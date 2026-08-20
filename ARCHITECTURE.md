@@ -63,6 +63,7 @@ src/
 │   ├── Dashboard.tsx          Firm-wide matter overview
 │   ├── MattersPage.tsx / MatterWorkspacePage.tsx
 │   ├── ClientsPage.tsx / TeamPage.tsx / DocumentTypesPage.tsx
+│   ├── PrecedentLibraryPage.tsx  Bulk-upload firm-wide precedent, independent of any matter
 │   ├── DraftDocumentPage.tsx / RedlineReviewPage.tsx / MatterChatPage.tsx
 │   └── Auth.tsx / ResetPassword.tsx / HelpPage.tsx / NotFound.tsx
 ├── integrations/supabase/   Client + generated types
@@ -126,7 +127,7 @@ documents          (RAG store: matter-scoped context + firm-wide precedent, one 
 ### Storage buckets
 
 - `matter-documents` (private) — uploaded and AI-generated document files, one folder per matter.
-- `precedent-library` (private) — reserved for firm-wide precedent uploads independent of a specific matter; not yet wired to any UI (all current precedent ingestion goes through matter documents flagged `is_precedent`).
+- `precedent-library` (private) — firm-wide precedent uploads independent of a specific matter, via the Precedent Library page (bulk multi-file upload, tagged by document type, `matter_id` null).
 
 ---
 

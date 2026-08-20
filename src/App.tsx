@@ -16,6 +16,7 @@ import DraftDocumentPage from "./pages/DraftDocumentPage";
 import RedlineReviewPage from "./pages/RedlineReviewPage";
 import MatterChatPage from "./pages/MatterChatPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
+import PrecedentLibraryPage from "./pages/PrecedentLibraryPage";
 import ClientsPage from "./pages/ClientsPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
@@ -92,6 +93,16 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <MatterChatPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/precedent-library"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <PrecedentLibraryPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }
