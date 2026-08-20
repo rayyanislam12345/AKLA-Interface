@@ -12,6 +12,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
+import DraftDocumentPage from "./pages/DraftDocumentPage";
 import ClientsPage from "./pages/ClientsPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
@@ -58,6 +59,16 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <MatterWorkspacePage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/matters/:matterId/draft"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <DraftDocumentPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }

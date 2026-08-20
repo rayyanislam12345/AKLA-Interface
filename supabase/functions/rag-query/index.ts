@@ -172,7 +172,9 @@ ${context}`;
     }
 
     const aiData = await aiResponse.json();
-    const answer = aiData.content?.[0]?.text ?? '';
+    // Claude can emit a `thinking` block ahead of the `text` block (extended
+    // thinking) — content[0] isn't reliably the text block, so find it explicitly.
+    const answer = aiData.content?.find((block: any) => block.type === 'text')?.text ?? '';
 
     return new Response(JSON.stringify({
       answer,

@@ -9,6 +9,12 @@ verify_jwt = true
 [functions.rag-query]
 verify_jwt = true
 
+[functions.drafting-interview]
+verify_jwt = true
+
+[functions.draft-document]
+verify_jwt = true
+
 [functions.create-organization]
 verify_jwt = true
 

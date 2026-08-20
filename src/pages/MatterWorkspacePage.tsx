@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, Plus, Upload } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Check, Circle, CircleDot, FileText, Plus, Sparkles, Upload } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
 import {
   useMatterParties,
@@ -59,6 +59,7 @@ function StageIcon({ status }: { status: string }) {
 
 export default function MatterWorkspacePage() {
   const { matterId } = useParams<{ matterId: string }>();
+  const navigate = useNavigate();
   const { data: matter, isLoading } = useMatter(matterId);
   const { data: stages } = useMatterStages(matterId);
   const setStageStatus = useSetStageStatus();
@@ -158,8 +159,12 @@ export default function MatterWorkspacePage() {
         </Card>
 
         <Card className="md:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Documents</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/draft`)}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Draft with AI
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             <input
