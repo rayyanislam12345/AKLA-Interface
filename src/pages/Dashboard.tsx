@@ -1,14 +1,93 @@
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useMatters } from "@/hooks/useMatters";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { data: matters, isLoading } = useMatters();
+  const navigate = useNavigate();
+
+  const active = matters?.filter((m) => m.status === "active") ?? [];
+  const other = matters?.filter((m) => m.status !== "active") ?? [];
 
   return (
-    <div className="space-y-2">
-      <h1 className="text-2xl font-semibold">Welcome{user?.email ? `, ${user.email}` : ""}</h1>
-      <p className="text-muted-foreground">
-        The matter dashboard isn't built yet — this is a placeholder from the Phase 0 foundation pass.
-      </p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Welcome{user?.email ? `, ${user.email}` : ""}</h1>
+        <p className="text-muted-foreground">Firm-wide view of every active matter.</p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground font-normal">Active Matters</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{active.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground font-normal">Other</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{other.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground font-normal">Total</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{matters?.length ?? 0}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-medium mb-3">Matters</h2>
+        {isLoading ? (
+          <p className="text-muted-foreground">Loading…</p>
+        ) : !matters?.length ? (
+          <p className="text-muted-foreground">
+            No matters yet — head to the Matters page to create the first one.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Client</TableHead>
+                <TableHead>Lead Partner</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Target Close</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {matters.map((matter) => (
+                <TableRow
+                  key={matter.id}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/matters/${matter.id}`)}
+                >
+                  <TableCell className="font-medium">{matter.name}</TableCell>
+                  <TableCell>{matter.client?.name || "—"}</TableCell>
+                  <TableCell>{matter.lead_partner?.full_name || "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={matter.status === "active" ? "default" : "secondary"}>
+                      {matter.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{matter.target_close_date || "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

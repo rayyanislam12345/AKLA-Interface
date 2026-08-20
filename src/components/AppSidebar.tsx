@@ -1,4 +1,4 @@
-import { LayoutDashboard, HelpCircle, LogOut } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Building2, Users, HelpCircle, LogOut } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,6 +19,9 @@ import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Matters", url: "/matters", icon: FolderKanban },
+  { title: "Clients", url: "/clients", icon: Building2 },
+  { title: "Team", url: "/team", icon: Users },
   { title: "Help", url: "/help", icon: HelpCircle },
 ];
 

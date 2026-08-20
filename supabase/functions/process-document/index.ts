@@ -21,13 +21,21 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const { filePath, fileName, fileType } = await req.json();
+    const {
+      filePath,
+      fileName,
+      fileType,
+      bucket = 'matter-documents',
+      matterId = null,
+      documentTypeId = null,
+      isPrecedent = false,
+    } = await req.json();
 
-    console.log('Processing document:', { filePath, fileName, fileType });
+    console.log('Processing document:', { filePath, fileName, fileType, bucket });
 
     // Download file from storage
     const { data: fileData, error: downloadError } = await supabase.storage
-      .from('rag-documents')
+      .from(bucket)
       .download(filePath);
 
     if (downloadError) {
@@ -41,6 +49,7 @@ serve(async (req) => {
       file_type: fileType,
       upload_date: new Date().toISOString(),
       storage_path: filePath,
+      storage_bucket: bucket,
       file_size: fileData.size,
     };
 
@@ -50,18 +59,18 @@ serve(async (req) => {
     if (fileExtension === 'pdf') {
       // Extract text from PDF using unpdf (Deno-compatible)
       const { extractText, getDocumentProxy } = await import('https://esm.sh/unpdf@0.11.0');
-      
+
       const arrayBuffer = await fileData.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
-      
+
       // Get document metadata
       const documentProxy = await getDocumentProxy(uint8Array);
       const numPages = documentProxy.numPages;
-      
+
       // Extract text from all pages
       const { text } = await extractText(uint8Array, { mergePages: true });
       extractedText = text;
-      
+
       metadata.page_count = numPages;
       metadata.original_format = 'pdf';
 
@@ -71,7 +80,7 @@ serve(async (req) => {
       // Extract text from DOCX
       const mammoth = await import('https://esm.sh/mammoth@1.6.0');
       const arrayBuffer = await fileData.arrayBuffer();
-      
+
       const result = await mammoth.extractRawText({ arrayBuffer });
       extractedText = result.value;
       metadata.original_format = 'docx';
@@ -82,14 +91,14 @@ serve(async (req) => {
       // Extract text from Excel
       const XLSX = await import('https://esm.sh/xlsx@0.18.5');
       const arrayBuffer = await fileData.arrayBuffer();
-      
+
       const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
       const sheets: string[] = [];
 
       workbook.SheetNames.forEach((sheetName) => {
         const worksheet = workbook.Sheets[sheetName];
         const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
+
         let sheetText = `[Sheet: ${sheetName}]\n`;
         sheetData.forEach((row: any, index: number) => {
           if (row && row.length > 0) {
@@ -120,6 +129,9 @@ serve(async (req) => {
         body: {
           content: extractedText,
           metadata,
+          matterId,
+          documentTypeId,
+          isPrecedent,
         },
       }
     );

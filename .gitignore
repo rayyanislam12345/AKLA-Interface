@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# bun.lock is canonical; npm regenerates this if run directly
+package-lock.json
+
 # QA bot run artifacts
 qa-bot/videos/
 qa-bot/screenshots/

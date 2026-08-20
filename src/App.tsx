@@ -10,6 +10,10 @@ import { AppLayout } from "@/components/AppLayout";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
+import MattersPage from "./pages/MattersPage";
+import MatterWorkspacePage from "./pages/MatterWorkspacePage";
+import ClientsPage from "./pages/ClientsPage";
+import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
 import NotFound from "./pages/NotFound";
 
@@ -34,6 +38,46 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <Dashboard />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/matters"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <MattersPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/matters/:matterId"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <MatterWorkspacePage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/clients"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <ClientsPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/team"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <TeamPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }
