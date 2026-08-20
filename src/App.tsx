@@ -14,6 +14,8 @@ import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import DraftDocumentPage from "./pages/DraftDocumentPage";
 import RedlineReviewPage from "./pages/RedlineReviewPage";
+import MatterChatPage from "./pages/MatterChatPage";
+import DocumentTypesPage from "./pages/DocumentTypesPage";
 import ClientsPage from "./pages/ClientsPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
@@ -80,6 +82,26 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <RedlineReviewPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/matters/:matterId/chat"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <MatterChatPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/document-types"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <DocumentTypesPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }

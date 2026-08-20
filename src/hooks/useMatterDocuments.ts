@@ -25,6 +25,45 @@ export function useDocumentTypes() {
   });
 }
 
+export function useCreateDocumentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { name: string; category: string }) => {
+      const { error } = await supabase.from("document_types").insert(input);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["document-types"] });
+    },
+  });
+}
+
+export function useUpdateDocumentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name, category }: { id: string; name: string; category: string }) => {
+      const { error } = await supabase.from("document_types").update({ name, category }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["document-types"] });
+    },
+  });
+}
+
+export function useDeleteDocumentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("document_types").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["document-types"] });
+    },
+  });
+}
+
 export function useMatterDocuments(matterId: string | undefined) {
   return useQuery({
     queryKey: ["matter-documents", matterId],

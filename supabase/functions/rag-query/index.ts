@@ -23,6 +23,7 @@ serve(async (req) => {
       matterId = null,
       documentTypeId = null,
       precedentOnly = false,
+      threadId = null,
     } = await req.json();
 
     if (!query) {
@@ -82,6 +83,36 @@ serve(async (req) => {
       });
     }
 
+    // Threaded persistence is opt-in: only when a matterId is supplied (the
+    // matter Q&A chat UI). Precedent-library search stays stateless.
+    let activeThreadId: string | null = threadId;
+    let priorMessages: { role: string; content: string }[] = [];
+    if (matterId) {
+      if (!activeThreadId) {
+        const { data: thread, error: threadError } = await supabase
+          .from('ai_chat_threads')
+          .insert({ matter_id: matterId, title: 'Matter Q&A', created_by: user.id })
+          .select('id')
+          .single();
+        if (threadError) throw threadError;
+        activeThreadId = thread.id;
+      } else {
+        const { data: history } = await supabase
+          .from('ai_chat_messages')
+          .select('role, content')
+          .eq('thread_id', activeThreadId)
+          .order('created_at');
+        priorMessages = history ?? [];
+      }
+
+      const { error: insertUserMsgError } = await supabase.from('ai_chat_messages').insert({
+        thread_id: activeThreadId,
+        role: 'user',
+        content: query,
+      });
+      if (insertUserMsgError) throw insertUserMsgError;
+    }
+
     // Generate embedding for the query
     const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
       method: 'POST',
@@ -135,10 +166,15 @@ serve(async (req) => {
         ).join('\n\n---\n\n')
       : 'No relevant documents found in the knowledge base.';
 
-    const systemPrompt = `You are a legal assistant with access to the firm's document knowledge base (prior matters and precedent agreements). Use the following sources to answer the user's question precisely and conservatively. If the sources don't contain relevant information, say so clearly rather than guessing. Cite sources by number (e.g. "[Source 2]") when you rely on them.
+    const systemPrompt = `You are a legal assistant with access to the firm's document knowledge base (prior matters and precedent agreements). Use the following sources, retrieved specifically for the latest question, to answer precisely and conservatively. If the sources don't contain relevant information, say so clearly rather than guessing. Cite sources by number (e.g. "[Source 2]") when you rely on them.
 
-KNOWLEDGE BASE SOURCES:
+KNOWLEDGE BASE SOURCES FOR THE LATEST QUESTION:
 ${context}`;
+
+    const conversationMessages = [
+      ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: query },
+    ];
 
     // Call Anthropic directly
     const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -152,7 +188,7 @@ ${context}`;
         model: 'claude-sonnet-5',
         max_tokens: 1536,
         system: systemPrompt,
-        messages: [{ role: 'user', content: query }],
+        messages: conversationMessages,
       }),
     });
 
@@ -176,7 +212,17 @@ ${context}`;
     // thinking) — content[0] isn't reliably the text block, so find it explicitly.
     const answer = aiData.content?.find((block: any) => block.type === 'text')?.text ?? '';
 
+    if (activeThreadId) {
+      const { error: insertAssistantMsgError } = await supabase.from('ai_chat_messages').insert({
+        thread_id: activeThreadId,
+        role: 'assistant',
+        content: answer,
+      });
+      if (insertAssistantMsgError) throw insertAssistantMsgError;
+    }
+
     return new Response(JSON.stringify({
+      threadId: activeThreadId,
       answer,
       sources: (matches || []).map((doc: any) => ({
         id: doc.id,

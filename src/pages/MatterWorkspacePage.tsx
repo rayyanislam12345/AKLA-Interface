@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
+import { Check, Circle, CircleDot, FileText, MessageSquare, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
 import {
   useMatterParties,
@@ -124,16 +124,22 @@ export default function MatterWorkspacePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{matter.name}</h1>
-          <Badge variant={matter.status === "active" ? "default" : "secondary"}>{matter.status}</Badge>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold">{matter.name}</h1>
+            <Badge variant={matter.status === "active" ? "default" : "secondary"}>{matter.status}</Badge>
+          </div>
+          <p className="text-muted-foreground">
+            {(matter as any).client?.name || "No client"}
+            {matter.sector ? ` · ${matter.sector}` : ""}
+            {(matter as any).lead_partner?.full_name ? ` · Lead: ${(matter as any).lead_partner.full_name}` : ""}
+          </p>
         </div>
-        <p className="text-muted-foreground">
-          {(matter as any).client?.name || "No client"}
-          {matter.sector ? ` · ${matter.sector}` : ""}
-          {(matter as any).lead_partner?.full_name ? ` · Lead: ${(matter as any).lead_partner.full_name}` : ""}
-        </p>
+        <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/chat`)}>
+          <MessageSquare className="h-4 w-4 mr-2" />
+          Ask AI
+        </Button>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
