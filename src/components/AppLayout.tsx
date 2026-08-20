@@ -15,12 +15,9 @@ export function AppLayout({ children }: AppLayoutProps) {
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <div className="flex-1 flex flex-col">
-          <header
-            className="h-14 border-b flex items-center px-6"
-            style={{ backgroundColor: "#132050" }}
-          >
+          <header className="h-14 border-b border-sidebar-border bg-sidebar flex items-center px-6">
             <span className="text-lg font-semibold text-white tracking-tight">
-              AKLA Matter Hub
+              <span className="text-accent">AKLA</span> Matter Hub
             </span>
           </header>
           <main className="flex-1 p-6">{children}</main>

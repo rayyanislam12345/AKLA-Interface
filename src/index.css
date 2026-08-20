@@ -8,33 +8,33 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    /* FactorIQ Financial Theme - Light Mode */
+    /* AKLA Theme - Light Mode (sampled from the firm's logo: navy #2D3E6E + antique gold #C8A86A) */
     --background: 210 15% 97%;
-    --foreground: 213 31% 16%;
+    --foreground: 224 30% 14%;
 
     --card: 213 45% 96%;
-    --card-foreground: 213 31% 16%;
+    --card-foreground: 224 30% 14%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 213 31% 16%;
+    --popover-foreground: 224 30% 14%;
 
-    /* Deep Navy Primary - GEG Inspired */
-    --primary: 220 70% 18%;
+    /* Navy Primary - AKLA logo monogram background */
+    --primary: 224 42% 30%;
     --primary-foreground: 0 0% 98%;
-    --primary-light: 220 70% 28%;
-    --primary-glow: 220 65% 38%;
+    --primary-light: 224 40% 42%;
+    --primary-glow: 224 38% 55%;
 
     /* Professional Grays */
     --secondary: 220 20% 94%;
-    --secondary-foreground: 220 31% 16%;
+    --secondary-foreground: 224 30% 16%;
 
     --muted: 220 20% 96%;
     --muted-foreground: 220 16% 46%;
 
-    /* Gold/Amber Accent - GEG Inspired */
-    --accent: 43 74% 49%;
-    --accent-foreground: 220 31% 16%;
-    --accent-light: 43 74% 65%;
+    /* Antique Gold Accent - AKLA logo wordmark/monogram */
+    --accent: 40 46% 60%;
+    --accent-foreground: 224 42% 16%;
+    --accent-light: 40 57% 70%;
 
     /* Status Colors */
     --success: 142 76% 36%;
@@ -46,20 +46,11 @@ All colors MUST be HSL.
 
     --border: 213 27% 91%;
     --input: 213 27% 94%;
-    --ring: 213 94% 15%;
+    --ring: 224 42% 30%;
 
     --radius: 0.75rem;
 
-    /* Global Economics Group Brand Colors */
-    --geg-dark-blue: 19 32 80; /* #132050 */
-    --geg-light-blue: 0 91 142; /* #005b8e */
-    --geg-light-green: 66 187 157; /* #42bb9d */
-    --geg-dark-green: 0 124 126; /* #007c7e */
-    --geg-off-white: 250 250 250; /* #fafafa */
-    --geg-grey: 171 168 171; /* #aba8ab */
-    --geg-black: 35 31 32; /* #231f20 */
-
-    /* FactorIQ Gradients */
+    /* Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-light)));
     --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-light)));
     --gradient-surface: linear-gradient(145deg, hsl(var(--background)), hsl(var(--muted)));
@@ -74,52 +65,52 @@ All colors MUST be HSL.
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
-    /* Dark Blue Sidebar */
-    --sidebar-background: 220 70% 20%;
+    /* Navy Sidebar - matches the AKLA logo monogram's background exactly */
+    --sidebar-background: 224 42% 24%;
 
     --sidebar-foreground: 0 0% 100%;
 
-    --sidebar-primary: 220 70% 30%;
+    --sidebar-primary: 224 40% 34%;
 
     --sidebar-primary-foreground: 0 0% 100%;
 
-    --sidebar-accent: 220 70% 25%;
+    --sidebar-accent: 224 40% 30%;
 
-    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-accent-foreground: 40 57% 75%;
 
-    --sidebar-border: 220 50% 30%;
+    --sidebar-border: 224 35% 34%;
 
-    --sidebar-ring: 220 70% 50%;
+    --sidebar-ring: 40 46% 60%;
   }
 
   .dark {
-    /* FactorIQ Financial Theme - Dark Mode */
-    --background: 213 31% 8%;
+    /* AKLA Theme - Dark Mode */
+    --background: 224 30% 8%;
     --foreground: 213 27% 94%;
 
-    --card: 213 31% 10%;
+    --card: 224 30% 10%;
     --card-foreground: 213 27% 94%;
 
-    --popover: 213 31% 10%;
+    --popover: 224 30% 10%;
     --popover-foreground: 213 27% 94%;
 
-    /* Deep Navy Primary - Dark Mode - GEG Inspired */
-    --primary: 220 70% 65%;
-    --primary-foreground: 220 31% 8%;
-    --primary-light: 220 70% 75%;
-    --primary-glow: 220 65% 60%;
+    /* Navy Primary - Dark Mode */
+    --primary: 224 45% 68%;
+    --primary-foreground: 224 30% 8%;
+    --primary-light: 224 45% 78%;
+    --primary-glow: 224 40% 62%;
 
     /* Professional Grays - Dark Mode */
-    --secondary: 220 31% 16%;
+    --secondary: 224 31% 16%;
     --secondary-foreground: 220 27% 94%;
 
-    --muted: 220 31% 14%;
+    --muted: 224 31% 14%;
     --muted-foreground: 220 16% 54%;
 
-    /* Gold/Amber Accent - Dark Mode - GEG Inspired */
-    --accent: 43 74% 60%;
-    --accent-foreground: 220 31% 8%;
-    --accent-light: 43 74% 75%;
+    /* Antique Gold Accent - Dark Mode */
+    --accent: 40 55% 62%;
+    --accent-foreground: 224 30% 10%;
+    --accent-light: 40 60% 75%;
 
     /* Status Colors - Dark Mode */
     --success: 142 76% 46%;
@@ -129,9 +120,9 @@ All colors MUST be HSL.
     --destructive: 0 84% 70%;
     --destructive-foreground: 213 31% 8%;
 
-    --border: 213 31% 18%;
-    --input: 213 31% 16%;
-    --ring: 213 94% 65%;
+    --border: 224 31% 18%;
+    --input: 224 31% 16%;
+    --ring: 224 45% 68%;
 
     /* Dark Mode Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-light)));
@@ -143,15 +134,15 @@ All colors MUST be HSL.
     --shadow-premium: 0 25px 50px -12px hsl(var(--primary) / 0.4);
     --shadow-card: 0 4px 6px -1px hsl(var(--primary) / 0.2), 0 2px 4px -1px hsl(var(--primary) / 0.1);
     --shadow-glow: 0 0 40px hsl(var(--accent) / 0.4);
-    /* Dark Blue Sidebar - Dark Mode */
-    --sidebar-background: 220 70% 20%;
+    /* Navy Sidebar - Dark Mode */
+    --sidebar-background: 224 42% 20%;
     --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 220 70% 30%;
+    --sidebar-primary: 224 40% 30%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 70% 25%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 220 50% 30%;
-    --sidebar-ring: 220 70% 50%;
+    --sidebar-accent: 224 40% 26%;
+    --sidebar-accent-foreground: 40 55% 72%;
+    --sidebar-border: 224 35% 30%;
+    --sidebar-ring: 40 55% 62%;
   }
 }
 

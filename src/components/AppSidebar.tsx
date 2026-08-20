@@ -16,6 +16,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import aklaLogo from "@/assets/akla-logo.png";
+import aklaMonogram from "@/assets/akla-monogram.png";
 
 const NAV_ITEMS = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -49,10 +51,12 @@ export function AppSidebar() {
       onMouseLeave={() => setOpen(false)}
     >
       <SidebarHeader className="border-b border-white/10 h-14 flex items-center px-4">
-        <div className="flex items-center gap-2 justify-center w-full">
-          <span className="text-lg font-bold text-white tracking-tight">
-            {isCollapsed ? "AK" : "AKLA"}
-          </span>
+        <div className="flex items-center justify-center w-full">
+          {isCollapsed ? (
+            <img src={aklaMonogram} alt="AKLA" className="h-9 w-9 rounded-full" />
+          ) : (
+            <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-8 w-auto max-w-full object-contain" />
+          )}
         </div>
       </SidebarHeader>
 
@@ -69,8 +73,10 @@ export function AppSidebar() {
                     <NavLink
                       to={url}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-4 py-2 text-white transition-colors ${
-                          isActive ? "bg-white/20 font-medium" : ""
+                        `flex items-center gap-3 px-4 py-2 border-l-2 transition-colors ${
+                          isActive
+                            ? "border-accent bg-white/10 text-accent font-medium"
+                            : "border-transparent text-white"
                         }`
                       }
                     >
@@ -90,7 +96,7 @@ export function AppSidebar() {
           <div className="space-y-3">
             <div className="flex items-center gap-3">
               <Avatar className="w-8 h-8">
-                <AvatarFallback className="bg-white/20 text-white text-sm font-medium">
+                <AvatarFallback className="bg-accent/20 text-accent text-sm font-medium">
                   {getInitials(user.email || "")}
                 </AvatarFallback>
               </Avatar>

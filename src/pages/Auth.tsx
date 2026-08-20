@@ -8,10 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { BrainCircuit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { MFAVerification } from '@/components/MFAVerification';
 import { MFAEnrollment } from '@/components/MFAEnrollment';
+import aklaLogo from '@/assets/akla-logo.png';
 
 type AuthStep = 'login' | 'mfa-verify' | 'mfa-required' | 'forgot-password' | 'accept-invite' | 'invite-mfa';
 
@@ -211,13 +211,7 @@ export default function Auth() {
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center mb-8">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-                <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-                <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-              </div>
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -225,7 +219,7 @@ export default function Auth() {
               <CardTitle>You've been invited!</CardTitle>
               <CardDescription>
                 {inviteOrgName
-                  ? `Set a password to join ${inviteOrgName} on FactorIQ.`
+                  ? `Set a password to join ${inviteOrgName} on AKLA Matter Hub.`
                   : 'Set a password to complete your account setup.'}
               </CardDescription>
             </CardHeader>
@@ -289,13 +283,7 @@ export default function Auth() {
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center mb-8">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-                <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-                <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-              </div>
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -317,7 +305,7 @@ export default function Auth() {
                 variant="ghost"
                 className="w-full"
                 onClick={() => {
-                  toast({ title: 'Welcome to FactorIQ!', description: 'You can enable 2FA later in settings.' });
+                  toast({ title: 'Welcome to AKLA Matter Hub!', description: 'You can enable 2FA later in settings.' });
                   navigate('/dashboard', { replace: true });
                 }}
               >
@@ -346,13 +334,7 @@ export default function Auth() {
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center mb-8">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-                <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-                <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-              </div>
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
             </div>
           </div>
           <MFAVerification 
@@ -372,13 +354,7 @@ export default function Auth() {
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center mb-8">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-                <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-                <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-              </div>
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -422,13 +398,7 @@ export default function Auth() {
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center mb-8">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-                <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-                <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-              </div>
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -505,13 +475,7 @@ export default function Auth() {
       <div className="w-full max-w-md">
         <div className="flex items-center justify-center mb-8">
           <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-12 h-12 bg-gradient-primary rounded-lg">
-              <BrainCircuit className="w-7 h-7 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">FactorIQ</h1>
-              <p className="text-sm text-muted-foreground">AI-Powered PE Analytics</p>
-            </div>
+            <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
           </div>
         </div>
 
