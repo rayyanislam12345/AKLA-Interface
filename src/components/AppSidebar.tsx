@@ -1,5 +1,5 @@
 import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, HelpCircle, LogOut } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -32,6 +32,7 @@ const NAV_ITEMS = [
 export function AppSidebar() {
   const { state, setOpen } = useSidebar();
   const { user, signOut } = useAuth();
+  const location = useLocation();
   const isCollapsed = state === "collapsed";
 
   const getInitials = (email: string) => {
@@ -71,27 +72,35 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.map(({ title, url, icon: Icon }) => (
-                <SidebarMenuItem key={title}>
-                  <SidebarMenuButton asChild className="hover:bg-white/10">
-                    <NavLink
-                      to={url}
-                      className={({ isActive }) =>
-                        `flex items-center border-l-2 py-2.5 transition-colors ${
+              {NAV_ITEMS.map(({ title, url, icon: Icon }) => {
+                // Mirror NavLink's own default matching (exact, or a child route)
+                // instead of NavLink's function-typed className prop: SidebarMenuButton's
+                // asChild wraps a Radix Slot, which merges className via plain string
+                // concatenation. A function passed as className gets silently coerced to
+                // its own source text via that concatenation, so the isActive styling
+                // never actually applied — every row rendered identically. Precomputing
+                // isActive here and passing a plain string sidesteps that incompatibility.
+                const isActive = location.pathname === url || location.pathname.startsWith(`${url}/`);
+                return (
+                  <SidebarMenuItem key={title}>
+                    <SidebarMenuButton asChild className="hover:bg-white/10">
+                      <NavLink
+                        to={url}
+                        className={`flex items-center border-l-2 py-2 transition-colors ${
                           isCollapsed ? "justify-center px-2" : "gap-3 px-4"
                         } ${
                           isActive
                             ? "border-accent bg-white/10 text-accent font-medium"
                             : "border-transparent text-white"
-                        }`
-                      }
-                    >
-                      <Icon className={isCollapsed ? "!h-8 !w-8 shrink-0" : "h-5 w-5 shrink-0"} />
-                      {!isCollapsed && <span>{title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+                        }`}
+                      >
+                        <Icon className="!h-6 !w-6 shrink-0" />
+                        {!isCollapsed && <span>{title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
