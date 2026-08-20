@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, Plus, Sparkles, Upload } from "lucide-react";
+import { Check, Circle, CircleDot, FileText, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
 import {
   useMatterParties,
@@ -224,6 +224,15 @@ export default function MatterWorkspacePage() {
                       }
                     >
                       <Upload className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="Review with AI"
+                      disabled={!(doc as any).versions?.length}
+                      onClick={() => navigate(`/matters/${matterId}/documents/${doc.id}/review`)}
+                    >
+                      <ScanSearch className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}

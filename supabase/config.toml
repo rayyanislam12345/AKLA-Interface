@@ -15,6 +15,9 @@ verify_jwt = true
 [functions.draft-document]
 verify_jwt = true
 
+[functions.suggest-redline]
+verify_jwt = true
+
 [functions.create-organization]
 verify_jwt = true
 

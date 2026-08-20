@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
-import { Buffer } from "node:buffer";
+import { extractTextFromFile } from "../_shared/extractText.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,83 +44,19 @@ serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError.message}`);
     }
 
-    let extractedText = '';
-    let metadata: any = {
+    const { text: extractedText, metadata: extractMetadata } = await extractTextFromFile(fileData, fileName);
+
+    const metadata: any = {
       filename: fileName,
       file_type: fileType,
       upload_date: new Date().toISOString(),
       storage_path: filePath,
       storage_bucket: bucket,
       file_size: fileData.size,
+      ...extractMetadata,
     };
 
-    // Determine file type and extract text
-    const fileExtension = fileName.toLowerCase().split('.').pop();
-
-    if (fileExtension === 'pdf') {
-      // Extract text from PDF using unpdf (Deno-compatible)
-      const { extractText, getDocumentProxy } = await import('https://esm.sh/unpdf@0.11.0');
-
-      const arrayBuffer = await fileData.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-
-      // Get document metadata
-      const documentProxy = await getDocumentProxy(uint8Array);
-      const numPages = documentProxy.numPages;
-
-      // Extract text from all pages
-      const { text } = await extractText(uint8Array, { mergePages: true });
-      extractedText = text;
-
-      metadata.page_count = numPages;
-      metadata.original_format = 'pdf';
-
-      console.log(`Extracted ${text.length} characters from ${numPages} pages`);
-
-    } else if (fileExtension === 'docx') {
-      // Extract text from DOCX
-      const mammoth = await import('https://esm.sh/mammoth@1.6.0');
-      const arrayBuffer = await fileData.arrayBuffer();
-
-      // esm.sh can resolve either mammoth's browser build (wants `arrayBuffer`)
-      // or its Node build (wants a Node `buffer`) depending on how it infers
-      // the target — pass both so extraction works regardless of which loads.
-      const result = await mammoth.extractRawText({ arrayBuffer, buffer: Buffer.from(arrayBuffer) } as any);
-      extractedText = result.value;
-      metadata.original_format = 'docx';
-
-      console.log(`Extracted ${result.value.length} characters from DOCX`);
-
-    } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-      // Extract text from Excel
-      const XLSX = await import('https://esm.sh/xlsx@0.18.5');
-      const arrayBuffer = await fileData.arrayBuffer();
-
-      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
-      const sheets: string[] = [];
-
-      workbook.SheetNames.forEach((sheetName) => {
-        const worksheet = workbook.Sheets[sheetName];
-        const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-        let sheetText = `[Sheet: ${sheetName}]\n`;
-        sheetData.forEach((row: any, index: number) => {
-          if (row && row.length > 0) {
-            sheetText += `Row ${index + 1}: ${row.join(', ')}\n`;
-          }
-        });
-        sheets.push(sheetText);
-      });
-
-      extractedText = sheets.join('\n\n');
-      metadata.sheet_count = workbook.SheetNames.length;
-      metadata.original_format = 'excel';
-
-      console.log(`Extracted data from ${workbook.SheetNames.length} sheets`);
-
-    } else {
-      throw new Error(`Unsupported file type: ${fileExtension}`);
-    }
+    console.log(`Extracted ${extractedText.length} characters (${extractMetadata.original_format})`);
 
     if (!extractedText || extractedText.trim().length === 0) {
       throw new Error('No text content could be extracted from the document');

@@ -13,6 +13,7 @@ import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import DraftDocumentPage from "./pages/DraftDocumentPage";
+import RedlineReviewPage from "./pages/RedlineReviewPage";
 import ClientsPage from "./pages/ClientsPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
@@ -69,6 +70,16 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <DraftDocumentPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/matters/:matterId/documents/:matterDocumentId/review"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <RedlineReviewPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }
