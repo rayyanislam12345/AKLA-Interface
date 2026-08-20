@@ -1,0 +1,16 @@
+{
+  "name": "factoriq-qa-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "npx tsx run.ts",
+    "start:headless": "QA_HEADLESS=true npx tsx run.ts",
+    "start:prod": "QA_URL=https://factoriq.app QA_HEADLESS=true npx tsx run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "playwright": "latest",
+    "tsx": "latest"
+  }
+}

@@ -1,0 +1,16 @@
+project_id = "mhdufgphzalrzhzplbzf"
+
+[functions.process-document]
+verify_jwt = true
+
+[functions.ingest-documents]
+verify_jwt = true
+
+[functions.rag-query]
+verify_jwt = true
+
+[functions.create-organization]
+verify_jwt = true
+
+[functions.invite-user]
+verify_jwt = true

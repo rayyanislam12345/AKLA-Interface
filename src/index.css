@@ -1,0 +1,244 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* FactorIQ Financial Theme - Light Mode */
+    --background: 210 15% 97%;
+    --foreground: 213 31% 16%;
+
+    --card: 213 45% 96%;
+    --card-foreground: 213 31% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 31% 16%;
+
+    /* Deep Navy Primary - GEG Inspired */
+    --primary: 220 70% 18%;
+    --primary-foreground: 0 0% 98%;
+    --primary-light: 220 70% 28%;
+    --primary-glow: 220 65% 38%;
+
+    /* Professional Grays */
+    --secondary: 220 20% 94%;
+    --secondary-foreground: 220 31% 16%;
+
+    --muted: 220 20% 96%;
+    --muted-foreground: 220 16% 46%;
+
+    /* Gold/Amber Accent - GEG Inspired */
+    --accent: 43 74% 49%;
+    --accent-foreground: 220 31% 16%;
+    --accent-light: 43 74% 65%;
+
+    /* Status Colors */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 98%;
+    --warning: 48 96% 53%;
+    --warning-foreground: 213 31% 16%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 213 27% 91%;
+    --input: 213 27% 94%;
+    --ring: 213 94% 15%;
+
+    --radius: 0.75rem;
+
+    /* Global Economics Group Brand Colors */
+    --geg-dark-blue: 19 32 80; /* #132050 */
+    --geg-light-blue: 0 91 142; /* #005b8e */
+    --geg-light-green: 66 187 157; /* #42bb9d */
+    --geg-dark-green: 0 124 126; /* #007c7e */
+    --geg-off-white: 250 250 250; /* #fafafa */
+    --geg-grey: 171 168 171; /* #aba8ab */
+    --geg-black: 35 31 32; /* #231f20 */
+
+    /* FactorIQ Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-light)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-light)));
+    --gradient-surface: linear-gradient(145deg, hsl(var(--background)), hsl(var(--muted)));
+    --gradient-hero: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
+
+    /* Shadows */
+    --shadow-premium: 0 25px 50px -12px hsl(var(--primary) / 0.25);
+    --shadow-card: 0 4px 6px -1px hsl(var(--primary) / 0.1), 0 2px 4px -1px hsl(var(--primary) / 0.06);
+    --shadow-glow: 0 0 40px hsl(var(--accent) / 0.3);
+
+    /* Transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* Dark Blue Sidebar */
+    --sidebar-background: 220 70% 20%;
+
+    --sidebar-foreground: 0 0% 100%;
+
+    --sidebar-primary: 220 70% 30%;
+
+    --sidebar-primary-foreground: 0 0% 100%;
+
+    --sidebar-accent: 220 70% 25%;
+
+    --sidebar-accent-foreground: 0 0% 100%;
+
+    --sidebar-border: 220 50% 30%;
+
+    --sidebar-ring: 220 70% 50%;
+  }
+
+  .dark {
+    /* FactorIQ Financial Theme - Dark Mode */
+    --background: 213 31% 8%;
+    --foreground: 213 27% 94%;
+
+    --card: 213 31% 10%;
+    --card-foreground: 213 27% 94%;
+
+    --popover: 213 31% 10%;
+    --popover-foreground: 213 27% 94%;
+
+    /* Deep Navy Primary - Dark Mode - GEG Inspired */
+    --primary: 220 70% 65%;
+    --primary-foreground: 220 31% 8%;
+    --primary-light: 220 70% 75%;
+    --primary-glow: 220 65% 60%;
+
+    /* Professional Grays - Dark Mode */
+    --secondary: 220 31% 16%;
+    --secondary-foreground: 220 27% 94%;
+
+    --muted: 220 31% 14%;
+    --muted-foreground: 220 16% 54%;
+
+    /* Gold/Amber Accent - Dark Mode - GEG Inspired */
+    --accent: 43 74% 60%;
+    --accent-foreground: 220 31% 8%;
+    --accent-light: 43 74% 75%;
+
+    /* Status Colors - Dark Mode */
+    --success: 142 76% 46%;
+    --success-foreground: 213 31% 8%;
+    --warning: 48 96% 63%;
+    --warning-foreground: 213 31% 8%;
+    --destructive: 0 84% 70%;
+    --destructive-foreground: 213 31% 8%;
+
+    --border: 213 31% 18%;
+    --input: 213 31% 16%;
+    --ring: 213 94% 65%;
+
+    /* Dark Mode Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-light)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-light)));
+    --gradient-surface: linear-gradient(145deg, hsl(var(--background)), hsl(var(--muted)));
+    --gradient-hero: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
+
+    /* Dark Mode Shadows */
+    --shadow-premium: 0 25px 50px -12px hsl(var(--primary) / 0.4);
+    --shadow-card: 0 4px 6px -1px hsl(var(--primary) / 0.2), 0 2px 4px -1px hsl(var(--primary) / 0.1);
+    --shadow-glow: 0 0 40px hsl(var(--accent) / 0.4);
+    /* Dark Blue Sidebar - Dark Mode */
+    --sidebar-background: 220 70% 20%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 220 70% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 70% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 220 50% 30%;
+    --sidebar-ring: 220 70% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* AI Analysis Markdown Prose Styling */
+.ai-analysis-prose h2 {
+  @apply text-lg font-bold text-foreground mt-6 mb-3 pb-2 border-b border-border first:mt-0;
+}
+
+.ai-analysis-prose h3 {
+  @apply text-base font-semibold mt-5 mb-2;
+  color: hsl(var(--primary));
+}
+
+.ai-analysis-prose h4 {
+  @apply text-sm font-semibold text-foreground mt-4 mb-1.5;
+}
+
+.ai-analysis-prose p {
+  @apply text-sm leading-relaxed text-foreground/85 mb-3;
+}
+
+.ai-analysis-prose ul {
+  @apply space-y-1.5 mb-4 pl-1;
+}
+
+.ai-analysis-prose ul li {
+  @apply text-sm leading-relaxed text-foreground/85 pl-4 relative;
+}
+
+.ai-analysis-prose ul li::before {
+  content: "";
+  @apply absolute left-0 top-[0.55em] w-1.5 h-1.5 rounded-full;
+  background: hsl(var(--primary));
+}
+
+.ai-analysis-prose ol {
+  @apply space-y-1.5 mb-4 pl-5 list-decimal;
+}
+
+.ai-analysis-prose ol li {
+  @apply text-sm leading-relaxed text-foreground/85;
+}
+
+.ai-analysis-prose strong {
+  @apply font-semibold text-foreground;
+}
+
+.ai-analysis-prose table {
+  @apply w-full text-sm mb-4 border border-border rounded-lg overflow-hidden;
+}
+
+.ai-analysis-prose thead {
+  background: hsl(var(--primary) / 0.08);
+}
+
+.ai-analysis-prose th {
+  @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider;
+  color: hsl(var(--primary));
+}
+
+.ai-analysis-prose td {
+  @apply px-3 py-2 text-sm border-t border-border text-foreground/80;
+}
+
+.ai-analysis-prose tr:nth-child(even) td {
+  background: hsl(var(--muted) / 0.5);
+}
+
+.ai-analysis-prose blockquote {
+  @apply border-l-4 pl-4 py-1 my-3 italic text-sm text-muted-foreground;
+  border-color: hsl(var(--accent));
+}
+
+.ai-analysis-prose hr {
+  @apply my-4 border-border;
+}
