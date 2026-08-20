@@ -45,7 +45,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar
-      className="border-r-0 bg-sidebar data-[state=collapsed]:w-24"
+      className="border-r-0 bg-sidebar"
       collapsible="icon"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -53,7 +53,11 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-white/10 h-14 flex items-center px-4">
         <div className="flex items-center justify-center w-full">
           {isCollapsed ? (
-            <img src={aklaMonogram} alt="AKLA" className="h-9 w-9 rounded-full" />
+            <img
+              src={aklaMonogram}
+              alt="AKLA"
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
+            />
           ) : (
             <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-8 w-auto max-w-full object-contain" />
           )}
