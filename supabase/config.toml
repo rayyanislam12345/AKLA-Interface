@@ -17,9 +17,3 @@ verify_jwt = true
 
 [functions.suggest-redline]
 verify_jwt = true
-
-[functions.create-organization]
-verify_jwt = true
-
-[functions.invite-user]
-verify_jwt = true

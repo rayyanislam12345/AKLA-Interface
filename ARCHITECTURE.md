@@ -1,8 +1,10 @@
-# FactorIQ Platform Architecture
+# AKLA Matter Hub — Architecture
 
 ## Overview
 
-FactorIQ is a private equity portfolio management and analytics platform built for institutional investors, general partners (GPs), and limited partners (LPs). The platform provides comprehensive tools for tracking investments, analyzing fund performance, managing operating companies, deal sourcing and management, project planning, and generating insights through AI-powered analytics.
+AKLA Matter Hub is the firm's internal matter management and AI drafting platform, built for a Karachi-based practice working primarily in PPP transactions and infrastructure due diligence. It tracks matters through a stage/document lifecycle and layers three AI capabilities on top of the firm's own document history: precedent-aware drafting, clause-level redline review, and a matter-grounded Q&A chat.
+
+The app is single-tenant by design — every authenticated user is a member of the one firm, and (per an explicit access-model decision) can see every matter. There is no client-facing portal.
 
 ---
 
@@ -11,84 +13,30 @@ FactorIQ is a private equity portfolio management and analytics platform built f
 ### Frontend
 | Technology | Purpose |
 |------------|---------|
-| **React 18** | UI library with hooks-based architecture |
-| **TypeScript** | Type-safe development |
-| **Vite** | Build tool and development server |
-| **Tailwind CSS** | Utility-first CSS framework |
-| **shadcn/ui** | Component library built on Radix UI |
+| **React 18 + TypeScript** | UI |
+| **Vite** | Build tool and dev server |
+| **Tailwind CSS + shadcn/ui** | Styling and component library (Radix primitives) |
 | **React Router v6** | Client-side routing |
-| **TanStack Query** | Server state management and caching |
-| **Recharts** | Data visualization and charting |
+| **TanStack Query** | Server state, caching, mutations |
+| **Tiptap** | Rich-text editor for AI-generated drafts |
+| **docx** | Client-side `.docx` generation for exports |
+| **marked** | Renders AI-generated markdown drafts into the Tiptap editor |
 
 ### Backend
 | Technology | Purpose |
 |------------|---------|
-| **Supabase** | Backend-as-a-Service platform |
-| **PostgreSQL** | Primary database with pgvector extension |
-| **Supabase Auth** | Authentication and user management |
-| **Supabase Edge Functions** | Serverless Deno functions |
-| **Row Level Security (RLS)** | Data access control |
+| **Supabase** | Postgres, Auth, Storage, Edge Functions |
+| **PostgreSQL + pgvector** | Primary database; vector similarity search for the document knowledge base |
+| **Deno Edge Functions** | Serverless functions for AI calls, document processing, and RAG |
+| **Row Level Security (RLS)** | All data access control |
 
-### External Integrations
-| Service | Purpose |
-|---------|---------|
-| **Google Gemini** | Primary AI engine — deal research, analysis, workspace agent, graph generation, thumbnails |
-| **OpenAI API** | Analytics chat, GP analysis, RAG queries, document embeddings |
-| **Perplexity API** | News summaries and PDF summarization |
-| **Intellizence API** | News and market intelligence |
-| **Microsoft Graph / Outlook** | Calendar sync, meeting management (OAuth) |
+### AI
+| Service | Used for |
+|---------|----------|
+| **Anthropic Claude** (`claude-sonnet-5`) | All generation: drafting, redline suggestions, chat, guided intake |
+| **Voyage AI** (`voyage-law-2`) | Embeddings — a legal-domain-tuned model, chosen over a general-purpose one for clause-level precedent matching |
 
----
-
-## Application Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        CLIENT (Browser)                          │
-├─────────────────────────────────────────────────────────────────┤
-│  React Application                                               │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │   Pages     │ │ Components  │ │   Hooks     │                │
-│  └─────────────┘ └─────────────┘ └─────────────┘                │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │  TanStack   │ │   Router    │ │  Supabase   │                │
-│  │   Query     │ │             │ │   Client    │                │
-│  └─────────────┘ └─────────────┘ └─────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      SUPABASE PLATFORM                           │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│  │  Auth Service   │  │  Edge Functions │  │    Storage      │  │
-│  │  (JWT tokens)   │  │  (Deno runtime) │  │  (File buckets) │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
-│                              │                                   │
-│  ┌───────────────────────────▼───────────────────────────────┐  │
-│  │                    PostgreSQL Database                     │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐          │  │
-│  │  │   Tables    │ │  Functions  │ │  pgvector   │          │  │
-│  │  │   + RLS     │ │  + Triggers │ │  Extension  │          │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘          │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## AI Model Usage
-
-| Model | Provider | Used By |
-|-------|----------|---------|
-| **Gemini 2.5 Pro** | Google | Complex analysis tasks |
-| **Gemini 2.5 Flash** | Google | Deal research, deal analysis, thesis fit, investment analysis, workspace agent, graph generation, project scenarios, operators chat |
-| **Gemini 2.5 Flash (Image)** | Google | Contextual thumbnail generation for deals and projects |
-| **GPT-4o-mini** | OpenAI | Analytics chat, GP analysis, RAG document Q&A |
-| **Sonar Pro** | Perplexity | News summaries, PDF summarization |
-| **text-embedding-3-small** | OpenAI | Document vectorization for RAG |
-
-All LLM calls are routed through the **Lovable AI Gateway**.
+No other AI vendor is in the stack. There is no AI gateway — Edge Functions call the Anthropic and Voyage APIs directly.
 
 ---
 
@@ -96,605 +44,122 @@ All LLM calls are routed through the **Lovable AI Gateway**.
 
 ```
 src/
-├── assets/                 # Static images, icons, video metadata
 ├── components/
-│   ├── ui/                 # shadcn/ui base components
-│   ├── deal-manager/       # Deal Manager workspace (pipeline, cards, workspace tabs)
-│   ├── graph-generator/    # Graph Generator (selectors, chart rendering, saved graphs)
-│   ├── projects/           # Projects workspace (scenarios, documents, notes)
-│   ├── report/             # Report generation components
-│   ├── workspace/          # Analytics Workspace AI agent + dashboard renderer
-│   └── [Feature]*.tsx      # Feature-specific components
-├── contexts/
-│   ├── DealChatContext.tsx  # Deal Manager AI chat state
-│   └── ProjectChatContext.tsx # Project AI chat state
+│   ├── ui/                 shadcn/Radix primitives
+│   ├── AppLayout.tsx        Shell: sidebar + header
+│   ├── AppSidebar.tsx        Nav
+│   ├── ProtectedRoute.tsx    Auth gate (no per-feature gating — firm-wide access)
+│   ├── MFAEnrollment.tsx     TOTP enrollment
+│   └── MFAVerification.tsx   TOTP login verification
 ├── hooks/
-│   ├── useAuth.tsx         # Authentication context and hooks
-│   ├── useOrganization.tsx # Multi-tenancy context
-│   ├── useUserFeatures.tsx # Feature-gated navigation
-│   ├── useGraphGenerator.ts # Graph generator logic
-│   ├── useSavedGraphs.ts   # Persisted graph management
-│   ├── useOutlookAuth.ts   # Microsoft OAuth integration
-│   ├── use-mobile.tsx      # Responsive utilities
-│   └── use-toast.ts        # Toast notifications
-├── integrations/
-│   ├── supabase/           # Supabase client and types
-│   ├── dealFinder.ts       # Deal sourcing integration
-│   ├── intellizence.ts     # News API integration
-│   └── newsapi.ts          # News aggregation
-├── lib/
-│   ├── utils.ts            # Utility functions (cn, etc.)
-│   ├── columnMapper.ts     # AI-assisted column mapping
-│   ├── dataTransformer.ts  # Data normalization pipeline
-│   ├── templateProcessor.ts # Upload template processing
-│   ├── schemaRegistry.ts   # Entity schema definitions
-│   ├── templateIdentifier.ts # Auto template detection
-│   ├── exportToExcel.ts    # Excel export functionality
-│   ├── generateReportPdf.ts # PDF report generation
-│   ├── financialForecasting.ts # Forecasting models
-│   └── reportConfig.ts     # Report configuration
-├── pages/                  # Route page components
-├── types/                  # TypeScript type definitions
-├── App.tsx                 # Root component with routing
-├── main.tsx                # Application entry point
-└── index.css               # Global styles and CSS variables
+│   ├── useAuth.tsx           Session/auth context
+│   ├── useClients.ts / useMatters.ts / useMatterDetail.ts / useMatterDocuments.ts
+│   ├── useProfiles.ts        Lawyer directory + role assignment
+│   ├── useDrafting.ts        draft-document / drafting-interview
+│   ├── useRedline.ts         suggest-redline + accept/reject
+│   ├── useMatterChat.ts      Threaded matter Q&A
+│   └── useActivityTracking.ts  Stub — see "Known gaps" below
+├── pages/
+│   ├── Dashboard.tsx          Firm-wide matter overview
+│   ├── MattersPage.tsx / MatterWorkspacePage.tsx
+│   ├── ClientsPage.tsx / TeamPage.tsx / DocumentTypesPage.tsx
+│   ├── DraftDocumentPage.tsx / RedlineReviewPage.tsx / MatterChatPage.tsx
+│   └── Auth.tsx / ResetPassword.tsx / HelpPage.tsx / NotFound.tsx
+├── integrations/supabase/   Client + generated types
+└── App.tsx                  Routes
 
 supabase/
-├── functions/              # Edge Functions (see Edge Functions section)
-├── migrations/             # Database migration files
-└── config.toml             # Supabase configuration
+├── functions/
+│   ├── _shared/extractText.ts   Shared PDF/DOCX/XLSX text extraction
+│   ├── process-document/         Storage download → extract → ingest
+│   ├── ingest-documents/         Chunk + embed (Voyage) + insert into `documents`
+│   ├── rag-query/                Embed query → match_documents → Claude answer (optionally threaded)
+│   ├── draft-document/           Precedent/interview-grounded draft generation
+│   ├── drafting-interview/       Turn-by-turn intake chat
+│   └── suggest-redline/          Clause-level review against precedent
+└── migrations/               10 migrations — fresh baseline, no inherited history
 ```
 
 ---
 
 ## Database Schema
 
-### Core Entities
-
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  organizations   │────▶│      funds       │────▶│ fund_performance │
-└──────────────────┘     └──────────────────┘     └──────────────────┘
-         │                       │
-         │                       ▼
-         │               ┌──────────────────┐
-         │               │ fund_investments │
-         │               └──────────────────┘
-         │                       │
-         ▼                       ▼
-┌──────────────────┐     ┌──────────────────┐
-│ general_partners │     │operating_companies│
-└──────────────────┘     └──────────────────┘
-         │                       │
-         │                       ├──────────────────────┐
-         │                       ▼                      ▼
-         │               ┌──────────────────┐  ┌──────────────────┐
-         │               │   _financials    │  │ _operational_    │
-         │               └──────────────────┘  │    _metrics      │
-         │                                     └──────────────────┘
-         │                       │
-         │                       ▼
-         │               ┌──────────────────┐
-         │               │   _cyber         │
-         │               └──────────────────┘
-         │
-         ▼
-┌──────────────────┐     ┌──────────────────┐
-│ limited_partners │────▶│fund_lp_commitments│
-└──────────────────┘     └──────────────────┘
+clients ──< matters ──< matter_stages
+                    ├─< matter_parties
+                    ├─< matter_documents ──< document_versions ──< redline_suggestions
+                    ├─< matter_notes
+                    ├─< matter_tasks
+                    └─< ai_chat_threads ──< ai_chat_messages
+
+document_types ──< matter_documents
+               └─< documents (via document_type_id)
+
+profiles ──< user_roles
+documents          (RAG store: matter-scoped context + firm-wide precedent, one table)
 ```
 
-### Deal Manager & Projects
+| Table | Purpose |
+|-------|---------|
+| `profiles` | One row per `auth.users` row, auto-created via a trigger on signup |
+| `user_roles` | `admin` / `partner` / `associate` / `paralegal`, checked via `has_role()` |
+| `clients` | Client entities |
+| `matters` | The core transaction/engagement record |
+| `matter_stages` | Per-matter stage checklist, seeded from a default PPP pipeline on creation |
+| `matter_parties` | Counterparties on a matter (name + role, e.g. "EPC Contractor") |
+| `document_types` | The firm's contract taxonomy — admin-editable via Document Types |
+| `matter_documents` | A document instance on a matter (title, type, status) |
+| `document_versions` | Version history — every upload or AI-generated/redlined export is a new row |
+| `documents` | The RAG store: chunked text + `vector(1024)` embedding + metadata. Doubles as matter-scoped context (`matter_id` set) and firm-wide precedent library (`is_precedent = true`) |
+| `redline_suggestions` | Structured AI review output per document version — clause reference, original/suggested text, rationale, accept/reject status |
+| `matter_notes` / `matter_tasks` | Activity log and to-dos per matter |
+| `ai_chat_threads` / `ai_chat_messages` | Persistent chat — used by both the guided drafting interview and the matter Q&A chat (distinguished by `title`) |
+| `support_requests` | Backing table for the Help page's contact form |
 
-```
-┌──────────────────┐     ┌──────────────────┐
-│      deals       │────▶│ deal_documents   │
-│                  │────▶│ deal_stages      │
-│                  │────▶│ deal_notes       │
-│                  │────▶│ deal_meetings    │
-└──────────────────┘     └──────────────────┘
+### Key functions
 
-┌──────────────────┐     ┌──────────────────┐
-│    projects      │────▶│ project_documents│
-│                  │────▶│ project_notes    │
-│                  │────▶│ project_scenarios│
-└──────────────────┘     └──────────────────┘
-```
+- `has_role(user_id, role)` — SQL, `SECURITY DEFINER`, used throughout RLS policies.
+- `is_firm_member(user_id)` — true for any row present in `profiles`; the basis of the firm-wide access model.
+- `match_documents(query_embedding, ...)` — pgvector cosine-similarity search over `documents`, filterable by matter, document type, and precedent-only.
+- `handle_new_user()` — trigger, creates a `profiles` row on `auth.users` insert.
 
-### Dimensional Model (Operating Company Analytics)
+### Storage buckets
 
-```
-                    ┌──────────────┐
-                    │   dim_time   │
-                    └──────┬───────┘
-                           │
-┌──────────────┐   ┌──────▼────────────────────┐   ┌──────────────┐
-│ dim_product  │──▶│ fact_operating_company_   │◀──│ dim_region   │
-└──────────────┘   │       financials           │   └──────────────┘
-                   └──────▲────────────────────┘
-                          │
-                   ┌──────┴───────┐
-                   │ dim_segment  │
-                   └──────────────┘
-```
-
-### Key Tables
-
-| Table | Description |
-|-------|-------------|
-| **Core Entities** | |
-| `organizations` | Multi-tenant organization entities |
-| `organization_members` | User-to-organization membership with roles |
-| `profiles` | Extended user profile data |
-| `user_roles` | Application-level roles (admin, moderator, user) |
-| **Funds & Investments** | |
-| `funds` | Investment fund entities |
-| `fund_performance` | Historical fund performance metrics (NAV, IRR, MOIC, TVPI, DPI) |
-| `fund_investments` | Fund-level investment records linking funds to operating companies |
-| `fund_lp_commitments` | LP commitment tracking |
-| **Entities** | |
-| `general_partners` | GP entities with comprehensive financial and performance data |
-| `limited_partners` | LP entities |
-| `operating_companies` | Portfolio company entities |
-| `operating_company_financials` | Company financial statements |
-| `operating_company_operational_metrics` | KPIs and operational data |
-| `operating_company_cyber` | Cybersecurity metrics |
-| **Deal Manager** | |
-| `deals` | Deal pipeline records with AI analysis fields |
-| `deal_documents` | Deal-associated document uploads with AI summaries |
-| `deal_stages` | Pipeline stage tracking with checklists |
-| `deal_notes` | Deal activity notes |
-| `deal_meetings` | Calendar/meeting records (with Outlook sync) |
-| **Projects** | |
-| `projects` | Strategic planning projects |
-| `project_documents` | Project-associated documents |
-| `project_notes` | Project activity log |
-| `project_scenarios` | Scenario analysis models |
-| **Deal Sourcing** | |
-| `deal_searches` | Saved deal search criteria |
-| `deal_opportunities` | Discovered deal opportunities |
-| **Documents & RAG** | |
-| `documents` | RAG document store with vector embeddings |
-| `uploaded_files` | File metadata for uploaded documents |
-| `file_fields` | Extracted field metadata from files |
-| **Dimensional Model** | |
-| `dim_time` | Time dimension (date, month, quarter, fiscal year) |
-| `dim_product` | Product dimension per operating company |
-| `dim_region` | Geographic dimension per operating company |
-| `dim_segment` | Business segment dimension per operating company |
-| `fact_operating_company_financials` | Fact table with financial metrics by dimensions |
-| **Feature Governance** | |
-| `features` | Available platform features with routes |
-| `user_features` | Per-user feature assignments |
-| `organization_features` | Per-organization feature assignments |
-| `organization_ai_policies` | AI usage policies at org/feature level |
-| **AI Analysis** | |
-| `gp_analyses` | AI-generated GP analysis snapshots |
-| `gp_analysis_prompts` | Configurable analysis prompt templates |
-| `portfolio_news_prompts` | News summary prompt templates |
-| `portfolio_news_summaries` | Generated news summaries |
-| **Other** | |
-| `custom_templates` | User-created upload templates |
-| `entity_imports` | Bulk import tracking |
-| `entity_deletion_log` | Audit trail for entity deletions |
-| `bridge_preferences` | User preferences for value creation bridge charts |
-
-### Enums
-
-| Enum | Values |
-|------|--------|
-| `investment_type` | `lp_fund`, `co_investment`, `gp_equity` |
-| `investment_status` | `active`, `exited`, `written_off`, `under_loi` |
-| `financial_period` | `Monthly`, `Quarterly`, `Annual`, `At Entry` |
-| `cash_flow_type` | `capital_call`, `distribution`, `management_fee`, `other` |
-| `app_role` | `admin`, `moderator`, `user` |
-| `benchmark_type` | `market_index`, `peer_group`, `custom` |
+- `matter-documents` (private) — uploaded and AI-generated document files, one folder per matter.
+- `precedent-library` (private) — reserved for firm-wide precedent uploads independent of a specific matter; not yet wired to any UI (all current precedent ingestion goes through matter documents flagged `is_precedent`).
 
 ---
 
 ## Authentication & Authorization
 
-### Authentication Flow
-
-```
-┌─────────┐     ┌─────────────┐     ┌─────────────┐
-│  User   │────▶│ Supabase    │────▶│  Database   │
-│         │     │ Auth        │     │  (profiles) │
-└─────────┘     └─────────────┘     └─────────────┘
-                      │
-                      ▼
-               ┌─────────────┐
-               │ JWT Token   │
-               │ (session)   │
-               └─────────────┘
-```
-
-### Authorization Layers
-
-1. **Application Roles** (`user_roles` table)
-   - `admin`: Full system access
-   - `moderator`: Extended permissions
-   - `user`: Standard user access
-
-2. **Organization Membership** (`organization_members` table)
-   - `owner`: Can manage organization and members
-   - `member`: Standard organization access
-
-3. **Feature Governance** (`features`, `user_features`, `organization_features`)
-   - Feature-gated navigation and access control
-   - Organization-level AI policy management
-
-4. **Row Level Security (RLS)**
-   - All tables have RLS enabled
-   - Policies enforce user-based and organization-based access
-   - Helper functions: `has_role()`, `is_org_member()`, `get_user_organization_id()`
-
-### Key RLS Patterns
-
-```sql
--- User owns the record
-auth.uid() = user_id
-
--- User is organization member
-is_org_member(auth.uid(), organization_id)
-
--- User has specific role
-has_role(auth.uid(), 'admin'::app_role)
-
--- Authenticated users (read-only shared data)
-true  -- For SELECT on reference data
-```
+- **Auth**: Supabase Auth, email/password, with optional TOTP MFA (`MFAEnrollment`/`MFAVerification`).
+- **Roles**: `admin`, `partner`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles`, to avoid privilege-escalation-via-update. `has_role()` is the canonical check, used inside RLS policies.
+- **Access model**: firm-wide. Any authenticated firm member can read/write matters, documents, notes, tasks, and chat. There is no per-matter ACL — this was an explicit decision (documented in the original planning pass) favoring simplicity for a small, close-knit practice over conflict-screening infrastructure the firm doesn't currently need.
+- **Admin-gated actions**: managing the document-type taxonomy (`document_types`), assigning roles (`user_roles`), and deleting clients/matters require `admin` (or `partner`, for client/matter deletion).
+- **`ProtectedRoute`**: gates on authentication only — no per-feature flag system (the FactorIQ-era `features`/`user_features` tables were dropped along with the rest of that product).
 
 ---
 
-## Key Features & Modules
+## Edge Functions Reference
 
-### 1. Portfolio Management
-- **Location**: `src/pages/Portfolios.tsx`, `src/components/PortfolioOverview.tsx`
-- Multi-asset portfolio tracking (LP Funds, Co-Investments, GP Equity)
-- Performance metrics aggregation
-- Investment lifecycle management
+| Function | Calls | Purpose |
+|----------|-------|---------|
+| `process-document` | Voyage (via ingest-documents) | Downloads a file from storage, extracts text (PDF via `unpdf`, DOCX via `mammoth`, XLSX via `xlsx`), hands off to `ingest-documents` |
+| `ingest-documents` | Voyage `voyage-law-2` | Chunks text, embeds each chunk (batched), inserts into `documents` with `matter_id`/`document_type_id`/`is_precedent` |
+| `rag-query` | Voyage + Claude | Embeds a query, runs `match_documents`, asks Claude to answer grounded in the results. Optionally threaded (pass `matterId`) — persists to `ai_chat_threads`/`ai_chat_messages` and feeds prior turns back to Claude so follow-ups have context. Without `matterId`, stays stateless (used for ad hoc precedent search) |
+| `draft-document` | Claude | Pulls the firm's most recent precedent of the chosen document type (direct filter, not semantic — the precedent library isn't large enough yet to need re-ranking) plus known matter parties, and/or a guided-interview transcript, and asks Claude for a full first draft |
+| `drafting-interview` | Claude | Turn-by-turn intake chat — asks one question at a time, returns `{ready, message}` as JSON, persists every turn |
+| `suggest-redline` | Voyage's precedent (already embedded) + Claude | Downloads a document version, extracts text, pulls precedent, asks Claude for a JSON array of clause-level suggestions; clears stale pending suggestions before inserting fresh ones on re-review |
 
-### 2. Fund Performance Analytics
-- **Location**: `src/pages/FundPerformancePage.tsx`, `src/components/FundPerformance.tsx`
-- Historical performance tracking (IRR, MOIC, TVPI, DPI, RVPI)
-- NAV trending and analysis
-- Fee tracking (management fees, carried interest)
-
-### 3. General Partner Analysis
-- **Location**: `src/pages/GeneralPartnersPage.tsx`, `src/components/GeneralPartnerDashboard.tsx`
-- Comprehensive GP metrics dashboard
-- AI-powered performance analysis (Gemini)
-- Interactive chat-based insights
-
-### 4. Operating Company Management
-- **Location**: `src/pages/OperatingCompaniesPage.tsx`, `src/components/OperationalMetricsDashboard.tsx`
-- Financial statement tracking
-- Operational KPI monitoring
-- Cybersecurity risk assessment
-- Dimensional analysis (product/region/segment breakdowns)
-
-### 5. Document Intelligence (RAG)
-- **Location**: `src/components/DocumentManager.tsx`, `src/components/AnalyticsChat.tsx`
-- Document upload and processing
-- Vector embedding generation (OpenAI)
-- Semantic search and Q&A
-
-### 6. Deal Sourcing (Deal Finder)
-- **Location**: `src/pages/DealFinderPage.tsx`, `src/components/DealSearchFilters.tsx`
-- Multi-criteria deal search
-- Saved search management
-- Opportunity tracking and promotion to Deal Manager
-
-### 7. News & Intelligence
-- **Location**: `src/components/IntellizenceNewsSearch.tsx`
-- Portfolio-relevant news aggregation
-- AI-generated summaries (Perplexity)
-- Industry monitoring
-
-### 8. Reporting
-- **Location**: `src/pages/ReportsPage.tsx`, `src/components/report/`
-- Configurable report templates
-- PDF and Excel export
-- Multi-entity report generation
-
-### 9. Deal Manager
-- **Location**: `src/pages/DealManagerPage.tsx`, `src/components/deal-manager/`
-- Full deal pipeline with stage tracking (Screening → Closed)
-- Deal workspace with 6 tabs: Overview, Details, Documents, AI Analysis, Notes, Meetings
-- **Details tab**: Populated via AI research (same data as Deal Finder) with company overview, financial metrics, and sources
-- Automated AI analysis on deal creation: thumbnail, thesis fit, investment analysis, company research
-- Document upload with AI summarization and RAG vectorization
-- Financial model generation (DCF, LBO, Comparables) via AI tool-calling
-- AI chat assistant with persistent history
-
-### 10. Projects & Scenario Analysis
-- **Location**: `src/pages/ProjectsPage.tsx`, `src/components/projects/`
-- Strategic planning workspace with project cards
-- Scenario modeling with AI-powered analysis
-- Project documents with AI processing
-- AI chat assistant for project insights
-
-### 11. Graph Generator
-- **Location**: `src/pages/GraphGeneratorPage.tsx`, `src/components/graph-generator/`
-- Custom chart creation with entity/data point/time frame selectors
-- AI-powered chart generation (Gemini)
-- Style prompt customization
-- Saved graphs management
-- Save-to-page functionality
-
-### 12. Analytics Workspace
-- **Location**: `src/pages/WorkspacePage.tsx`, `src/components/workspace/`
-- AI-powered analysis agent (Gemini)
-- Dynamic dashboard rendering from AI-generated specifications
-- Natural language query interface
-
-### 13. Unified Upload System
-- **Location**: `src/components/SimpleUploadAgent.tsx`, `src/lib/templateProcessor.ts`
-- Auto template detection for entity types
-- AI-assisted column mapping (`ai-column-mapper`)
-- Multi-sheet Excel support
-- Data validation and transformation pipeline
-- Support for: operating companies, funds, GPs, LPs, fund performance, financials, operational metrics
-
-### 14. AI Policy Governance
-- **Location**: `src/components/AIPolicyManager.tsx`, `src/components/OrganizationFeaturesAdmin.tsx`
-- Organization-level AI policy management
-- Feature-level AI policy configuration
-- Fund investment thesis management for deal analysis
+**A recurring implementation detail worth knowing**: Claude Sonnet 5 can emit a `thinking` content block ahead of the `text` block (extended thinking). Every function that parses a Claude response finds the `text`-typed block explicitly rather than assuming `content[0]` — this was a real bug caught during development (see git history on `rag-query`, `drafting-interview`, `draft-document`, `suggest-redline`) and matters for anyone adding a new Claude-calling function.
 
 ---
 
-## Edge Functions Architecture
+## Known gaps / deliberate v1 limitations
 
-### Document Processing Pipeline
-
-```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Upload    │────▶│ process-document│────▶│ ingest-documents│
-│   (Client)  │     │ (extract text)  │     │ (embed + store) │
-└─────────────┘     └─────────────────┘     └─────────────────┘
-                                                     │
-                                                     ▼
-                                            ┌─────────────────┐
-                                            │   documents     │
-                                            │   (pgvector)    │
-                                            └─────────────────┘
-                                                     │
-                                                     ▼
-                    ┌─────────────────┐     ┌─────────────────┐
-                    │    rag-query    │◀────│   User Query    │
-                    │ (semantic search│     │                 │
-                    │  + AI response) │     └─────────────────┘
-                    └─────────────────┘
-```
-
-### Deal Manager Pipeline
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────────────┐
-│  Deal Finder    │────▶│  Promote to     │────▶│  Deal Manager Workspace │
-│  (Search/       │     │  Deal Manager   │     │                         │
-│   Discover)     │     │  (data preserved│     │  ┌─ Overview            │
-└─────────────────┘     └─────────────────┘     │  ├─ Details (research)  │
-                               │                │  ├─ Documents           │
-        ┌──────────────────────┤                │  ├─ AI Analysis         │
-        ▼                      ▼                │  ├─ Notes               │
-┌───────────────┐   ┌──────────────────┐        │  └─ Meetings           │
-│ + New Deal    │   │ Auto AI Tasks:   │        └─────────────────────────┘
-│ (manual       │──▶│ • Thumbnail      │
-│  creation)    │   │ • Research       │
-└───────────────┘   │ • Thesis Fit     │
-                    │ • Investment     │
-                    │   Analysis       │
-                    └──────────────────┘
-```
-
-### Edge Functions Reference
-
-| Function | Purpose | AI Model |
-|----------|---------|----------|
-| **Analytics & Chat** | | |
-| `analytics-chat` | General analytics Q&A | GPT-4o-mini |
-| `gp-analysis` | GP performance analysis | GPT-4o-mini |
-| `gp-analysis-chat` | Interactive GP insights | GPT-4o-mini |
-| `operators-chat` | Operators AI assistant | Gemini 2.5 Flash |
-| `operational-metrics-summary` | OpCo metrics summarization | Gemini 2.5 Flash |
-| **Deal Manager** | | |
-| `deal-research` | Company research for Details tab | Gemini 2.5 Flash |
-| `deal-ai-analysis` | Thesis fit & investment analysis | Gemini 2.5 Flash |
-| `deal-ai-analysis-stream` | Streaming deal analysis | Gemini 2.5 Flash |
-| `deal-manager-chat` | Deal workspace AI assistant | Gemini 2.5 Flash |
-| `deal-analysis-chat` | Deal analysis chat | Gemini 2.5 Flash |
-| `deal-qa-chat` | Deal Q&A from documents | Gemini 2.5 Flash |
-| `deal-finder-search` | Deal sourcing API | Gemini 2.5 Flash |
-| `generate-deal-thumbnail` | AI contextual thumbnail | Gemini 2.5 Flash Image |
-| `process-deal-document` | Deal document processing | — |
-| **Projects** | | |
-| `project-chat` | Project AI assistant | Gemini 2.5 Flash |
-| `project-analysis-chat` | Project analysis chat | Gemini 2.5 Flash |
-| `project-scenario-analysis` | Scenario modeling | Gemini 2.5 Flash |
-| `generate-project-thumbnail` | AI contextual thumbnail | Gemini 2.5 Flash Image |
-| `process-project-document` | Project document processing | — |
-| **Documents & RAG** | | |
-| `process-document` | Document text extraction | — |
-| `ingest-documents` | Embedding + vector storage | OpenAI Embeddings |
-| `rag-query` | Semantic search + AI response | GPT-4o-mini |
-| `summarize-pdf` | PDF summarization | Perplexity |
-| `fetch-file-data` | File data retrieval | — |
-| `parse-file` | File parsing utilities | — |
-| **Upload & Data** | | |
-| `ai-column-mapper` | AI-assisted column mapping | Gemini 2.5 Flash |
-| `ai-data-parser` | AI data parsing | Gemini 2.5 Flash |
-| `import-entities` | Bulk entity import | — |
-| `parse-and-backfill` | Data backfill processing | — |
-| `seed-dimensional-data` | Dimensional model seeding | — |
-| `seed-daily-dimensional-facts` | Daily fact seeding | — |
-| **Visualization** | | |
-| `graph-generator` | AI chart generation | Gemini 2.5 Flash |
-| `workspace-analysis` | Analytics workspace agent | Gemini 2.5 Flash |
-| **News & Intelligence** | | |
-| `fetch-news` | News aggregation | — |
-| `fetch-intellizence-news` | Intellizence integration | — |
-| `generate-portfolio-news-summary` | AI news summaries | Perplexity |
-| **Admin & Integration** | | |
-| `create-organization` | Organization provisioning | — |
-| `invite-user` | User invitation | — |
-| `setup-demo-account` | Demo account setup | — |
-| `submit-demo-request` | Demo request handling | — |
-| `outlook-auth` | Microsoft OAuth flow | — |
-| `outlook-meetings` | Outlook calendar sync | — |
-
----
-
-## Storage Buckets
-
-| Bucket | Purpose |
-|--------|---------|
-| `uploaded-files` | User-uploaded data files (CSV, Excel) |
-| `rag-documents` | Documents for RAG processing |
-| `deal-documents` | Deal Manager document uploads |
-| `project-documents` | Project document uploads |
-| `reports` | Generated report files |
-
----
-
-## Data Flow Patterns
-
-### Investment Data Flow
-
-```
-User Action          Frontend              Backend              Database
-    │                   │                     │                    │
-    │──Create Investment─▶                    │                    │
-    │                   │──Supabase Insert───▶│                    │
-    │                   │                     │──RLS Check────────▶│
-    │                   │                     │◀─────Allowed───────│
-    │                   │                     │──Insert Row───────▶│
-    │                   │◀──Success Response──│                    │
-    │◀──TanStack Cache──│                     │                    │
-    │   Invalidation    │                     │                    │
-```
-
-### RAG Query Flow
-
-```
-User Query           Frontend              Edge Function         External
-    │                   │                     │                    │
-    │──Ask Question────▶│                     │                    │
-    │                   │──Invoke Function───▶│                    │
-    │                   │                     │──Generate Embedding─▶OpenAI
-    │                   │                     │◀─────Embedding──────│
-    │                   │                     │──Vector Search─────▶Database
-    │                   │                     │◀─────Documents──────│
-    │                   │                     │──Generate Answer───▶OpenAI
-    │                   │                     │◀─────Response───────│
-    │                   │◀──Streaming Response│                    │
-    │◀──Display Answer──│                     │                    │
-```
-
-### Deal Creation Flow
-
-```
-User Action          Frontend              Edge Functions        External
-    │                   │                     │                    │
-    │──Create Deal─────▶│                     │                    │
-    │                   │──Insert Deal───────▶│ Database           │
-    │                   │◀──Deal Created──────│                    │
-    │                   │                     │                    │
-    │                   │──(async, parallel)──▶│                    │
-    │                   │  deal-research      │──Research─────────▶Gemini
-    │                   │  deal-ai-analysis   │──Analysis─────────▶Gemini
-    │                   │  generate-thumbnail │──Thumbnail────────▶Gemini
-    │                   │                     │◀─────Results────────│
-    │                   │                     │──Update Deal──────▶Database
-    │◀──Cache Refresh───│                     │                    │
-```
-
----
-
-## Security Considerations
-
-### Data Protection
-- All API keys stored as Supabase secrets (not in code)
-- RLS enforces data isolation between organizations
-- JWT tokens for authenticated API access
-- HTTPS for all communications
-- AI policy governance for controlling AI usage per organization/feature
-
-### Access Control Hierarchy
-1. **Public Routes**: Landing page, Contact, Auth
-2. **Authenticated Routes**: All dashboard pages (via `ProtectedRoute`)
-3. **Feature-Gated Routes**: Controlled via `features` + `user_features` tables
-4. **Admin Routes**: User management, system settings, AI policy management
-5. **Organization-Scoped Data**: Funds, GPs, LPs, Operating Companies, Deals, Projects
-
-### Storage Security
-- Private buckets for uploaded files
-- RLS policies on storage objects
-- User-scoped file access
-
----
-
-## Environment Configuration
-
-### Required Secrets
-| Secret | Purpose |
-|--------|---------|
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Public API key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Admin API key (Edge Functions) |
-| `OPENAI_API_KEY` | AI/ML operations (chat, embeddings) |
-| `LOVABLE_API_KEY` | Lovable AI gateway |
-| `GEMINI_API_KEY` | Google Gemini (via gateway) |
-| `INTELLIZENCE_API_KEY` | News intelligence |
-| `PERPLEXITY_API_KEY` | Search and summarization |
-| `NEWS_API_KEY` | News aggregation |
-
----
-
-## Performance Optimizations
-
-### Frontend
-- **TanStack Query**: Automatic caching, background refetching
-- **Code Splitting**: Route-based lazy loading
-- **Memoization**: `useMemo`, `useCallback` for expensive computations
-
-### Database
-- **Indexes**: On frequently queried columns
-- **pgvector HNSW Index**: For semantic search performance
-- **RLS Function Optimization**: `SECURITY DEFINER` with `search_path`
-- **Dimensional Model**: Star schema for efficient operating company analytics
-
-### Edge Functions
-- **Streaming Responses**: For AI-generated content
-- **Connection Pooling**: Via Supabase client
-- **Parallel AI Tasks**: Deal creation triggers concurrent background analysis
-
----
-
-## Deployment
-
-### Lovable Platform
-- Automatic deployments on code changes
-- Preview environments for branches
-- Custom domain support
-
-### Database Migrations
-- Managed via Supabase migrations
-- Version-controlled in `supabase/migrations/`
-- Applied automatically on deployment
-
----
-
-## Future Architecture Considerations
-
-1. **Real-time Updates**: Supabase Realtime for live deal pipeline collaboration
-2. **Background Jobs**: Scheduled reports, periodic deal re-analysis, news monitoring
-3. **Multi-region**: For global performance
-4. **Advanced RAG**: Hybrid search (vector + keyword), re-ranking, multi-modal embeddings
-5. **Workflow Automation**: Configurable triggers for deal stage transitions
-
----
-
-*Last Updated: March 2026*
+- **`useActivityTracking` is a stub.** The FactorIQ-era version logged against tables that no longer exist. A matter-hub-appropriate audit trail (logins, matter/document access) hasn't been rebuilt.
+- **Redline export requires the same session.** `RedlineReviewPage` needs the extracted source text to build the clean export, and that text isn't cached across visits — re-run the review to enable export if you're returning to a page with existing suggestions.
+- **No native Word tracked-changes.** Redline suggestions are accept/reject in-app; the export is a clean revised `.docx`, not a document with OOXML revision marks. Flagged from the start as a deliberate v1 scope decision, not an oversight.
+- **`document_types.required_fields`** exists in the schema (a hint for the drafting interview) but has no editing UI yet — no document type currently has it populated.
+- **No data-residency option in Pakistan.** The Supabase project runs on the nearest available region; there is no AWS/Supabase presence in Pakistan itself. See [SECURITY.md](SECURITY.md).
+- **Onboarding the rest of the firm** (10-11 more lawyers) hasn't happened yet — there's one admin test account.

@@ -1,73 +1,43 @@
-# Welcome to your Lovable project
+# AKLA Matter Hub
 
-## Project info
+The firm's internal matter management and AI drafting hub — track PPP transactions and due-diligence engagements through their document lifecycle, and use the firm's own precedent library to draft and review agreements.
 
-**URL**: https://lovable.dev/projects/bcf5013b-eeb7-4c05-949f-512418a4eff5
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a full technical writeup and [SECURITY.md](SECURITY.md) for the security/confidentiality model.
 
-## How can I edit this code?
+## What it does
 
-There are several ways of editing your application.
+- **Matters** — track a transaction's client, sector, lead partner, and a stage checklist (Origination → Due Diligence → Drafting → Negotiation → Financial Close → Post-Closing), plus parties, tasks, and notes.
+- **Documents** — upload drafts against a matter, version them, and move them through a status pipeline (not started → drafting → internal review → with counterparty → negotiation → finalized → executed). Every upload is text-extracted and embedded into the firm's document knowledge base.
+- **Draft with AI** — generate a first draft of a document either from the firm's own precedent for that document type, or through a guided Q&A interview when no close precedent exists.
+- **Review with AI** — get clause-level redline suggestions on an uploaded draft, benchmarked against precedent and standard market practice; accept or reject each, then export a clean revised `.docx`.
+- **Ask AI** — a per-matter chat grounded in that matter's documents and the firm's precedent library.
+- **Document Types** — admin-editable contract taxonomy (Concession Agreement, EPC Contract, financing agreements, etc.) that drives drafting and review.
 
-**Use Lovable**
+## Tech stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/bcf5013b-eeb7-4c05-949f-512418a4eff5) and start prompting.
+React 18 + TypeScript + Vite, Tailwind CSS + shadcn/ui, TanStack Query, React Router. Backend is Supabase (Postgres + pgvector, Auth, Storage, Edge Functions). AI: Anthropic Claude for generation, Voyage AI (`voyage-law-2`, a legal-domain embedding model) for retrieval.
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Local development
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Requires a `.env` with:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```
+VITE_SUPABASE_URL="https://<project-ref>.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
+VITE_SUPABASE_PROJECT_ID="<project-ref>"
+```
 
-**Use GitHub Codespaces**
+The Supabase project itself needs two Edge Function secrets set (Project Settings → Edge Functions → Secrets): `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Other scripts
 
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/bcf5013b-eeb7-4c05-949f-512418a4eff5) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+```sh
+npm run build      # production build
+npm run lint        # eslint
+npm run qa          # Playwright-driven QA bot (qa-bot/)
+```

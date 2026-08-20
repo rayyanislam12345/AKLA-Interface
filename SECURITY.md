@@ -1,394 +1,95 @@
-# Security Documentation
+# Security & Confidentiality
 
-This document provides a comprehensive overview of the security features implemented in the FactorIQ platform across all layers: application, cloud/edge, and database.
-
----
-
-## Technical Configuration
-
-FactorIQ is a single-page application (SPA) built with React 18, TypeScript, and Vite, styled using Tailwind CSS with shadcn/ui components. The backend is powered by Supabase, providing a managed PostgreSQL database with the pgvector extension for AI-powered document search, Supabase Auth for identity management, and Deno-based Edge Functions for serverless API logic. All client-server communication occurs over HTTPS, with JWT-based authentication tokens issued by Supabase Auth. The application is deployed on Lovable's managed infrastructure, with Edge Functions deployed to Supabase's global edge network for low-latency execution.
+This describes the actual security posture of AKLA Matter Hub as built — not aspirational. Every document in this system is presumptively privileged client work product; that framing drives the recommendations below more than generic security best practice does.
 
 ---
 
-## Table of Contents
+## Technical configuration
 
-1. [Overview](#overview)
-2. [Application Layer Security](#application-layer-security)
-3. [Cloud & Edge Layer Security](#cloud--edge-layer-security)
-4. [Database Layer Security](#database-layer-security)
-5. [Data Encryption](#data-encryption)
-6. [Multi-Tenancy & Data Isolation](#multi-tenancy--data-isolation)
-7. [Audit & Compliance](#audit--compliance)
-8. [Security Best Practices](#security-best-practices)
+React 18/TypeScript SPA on Vite, backed by Supabase (Postgres + pgvector, Auth, Storage, Deno Edge Functions). All client-server traffic is HTTPS with JWT-based Supabase Auth sessions. AI calls go directly to the Anthropic and Voyage AI APIs from Edge Functions — no third AI vendor, no gateway in between.
 
 ---
 
-## Overview
-
-FactorIQ implements a **defense-in-depth** security strategy with multiple layers of protection:
-
-- **Authentication & Authorization** at the application layer
-- **JWT verification & error sanitization** at the edge/cloud layer
-- **Row Level Security (RLS)** with comprehensive policies at the database layer
-- **Encryption** for data at rest and in transit
-
----
-
-## Application Layer Security
-
-### Authentication
+## Authentication
 
 | Feature | Implementation |
 |---------|----------------|
-| **Email/Password Auth** | Supabase Auth with secure password hashing (bcrypt) |
-| **Session Management** | JWT-based sessions via `useAuth` hook |
-| **Password Reset** | Secure email-based reset flow with rate limiting (60s cooldown) |
-| **Email Verification** | Optional email confirmation on signup |
+| Email/password | Supabase Auth, bcrypt-hashed |
+| MFA | Optional TOTP (`MFAEnrollment`/`MFAVerification`) — not currently enforced firm-wide |
+| Session | JWT via `useAuth`, persisted to `localStorage` |
+| Password reset | Email-based, Supabase-managed |
 
-### Multi-Factor Authentication (MFA)
-
-| Feature | Implementation |
-|---------|----------------|
-| **TOTP-Based 2FA** | Authenticator app integration (Google Authenticator, Authy, etc.) |
-| **User Enrollment** | Self-service QR code setup in Settings → Security |
-| **Organization Enforcement** | Admins can require MFA for all organization members |
-| **Login Flow** | Automatic detection of enrolled users with 6-digit code verification |
-
-**Related Components:**
-- `src/components/MFAEnrollment.tsx` - User enrollment interface
-- `src/components/MFAVerification.tsx` - Login verification flow
-- `src/components/OrganizationMFASettings.tsx` - Org-level MFA policy
-
-### Role-Based Access Control (RBAC)
-
-| Role | Capabilities |
-|------|--------------|
-| **Admin** | Full platform access, cross-organization management, entity deletion |
-| **Member** | Organization-scoped access based on feature assignments |
-
-**Implementation:**
-- Roles stored in `user_roles` table (never on profiles to prevent privilege escalation)
-- `has_role()` security definer function for RLS policies
-- Client-side role checks for UI rendering only; actual security via RLS
-
-```sql
--- Security definer function prevents RLS recursion
-CREATE FUNCTION public.has_role(_user_id uuid, _role app_role)
-RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.user_roles
-    WHERE user_id = _user_id AND role = _role
-  )
-$$;
-```
-
-### Feature-Based Access Control
-
-| Feature | Implementation |
-|---------|----------------|
-| **User-Level Restrictions** | `user_features` table maps users to specific features |
-| **Organization-Level Restrictions** | `organization_features` table enables/disables features per org |
-| **Permissive Default** | Users with no feature assignments have full access |
-| **Admin Bypass** | Admins always have access regardless of feature restrictions |
-
-**Related Components:**
-- `src/hooks/useUserFeatures.tsx` - Feature access logic
-- `src/components/ProtectedRoute.tsx` - Route-level protection
-- `src/components/FeatureAssignment.tsx` - Admin feature management
-
-### Protected Routes
-
-All authenticated routes are wrapped with `ProtectedRoute` which:
-1. Validates user authentication state
-2. Checks feature-level access permissions
-3. Verifies route access based on assigned features
-4. Redirects unauthorized users to `/home`
+**Open recommendation, not yet actioned**: Supabase's leaked-password-protection check (against HaveIBeenPwned) is currently **disabled** on the project. It's a one-toggle fix in Auth settings and costs nothing — worth turning on before wider rollout.
 
 ---
 
-## Cloud & Edge Layer Security
+## Authorization
 
-### JWT Verification
+### Roles
 
-All sensitive Edge Functions require JWT verification:
+`admin`, `partner`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles` (avoids privilege escalation via a profile update), checked through a `SECURITY DEFINER` `has_role()` function used across RLS policies.
 
-```toml
-# supabase/config.toml
-[functions.parse-file]
-verify_jwt = true
+### Access model: firm-wide, not per-matter
 
-[functions.analytics-chat]
-verify_jwt = true
+This is the load-bearing decision in the whole authorization model, made explicitly during planning rather than defaulted into: **every authenticated firm member can read and write every matter, document, note, task, and chat.** There is no per-matter access control list.
 
-[functions.import-entities]
-verify_jwt = true
-```
+Concretely, RLS policies reduce to two shapes almost everywhere:
+- `is_firm_member(auth.uid())` — general read/write, the vast majority of policies.
+- `has_role(auth.uid(), 'admin')` (or `'partner'`) — gates document-type taxonomy management, role assignment, and client/matter deletion.
 
-**Public Endpoints** (no JWT required):
-- `submit-demo-request` - Public demo form
-- `generate-portfolio-news-summary` - Background processing (uses internal validation)
-
-### Error Sanitization
-
-Edge Functions implement error sanitization to prevent information leakage:
-
-```typescript
-try {
-  // Business logic
-} catch (error: unknown) {
-  // Log detailed error server-side
-  console.error('Detailed error:', error);
-  
-  // Return generic message to client
-  return new Response(
-    JSON.stringify({ error: 'An unexpected error occurred' }),
-    { status: 500, headers: corsHeaders }
-  );
-}
-```
-
-**Applied to Functions:**
-- `create-organization`
-- `submit-demo-request`
-- `import-entities`
-- `analytics-chat`
-- `parse-file`
-- `fetch-news`
-- `fetch-intellizence-news`
-- `gp-analysis-chat`
-
-### CORS Configuration
-
-All Edge Functions include controlled CORS headers:
-
-```typescript
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-```
-
-### Service Role Isolation
-
-| Operation Type | Client Used |
-|----------------|-------------|
-| User operations | Anon key with RLS enforcement |
-| Admin/background operations | Service role key (bypasses RLS) |
+**What this means in practice**: there is no technical barrier between matters. If the firm ever needs an ethical wall for a specific engagement (a genuine possibility in a PPP/infrastructure practice where opposing parties on one deal may be co-counseled on another), that is a manual, out-of-band process today — not something the system enforces. Worth knowing before it's needed, not after.
 
 ---
 
-## Database Layer Security
+## Database layer
 
-### Row Level Security (RLS)
-
-**All tables have RLS enabled** with granular policies per operation:
-
-| Operation | Policy Pattern |
-|-----------|----------------|
-| SELECT | Organization membership or admin role |
-| INSERT | Authenticated user or admin |
-| UPDATE | Owner, organization member, or admin |
-| DELETE | Owner or admin only |
-
-### Security Definer Functions
-
-These functions execute with elevated privileges to avoid RLS recursion:
-
-| Function | Purpose |
-|----------|---------|
-| `has_role(_user_id, _role)` | Check if user has a specific role |
-| `is_org_member(_user_id, _org_id)` | Check organization membership |
-| `get_user_organization_id()` | Get current user's organization ID |
-| `user_has_feature(_user_id, _feature_key)` | Check feature access |
-| `organization_has_feature(_org_id, _feature_key)` | Check org-level feature status |
-
-### Common RLS Policy Patterns
-
-**Organization-Scoped Access:**
-```sql
-CREATE POLICY "Users can view org data"
-ON public.table_name FOR SELECT
-USING (
-  is_org_member(auth.uid(), organization_id) 
-  OR has_role(auth.uid(), 'admin')
-);
-```
-
-**User-Owned Data:**
-```sql
-CREATE POLICY "Users can view their own data"
-ON public.table_name FOR SELECT
-USING (auth.uid() = user_id);
-```
-
-**Junction Table Access (via parent entity):**
-```sql
-CREATE POLICY "Users can view org investments"
-ON public.fund_investments FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM funds f
-    WHERE f.id = fund_investments.fund_id
-    AND (is_org_member(auth.uid(), f.organization_id) 
-         OR has_role(auth.uid(), 'admin'))
-  )
-);
-```
-
-### Tables with RLS Policies
-
-| Category | Tables |
-|----------|--------|
-| **Core Entities** | `general_partners`, `limited_partners`, `funds`, `operating_companies` |
-| **Relationships** | `fund_investments`, `fund_lp_commitments`, `gp_investors` |
-| **Financial Data** | `fund_performance`, `fact_operating_company_financials`, `operating_company_financials` |
-| **Dimensions** | `dim_time`, `dim_product`, `dim_region`, `dim_segment` |
-| **User Data** | `profiles`, `portfolios`, `investments`, `documents` |
-| **System** | `features`, `user_features`, `organization_features`, `user_roles` |
-| **Uploads** | `uploaded_files`, `file_fields`, `entity_imports` |
-| **Audit** | `entity_deletion_log` |
+- **RLS is enabled on every table.**
+- Storage buckets (`matter-documents`, `precedent-library`) are both **private**, gated by the same `is_firm_member()` check on `storage.objects` policies.
+- The `vector` extension lives in a dedicated `extensions` schema, not `public` (a Supabase best-practice recommendation, applied).
+- Functions that touch `SECURITY DEFINER` privileges (`has_role`, `is_firm_member`, `handle_new_user`, `match_documents`) have `search_path` pinned and anonymous (`anon`) execute access explicitly revoked — `handle_new_user` is trigger-only and has no RPC access at all; `has_role`/`is_firm_member` are callable by `authenticated` only, which is required since RLS policies invoke them as the querying user.
 
 ---
 
-## Data Encryption
+## Data encryption
 
-### Encryption at Rest
+| Component | Standard |
+|-----------|----------|
+| Postgres database | AES-256 (Supabase-managed) |
+| Storage buckets | AES-256 (Supabase-managed) |
+| Transit (API, DB, Edge Functions) | TLS 1.2/1.3 |
 
-| Component | Encryption Standard |
-|-----------|---------------------|
-| **PostgreSQL Database** | AES-256 (Supabase managed) |
-| **Storage Buckets** | AES-256 (Supabase managed) |
-| **Automated Backups** | AES-256 encrypted |
+## Secrets management
 
-### Encryption in Transit
-
-| Connection Type | Protocol |
-|-----------------|----------|
-| **API Connections** | TLS 1.2/1.3 (HTTPS) |
-| **Database Connections** | SSL/TLS |
-| **Edge Function Calls** | HTTPS |
-
-### Storage Bucket Security
-
-| Bucket | Public | Purpose |
-|--------|--------|---------|
-| `uploaded-files` | ❌ Private | User file uploads |
-| `rag-documents` | ❌ Private | Document processing |
-
-### Secrets Management
-
-Edge Function secrets are stored in Supabase Vault (encrypted):
-- `OPENAI_API_KEY`
-- `PERPLEXITY_API_KEY`
-- `INTELLIZENCE_API_KEY`
-- `NEWS_API_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+Edge Function secrets (`ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, plus the Supabase-managed `SUPABASE_SERVICE_ROLE_KEY`) are stored in Supabase's encrypted function-secrets store, never in client code or the repo.
 
 ---
 
-## Multi-Tenancy & Data Isolation
+## AI vendor confidentiality — the part generic security docs don't cover
 
-### Organization-Based Isolation
+Every document ingested here — matter uploads and firm precedent alike — is presumptively privileged. Before real client documents go through this system at any real volume, confirm in writing with both vendors:
 
-All core entity tables include an `organization_id` column:
+- **Anthropic**: use a commercial API agreement, not a consumer product. Commercial API usage is not used for model training by default, but get that confirmed in the actual agreement rather than assumed.
+- **Voyage AI**: same standard — confirm data-handling and retention terms before bulk-ingesting the precedent library.
 
-```sql
--- Example: general_partners table
-organization_id uuid REFERENCES organizations(id)
-```
-
-**RLS policies enforce organization boundaries:**
-- Users can only access data within their organization
-- Admins can access data across all organizations
-- New user assignments can specify `organization_id` or `organization_slug`
-
-### Cross-Organization Access
-
-| User Type | Access Scope |
-|-----------|--------------|
-| Regular User | Own organization only |
-| Admin | All organizations (for management purposes) |
+**Data residency**: neither Supabase nor the underlying cloud has a Pakistan region. The nearest available region is Singapore. If any client or government counterparty has a data-residency expectation, that's worth a line in the engagement letter rather than a surprise later.
 
 ---
 
-## Audit & Compliance
+## Human-in-the-loop, by design
 
-### Soft Deletion
+Nothing this system produces — a drafted clause, a redline suggestion — is meant to be presentable as final without a lawyer's review, and the product is built around that:
 
-Core entities use soft deletion for audit trails:
+- AI-generated drafts land in an editable Tiptap editor, never a locked/exported artifact, until a lawyer explicitly saves a version.
+- Redline suggestions are accept/reject, one at a time — nothing is auto-applied.
+- `draft-document`'s system prompt explicitly instructs Claude to insert a marked placeholder (e.g. `[CONCESSION PERIOD — TO BE CONFIRMED]`) rather than invent a commercial term it wasn't given.
+- `rag-query` is instructed to say clearly when its knowledge base has nothing relevant, rather than guess — and in testing, correctly distinguished "this is from our conversation" from "this is from the knowledge base" rather than fabricating a citation.
 
-| Entity Type | Soft Delete Column |
-|-------------|-------------------|
-| General Partners | `deleted_at` |
-| Limited Partners | `deleted_at` |
-| Funds | `deleted_at` |
-| Operating Companies | `deleted_at` |
-
-### Entity Deletion Logging
-
-All deletions are logged to `entity_deletion_log`:
-
-```sql
-CREATE TABLE entity_deletion_log (
-  id uuid PRIMARY KEY,
-  entity_type text NOT NULL,
-  entity_id uuid NOT NULL,
-  entity_name text NOT NULL,
-  deleted_by uuid NOT NULL,
-  deletion_reason text NOT NULL,  -- Minimum 10 characters
-  cascading_impact jsonb NOT NULL,
-  organization_id uuid,
-  created_at timestamptz
-);
-```
-
-### Deletion Safeguards
-
-1. **Role Restriction**: Only Admins can delete entities
-2. **Confirmation Required**: User must type exact entity name
-3. **Reason Required**: Minimum 10-character deletion reason
-4. **Impact Analysis**: Cascading effects displayed before confirmation
+None of this is a substitute for review; it's meant to make the AI's boundaries legible rather than to eliminate the need for a lawyer to actually read the output.
 
 ---
 
-## Security Best Practices
+## What's not built yet
 
-### What We Do
-
-✅ Store roles in separate `user_roles` table (not on profiles)  
-✅ Use security definer functions to prevent RLS recursion  
-✅ Validate all user input server-side  
-✅ Sanitize error messages in Edge Functions  
-✅ Require JWT verification on sensitive endpoints  
-✅ Implement rate limiting on password reset  
-✅ Use private storage buckets  
-✅ Log all entity deletions with reasons  
-
-### What We Don't Do
-
-❌ Store API keys in client-side code  
-❌ Check admin status via localStorage (client-side)  
-❌ Expose detailed error messages to clients  
-❌ Allow hard deletion of core entities  
-❌ Bypass RLS for user operations  
-
-### Recommendations
-
-1. **Enable Leaked Password Protection** in Supabase Auth Settings
-2. **Regularly review RLS policies** when adding new tables
-3. **Audit entity deletion logs** periodically
-4. **Rotate API keys** on a regular schedule
-5. **Enable MFA enforcement** for sensitive organizations
-
----
-
-## Security Contact
-
-For security concerns or vulnerability reports, please contact the development team.
-
----
-
-*Last Updated: February 2026*
+- No firm-wide audit trail (login/access logging) — the hook that would carry this (`useActivityTracking`) is currently a stub. See [ARCHITECTURE.md](ARCHITECTURE.md#known-gaps--deliberate-v1-limitations).
+- No MFA enforcement policy (available per-user, not required).
+- No conflicts/ethical-wall tooling, per the firm-wide access decision above.
