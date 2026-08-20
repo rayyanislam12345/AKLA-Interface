@@ -77,14 +77,16 @@ export function AppSidebar() {
                     <NavLink
                       to={url}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-4 py-2 border-l-2 transition-colors ${
+                        `flex items-center border-l-2 py-2.5 transition-colors ${
+                          isCollapsed ? "justify-center px-2" : "gap-3 px-4"
+                        } ${
                           isActive
                             ? "border-accent bg-white/10 text-accent font-medium"
                             : "border-transparent text-white"
                         }`
                       }
                     >
-                      <Icon className="h-5 w-5" />
+                      <Icon className={isCollapsed ? "!h-8 !w-8 shrink-0" : "h-5 w-5 shrink-0"} />
                       {!isCollapsed && <span>{title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
