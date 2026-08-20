@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Check, Circle, CircleDot, Plus } from "lucide-react";
+import { Check, Circle, CircleDot, FileText, Plus, Upload } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
 import {
   useMatterParties,
@@ -11,13 +11,43 @@ import {
   useMatterNotes,
   useAddMatterNote,
 } from "@/hooks/useMatterDetail";
+import {
+  useDocumentTypes,
+  useMatterDocuments,
+  useCreateMatterDocument,
+  useSetMatterDocumentStatus,
+  useUploadDocumentVersion,
+  type DocumentStatus,
+} from "@/hooks/useMatterDocuments";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+
+const DOCUMENT_STATUSES: DocumentStatus[] = [
+  "not_started",
+  "drafting",
+  "internal_review",
+  "with_counterparty",
+  "negotiation",
+  "finalized",
+  "executed",
+];
+
+function statusLabel(status: string) {
+  return status.replace(/_/g, " ");
+}
+
+function statusVariant(status: string): "default" | "secondary" | "outline" {
+  if (status === "finalized" || status === "executed") return "default";
+  if (status === "not_started") return "outline";
+  return "secondary";
+}
 
 const STAGE_CYCLE = ["not_started", "in_progress", "complete"] as const;
 
@@ -46,6 +76,41 @@ export default function MatterWorkspacePage() {
   const { data: notes } = useMatterNotes(matterId);
   const addNote = useAddMatterNote();
   const [noteContent, setNoteContent] = useState("");
+
+  const { toast } = useToast();
+  const { data: documentTypes } = useDocumentTypes();
+  const { data: matterDocuments } = useMatterDocuments(matterId);
+  const createMatterDocument = useCreateMatterDocument();
+  const setDocumentStatus = useSetMatterDocumentStatus();
+  const uploadVersion = useUploadDocumentVersion();
+  const [newDocTitle, setNewDocTitle] = useState("");
+  const [newDocTypeId, setNewDocTypeId] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<{ matterDocumentId: string; documentTypeId: string | null; nextVersion: number } | null>(null);
+
+  const triggerUpload = (matterDocumentId: string, documentTypeId: string | null, versionCount: number) => {
+    uploadTargetRef.current = { matterDocumentId, documentTypeId, nextVersion: versionCount + 1 };
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const target = uploadTargetRef.current;
+    e.target.value = "";
+    if (!file || !target || !matterId) return;
+    try {
+      await uploadVersion.mutateAsync({
+        matterId,
+        matterDocumentId: target.matterDocumentId,
+        documentTypeId: target.documentTypeId,
+        file,
+        nextVersionNumber: target.nextVersion,
+      });
+      toast({ title: "Document version uploaded" });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    }
+  };
 
   if (isLoading || !matter) {
     return <p className="text-muted-foreground">Loading…</p>;
@@ -89,6 +154,112 @@ export default function MatterWorkspacePage() {
                 <span>{stage.name}</span>
               </button>
             ))}
+          </CardContent>
+        </Card>
+
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Documents</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.xlsx,.xls"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+            {!matterDocuments?.length ? (
+              <p className="text-sm text-muted-foreground">No documents yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {matterDocuments.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center gap-3 border rounded-md px-3 py-2"
+                  >
+                    <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {(doc as any).document_type?.name || "No type"} ·{" "}
+                        {(doc as any).versions?.length || 0} version
+                        {(doc as any).versions?.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <Select
+                      value={doc.status}
+                      onValueChange={(value) =>
+                        setDocumentStatus.mutate({
+                          matterDocumentId: doc.id,
+                          status: value as DocumentStatus,
+                          matterId: matterId!,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-44 h-8 text-xs">
+                        <Badge variant={statusVariant(doc.status)} className="pointer-events-none">
+                          <SelectValue />
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DOCUMENT_STATUSES.map((status) => (
+                          <SelectItem key={status} value={status} className="capitalize">
+                            {statusLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="Upload a new version"
+                      onClick={() =>
+                        triggerUpload(doc.id, doc.document_type_id, (doc as any).versions?.length || 0)
+                      }
+                    >
+                      <Upload className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <Input
+                placeholder="Document title"
+                value={newDocTitle}
+                onChange={(e) => setNewDocTitle(e.target.value)}
+              />
+              <Select value={newDocTypeId} onValueChange={setNewDocTypeId}>
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Document type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {documentTypes?.map((type) => (
+                    <SelectItem key={type.id} value={type.id}>
+                      {type.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="icon"
+                variant="outline"
+                disabled={!newDocTitle.trim()}
+                onClick={() => {
+                  createMatterDocument.mutate({
+                    matter_id: matterId!,
+                    title: newDocTitle.trim(),
+                    document_type_id: newDocTypeId || undefined,
+                  });
+                  setNewDocTitle("");
+                  setNewDocTypeId("");
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
+import { Buffer } from "node:buffer";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,7 +82,10 @@ serve(async (req) => {
       const mammoth = await import('https://esm.sh/mammoth@1.6.0');
       const arrayBuffer = await fileData.arrayBuffer();
 
-      const result = await mammoth.extractRawText({ arrayBuffer });
+      // esm.sh can resolve either mammoth's browser build (wants `arrayBuffer`)
+      // or its Node build (wants a Node `buffer`) depending on how it infers
+      // the target — pass both so extraction works regardless of which loads.
+      const result = await mammoth.extractRawText({ arrayBuffer, buffer: Buffer.from(arrayBuffer) } as any);
       extractedText = result.value;
       metadata.original_format = 'docx';
 
