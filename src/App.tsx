@@ -17,6 +17,8 @@ import RedlineReviewPage from "./pages/RedlineReviewPage";
 import MatterChatPage from "./pages/MatterChatPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
 import PrecedentLibraryPage from "./pages/PrecedentLibraryPage";
+import MandateOpportunitiesPage from "./pages/MandateOpportunitiesPage";
+import WhatsAppActivityPage from "./pages/WhatsAppActivityPage";
 import ClientsPage from "./pages/ClientsPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
@@ -103,6 +105,26 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <PrecedentLibraryPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/mandate-opportunities"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <MandateOpportunitiesPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/whatsapp-activity"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <WhatsAppActivityPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }

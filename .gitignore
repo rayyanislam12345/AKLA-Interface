@@ -26,6 +26,23 @@ qa-bot/traces/
 .env.*.local
 .mcp.json
 
+# Mandate Bot lives in its own separate git repo (AKLA_Mandate_Bot) —
+# never let it get staged into this one as a gitlink.
+Mandate Bot/
+
+# whatsapp-dashboard is a separate standalone project, not yet under any
+# git repo, holding real API keys (.env), real client data (data/), and
+# live WhatsApp session tokens (.wppconnect_auth/, .wwebjs_auth/) —
+# never let this get staged into this repo.
+whatsapp-dashboard/
+
+# Precedent backlog ingestion tool: run-local artifacts, not source
+scripts/precedent_backlog/manifest.json
+scripts/precedent_backlog/report.json
+scripts/precedent_backlog/.venv/
+__pycache__/
+*.pyc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

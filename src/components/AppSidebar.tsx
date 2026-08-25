@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, HelpCircle, LogOut } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -25,6 +25,8 @@ const NAV_ITEMS = [
   { title: "Clients", url: "/clients", icon: Building2 },
   { title: "Team", url: "/team", icon: Users },
   { title: "Precedent Library", url: "/precedent-library", icon: BookMarked },
+  { title: "Mandate Opportunities", url: "/mandate-opportunities", icon: Megaphone },
+  { title: "WhatsApp Activity", url: "/whatsapp-activity", icon: MessageCircle },
   { title: "Document Types", url: "/document-types", icon: ListTree },
   { title: "Help", url: "/help", icon: HelpCircle },
 ];

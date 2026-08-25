@@ -104,7 +104,15 @@ serve(async (req) => {
 
     const systemPrompt = `You are a legal drafting assistant. Draft a complete, professional first version of a "${documentType.name}" (${documentType.category}) for the matter "${matter.name}"${(matter as any).client?.name ? ` (client: ${(matter as any).client.name})` : ''}${matter.sector ? `, sector: ${matter.sector}` : ''}.${matter.description ? `\n\nMatter description: ${matter.description}` : ''}${partiesSection}${precedentSection}${requirementsSection}
 
-Write the full document text with numbered clauses/sections and proper legal drafting conventions (defined terms capitalized on first use, recitals, operative clauses, execution block). Where a specific commercial term wasn't provided, insert a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] rather than inventing a figure. This is a first draft for a lawyer to review and edit — it is not final.
+Write the full document text with proper legal drafting conventions (defined terms capitalized on first use, recitals, operative clauses, execution block). Where a specific commercial term wasn't provided, insert a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] rather than inventing a figure. This is a first draft for a lawyer to review and edit — it is not final.
+
+Format the output as Markdown, matching the firm's clause-numbering convention exactly:
+- Exactly one "# " heading, for the document title only (e.g. "# CONCESSION AGREEMENT").
+- "## " for each top-level clause/section — heading text only (e.g. "## Definitions and Interpretation"). Do NOT type the clause number yourself; the numbering is generated automatically when this is exported, so a typed "1. " prefix would create a duplicate number.
+- "### " for a sub-clause within a section, "#### " for one level deeper if genuinely needed — same rule, no typed numbers.
+- Ordinary paragraphs for recitals and body text that isn't itself a numbered sub-item.
+- A Markdown list ("- " per item) for enumerated sub-items within a clause (e.g. what would read as (a)/(b)/(c)) — again, don't type the letter/number yourself.
+- Leave a blank line between clauses and before/after the execution block, the way a lawyer would when typing this directly in Word.
 
 Output ONLY the document text itself, no commentary before or after it.`;
 

@@ -227,6 +227,66 @@ export type Database = {
           },
         ]
       }
+      mandate_opportunities: {
+        Row: {
+          category: string | null
+          close_date: string | null
+          dedupe_key: string
+          department: string | null
+          document_url: string | null
+          extra_urls: string[]
+          found_at: string
+          id: string
+          matched_keywords: string[]
+          notice_type: string | null
+          notice_url: string | null
+          publish_date: string | null
+          source: string
+          storage_folder: string | null
+          synced_at: string
+          tender_ref: string | null
+          title: string
+        }
+        Insert: {
+          category?: string | null
+          close_date?: string | null
+          dedupe_key: string
+          department?: string | null
+          document_url?: string | null
+          extra_urls?: string[]
+          found_at?: string
+          id?: string
+          matched_keywords?: string[]
+          notice_type?: string | null
+          notice_url?: string | null
+          publish_date?: string | null
+          source: string
+          storage_folder?: string | null
+          synced_at?: string
+          tender_ref?: string | null
+          title: string
+        }
+        Update: {
+          category?: string | null
+          close_date?: string | null
+          dedupe_key?: string
+          department?: string | null
+          document_url?: string | null
+          extra_urls?: string[]
+          found_at?: string
+          id?: string
+          matched_keywords?: string[]
+          notice_type?: string | null
+          notice_url?: string | null
+          publish_date?: string | null
+          source?: string
+          storage_folder?: string | null
+          synced_at?: string
+          tender_ref?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
       matter_documents: {
         Row: {
           created_at: string
@@ -617,11 +677,176 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_account_links: {
+        Row: {
+          created_at: string
+          id: string
+          profile_id: string
+          whatsapp_user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          profile_id: string
+          whatsapp_user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          profile_id?: string
+          whatsapp_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_account_links_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_documents: {
+        Row: {
+          chat_name: string | null
+          filename: string
+          id: string
+          kind: string | null
+          message_at: string | null
+          mimetype: string | null
+          owner_id: string | null
+          sender: string | null
+          source_document_id: string
+          source_user_id: string
+          storage_path: string
+          synced_at: string
+          whatsapp_matter_id: string
+        }
+        Insert: {
+          chat_name?: string | null
+          filename: string
+          id?: string
+          kind?: string | null
+          message_at?: string | null
+          mimetype?: string | null
+          owner_id?: string | null
+          sender?: string | null
+          source_document_id: string
+          source_user_id: string
+          storage_path: string
+          synced_at?: string
+          whatsapp_matter_id: string
+        }
+        Update: {
+          chat_name?: string | null
+          filename?: string
+          id?: string
+          kind?: string | null
+          message_at?: string | null
+          mimetype?: string | null
+          owner_id?: string | null
+          sender?: string | null
+          source_document_id?: string
+          source_user_id?: string
+          storage_path?: string
+          synced_at?: string
+          whatsapp_matter_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_documents_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_documents_whatsapp_matter_id_fkey"
+            columns: ["whatsapp_matter_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_matters: {
+        Row: {
+          aliases: string[]
+          chat_history: Json
+          chats: string[]
+          detailed_summary: string
+          id: string
+          last_active_at: string | null
+          matter_created_at: string | null
+          matter_id: string | null
+          message_count: number
+          name: string
+          owner_id: string | null
+          source_matter_id: string
+          source_user_id: string
+          summary: string
+          synced_at: string
+        }
+        Insert: {
+          aliases?: string[]
+          chat_history?: Json
+          chats?: string[]
+          detailed_summary?: string
+          id?: string
+          last_active_at?: string | null
+          matter_created_at?: string | null
+          matter_id?: string | null
+          message_count?: number
+          name: string
+          owner_id?: string | null
+          source_matter_id: string
+          source_user_id: string
+          summary?: string
+          synced_at?: string
+        }
+        Update: {
+          aliases?: string[]
+          chat_history?: Json
+          chats?: string[]
+          detailed_summary?: string
+          id?: string
+          last_active_at?: string | null
+          matter_created_at?: string | null
+          matter_id?: string | null
+          message_count?: number
+          name?: string
+          owner_id?: string | null
+          source_matter_id?: string
+          source_user_id?: string
+          summary?: string
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_matters_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_matters_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      can_access_whatsapp_document: {
+        Args: { _path: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

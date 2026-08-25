@@ -1,7 +1,12 @@
 import { useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, MessageSquare, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
+import { Check, Circle, CircleDot, FileText, MessageCircle, MessageSquare, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
+import {
+  useWhatsAppMattersForMatter,
+  useWhatsAppDocuments,
+  openWhatsAppDocument,
+} from "@/hooks/useWhatsAppMatters";
 import {
   useMatterParties,
   useAddMatterParty,
@@ -55,6 +60,89 @@ function StageIcon({ status }: { status: string }) {
   if (status === "complete") return <Check className="h-4 w-4 text-green-600" />;
   if (status === "in_progress") return <CircleDot className="h-4 w-4 text-amber-500" />;
   return <Circle className="h-4 w-4 text-muted-foreground" />;
+}
+
+function WhatsAppMatterDocuments({ whatsappMatterId }: { whatsappMatterId: string }) {
+  const { data: files, isLoading } = useWhatsAppDocuments(whatsappMatterId);
+  const { toast } = useToast();
+
+  const handleOpen = async (path: string) => {
+    try {
+      await openWhatsAppDocument(path);
+    } catch (err: any) {
+      toast({ title: "Failed to open document", description: err.message, variant: "destructive" });
+    }
+  };
+
+  if (isLoading) return null;
+  if (!files?.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {files.map((file) => (
+        <Button key={file.id} variant="outline" size="sm" onClick={() => handleOpen(file.storage_path)} className="gap-1.5">
+          <FileText className="h-3.5 w-3.5" />
+          {file.filename}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+// A firm Matter can have more than one linked whatsapp_matters row — different
+// lawyers each capturing the same deal on their own WhatsApp, or one lawyer's
+// LLM splitting a matter across chats — so this renders a list, not a card
+// for a single entity. No "link" control here: linking is initiated from the
+// WhatsApp Activity page, where the row a lawyer is looking at is already one
+// they have SELECT visibility into (their own capture, or already linked) —
+// surfacing a cross-user picker here would need an endpoint that leaks the
+// existence of other lawyers' private, unlinked data.
+function WhatsAppActivityCard({ matterId }: { matterId: string | undefined }) {
+  const navigate = useNavigate();
+  const { data: whatsappMatters, isLoading } = useWhatsAppMattersForMatter(matterId);
+
+  return (
+    <Card className="md:col-span-2">
+      <CardHeader>
+        <CardTitle className="text-base">WhatsApp Activity</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !whatsappMatters?.length ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">No WhatsApp activity linked yet.</p>
+            <Button size="sm" variant="outline" onClick={() => navigate("/whatsapp-activity")}>
+              <MessageCircle className="h-4 w-4 mr-2" />
+              Link from WhatsApp Activity
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {whatsappMatters.map((wm) => (
+              <div key={wm.id} className="border rounded-md px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">{wm.owner_name ?? "Unknown lawyer"}</p>
+                  <span className="text-xs text-muted-foreground">{wm.message_count} messages</span>
+                </div>
+                {wm.summary && <p className="text-sm text-muted-foreground mt-1">{wm.summary}</p>}
+                {wm.chats.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {wm.chats.map((chat) => (
+                      <Badge key={chat} variant="outline" className="text-[10px] font-normal">
+                        {chat}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <WhatsAppMatterDocuments whatsappMatterId={wm.id} />
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function MatterWorkspacePage() {
@@ -397,6 +485,8 @@ export default function MatterWorkspacePage() {
             </div>
           </CardContent>
         </Card>
+
+        <WhatsAppActivityCard matterId={matterId} />
       </div>
     </div>
   );
