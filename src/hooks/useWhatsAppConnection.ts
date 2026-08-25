@@ -2,11 +2,18 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+// In dev, Vite's own proxy (vite.config.ts) forwards /whatsapp-api to
+// localhost:3740 for free. In production there's no dev server to proxy
+// through, so this needs whatsapp-dashboard's real public URL (the
+// Tailscale Funnel hostname) instead — set via VITE_WHATSAPP_API_URL.
+const WHATSAPP_API_BASE =
+  (import.meta.env.VITE_WHATSAPP_API_URL as string | undefined)?.replace(/\/$/, "") || "/whatsapp-api";
+
 async function whatsappApiFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const res = await fetch(`/whatsapp-api${path}`, {
+  const res = await fetch(`${WHATSAPP_API_BASE}${path}`, {
     ...options,
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -146,5 +153,5 @@ export function useAskWhatsApp() {
 }
 
 export function whatsappDocumentDownloadUrl(id: string) {
-  return `/whatsapp-api/documents/${encodeURIComponent(id)}/download`;
+  return `${WHATSAPP_API_BASE}/documents/${encodeURIComponent(id)}/download`;
 }
