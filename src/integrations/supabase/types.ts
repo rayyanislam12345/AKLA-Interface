@@ -570,6 +570,7 @@ export type Database = {
           email: string
           full_name: string | null
           id: string
+          status: Database["public"]["Enums"]["profile_status"]
           updated_at: string
         }
         Insert: {
@@ -577,6 +578,7 @@ export type Database = {
           email: string
           full_name?: string | null
           id: string
+          status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
         }
         Update: {
@@ -584,6 +586,7 @@ export type Database = {
           email?: string
           full_name?: string | null
           id?: string
+          status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
         }
         Relationships: []
@@ -884,6 +887,7 @@ export type Database = {
         | "negotiation"
         | "finalized"
         | "executed"
+      profile_status: "pending" | "approved" | "rejected"
       redline_status: "pending" | "accepted" | "rejected"
       task_status: "open" | "in_progress" | "done"
     }
@@ -1023,6 +1027,7 @@ export const Constants = {
         "finalized",
         "executed",
       ],
+      profile_status: ["pending", "approved", "rejected"],
       redline_status: ["pending", "accepted", "rejected"],
       task_status: ["open", "in_progress", "done"],
     },

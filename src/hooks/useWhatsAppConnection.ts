@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 
 // In dev, Vite's own proxy (vite.config.ts) forwards /whatsapp-api to
 // localhost:3740 for free. In production there's no dev server to proxy
-// through, so this needs whatsapp-dashboard's real public URL (the
-// Tailscale Funnel hostname) instead — set via VITE_WHATSAPP_API_URL.
+// through, so this needs whatsapp-dashboard's real public URL (its own
+// DigitalOcean droplet, behind Caddy/HTTPS at a DuckDNS hostname) instead
+// — set via VITE_WHATSAPP_API_URL.
 const WHATSAPP_API_BASE =
   (import.meta.env.VITE_WHATSAPP_API_URL as string | undefined)?.replace(/\/$/, "") || "/whatsapp-api";
 

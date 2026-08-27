@@ -13,7 +13,7 @@ import { MFAVerification } from '@/components/MFAVerification';
 import { MFAEnrollment } from '@/components/MFAEnrollment';
 import aklaLogo from '@/assets/akla-logo.png';
 
-type AuthStep = 'login' | 'mfa-verify' | 'mfa-required' | 'forgot-password' | 'accept-invite' | 'invite-mfa';
+type AuthStep = 'login' | 'signup' | 'signup-pending' | 'mfa-verify' | 'mfa-required' | 'forgot-password' | 'accept-invite' | 'invite-mfa';
 
 // Detect invite synchronously before first render so the redirect effect never fires
 function detectInvite() {
@@ -21,7 +21,7 @@ function detectInvite() {
 }
 
 export default function Auth() {
-  const { user, signIn } = useAuth();
+  const { user, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +35,11 @@ export default function Auth() {
   const [inviteFullName, setInviteFullName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteConfirmPassword, setInviteConfirmPassword] = useState('');
+  const [signupFullName, setSignupFullName] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [signupEmailConfirmRequired, setSignupEmailConfirmRequired] = useState(false);
 
   // Load org name from user metadata once Supabase processes the invite token
   useEffect(() => {
@@ -119,6 +124,37 @@ export default function Auth() {
     }
     
     setIsLoading(false);
+  };
+
+  const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+
+    if (signupPassword !== signupConfirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (signupPassword.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
+    setIsLoading(true);
+    const { data, error } = await signUp(signupEmail, signupPassword, signupFullName.trim());
+
+    if (error) {
+      setError(error.message);
+      toast({ title: 'Sign up failed', description: error.message, variant: 'destructive' });
+      setIsLoading(false);
+      return;
+    }
+
+    // Whether Supabase requires an email-confirmation click before a session
+    // exists depends on the project's auth settings — either way the account
+    // still needs admin approval, so both paths land on the same screen.
+    setSignupEmailConfirmRequired(!data?.session);
+    setIsLoading(false);
+    setAuthStep('signup-pending');
   };
 
   const handleMFASuccess = () => {
@@ -322,6 +358,139 @@ export default function Auth() {
               navigate('/dashboard', { replace: true });
             }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  // Sign up screen
+  if (authStep === 'signup') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+        <div className="w-full max-w-md">
+          <div className="flex items-center justify-center mb-8">
+            <div className="flex items-center space-x-3">
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+            </div>
+          </div>
+          <Card className="border-border/50 shadow-elegant">
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-2xl text-center">Create an account</CardTitle>
+              <CardDescription className="text-center">
+                An admin will need to approve your account before you can sign in.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {error && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              <form onSubmit={handleSignUp} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="signup-name">Full name</Label>
+                  <Input
+                    id="signup-name"
+                    type="text"
+                    placeholder="Your full name"
+                    value={signupFullName}
+                    onChange={(e) => setSignupFullName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-email">Email</Label>
+                  <Input
+                    id="signup-email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-password">Password</Label>
+                  <Input
+                    id="signup-password"
+                    type="password"
+                    placeholder="Choose a password"
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-confirm">Confirm password</Label>
+                  <Input
+                    id="signup-confirm"
+                    type="password"
+                    placeholder="Confirm your password"
+                    value={signupConfirmPassword}
+                    onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={isLoading} variant="premium">
+                  {isLoading ? 'Creating account...' : 'Sign up'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setAuthStep('login');
+                    setError(null);
+                  }}
+                >
+                  Back to sign in
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // Post-signup screen — account exists but is pending admin approval
+  if (authStep === 'signup-pending') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+        <div className="w-full max-w-md">
+          <div className="flex items-center justify-center mb-8">
+            <div className="flex items-center space-x-3">
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+            </div>
+          </div>
+          <Card className="border-border/50 shadow-elegant">
+            <CardHeader className="text-center">
+              <CardTitle>Account created</CardTitle>
+              <CardDescription>
+                {signupEmailConfirmRequired
+                  ? "Check your email to confirm your address. Once confirmed, an admin still needs to approve your account before you can sign in."
+                  : "An admin needs to approve your account before you can sign in. You'll be notified once that's done — no need to sign up again."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setAuthStep('login');
+                  setError(null);
+                  setSignupFullName('');
+                  setSignupEmail('');
+                  setSignupPassword('');
+                  setSignupConfirmPassword('');
+                }}
+              >
+                Back to sign in
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
@@ -532,6 +701,17 @@ export default function Auth() {
                 }}
               >
                 Forgot your password?
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setAuthStep('signup');
+                  setError(null);
+                }}
+              >
+                Sign Up
               </Button>
             </form>
           </CardContent>

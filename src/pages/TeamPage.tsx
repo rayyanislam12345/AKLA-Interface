@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useProfiles, useSetUserRole, type AppRole } from "@/hooks/useProfiles";
+import { useProfiles, useSetUserRole, usePendingProfiles, useDecideProfileApproval, type AppRole } from "@/hooks/useProfiles";
 import {
   useWhatsAppAccountLinks,
   useLinkWhatsAppAccount,
@@ -122,6 +122,69 @@ function WhatsAppAccountsSection() {
   );
 }
 
+function PendingApprovalsSection() {
+  const { data: pending, isLoading } = usePendingProfiles();
+  const decide = useDecideProfileApproval();
+  const { toast } = useToast();
+
+  const handleDecide = async (userId: string, status: "approved" | "rejected") => {
+    try {
+      await decide.mutateAsync({ userId, status });
+      toast({ title: status === "approved" ? "Account approved" : "Account rejected" });
+    } catch (err: any) {
+      toast({ title: "Failed to update account", description: err.message, variant: "destructive" });
+    }
+  };
+
+  if (!isLoading && !pending?.length) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Pending Approvals</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead className="w-48"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pending?.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="font-medium">{p.full_name || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{p.email}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={decide.isPending}
+                        onClick={() => handleDecide(p.id, "rejected")}
+                      >
+                        Reject
+                      </Button>
+                      <Button size="sm" disabled={decide.isPending} onClick={() => handleDecide(p.id, "approved")}>
+                        Approve
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function TeamPage() {
   const { user } = useAuth();
   const { data: profiles, isLoading } = useProfiles();
@@ -136,6 +199,8 @@ export default function TeamPage() {
         <h1 className="text-2xl font-semibold">Team</h1>
         <p className="text-muted-foreground">Lawyers with access to the firm's matters.</p>
       </div>
+
+      {isAdmin && <PendingApprovalsSection />}
 
       {isLoading ? (
         <p className="text-muted-foreground">Loading…</p>
