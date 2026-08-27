@@ -1,15 +1,17 @@
 import { useMemo, useRef, useState } from "react";
-import { BookMarked, FileText, Trash2, Upload } from "lucide-react";
+import { BookMarked, ExternalLink, FileText, Gavel, Trash2, Upload } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   usePrecedentSources,
   useUploadPrecedentDocument,
   useDeletePrecedentSource,
 } from "@/hooks/usePrecedentLibrary";
+import { useStatuteSources, useDeleteStatuteSource } from "@/hooks/useLawLibrary";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -19,6 +21,83 @@ interface QueuedFile {
   file: File;
   status: FileStatus;
   error?: string;
+}
+
+function LawLibraryTab() {
+  const { data: statutes, isLoading } = useStatuteSources();
+  const deleteStatute = useDeleteStatuteSource();
+  const { toast } = useToast();
+
+  const handleDelete = async (actName: string) => {
+    if (!window.confirm(`Remove "${actName}" from the law library?`)) return;
+    try {
+      await deleteStatute.mutateAsync(actName);
+      toast({ title: "Removed from law library" });
+    } catch (err: any) {
+      toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Pakistani statute text — Draft with AI and Review with AI can ground answers in what the law
+        actually says, kept separate from the firm's own precedent above. Sourced from{" "}
+        <a
+          href="https://pakistancode.gov.pk"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2"
+        >
+          pakistancode.gov.pk
+        </a>{" "}
+        via <code className="text-xs">scripts/law_library</code> — there's no upload button here since
+        this corpus is scraper-managed, not lawyer-uploaded.
+      </p>
+
+      {isLoading ? (
+        <p className="text-muted-foreground">Loading…</p>
+      ) : !statutes?.length ? (
+        <p className="text-muted-foreground">Nothing in the law library yet.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Act</TableHead>
+              <TableHead>Chunks</TableHead>
+              <TableHead>Added</TableHead>
+              <TableHead className="w-20"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {statutes.map((s) => (
+              <TableRow key={s.act_name}>
+                <TableCell className="max-w-md">{s.act_name}</TableCell>
+                <TableCell className="text-muted-foreground">{s.chunk_count}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    {s.source_url && (
+                      <Button size="icon" variant="ghost" asChild>
+                        <a href={s.source_url} target="_blank" rel="noreferrer" title="View source">
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </Button>
+                    )}
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
 }
 
 export default function PrecedentLibraryPage() {
@@ -87,123 +166,139 @@ export default function PrecedentLibraryPage() {
           Precedent Library
         </h1>
         <p className="text-muted-foreground">
-          Firm-wide past agreements, independent of any matter — this is what "Draft with AI" and "Review
-          with AI" pull from when drafting or benchmarking a document type.
+          What "Draft with AI" and "Review with AI" ground their answers in — the firm's own past
+          agreements, and Pakistani statute text, kept as two distinct corpora.
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Bulk Upload</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-3 items-end flex-wrap">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Document type</label>
-              <Select value={documentTypeId} onValueChange={setDocumentTypeId}>
-                <SelectTrigger className="w-64">
-                  <SelectValue placeholder="All files below will be tagged as this type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {documentTypes?.map((type) => (
-                    <SelectItem key={type.id} value={type.id}>
-                      {type.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.docx,.xlsx,.xls"
-              className="hidden"
-              onChange={handleFilesSelected}
-            />
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={!documentTypeId}>
-              <Upload className="h-4 w-4 mr-2" />
-              Add Files
-            </Button>
-            <Button
-              onClick={handleUploadAll}
-              disabled={!documentTypeId || queue.length === 0 || uploading}
-            >
-              Upload {queue.length > 0 ? `(${queue.length})` : ""}
-            </Button>
-          </div>
-          {!documentTypeId && (
-            <p className="text-xs text-muted-foreground">
-              Pick a document type first — every file in a batch is tagged with the same type. Run the
-              upload again for a different type.
-            </p>
-          )}
+      <Tabs defaultValue="precedents">
+        <TabsList>
+          <TabsTrigger value="precedents">Precedents</TabsTrigger>
+          <TabsTrigger value="law-library">
+            <Gavel className="h-3.5 w-3.5 mr-1.5" />
+            Law Library
+          </TabsTrigger>
+        </TabsList>
 
-          {queue.length > 0 && (
-            <div className="space-y-1 max-h-64 overflow-y-auto">
-              {queue.map((q, i) => (
-                <div key={i} className="flex items-center gap-3 text-sm border-b py-1.5 last:border-0">
-                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="truncate flex-1">{q.file.name}</span>
-                  <Badge
-                    variant={
-                      q.status === "done" ? "default" : q.status === "error" ? "destructive" : "secondary"
-                    }
-                  >
-                    {q.status}
-                  </Badge>
+        <TabsContent value="precedents" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Bulk Upload</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-3 items-end flex-wrap">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Document type</label>
+                  <Select value={documentTypeId} onValueChange={setDocumentTypeId}>
+                    <SelectTrigger className="w-64">
+                      <SelectValue placeholder="All files below will be tagged as this type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {documentTypes?.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.xlsx,.xls"
+                  className="hidden"
+                  onChange={handleFilesSelected}
+                />
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={!documentTypeId}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Add Files
+                </Button>
+                <Button
+                  onClick={handleUploadAll}
+                  disabled={!documentTypeId || queue.length === 0 || uploading}
+                >
+                  Upload {queue.length > 0 ? `(${queue.length})` : ""}
+                </Button>
+              </div>
+              {!documentTypeId && (
+                <p className="text-xs text-muted-foreground">
+                  Pick a document type first — every file in a batch is tagged with the same type. Run the
+                  upload again for a different type.
+                </p>
+              )}
 
-      <div className="space-y-6">
-        {isLoading ? (
-          <p className="text-muted-foreground">Loading…</p>
-        ) : !sources?.length ? (
-          <p className="text-muted-foreground">Nothing in the precedent library yet.</p>
-        ) : (
-          Array.from(grouped.entries()).map(([category, items]) => (
-            <div key={category} className="space-y-2">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                {category}
-              </h2>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>File</TableHead>
-                    <TableHead>Chunks</TableHead>
-                    <TableHead>Added</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items!.map((s) => (
-                    <TableRow key={s.storage_path}>
-                      <TableCell className="truncate max-w-xs">{s.filename}</TableCell>
-                      <TableCell className={cn("text-muted-foreground")}>{s.chunk_count}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(s.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => handleDelete(s.storage_path, s.filename)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+              {queue.length > 0 && (
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {queue.map((q, i) => (
+                    <div key={i} className="flex items-center gap-3 text-sm border-b py-1.5 last:border-0">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1">{q.file.name}</span>
+                      <Badge
+                        variant={
+                          q.status === "done" ? "default" : q.status === "error" ? "destructive" : "secondary"
+                        }
+                      >
+                        {q.status}
+                      </Badge>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
-          ))
-        )}
-      </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            {isLoading ? (
+              <p className="text-muted-foreground">Loading…</p>
+            ) : !sources?.length ? (
+              <p className="text-muted-foreground">Nothing in the precedent library yet.</p>
+            ) : (
+              Array.from(grouped.entries()).map(([category, items]) => (
+                <div key={category} className="space-y-2">
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                    {category}
+                  </h2>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>File</TableHead>
+                        <TableHead>Chunks</TableHead>
+                        <TableHead>Added</TableHead>
+                        <TableHead className="w-12"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items!.map((s) => (
+                        <TableRow key={s.storage_path}>
+                          <TableCell className="truncate max-w-xs">{s.filename}</TableCell>
+                          <TableCell className={cn("text-muted-foreground")}>{s.chunk_count}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {new Date(s.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleDelete(s.storage_path, s.filename)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="law-library" className="mt-6">
+          <LawLibraryTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

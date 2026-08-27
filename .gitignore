@@ -43,6 +43,10 @@ scripts/precedent_backlog/.venv/
 __pycache__/
 *.pyc
 
+# Law library scraper: downloaded PDFs and run-local state, not source
+scripts/law_library/manifest.json
+scripts/law_library/downloads/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

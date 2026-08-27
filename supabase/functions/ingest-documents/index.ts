@@ -21,6 +21,7 @@ serve(async (req) => {
       matterId = null,
       documentTypeId = null,
       isPrecedent = false,
+      isStatute = false,
     } = await req.json();
 
     if (!content) {
@@ -76,11 +77,36 @@ serve(async (req) => {
     const chunks = splitIntoChunks(content, chunkSize, chunkOverlap);
     console.log(`Split content into ${chunks.length} chunks`);
 
-    // Voyage AI batches embeddings in a single call (up to 128 inputs per request)
+    // Voyage AI batches embeddings in a single call, but the real limit
+    // (confirmed the hard way ingesting a 198-chunk statute) is 120,000
+    // tokens per batch, not a fixed chunk count — 128 chunks comfortably
+    // fits that for a typical-length document, but not for a chunk size
+    // this ingest call is using with content this dense. Batch by an
+    // estimated token budget instead: ~4 chars/token is the standard
+    // conservative heuristic for English text, kept well under Voyage's
+    // actual limit for margin.
+    const MAX_BATCH_TOKENS = 100_000;
+    const CHARS_PER_TOKEN = 4;
+    const batches: string[][] = [];
+    let currentBatch: string[] = [];
+    let currentBatchChars = 0;
+    for (const chunk of chunks) {
+      const chunkChars = chunk.length;
+      if (currentBatch.length > 0 && currentBatchChars + chunkChars > MAX_BATCH_TOKENS * CHARS_PER_TOKEN) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchChars = 0;
+      }
+      currentBatch.push(chunk);
+      currentBatchChars += chunkChars;
+    }
+    if (currentBatch.length > 0) batches.push(currentBatch);
+
     const embeddings: number[][] = [];
-    const BATCH_SIZE = 128;
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE);
+    let chunkOffset = 0;
+    for (const batch of batches) {
+      const batchStartIndex = chunkOffset;
+      chunkOffset += batch.length;
       const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
         method: 'POST',
         headers: {
@@ -102,7 +128,11 @@ serve(async (req) => {
 
       const embeddingData = await embeddingResponse.json();
       for (const item of embeddingData.data) {
-        embeddings[item.index] = item.embedding;
+        // item.index is relative to THIS batch, not the full chunk list —
+        // confirmed the hard way that any document needing more than one
+        // batch was silently corrupting/dropping embeddings past the
+        // first, since every batch's local indices collided at 0..N.
+        embeddings[batchStartIndex + item.index] = item.embedding;
       }
     }
 
@@ -125,6 +155,7 @@ serve(async (req) => {
         matter_id: matterId,
         document_type_id: documentTypeId,
         is_precedent: isPrecedent,
+        is_statute: isStatute,
         created_by: user.id,
       })
     );

@@ -16,6 +16,10 @@ import argparse
 import json
 import os
 import sys
+import time
+from datetime import datetime, timezone
+
+import requests
 
 from dotenv import load_dotenv
 
@@ -28,6 +32,16 @@ load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
 MANIFEST_PATH = os.path.join(SCRIPT_DIR, "manifest.json")
 REPORT_PATH = os.path.join(SCRIPT_DIR, "report.json")
+
+# process_document() triggers a Voyage embedding call server-side
+# (ingest-documents), and the account is on Voyage's free tier — 3
+# requests/minute. Almost every file is a single embedding batch (Voyage
+# batches up to 128 chunks per call, well above what one legal document
+# chunks into), so pacing by request count is a reasonable proxy: 25s
+# keeps us under 3/min with margin for jitter and the rare multi-batch
+# document, without needing to add a payment method just for a one-time
+# bulk backlog run.
+INGEST_THROTTLE_SECONDS = 25
 
 
 def load_manifest() -> dict:
@@ -259,7 +273,37 @@ def confirm(manifest: dict, root: str, sb: SupabaseClient, only_existing_types: 
                 data = f.read()
             storage_path = sb.upload_precedent_file(document_type_id, row["filename"], data)
             ext = row["filename"].rsplit(".", 1)[-1]
-            sb.process_document(storage_path, row["filename"], ext, document_type_id)
+
+            try:
+                sb.process_document(storage_path, row["filename"], ext, document_type_id)
+            except requests.exceptions.HTTPError as err:
+                no_text_layer = (
+                    err.response is not None
+                    and "No text content could be extracted" in err.response.text
+                )
+                if not (no_text_layer and ext.lower() == "pdf" and sb.ocr_configured):
+                    raise
+                # Scanned/photographed PDF, no real text layer — process-document's
+                # own OCR fallback only has Supabase's 400s platform ceiling to work
+                # with, which a long scan blows straight through, so this calls the
+                # OCR service directly (no such limit here) and feeds the result to
+                # ingest-documents ourselves rather than through process-document.
+                print(f"  No text layer — running OCR (can take a while for a long scan)...")
+                ocr_text = sb.ocr_pdf(data)
+                sb.ingest_document_text(
+                    ocr_text,
+                    document_type_id=document_type_id,
+                    is_precedent=True,
+                    metadata={
+                        "filename": row["filename"],
+                        "file_type": ext,
+                        "upload_date": datetime.now(timezone.utc).isoformat(),
+                        "storage_path": storage_path,
+                        "storage_bucket": "precedent-library",
+                        "original_format": "pdf",
+                        "ocr": True,
+                    },
+                )
 
             row["outcome"] = "ingested"
             row["document_type_id"] = document_type_id
@@ -272,10 +316,15 @@ def confirm(manifest: dict, root: str, sb: SupabaseClient, only_existing_types: 
             print(f"FAILED: {row['filename']}: {err}", file=sys.stderr)
 
         # A long confirm run over many files could be interrupted partway —
-        # save incrementally so nothing already-uploaded gets silently
-        # forgotten (and re-uploaded as a duplicate) on the next attempt.
-        if i % 10 == 0:
-            save_manifest(manifest)
+        # save after every single file (not batched) so nothing
+        # already-uploaded gets silently forgotten (and re-uploaded as a
+        # duplicate) on the next attempt. Confirmed the hard way: a killed
+        # run once left a genuinely-ingested file stuck as "pending_ingest".
+        save_manifest(manifest)
+
+        if i < len(pending):
+            print(f"  (pacing under Voyage's free-tier rate limit — waiting {INGEST_THROTTLE_SECONDS}s)")
+            time.sleep(INGEST_THROTTLE_SECONDS)
 
     save_manifest(manifest)
 
@@ -354,7 +403,18 @@ def main():
             "for --confirm — process-document's internal call to ingest-documents requires a real signed-in "
             "session (a service-role key alone gets rejected by ingest-documents' own auth.getUser() check)."
         )
-    sb = SupabaseClient(supabase_url, service_role_key, session_email, session_password)
+    ocr_service_url = os.environ.get("OCR_SERVICE_URL")
+    ocr_service_secret = os.environ.get("OCR_SERVICE_SECRET")
+    sb = SupabaseClient(
+        supabase_url, service_role_key, session_email, session_password,
+        ocr_service_url=ocr_service_url, ocr_service_secret=ocr_service_secret,
+    )
+    if args.confirm and not sb.ocr_configured:
+        print(
+            "Note: OCR_SERVICE_URL/OCR_SERVICE_SECRET not set — scanned PDFs with no real text layer "
+            "will just be marked failed rather than falling back to OCR.",
+            file=sys.stderr,
+        )
 
     anthropic_client = None
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
