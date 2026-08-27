@@ -82,11 +82,14 @@ serve(async (req) => {
     // tokens per batch, not a fixed chunk count — 128 chunks comfortably
     // fits that for a typical-length document, but not for a chunk size
     // this ingest call is using with content this dense. Batch by an
-    // estimated token budget instead: ~4 chars/token is the standard
-    // conservative heuristic for English text, kept well under Voyage's
-    // actual limit for margin.
-    const MAX_BATCH_TOKENS = 100_000;
-    const CHARS_PER_TOKEN = 4;
+    // estimated token budget instead. 4 chars/token is the usual English
+    // heuristic, but dense numeric/tabular text (e.g. the Income Tax
+    // Ordinance) tokenizes worse — a real batch estimated at 100,000
+    // tokens under that heuristic came back from Voyage at 123,267,
+    // still over the 120,000 limit. Use 3 chars/token and a lower budget
+    // for real margin against that kind of content.
+    const MAX_BATCH_TOKENS = 80_000;
+    const CHARS_PER_TOKEN = 3;
     const batches: string[][] = [];
     let currentBatch: string[] = [];
     let currentBatchChars = 0;
