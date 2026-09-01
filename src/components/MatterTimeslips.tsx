@@ -1,15 +1,21 @@
 import { useMemo, useState } from "react";
-import { Clock, Download, Loader2 } from "lucide-react";
+import { Clock, Download, Loader2, Pencil } from "lucide-react";
 import {
   MatterTimeslip,
   RANGE_LABELS,
   RangePreset,
+  TimeslipEdits,
   authorName,
   byTask,
   resolveRange,
   summarise,
   useMatterTimeslips,
+  useUpdateTimeslip,
 } from "@/hooks/useMatterTimeslips";
+import { useMatterTasks } from "@/hooks/useMatterDetail";
+import { useAuth } from "@/hooks/useAuth";
+import { useProfiles } from "@/hooks/useProfiles";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -20,6 +26,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 type View = "entries" | "day" | "author" | "task";
@@ -61,6 +78,129 @@ function toCsv(slips: MatterTimeslip[], matterName: string) {
   return "﻿" + rows.join("\n");
 }
 
+// Keyed by slip.id from the caller so each open resets its own state instead
+// of carrying over the previous slip's edits.
+function EditTimeslipDialog({
+  slip,
+  matterId,
+  tasks,
+  onClose,
+}: {
+  slip: MatterTimeslip;
+  matterId: string;
+  tasks: { id: string; title: string }[];
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const updateTimeslip = useUpdateTimeslip();
+
+  const [workDate, setWorkDate] = useState(slip.work_date);
+  const [hours, setHours] = useState(String(slip.hours));
+  const [taskCode, setTaskCode] = useState(slip.task_code ?? "");
+  const [narrative, setNarrative] = useState(slip.narrative);
+  const [hubTaskId, setHubTaskId] = useState(slip.hub_task_id ?? "none");
+
+  const hoursValue = Number(hours);
+  const canSave = workDate && hoursValue > 0 && narrative.trim().length > 0;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    const edits: TimeslipEdits = {
+      work_date: workDate,
+      hours: hoursValue,
+      task_code: taskCode.trim() || null,
+      narrative: narrative.trim(),
+      hub_task_id: hubTaskId === "none" ? null : hubTaskId,
+    };
+    try {
+      await updateTimeslip.mutateAsync({ id: slip.id, matterId, edits });
+      toast({ title: "Timeslip updated" });
+      onClose();
+    } catch (err: any) {
+      toast({ title: "Failed to update timeslip", description: err.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Timeslip</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <p className="text-xs text-muted-foreground">
+            Associate: <span className="font-medium text-foreground">{authorName(slip)}</span> (not editable)
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="edit-timeslip-date">Date</Label>
+              <Input
+                id="edit-timeslip-date"
+                type="date"
+                value={workDate}
+                onChange={(e) => setWorkDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-timeslip-hours">Hours</Label>
+              <Input
+                id="edit-timeslip-hours"
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Task</Label>
+            <Select value={hubTaskId} onValueChange={setHubTaskId}>
+              <SelectTrigger>
+                <SelectValue placeholder="No task" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No task</SelectItem>
+                {tasks.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-timeslip-code">Task code</Label>
+            <Input
+              id="edit-timeslip-code"
+              placeholder="e.g. L110"
+              value={taskCode}
+              onChange={(e) => setTaskCode(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-timeslip-narrative">Narrative</Label>
+            <Textarea
+              id="edit-timeslip-narrative"
+              value={narrative}
+              onChange={(e) => setNarrative(e.target.value)}
+              className="min-h-24"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={!canSave || updateTimeslip.isPending}>
+            {updateTimeslip.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function MatterTimeslips({
   matterId,
   matterName,
@@ -70,8 +210,18 @@ export function MatterTimeslips({
 }) {
   const [preset, setPreset] = useState<RangePreset>("30");
   const [view, setView] = useState<View>("entries");
+  const [editing, setEditing] = useState<MatterTimeslip | null>(null);
   const range = useMemo(() => resolveRange(preset), [preset]);
   const { data: slips, isLoading, error } = useMatterTimeslips(matterId, range);
+  const { data: tasks } = useMatterTasks(matterId);
+  const { user } = useAuth();
+  const { data: profiles } = useProfiles();
+
+  // Matches the RLS policy exactly: the author, or an admin/partner
+  // correcting someone else's entry.
+  const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
+  const isPrivileged = currentRole === "admin" || currentRole === "partner";
+  const canEdit = (s: MatterTimeslip) => isPrivileged || s.author_id === user?.id;
 
   const { total, byDay, byAuthor } = useMemo(
     () => summarise(slips ?? []),
@@ -175,6 +325,7 @@ export function MatterTimeslips({
                 <TableHead className="w-[70px]">Code</TableHead>
                 <TableHead>Narrative</TableHead>
                 <TableHead className="w-[150px]">Task</TableHead>
+                <TableHead className="w-8"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -195,6 +346,13 @@ export function MatterTimeslips({
                   <TableCell className="text-sm">{s.narrative}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {s.task?.title ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    {canEdit(s) && (
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(s)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -246,6 +404,16 @@ export function MatterTimeslips({
           </Table>
         )}
       </CardContent>
+
+      {editing && (
+        <EditTimeslipDialog
+          key={editing.id}
+          slip={editing}
+          matterId={matterId}
+          tasks={tasks ?? []}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Card>
   );
 }

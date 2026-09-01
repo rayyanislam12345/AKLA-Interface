@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface MatterTimeslip {
@@ -62,6 +62,39 @@ export function useMatterTimeslips(
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as unknown as MatterTimeslip[];
+    },
+  });
+}
+
+// Every field except author_id — matching who did the work isn't something
+// an edit should change; it's the one thing the RLS policy still can't be
+// talked out of by an admin/partner editing someone else's entry.
+export interface TimeslipEdits {
+  work_date: string;
+  hours: number;
+  task_code: string | null;
+  narrative: string;
+  hub_task_id: string | null;
+}
+
+export function useUpdateTimeslip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      matterId,
+      edits,
+    }: {
+      id: string;
+      matterId: string;
+      edits: TimeslipEdits;
+    }) => {
+      const { error } = await supabase.from("matter_timeslips").update(edits).eq("id", id);
+      if (error) throw error;
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-timeslips", matterId] });
     },
   });
 }
