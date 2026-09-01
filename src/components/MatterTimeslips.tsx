@@ -316,92 +316,150 @@ export function MatterTimeslips({
             upload approved entries from Timekeeper.
           </p>
         ) : view === "entries" ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[110px]">Date</TableHead>
-                <TableHead className="w-[150px]">Associate</TableHead>
-                <TableHead className="w-[64px] text-right">Hours</TableHead>
-                <TableHead className="w-[70px]">Code</TableHead>
-                <TableHead>Narrative</TableHead>
-                <TableHead className="w-[150px]">Task</TableHead>
-                <TableHead className="w-8"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {slips.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
-                    {formatDate(s.work_date)}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {authorName(s)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">
-                    {Number(s.hours).toFixed(1)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {s.task_code ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">{s.narrative}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {s.task?.title ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    {canEdit(s) && (
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(s)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>
-                  {view === "day"
-                    ? "Date"
-                    : view === "task"
-                    ? "Task"
-                    : "Associate"}
-                </TableHead>
-                <TableHead className="w-[90px] text-right">Hours</TableHead>
-                <TableHead className="w-[45%]">Share</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {[...grouped.entries()]
-                .sort((a, b) =>
-                  view === "day"
-                    ? b[0].localeCompare(a[0])
-                    : b[1] - a[1]
-                )
-                .map(([key, hours]) => (
-                  <TableRow key={key}>
-                    <TableCell className="whitespace-nowrap">
-                      {view === "day" ? formatDate(key) : key}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
-                      {hours.toFixed(1)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-2 w-full rounded bg-muted">
-                        <div
-                          className={cn("h-2 rounded bg-primary")}
-                          style={{
-                            width: `${total ? (hours / total) * 100 : 0}%`,
-                          }}
-                        />
-                      </div>
-                    </TableCell>
+          <>
+            {/* A 7-column table can't shrink to fit a phone — a stacked
+                card per entry needs no horizontal scroll at all. */}
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[110px]">Date</TableHead>
+                    <TableHead className="w-[150px]">Associate</TableHead>
+                    <TableHead className="w-[64px] text-right">Hours</TableHead>
+                    <TableHead className="w-[70px]">Code</TableHead>
+                    <TableHead>Narrative</TableHead>
+                    <TableHead className="w-[150px]">Task</TableHead>
+                    <TableHead className="w-8"></TableHead>
                   </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {slips.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {formatDate(s.work_date)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {authorName(s)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {Number(s.hours).toFixed(1)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {s.task_code ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">{s.narrative}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {s.task?.title ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        {canEdit(s) && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(s)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
+              {slips.map((s) => (
+                <div key={s.id} className="border rounded-md px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {formatDate(s.work_date)}{" "}
+                        <span className="font-normal text-muted-foreground">· {authorName(s)}</span>
+                      </p>
+                      {(s.task?.title || s.task_code) && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {[s.task?.title, s.task_code].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-sm font-medium tabular-nums">{Number(s.hours).toFixed(1)}h</span>
+                      {canEdit(s) && (
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(s)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm mt-1.5">{s.narrative}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>
+                      {view === "day"
+                        ? "Date"
+                        : view === "task"
+                        ? "Task"
+                        : "Associate"}
+                    </TableHead>
+                    <TableHead className="w-[90px] text-right">Hours</TableHead>
+                    <TableHead className="w-[45%]">Share</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...grouped.entries()]
+                    .sort((a, b) =>
+                      view === "day"
+                        ? b[0].localeCompare(a[0])
+                        : b[1] - a[1]
+                    )
+                    .map(([key, hours]) => (
+                      <TableRow key={key}>
+                        <TableCell className="whitespace-nowrap">
+                          {view === "day" ? formatDate(key) : key}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {hours.toFixed(1)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="h-2 w-full rounded bg-muted">
+                            <div
+                              className={cn("h-2 rounded bg-primary")}
+                              style={{
+                                width: `${total ? (hours / total) * 100 : 0}%`,
+                              }}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
+              {[...grouped.entries()]
+                .sort((a, b) => (view === "day" ? b[0].localeCompare(a[0]) : b[1] - a[1]))
+                .map(([key, hours]) => (
+                  <div key={key} className="border rounded-md px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm truncate">{view === "day" ? formatDate(key) : key}</p>
+                      <span className="text-sm font-medium tabular-nums shrink-0">{hours.toFixed(1)}h</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded bg-muted mt-1.5">
+                      <div
+                        className="h-1.5 rounded bg-primary"
+                        style={{ width: `${total ? (hours / total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
                 ))}
-            </TableBody>
-          </Table>
+            </div>
+          </>
         )}
       </CardContent>
 
