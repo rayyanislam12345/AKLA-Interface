@@ -12,6 +12,7 @@ import {
   useRedlineSuggestions,
   useRunRedlineReview,
   useSetSuggestionStatus,
+  type RedlineReviewType,
   type RedlineSuggestion,
 } from "@/hooks/useRedline";
 import DocumentChatPanel, { type DocumentChatMessage } from "@/components/chat/DocumentChatPanel";
@@ -26,6 +27,25 @@ function statusBadgeVariant(status: RedlineSuggestion["status"]) {
   if (status === "rejected") return "secondary" as const;
   return "outline" as const;
 }
+
+// "Run AI Review" runs three separate, purpose-built passes (see
+// suggest-redline) instead of one generic one — grouping the sidebar by
+// review_type keeps that visible instead of flattening them into one list.
+const STRUCTURED_REVIEW_TYPES: RedlineReviewType[] = ["legal_clauses", "formatting", "content_conflicts"];
+
+const REVIEW_TYPE_LABELS: Record<RedlineReviewType, string> = {
+  legal_clauses: "Legal Clauses & Citations",
+  formatting: "Formatting",
+  content_conflicts: "Content & Conflicts",
+  chat: "From Follow-up Chat",
+};
+
+const REVIEW_TYPE_DESCRIPTIONS: Record<RedlineReviewType, string> = {
+  legal_clauses: "Clause correctness against statute and precedent, and legal assertions made without citation.",
+  formatting: "Structure and formatting against the firm's template and precedent — not clause substance.",
+  content_conflicts: "Content against precedent, and against this matter's other documents for conflicts.",
+  chat: "",
+};
 
 // Just the clause reference/rationale/status now — the actual before/after
 // text is visible directly in the real rendered document (tracked changes)
@@ -293,7 +313,7 @@ export default function RedlineReviewPage() {
           {(runReview.isPending || applyPreview.isPending) && (
             <p className="text-muted-foreground">
               {runReview.isPending
-                ? "Reviewing against precedent — this can take a moment…"
+                ? "Running three review passes — legal clauses, formatting, and content — this can take a moment…"
                 : "Building tracked-changes preview…"}
             </p>
           )}
@@ -313,16 +333,52 @@ export default function RedlineReviewPage() {
                   <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />
                 </CardContent>
               </Card>
-              <div className="space-y-2">
-                {suggestions.map((s) => (
-                  <SuggestionListItem
-                    key={s.id}
-                    suggestion={s}
-                    disabled={setStatus.isPending || applyPreview.isPending}
-                    onAccept={() => handleSetStatus(s.id, "accepted")}
-                    onReject={() => handleSetStatus(s.id, "rejected")}
-                  />
-                ))}
+              <div className="space-y-5">
+                {STRUCTURED_REVIEW_TYPES.map((type) => {
+                  const group = suggestions.filter((s) => s.review_type === type);
+                  return (
+                    <div key={type} className="space-y-2">
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {REVIEW_TYPE_LABELS[type]}
+                          {group.length > 0 ? ` (${group.length})` : ""}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/80">{REVIEW_TYPE_DESCRIPTIONS[type]}</p>
+                      </div>
+                      {group.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Nothing flagged in this pass.</p>
+                      ) : (
+                        group.map((s) => (
+                          <SuggestionListItem
+                            key={s.id}
+                            suggestion={s}
+                            disabled={setStatus.isPending || applyPreview.isPending}
+                            onAccept={() => handleSetStatus(s.id, "accepted")}
+                            onReject={() => handleSetStatus(s.id, "rejected")}
+                          />
+                        ))
+                      )}
+                    </div>
+                  );
+                })}
+                {suggestions.some((s) => s.review_type === "chat") && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {REVIEW_TYPE_LABELS.chat}
+                    </p>
+                    {suggestions
+                      .filter((s) => s.review_type === "chat")
+                      .map((s) => (
+                        <SuggestionListItem
+                          key={s.id}
+                          suggestion={s}
+                          disabled={setStatus.isPending || applyPreview.isPending}
+                          onAccept={() => handleSetStatus(s.id, "accepted")}
+                          onReject={() => handleSetStatus(s.id, "rejected")}
+                        />
+                      ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

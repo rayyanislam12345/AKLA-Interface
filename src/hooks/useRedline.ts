@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Enums } from "@/integrations/supabase/types";
 
 export type RedlineStatus = Enums<"redline_status">;
+export type RedlineReviewType = "legal_clauses" | "formatting" | "content_conflicts" | "chat";
 
 export interface RedlineSuggestion {
   id: string;
@@ -12,6 +13,7 @@ export interface RedlineSuggestion {
   suggested_text: string | null;
   rationale: string | null;
   status: RedlineStatus;
+  review_type: RedlineReviewType;
 }
 
 export function useLatestDocumentVersion(matterDocumentId: string | undefined) {

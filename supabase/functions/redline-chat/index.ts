@@ -218,6 +218,7 @@ SUGGESTIONS: <a JSON array of {"clause_reference": string, "original_text": stri
             original_text: s.original_text,
             suggested_text: s.suggested_text,
             rationale: s.rationale,
+            review_type: 'chat',
             status: 'pending',
           }))
         )

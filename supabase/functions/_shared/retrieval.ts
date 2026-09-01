@@ -15,6 +15,7 @@ export interface GroundedMatch {
 export interface GroundedContext {
   precedents: GroundedMatch[];
   statutes: GroundedMatch[];
+  matterDocuments: GroundedMatch[];
 }
 
 export async function fetchGroundedContext(
@@ -24,7 +25,13 @@ export async function fetchGroundedContext(
   documentTypeId: string | null,
   matterId: string | null = null,
   precedentCount = 5,
-  statuteCount = 3
+  statuteCount = 3,
+  // Used by suggest-redline's cross-document conflict pass: other documents
+  // already on this matter, for checking internal consistency. Off by
+  // default since draft-document/redline-chat don't need it.
+  includeMatterDocuments = false,
+  excludeStoragePath: string | null = null,
+  matterDocumentCount = 8
 ): Promise<GroundedContext> {
   const [embeddingResult, relevantActNames] = await Promise.all([
     fetch('https://api.voyageai.com/v1/embeddings', {
@@ -56,7 +63,7 @@ export async function fetchGroundedContext(
   if (!embeddingResult.ok) {
     const error = await embeddingResult.text();
     console.error('Error generating retrieval query embedding:', error);
-    return { precedents: [], statutes: [] };
+    return { precedents: [], statutes: [], matterDocuments: [] };
   }
 
   const embeddingData = await embeddingResult.json();
@@ -67,7 +74,7 @@ export async function fetchGroundedContext(
     ? relevantActList.map((r) => r.act_name)
     : null;
 
-  const [{ data: precedentMatches, error: precedentError }, { data: statuteMatches, error: statuteError }] = await Promise.all([
+  const [{ data: precedentMatches, error: precedentError }, { data: statuteMatches, error: statuteError }, matterDocumentMatches] = await Promise.all([
     supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_count: precedentCount,
@@ -80,13 +87,28 @@ export async function fetchGroundedContext(
       statute_only: true,
       filter_act_names: filterActNames,
     }),
+    includeMatterDocuments && matterId
+      ? supabase.rpc('match_documents', {
+          query_embedding: queryEmbedding,
+          // One extra to absorb the document being reviewed's own chunk,
+          // which is filtered out below by storage_path.
+          match_count: matterDocumentCount + 1,
+          filter_matter_id: matterId,
+        })
+      : Promise.resolve({ data: [] as GroundedMatch[], error: null }),
   ]);
 
   if (precedentError) console.error('Error matching precedents:', precedentError);
   if (statuteError) console.error('Error matching statutes:', statuteError);
+  if (matterDocumentMatches.error) console.error('Error matching matter documents:', matterDocumentMatches.error);
+
+  const matterDocuments = ((matterDocumentMatches.data ?? []) as GroundedMatch[])
+    .filter((m) => !excludeStoragePath || (m.metadata as any)?.storage_path !== excludeStoragePath)
+    .slice(0, matterDocumentCount);
 
   return {
     precedents: precedentMatches ?? [],
     statutes: statuteMatches ?? [],
+    matterDocuments,
   };
 }
