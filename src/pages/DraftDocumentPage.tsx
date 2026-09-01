@@ -457,6 +457,23 @@ export default function DraftDocumentPage() {
       });
       if (versionError) throw versionError;
 
+      // Same RAG ingestion + statute auto-detection every other uploaded
+      // document version gets — an AI-drafted save shouldn't be invisible to
+      // matter chat or skip Relevant Laws detection just because it didn't
+      // come from the file picker.
+      const { error: processError } = await supabase.functions.invoke("process-document", {
+        body: {
+          filePath: storagePath,
+          fileName,
+          fileType: blob.type,
+          bucket: "matter-documents",
+          matterId,
+          documentTypeId,
+          isPrecedent: false,
+        },
+      });
+      if (processError) console.error("Draft saved but RAG ingestion failed:", processError);
+
       toast({ title: "Draft saved as a document version" });
       navigate(`/matters/${matterId}`);
     } catch (err: any) {

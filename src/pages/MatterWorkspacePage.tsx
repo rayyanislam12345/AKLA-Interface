@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, Gavel, MessageCircle, MessageSquare, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Check, Circle, CircleDot, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
 import {
@@ -169,6 +170,7 @@ function relevantLawSourceLabel(source: string) {
 // process-document auto-detects a mention on upload and adds it itself.
 function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: laws, isLoading } = useMatterRelevantLaws(matterId);
   const { data: libraryActs } = useStatuteSources();
   const addSelected = useAddSelectedRelevantLaw();
@@ -179,6 +181,11 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
   const [selectedAct, setSelectedAct] = useState("");
   const [typedAct, setTypedAct] = useState("");
   const [resolvingRowId, setResolvingRowId] = useState<string | null>(null);
+  // Typed acts being searched for don't have a row yet (resolve-statute only
+  // inserts once it knows available vs needs_upload) — tracked here purely
+  // so the list can show a "Searching web for law…" placeholder immediately
+  // instead of the whole add-row going quiet/disabled until it settles.
+  const [pendingSearches, setPendingSearches] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<{ lawId: string; actName: string } | null>(null);
 
@@ -199,14 +206,18 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
     if (!matterId || !typedAct.trim()) return;
     const actName = typedAct.trim();
     setTypedAct("");
+    if (attachedNames.has(actName) || pendingSearches.includes(actName)) return;
+    setPendingSearches((prev) => [...prev, actName]);
     try {
       const result = await resolveLaw.mutateAsync({ matterId, actName, source: "manual_typed" });
-      toast({
-        title: result.status === "available" ? "Added" : "Not found online — needs manual upload",
-        description: result.actName,
-      });
+      if (result.status === "needs_upload") {
+        toast({ title: "Not found online", description: `${result.actName} — upload it manually.` });
+      }
     } catch (err: any) {
       toast({ title: "Failed to add", description: err.message, variant: "destructive" });
+    } finally {
+      await queryClient.refetchQueries({ queryKey: ["matter-relevant-laws", matterId] });
+      setPendingSearches((prev) => prev.filter((n) => n !== actName));
     }
   };
 
@@ -272,49 +283,92 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
 
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !laws?.length ? (
+        ) : !laws?.length && pendingSearches.length === 0 ? (
           <p className="text-sm text-muted-foreground">None attached yet.</p>
         ) : (
           <div className="space-y-2">
-            {laws.map((law) => (
-              <div key={law.id} className="flex items-center gap-2 border rounded-md px-3 py-2">
+            {pendingSearches.map((actName) => (
+              <div
+                key={`pending-${actName}`}
+                className="flex items-center gap-2 border rounded-md px-3 py-2 border-dashed"
+              >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{law.act_name}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <Badge variant="outline" className="text-[10px] font-normal">
-                      {relevantLawSourceLabel(law.source)}
-                    </Badge>
-                    <Badge variant={law.status === "available" ? "default" : "secondary"} className="text-[10px] font-normal">
-                      {law.status === "available" ? "In Library" : "Needs Upload"}
-                    </Badge>
-                  </div>
+                  <p className="text-sm font-medium truncate">{actName}</p>
                 </div>
-                {law.status === "needs_upload" && (
-                  <>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      title="Search online again"
-                      disabled={resolvingRowId === law.id}
-                      onClick={() => handleFindAndAdd(law.id, law.act_name)}
-                    >
-                      <Search className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      title="Upload manually"
-                      onClick={() => triggerFileUpload(law.id, law.act_name)}
-                    >
-                      <Upload className="h-4 w-4" />
-                    </Button>
-                  </>
-                )}
-                <Button size="icon" variant="ghost" title="Remove" onClick={() => handleDelete(law.id)}>
-                  <Trash2 className="h-4 w-4" />
+                <Button size="sm" variant="outline" disabled className="shrink-0">
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  Searching web for law
                 </Button>
               </div>
             ))}
+            {laws?.map((law) => {
+              const isSearching = resolvingRowId === law.id;
+              const needsUpload = law.status === "needs_upload";
+              return (
+                <div
+                  key={law.id}
+                  className={cn(
+                    "flex items-center gap-2 border rounded-md px-3 py-2",
+                    needsUpload && !isSearching && "border-destructive/40 bg-destructive/5"
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {needsUpload && !isSearching && (
+                        <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                      )}
+                      <p className="text-sm font-medium truncate">{law.act_name}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Badge variant="outline" className="text-[10px] font-normal">
+                        {relevantLawSourceLabel(law.source)}
+                      </Badge>
+                      {!needsUpload && (
+                        <Badge variant="default" className="text-[10px] font-normal">
+                          In Library
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  {isSearching ? (
+                    <Button size="sm" variant="outline" disabled className="shrink-0">
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      Searching web for law
+                    </Button>
+                  ) : (
+                    needsUpload && (
+                      <>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Search online again"
+                          onClick={() => handleFindAndAdd(law.id, law.act_name)}
+                        >
+                          <Search className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => triggerFileUpload(law.id, law.act_name)}
+                        >
+                          <Upload className="h-4 w-4 mr-1.5" />
+                          Upload Law
+                        </Button>
+                      </>
+                    )
+                  )}
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    title="Remove"
+                    disabled={isSearching}
+                    onClick={() => handleDelete(law.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -342,9 +396,8 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
               value={typedAct}
               onChange={(e) => setTypedAct(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAddTyped()}
-              disabled={resolveLaw.isPending}
             />
-            <Button size="icon" variant="outline" disabled={!typedAct.trim() || resolveLaw.isPending} onClick={handleAddTyped}>
+            <Button size="icon" variant="outline" disabled={!typedAct.trim()} onClick={handleAddTyped}>
               <Plus className="h-4 w-4" />
             </Button>
           </div>

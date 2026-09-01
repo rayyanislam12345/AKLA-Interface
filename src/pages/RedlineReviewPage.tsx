@@ -226,6 +226,23 @@ export default function RedlineReviewPage() {
       });
       if (versionError) throw versionError;
 
+      // Same RAG ingestion + statute auto-detection every other uploaded
+      // document version gets — a redlined save shouldn't be invisible to
+      // matter chat or skip Relevant Laws detection just because it didn't
+      // come from the file picker.
+      const { error: processError } = await supabase.functions.invoke("process-document", {
+        body: {
+          filePath: storagePath,
+          fileName,
+          fileType: previewBlob.type,
+          bucket: "matter-documents",
+          matterId,
+          documentTypeId: matterDocument?.document_type_id ?? null,
+          isPrecedent: false,
+        },
+      });
+      if (processError) console.error("Redlined draft saved but RAG ingestion failed:", processError);
+
       toast({ title: "Redlined draft saved as a new document version" });
       navigate(`/matters/${matterId}`);
     } catch (err: any) {
