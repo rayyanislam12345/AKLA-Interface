@@ -53,6 +53,14 @@ __pycache__/
 scripts/law_library/manifest.json
 scripts/law_library/downloads/
 
+# Supabase CLI local link state — was tracked with a stale project-ref
+# pointing at a different, unrelated project (harumqhvmmrqwslqfukg, not this
+# project's mhdufgphzalrzhzplbzf), which any CLI command like `db push`
+# would have silently targeted instead of the real one. This is meant to be
+# per-machine CLI cache, not shared across clones — never commit it again.
+supabase/.temp/
+supabase/.branches/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
