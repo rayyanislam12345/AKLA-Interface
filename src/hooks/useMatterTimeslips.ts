@@ -11,7 +11,9 @@ export interface MatterTimeslip {
   narrative: string;
   source: string;
   uploaded_at: string;
+  hub_task_id: string | null;
   author: { full_name: string | null; email: string } | null;
+  task: { title: string } | null;
 }
 
 export type RangePreset = "today" | "7" | "30" | "90" | "all";
@@ -50,7 +52,7 @@ export function useMatterTimeslips(
       let q = supabase
         .from("matter_timeslips")
         .select(
-          "id, matter_id, author_id, work_date, hours, task_code, narrative, source, uploaded_at, author:profiles!matter_timeslips_author_id_fkey(full_name, email)"
+          "id, matter_id, author_id, work_date, hours, task_code, narrative, source, uploaded_at, hub_task_id, author:profiles!matter_timeslips_author_id_fkey(full_name, email), task:matter_tasks(title)"
         )
         .eq("matter_id", matterId!)
         .order("work_date", { ascending: false })
@@ -62,6 +64,16 @@ export function useMatterTimeslips(
       return (data ?? []) as unknown as MatterTimeslip[];
     },
   });
+}
+
+/** Totals keyed by the task the work was billed against. */
+export function byTask(slips: MatterTimeslip[]) {
+  const out = new Map<string, number>();
+  for (const s of slips) {
+    const key = s.task?.title ?? "No task";
+    out.set(key, (out.get(key) ?? 0) + Number(s.hours));
+  }
+  return out;
 }
 
 export function authorName(slip: MatterTimeslip): string {

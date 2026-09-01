@@ -5,6 +5,7 @@ import {
   RANGE_LABELS,
   RangePreset,
   authorName,
+  byTask,
   resolveRange,
   summarise,
   useMatterTimeslips,
@@ -21,11 +22,12 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-type View = "entries" | "day" | "author";
+type View = "entries" | "day" | "author" | "task";
 
 const VIEWS: { key: View; label: string }[] = [
   { key: "entries", label: "Entries" },
   { key: "day", label: "By day" },
+  { key: "task", label: "By task" },
   { key: "author", label: "By associate" },
 ];
 
@@ -49,6 +51,7 @@ function toCsv(slips: MatterTimeslip[], matterName: string) {
         esc(authorName(s)),
         Number(s.hours).toFixed(1),
         esc(s.task_code ?? ""),
+        esc(s.task?.title ?? ""),
         esc(s.narrative),
         esc(matterName),
       ].join(",")
@@ -68,7 +71,7 @@ export function MatterTimeslips({
   const [preset, setPreset] = useState<RangePreset>("30");
   const [view, setView] = useState<View>("entries");
   const range = useMemo(() => resolveRange(preset), [preset]);
-  const { data: slips, isLoading } = useMatterTimeslips(matterId, range);
+  const { data: slips, isLoading, error } = useMatterTimeslips(matterId, range);
 
   const { total, byDay, byAuthor } = useMemo(
     () => summarise(slips ?? []),
@@ -87,7 +90,8 @@ export function MatterTimeslips({
     URL.revokeObjectURL(url);
   };
 
-  const grouped = view === "day" ? byDay : byAuthor;
+  const grouped =
+    view === "day" ? byDay : view === "task" ? byTask(slips ?? []) : byAuthor;
 
   return (
     <Card>
@@ -144,6 +148,18 @@ export function MatterTimeslips({
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading time entries…
           </div>
+        ) : error ? (
+          // Showing the empty state on a failed query makes "no data" and
+          // "broken query" look identical, which hides exactly the problem
+          // you need to see.
+          <div className="py-6 text-sm">
+            <p className="font-medium text-destructive">
+              Could not load time entries.
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {(error as Error)?.message ?? "Unknown error"}
+            </p>
+          </div>
         ) : !slips?.length ? (
           <p className="py-6 text-sm text-muted-foreground">
             No time recorded against this matter in this period. Associates
@@ -158,6 +174,7 @@ export function MatterTimeslips({
                 <TableHead className="w-[64px] text-right">Hours</TableHead>
                 <TableHead className="w-[70px]">Code</TableHead>
                 <TableHead>Narrative</TableHead>
+                <TableHead className="w-[150px]">Task</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -176,6 +193,9 @@ export function MatterTimeslips({
                     {s.task_code ?? "—"}
                   </TableCell>
                   <TableCell className="text-sm">{s.narrative}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {s.task?.title ?? "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -184,7 +204,13 @@ export function MatterTimeslips({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{view === "day" ? "Date" : "Associate"}</TableHead>
+                <TableHead>
+                  {view === "day"
+                    ? "Date"
+                    : view === "task"
+                    ? "Task"
+                    : "Associate"}
+                </TableHead>
                 <TableHead className="w-[90px] text-right">Hours</TableHead>
                 <TableHead className="w-[45%]">Share</TableHead>
               </TableRow>

@@ -33,10 +33,16 @@ const NAV_ITEMS = [
 ];
 
 export function AppSidebar() {
-  const { state, setOpen } = useSidebar();
+  const { state, setOpen, isMobile } = useSidebar();
   const { user, signOut } = useAuth();
   const location = useLocation();
-  const isCollapsed = state === "collapsed";
+  // On mobile the sidebar always renders full-width inside a Sheet (see
+  // ui/sidebar.tsx) regardless of `state` — `state` only tracks the desktop
+  // hover-to-expand behavior below, and never flips to "expanded" from a
+  // mobile toggle. Without this, the mobile drawer opened at full width but
+  // still rendered icon-only with no labels, looking oversized for what it
+  // actually showed.
+  const isCollapsed = !isMobile && state === "collapsed";
 
   const getInitials = (email: string) => {
     const name = email.split("@")[0];
