@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import type { Editor } from "@tiptap/react";
 import { marked } from "marked";
+import { renderAsync } from "docx-preview";
+import RichTextEditor from "@/components/editor/RichTextEditor";
 import {
   AlignmentType,
   BorderStyle,
@@ -16,24 +17,17 @@ import {
   Paragraph,
   TextRun,
 } from "docx";
-import { Sparkles, Send, Save, FileText } from "lucide-react";
+import { Sparkles, Save, FileText } from "lucide-react";
 import { useMatter } from "@/hooks/useMatters";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { useDraftingInterview, useGenerateDraft } from "@/hooks/useDrafting";
+import { useDraftingInterview, useGenerateDraft, useReviseDraft } from "@/hooks/useDrafting";
 import { supabase } from "@/integrations/supabase/client";
+import DocumentChatPanel, { type DocumentChatMessage } from "@/components/chat/DocumentChatPanel";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
-
-type Mode = "precedent" | "interview";
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
 
 // Matches AKLA's own drafting convention (sampled from firm precedent/memo
 // .docx files): Arial body text, 1" margins, justified paragraphs with a
@@ -248,69 +242,76 @@ export default function DraftDocumentPage() {
   const { data: documentTypes } = useDocumentTypes();
   const interviewMutation = useDraftingInterview();
   const draftMutation = useGenerateDraft();
+  const reviseMutation = useReviseDraft();
 
   const [documentTypeId, setDocumentTypeId] = useState<string>("");
-  const [mode, setMode] = useState<Mode>("precedent");
   const [started, setStarted] = useState(false);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<DocumentChatMessage[]>([]);
   const [threadId, setThreadId] = useState<string | undefined>();
   const [isReadyToDraft, setIsReadyToDraft] = useState(false);
-  const [chatInput, setChatInput] = useState("");
 
   const [draft, setDraft] = useState<string | null>(null);
   const [precedentCount, setPrecedentCount] = useState(0);
+  const [hasTemplate, setHasTemplate] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<Editor | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
+  const [buildingPreview, setBuildingPreview] = useState(false);
 
   const documentTypeName = useMemo(
     () => documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document",
     [documentTypes, documentTypeId]
   );
 
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: "",
-  });
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    if (draft && editor) {
-      editor.commands.setContent(marked.parse(draft, { async: false }) as string);
-    }
-  }, [draft, editor]);
+  const editorContent = useMemo(
+    () => (draft ? (marked.parse(draft, { async: false }) as string) : ""),
+    [draft]
+  );
 
   const handleStart = async () => {
     if (!documentTypeId || !matterId) return;
     setStarted(true);
-    if (mode === "interview") {
-      const result = await interviewMutation.mutateAsync({ matterId, documentTypeId });
-      setThreadId(result.threadId);
-      setMessages([{ role: "assistant", content: result.reply }]);
-      setIsReadyToDraft(result.isReadyToDraft);
-    } else {
-      await handleGenerateDraft();
-    }
+    const result = await interviewMutation.mutateAsync({ matterId, documentTypeId });
+    setThreadId(result.threadId);
+    setMessages([{ role: "assistant", content: result.reply }]);
+    setIsReadyToDraft(result.isReadyToDraft);
   };
 
-  const handleSendChatMessage = async () => {
-    if (!chatInput.trim() || !matterId || !documentTypeId) return;
-    const userMessage = chatInput.trim();
-    setChatInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
-    const result = await interviewMutation.mutateAsync({
-      matterId,
-      documentTypeId,
-      threadId,
-      message: userMessage,
-    });
-    setThreadId(result.threadId);
-    setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
-    setIsReadyToDraft(result.isReadyToDraft);
+  // Continues the same chat log before and after a draft exists — before,
+  // it's the intake interview (drafting-interview); after, each message is
+  // a follow-up revision/question against the live draft (draft-document's
+  // revise branch), so the conversation reads as one continuous session.
+  const handleSendChatMessage = async (text: string) => {
+    if (!matterId || !documentTypeId) return;
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    try {
+      if (!draft) {
+        const result = await interviewMutation.mutateAsync({
+          matterId,
+          documentTypeId,
+          threadId,
+          message: text,
+        });
+        setThreadId(result.threadId);
+        setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
+        setIsReadyToDraft(result.isReadyToDraft);
+      } else {
+        const result = await reviseMutation.mutateAsync({
+          matterId,
+          documentTypeId,
+          threadId,
+          currentDraft: draft,
+          instruction: text,
+        });
+        setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
+        if (result.documentChanged) setDraft(result.updatedDraft);
+      }
+    } catch (err: any) {
+      toast({ title: "Message failed", description: err.message, variant: "destructive" });
+    }
   };
 
   const handleGenerateDraft = async () => {
@@ -319,18 +320,86 @@ export default function DraftDocumentPage() {
       const result = await draftMutation.mutateAsync({
         matterId,
         documentTypeId,
-        mode,
         threadId,
       });
       setDraft(result.draft);
       setPrecedentCount(result.precedentCount);
+      setHasTemplate(result.hasTemplate);
     } catch (err: any) {
       toast({ title: "Draft generation failed", description: err.message, variant: "destructive" });
     }
   };
 
+  // Builds the same firm-styled .docx both "Save as Document Version" and
+  // the live preview tab use — reads the editor's *current* ProseMirror
+  // JSON at call time, so it reflects manual in-editor edits too, not just
+  // whatever the AI last generated.
+  const buildFirmDocxBlob = async (): Promise<Blob | null> => {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    const paragraphs = editorContentToFirmParagraphs(editor.getJSON() as PMNode);
+    const draftDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    const headerTitle = `${matter?.name ?? ""} — ${documentTypeName} — AKLA — Draft, For Internal Purposes Only — ${draftDate}`;
+
+    const document = new Document({
+      styles: {
+        default: {
+          document: {
+            run: { font: FIRM_FONT, size: FIRM_BODY_SIZE },
+          },
+        },
+      },
+      numbering: { config: [firmNumberingConfig] },
+      sections: [
+        {
+          properties: {
+            page: {
+              margin: {
+                top: convertInchesToTwip(1),
+                right: convertInchesToTwip(1),
+                bottom: convertInchesToTwip(1),
+                left: convertInchesToTwip(1),
+              },
+            },
+          },
+          headers: { default: buildFirmHeader(headerTitle) },
+          footers: { default: buildFirmFooter() },
+          children: paragraphs,
+        },
+      ],
+    });
+    return Packer.toBlob(document);
+  };
+
+  const renderPreview = async () => {
+    setBuildingPreview(true);
+    try {
+      const blob = await buildFirmDocxBlob();
+      if (blob && previewRef.current) {
+        previewRef.current.innerHTML = "";
+        await renderAsync(blob, previewRef.current, previewRef.current, { inWrapper: true });
+      }
+    } catch (err: any) {
+      toast({ title: "Failed to build preview", description: err.message, variant: "destructive" });
+    } finally {
+      setBuildingPreview(false);
+    }
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as "edit" | "preview");
+    if (value === "preview") renderPreview();
+  };
+
+  // A chat revision can update the draft while the preview tab is already
+  // open — keep it in sync rather than showing stale content.
+  useEffect(() => {
+    if (activeTab === "preview") renderPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
   const handleSaveAsVersion = async () => {
-    if (!editor || !matterId || !documentTypeId) return;
+    if (!matterId || !documentTypeId) return;
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -367,41 +436,8 @@ export default function DraftDocumentPage() {
         .eq("matter_document_id", matterDocumentId);
       const nextVersion = (count ?? 0) + 1;
 
-      // Build a .docx from the live editor content (so the lawyer's in-editor
-      // edits are what's exported, not the original AI markdown), formatted to
-      // match the firm's own drafting convention — see editorContentToFirmParagraphs.
-      const paragraphs = editorContentToFirmParagraphs(editor.getJSON() as PMNode);
-      const draftDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-      const headerTitle = `${matter?.name ?? ""} — ${documentTypeName} — AKLA — Draft, For Internal Purposes Only — ${draftDate}`;
-
-      const document = new Document({
-        styles: {
-          default: {
-            document: {
-              run: { font: FIRM_FONT, size: FIRM_BODY_SIZE },
-            },
-          },
-        },
-        numbering: { config: [firmNumberingConfig] },
-        sections: [
-          {
-            properties: {
-              page: {
-                margin: {
-                  top: convertInchesToTwip(1),
-                  right: convertInchesToTwip(1),
-                  bottom: convertInchesToTwip(1),
-                  left: convertInchesToTwip(1),
-                },
-              },
-            },
-            headers: { default: buildFirmHeader(headerTitle) },
-            footers: { default: buildFirmFooter() },
-            children: paragraphs,
-          },
-        ],
-      });
-      const blob = await Packer.toBlob(document);
+      const blob = await buildFirmDocxBlob();
+      if (!blob) throw new Error("Editor is not ready yet");
       const fileName = `${documentTypeName.replace(/\s+/g, "-")}-v${nextVersion}.docx`;
       const storagePath = `${matterId}/${matterDocumentId}/v${nextVersion}-${fileName}`;
 
@@ -461,63 +497,27 @@ export default function DraftDocumentPage() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">How should the draft be built?</label>
-              <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                <TabsList>
-                  <TabsTrigger value="precedent">From precedent</TabsTrigger>
-                  <TabsTrigger value="interview">Guided interview</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <p className="text-xs text-muted-foreground">
-                {mode === "precedent"
-                  ? "Drafts from the firm's past agreements of this type, plus known matter parties. Best when close precedent exists."
-                  : "Claude asks you the key commercial terms one at a time, then drafts from your answers. Best when no close precedent exists yet."}
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Claude asks the key commercial terms one at a time, then drafts from your answers —
+              grounded in the firm's standard template and past precedent for this document type.
+            </p>
 
             <Button onClick={handleStart} disabled={!documentTypeId}>
-              {mode === "precedent" ? "Generate Draft" : "Start Interview"}
+              Start Interview
             </Button>
           </CardContent>
         </Card>
       ) : (
         <>
-          {mode === "interview" && !draft && (
+          {!draft && (
             <Card>
               <CardContent className="pt-6 space-y-4">
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {messages.map((m, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "rounded-lg px-3 py-2 text-sm max-w-[85%]",
-                        m.role === "assistant"
-                          ? "bg-muted"
-                          : "bg-primary text-primary-foreground ml-auto"
-                      )}
-                    >
-                      {m.content}
-                    </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Type your answer…"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendChatMessage()}
-                    disabled={interviewMutation.isPending}
-                  />
-                  <Button
-                    size="icon"
-                    onClick={handleSendChatMessage}
-                    disabled={!chatInput.trim() || interviewMutation.isPending}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
+                <DocumentChatPanel
+                  messages={messages}
+                  onSend={handleSendChatMessage}
+                  sending={interviewMutation.isPending}
+                  placeholder="Type your answer…"
+                />
                 <Button
                   variant={isReadyToDraft ? "default" : "outline"}
                   onClick={handleGenerateDraft}
@@ -535,23 +535,55 @@ export default function DraftDocumentPage() {
           )}
 
           {draft && (
-            <Card>
-              <CardContent className="pt-6 space-y-4">
-                <p className="text-xs text-muted-foreground">
-                  {precedentCount > 0
-                    ? `Drafted using ${precedentCount} precedent document${precedentCount === 1 ? "" : "s"} of this type.`
-                    : "No precedent of this type in the library yet — drafted from standard practice."}
-                  {" "}Review and edit before saving — this is a first draft, not final.
-                </p>
-                <div className="border rounded-md p-4 prose prose-sm max-w-none min-h-[400px]">
-                  <EditorContent editor={editor} />
-                </div>
-                <Button onClick={handleSaveAsVersion} disabled={saving}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save as Document Version
-                </Button>
-              </CardContent>
-            </Card>
+            <>
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <p className="text-xs text-muted-foreground">
+                    {hasTemplate
+                      ? "Drafted using the firm's standard template for this document type"
+                      : precedentCount > 0
+                      ? `Drafted using ${precedentCount} precedent document${precedentCount === 1 ? "" : "s"} of this type`
+                      : "No precedent or standard template of this type in the library yet — drafted from standard practice"}
+                    {precedentCount > 0 && hasTemplate
+                      ? `, plus ${precedentCount} supplementary precedent document${precedentCount === 1 ? "" : "s"}.`
+                      : "."}
+                    {" "}Review and edit before saving — this is a first draft, not final.
+                  </p>
+                  <Tabs value={activeTab} onValueChange={handleTabChange}>
+                    <TabsList>
+                      <TabsTrigger value="edit">Editable Draft</TabsTrigger>
+                      <TabsTrigger value="preview">Preview as Word Document</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="edit">
+                      <RichTextEditor ref={editorRef} content={editorContent} className="border rounded-md p-4 prose prose-sm max-w-none min-h-[400px]" />
+                    </TabsContent>
+                    <TabsContent value="preview">
+                      {buildingPreview && <p className="text-sm text-muted-foreground mb-2">Building preview…</p>}
+                      <div ref={previewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto" />
+                    </TabsContent>
+                  </Tabs>
+                  <Button onClick={handleSaveAsVersion} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save as Document Version
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Continue the conversation
+                  </p>
+                  <DocumentChatPanel
+                    messages={messages}
+                    onSend={handleSendChatMessage}
+                    sending={reviseMutation.isPending}
+                    placeholder="Ask a follow-up or request a change…"
+                    emptyHint="Ask a question about this draft, or tell Claude what to change — e.g. &quot;shorten the definitions section&quot;."
+                  />
+                </CardContent>
+              </Card>
+            </>
           )}
         </>
       )}

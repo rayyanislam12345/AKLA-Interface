@@ -94,7 +94,52 @@ TARGET_ACTS = [
     "Pakistan Environmental Protection Act, 1997",
     "Foreign Private Investment (Promotion and Protection) Act, 1976",
     "Foreign Exchange Regulation Act, 1947",
+    # Second pass — broadened further per "as much as possible": more of
+    # the same categories, plus a few (insurance, procurement, AML,
+    # electronic transactions) that came up short the first time round.
+    "Insurance Ordinance, 2000",
+    "Payment Systems and Electronic Fund Transfers Act, 2007",
+    "Anti-Money Laundering Act, 2010",
+    "Public Procurement Regulatory Authority Ordinance, 2002",
+    "Protection of Economic Reforms Act, 1992",
+    "Alternative Dispute Resolution Act, 2017",
+    "Electricity Act, 1910",
+    "Customs Act, 1969",
+    "Federal Excise Act, 2005",
+    "Trusts Act, 1882",
+    "Societies Registration Act, 1860",
+    "Electronic Transactions Ordinance, 2002",
 ]
+
+# A handful of the first-pass Acts came back not_found under their formal
+# citation but are real, findable Acts under a shorter/more common name —
+# the site's search wants bare significant words and sometimes just doesn't
+# rank the formal title well. Tried in order after the primary name fails.
+SEARCH_ALIASES: dict[str, list[str]] = {
+    "Securities Act, 2015": ["Securities Act"],
+    "Corporate Rehabilitation Act, 2018": ["Corporate Rehabilitation"],
+    "Financial Institutions (Recovery of Finances) Ordinance, 2001": [
+        "Recovery of Finances Ordinance",
+        "Financial Institutions Recovery Finances",
+    ],
+    "Recognition and Enforcement (Arbitration Agreements and Foreign Arbitral Awards) Act, 2011": [
+        "Arbitration Agreements and Foreign Arbitral Awards",
+        "Recognition Enforcement Arbitration Agreements",
+    ],
+    "Qanun-e-Shahadat Order, 1984": ["Qanun e Shahadat", "Evidence Order 1984", "Shahadat Order"],
+    "Sales Tax Act, 1990": ["Sales Tax Act", "Sales Tax"],
+    "Copyright Ordinance, 1962": ["Copyright Ordinance", "Copyright Act"],
+    "Public Private Partnership Authority Act, 2017": [
+        "Public Private Partnership Authority",
+        "PPP Authority Act",
+    ],
+    "Regulation of Generation, Transmission and Distribution of Electric Power Act, 1997": [
+        "NEPRA Act",
+        "National Electric Power Regulatory Authority",
+        "Electric Power Act 1997",
+    ],
+    "Foreign Exchange Regulation Act, 1947": ["Foreign Exchange Regulation Act", "Foreign Exchange Regulation"],
+}
 
 # Minimum extracted-character count before treating a PDF as having a real
 # text layer — matches the same threshold extractText.ts uses to decide a
@@ -162,12 +207,21 @@ def scan(manifest: dict) -> dict:
             continue
 
         print(f"Searching: {name}")
-        try:
-            found = search_act(name)
-        except requests.exceptions.RequestException as err:
-            manifest[name] = {"outcome": "failed", "error": f"Search failed: {err}"}
-            print(f"  FAILED (search): {err}", file=sys.stderr)
-            save_manifest(manifest)
+        found = None
+        for query_name in [name, *SEARCH_ALIASES.get(name, [])]:
+            try:
+                found = search_act(query_name)
+            except requests.exceptions.RequestException as err:
+                manifest[name] = {"outcome": "failed", "error": f"Search failed: {err}"}
+                print(f"  FAILED (search): {err}", file=sys.stderr)
+                save_manifest(manifest)
+                found = None
+                break
+            if found:
+                if query_name != name:
+                    print(f"  (found via alias query: {query_name!r})")
+                break
+        if name in manifest and manifest[name].get("outcome") == "failed":
             continue
 
         if not found:

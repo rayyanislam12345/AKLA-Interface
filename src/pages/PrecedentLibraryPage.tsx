@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
-import { BookMarked, ExternalLink, FileText, Gavel, Trash2, Upload } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Trash2, Upload } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   usePrecedentSources,
@@ -7,6 +8,7 @@ import {
   useDeletePrecedentSource,
 } from "@/hooks/usePrecedentLibrary";
 import { useStatuteSources, useDeleteStatuteSource } from "@/hooks/useLawLibrary";
+import { useDocumentTypeTemplates } from "@/hooks/useDocumentTypeTemplates";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +102,66 @@ function LawLibraryTab() {
   );
 }
 
+function StandardizeTab() {
+  const navigate = useNavigate();
+  const { data: rows, isLoading } = useDocumentTypeTemplates();
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        One canonical "standard version" per document type, curated by the team — "Draft with AI" uses
+        it as the primary structural and formatting jump-off point for that type, ahead of the firm's
+        other precedent.
+      </p>
+
+      {isLoading ? (
+        <p className="text-muted-foreground">Loading…</p>
+      ) : !rows?.length ? (
+        <p className="text-muted-foreground">No document types yet.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Document Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last Updated</TableHead>
+              <TableHead className="w-32"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.document_type_id}>
+                <TableCell className="max-w-md">{row.document_type_name}</TableCell>
+                <TableCell>
+                  <Badge variant={row.filename ? "default" : "secondary"}>
+                    {row.filename ? "Standardized" : "Not yet standardized"}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {row.updated_at
+                    ? `${new Date(row.updated_at).toLocaleDateString()}${
+                        row.updated_by_name ? ` by ${row.updated_by_name}` : ""
+                      }`
+                    : "—"}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
+                  >
+                    {row.filename ? "Replace" : "Upload"}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
 export default function PrecedentLibraryPage() {
   const { data: documentTypes } = useDocumentTypes();
   const { data: sources, isLoading } = usePrecedentSources();
@@ -177,6 +239,10 @@ export default function PrecedentLibraryPage() {
           <TabsTrigger value="law-library">
             <Gavel className="h-3.5 w-3.5 mr-1.5" />
             Law Library
+          </TabsTrigger>
+          <TabsTrigger value="standardize">
+            <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+            Standardize
           </TabsTrigger>
         </TabsList>
 
@@ -297,6 +363,10 @@ export default function PrecedentLibraryPage() {
 
         <TabsContent value="law-library" className="mt-6">
           <LawLibraryTab />
+        </TabsContent>
+
+        <TabsContent value="standardize" className="mt-6">
+          <StandardizeTab />
         </TabsContent>
       </Tabs>
     </div>

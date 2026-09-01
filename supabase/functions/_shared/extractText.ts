@@ -69,7 +69,11 @@ export async function extractTextFromFile(fileData: Blob, fileName: string): Pro
     // esm.sh can resolve either mammoth's browser build (wants `arrayBuffer`)
     // or its Node build (wants a Node `buffer`) depending on how it infers
     // the target — pass both so extraction works regardless of which loads.
-    const result = await mammoth.extractRawText({ arrayBuffer, buffer: Buffer.from(arrayBuffer) } as any);
+    // convertToHtml (not extractRawText) — preserves headings/bold/italic/
+    // lists as semantic HTML instead of discarding all structure, so
+    // precedent/template/statute text fed to the AI (and stored for RAG)
+    // retains far more of the original document's real formatting signal.
+    const result = await mammoth.convertToHtml({ arrayBuffer, buffer: Buffer.from(arrayBuffer) } as any);
     return { text: result.value, metadata: { original_format: "docx" } };
   }
 

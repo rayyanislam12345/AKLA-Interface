@@ -14,9 +14,11 @@ import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import DraftDocumentPage from "./pages/DraftDocumentPage";
 import RedlineReviewPage from "./pages/RedlineReviewPage";
+import RecordMeetingPage from "./pages/RecordMeetingPage";
 import MatterChatPage from "./pages/MatterChatPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
 import PrecedentLibraryPage from "./pages/PrecedentLibraryPage";
+import StandardizeDocumentTypePage from "./pages/StandardizeDocumentTypePage";
 import MandateOpportunitiesPage from "./pages/MandateOpportunitiesPage";
 import WhatsAppActivityPage from "./pages/WhatsAppActivityPage";
 import ClientsPage from "./pages/ClientsPage";
@@ -100,11 +102,31 @@ const App = () => {
                   }
                 />
                 <Route
+                  path="/record-meeting"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <RecordMeetingPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/precedent-library"
                   element={
                     <ProtectedRoute>
                       <AppLayout>
                         <PrecedentLibraryPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/precedent-library/standardize/:documentTypeId"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <StandardizeDocumentTypePage />
                       </AppLayout>
                     </ProtectedRoute>
                   }

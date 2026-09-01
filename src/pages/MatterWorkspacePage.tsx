@@ -1,7 +1,17 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Check, Circle, CircleDot, FileText, MessageCircle, MessageSquare, Plus, ScanSearch, Sparkles, Upload } from "lucide-react";
+import { Check, Circle, CircleDot, FileText, Gavel, MessageCircle, MessageSquare, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
+import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
+import {
+  useMatterRelevantLaws,
+  useAddSelectedRelevantLaw,
+  useResolveRelevantLaw,
+  useUploadRelevantLawFile,
+  useDeleteRelevantLaw,
+} from "@/hooks/useMatterRelevantLaws";
+import { useStatuteSources } from "@/hooks/useLawLibrary";
+import { supabase } from "@/integrations/supabase/client";
 import {
   useWhatsAppMattersForMatter,
   useWhatsAppDocuments,
@@ -22,6 +32,7 @@ import {
   useCreateMatterDocument,
   useSetMatterDocumentStatus,
   useUploadDocumentVersion,
+  useDeleteMatterDocument,
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
 import { Badge } from "@/components/ui/badge";
@@ -145,6 +156,204 @@ function WhatsAppActivityCard({ matterId }: { matterId: string | undefined }) {
   );
 }
 
+function relevantLawSourceLabel(source: string) {
+  if (source === "manual_selected") return "Selected";
+  if (source === "manual_typed") return "Typed";
+  return "Auto-detected";
+}
+
+// AI context for this matter is scoped to whatever's listed here (falling
+// back to a whole-library search if nothing's attached yet) — see
+// _shared/retrieval.ts. Rows arrive two ways: an associate adds one
+// directly (dropdown or typed, resolved via resolve-statute), or
+// process-document auto-detects a mention on upload and adds it itself.
+function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) {
+  const { toast } = useToast();
+  const { data: laws, isLoading } = useMatterRelevantLaws(matterId);
+  const { data: libraryActs } = useStatuteSources();
+  const addSelected = useAddSelectedRelevantLaw();
+  const resolveLaw = useResolveRelevantLaw();
+  const uploadLawFile = useUploadRelevantLawFile();
+  const deleteLaw = useDeleteRelevantLaw();
+
+  const [selectedAct, setSelectedAct] = useState("");
+  const [typedAct, setTypedAct] = useState("");
+  const [resolvingRowId, setResolvingRowId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<{ lawId: string; actName: string } | null>(null);
+
+  const attachedNames = new Set((laws ?? []).map((l) => l.act_name));
+  const availableToAdd = (libraryActs ?? []).filter((s) => !attachedNames.has(s.act_name));
+
+  const handleAddSelected = async () => {
+    if (!matterId || !selectedAct) return;
+    try {
+      await addSelected.mutateAsync({ matterId, actName: selectedAct });
+      setSelectedAct("");
+    } catch (err: any) {
+      toast({ title: "Failed to add", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleAddTyped = async () => {
+    if (!matterId || !typedAct.trim()) return;
+    const actName = typedAct.trim();
+    setTypedAct("");
+    try {
+      const result = await resolveLaw.mutateAsync({ matterId, actName, source: "manual_typed" });
+      toast({
+        title: result.status === "available" ? "Added" : "Not found online — needs manual upload",
+        description: result.actName,
+      });
+    } catch (err: any) {
+      toast({ title: "Failed to add", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleFindAndAdd = async (rowId: string, actName: string) => {
+    if (!matterId) return;
+    setResolvingRowId(rowId);
+    try {
+      const result = await resolveLaw.mutateAsync({ matterId, actName, source: "manual_typed" });
+      if (result.status === "needs_upload") {
+        toast({ title: "Still couldn't find it online", description: "Upload it manually instead." });
+      } else {
+        toast({ title: "Found and added" });
+      }
+    } catch (err: any) {
+      toast({ title: "Failed to search", description: err.message, variant: "destructive" });
+    } finally {
+      setResolvingRowId(null);
+    }
+  };
+
+  const triggerFileUpload = (lawId: string, actName: string) => {
+    uploadTargetRef.current = { lawId, actName };
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const target = uploadTargetRef.current;
+    e.target.value = "";
+    if (!file || !target || !matterId) return;
+    try {
+      await uploadLawFile.mutateAsync({ matterId, lawId: target.lawId, actName: target.actName, file });
+      toast({ title: "Uploaded" });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!matterId) return;
+    try {
+      await deleteLaw.mutateAsync({ id, matterId });
+    } catch (err: any) {
+      toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Gavel className="h-4 w-4" />
+          Relevant Laws
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Statutes the AI grounds drafting/review in for this matter specifically — falls back to
+          searching the whole law library until at least one is attached here.
+        </p>
+
+        <input ref={fileInputRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleFileSelected} />
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !laws?.length ? (
+          <p className="text-sm text-muted-foreground">None attached yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {laws.map((law) => (
+              <div key={law.id} className="flex items-center gap-2 border rounded-md px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{law.act_name}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <Badge variant="outline" className="text-[10px] font-normal">
+                      {relevantLawSourceLabel(law.source)}
+                    </Badge>
+                    <Badge variant={law.status === "available" ? "default" : "secondary"} className="text-[10px] font-normal">
+                      {law.status === "available" ? "In Library" : "Needs Upload"}
+                    </Badge>
+                  </div>
+                </div>
+                {law.status === "needs_upload" && (
+                  <>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="Search online again"
+                      disabled={resolvingRowId === law.id}
+                      onClick={() => handleFindAndAdd(law.id, law.act_name)}
+                    >
+                      <Search className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="Upload manually"
+                      onClick={() => triggerFileUpload(law.id, law.act_name)}
+                    >
+                      <Upload className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+                <Button size="icon" variant="ghost" title="Remove" onClick={() => handleDelete(law.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="border-t pt-3 space-y-2">
+          <div className="flex gap-2">
+            <Select value={selectedAct} onValueChange={setSelectedAct}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Add from the law library…" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableToAdd.map((s) => (
+                  <SelectItem key={s.act_name} value={s.act_name}>
+                    {s.act_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="icon" variant="outline" disabled={!selectedAct} onClick={handleAddSelected}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Or type a law not in the dropdown…"
+              value={typedAct}
+              onChange={(e) => setTypedAct(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddTyped()}
+              disabled={resolveLaw.isPending}
+            />
+            <Button size="icon" variant="outline" disabled={!typedAct.trim() || resolveLaw.isPending} onClick={handleAddTyped}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function MatterWorkspacePage() {
   const { matterId } = useParams<{ matterId: string }>();
   const navigate = useNavigate();
@@ -166,12 +375,19 @@ export default function MatterWorkspacePage() {
   const addNote = useAddMatterNote();
   const [noteContent, setNoteContent] = useState("");
 
+  const { data: matterContext } = useMatterContext(matterId);
+  const upsertMatterContext = useUpsertMatterContext();
+  const [contextDraft, setContextDraft] = useState("");
+  const [contextLoaded, setContextLoaded] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
   const { data: matterDocuments } = useMatterDocuments(matterId);
   const createMatterDocument = useCreateMatterDocument();
   const setDocumentStatus = useSetMatterDocumentStatus();
   const uploadVersion = useUploadDocumentVersion();
+  const deleteMatterDocument = useDeleteMatterDocument();
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocTypeId, setNewDocTypeId] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -198,6 +414,58 @@ export default function MatterWorkspacePage() {
       toast({ title: "Document version uploaded" });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleDeleteDocument = async (matterDocumentId: string, title: string) => {
+    if (!matterId) return;
+    if (!window.confirm(`Remove "${title}" and all its versions from this matter?`)) return;
+    try {
+      await deleteMatterDocument.mutateAsync({ matterDocumentId, matterId });
+      toast({ title: "Document removed" });
+    } catch (err: any) {
+      toast({ title: "Failed to remove document", description: err.message, variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
+    if (contextLoaded || matterContext === undefined) return;
+    setContextDraft(matterContext?.content ?? "");
+    setContextLoaded(true);
+  }, [matterContext, contextLoaded]);
+
+  const handleSaveContext = () => {
+    if (!matterId) return;
+    upsertMatterContext.mutate(
+      { matterId, content: contextDraft },
+      {
+        onSuccess: () => toast({ title: "Matter context saved" }),
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  const handleSummarizeContext = async () => {
+    if (!matterId) return;
+    setSummarizing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("summarize-matter-context", {
+        body: { matterId },
+      });
+      if (error) throw error;
+      if (!data.summary) {
+        toast({ title: "Nothing to summarize yet — no documents or past AI sessions on this matter" });
+        return;
+      }
+      setContextDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${data.summary}` : data.summary));
+      toast({
+        title: "Summary added — review before saving",
+        description: `Pulled from ${data.documentCount} document${data.documentCount === 1 ? "" : "s"} and ${data.messageCount} past AI message${data.messageCount === 1 ? "" : "s"}.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Failed to summarize", description: err.message, variant: "destructive" });
+    } finally {
+      setSummarizing(false);
     }
   };
 
@@ -327,6 +595,14 @@ export default function MatterWorkspacePage() {
                       onClick={() => navigate(`/matters/${matterId}/documents/${doc.id}/review`)}
                     >
                       <ScanSearch className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="Remove document"
+                      onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}
@@ -485,6 +761,43 @@ export default function MatterWorkspacePage() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Matter Context</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Curated facts carried forward across "Draft with AI" sessions on this matter, so the next
+              document doesn't have to re-ask what an earlier one already established. Use "Summarize"
+              to pull a first draft of this from the matter's existing documents and past AI sessions —
+              review and edit before saving.
+            </p>
+            <Textarea
+              placeholder="Key facts, decisions, and preferences for this matter…"
+              value={contextDraft}
+              onChange={(e) => setContextDraft(e.target.value)}
+              className="min-h-[140px]"
+            />
+            {(matterContext as any)?.updated_by?.full_name && (
+              <p className="text-xs text-muted-foreground">
+                Last updated by {(matterContext as any).updated_by.full_name} ·{" "}
+                {new Date(matterContext!.updated_at).toLocaleDateString()}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleSaveContext} disabled={upsertMatterContext.isPending}>
+                Save
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleSummarizeContext} disabled={summarizing}>
+                <Wand2 className="h-4 w-4 mr-2" />
+                {summarizing ? "Summarizing…" : "Summarize from documents & AI sessions"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <MatterRelevantLawsCard matterId={matterId} />
 
         <WhatsAppActivityCard matterId={matterId} />
       </div>

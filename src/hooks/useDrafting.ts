@@ -23,14 +23,34 @@ export function useGenerateDraft() {
     mutationFn: async (input: {
       matterId: string;
       documentTypeId: string;
-      mode: "precedent" | "interview";
       threadId?: string;
     }) => {
       const { data, error } = await supabase.functions.invoke("draft-document", {
         body: input,
       });
       if (error) throw error;
-      return data as { draft: string; precedentCount: number };
+      return data as { draft: string; precedentCount: number; hasTemplate: boolean };
+    },
+  });
+}
+
+// Follow-up turn on an already-generated draft — same edge function, a
+// distinct hook since the response shape is genuinely different (a chat
+// reply + possibly-updated draft, not a fresh generation).
+export function useReviseDraft() {
+  return useMutation({
+    mutationFn: async (input: {
+      matterId: string;
+      documentTypeId: string;
+      threadId?: string;
+      currentDraft: string;
+      instruction: string;
+    }) => {
+      const { data, error } = await supabase.functions.invoke("draft-document", {
+        body: input,
+      });
+      if (error) throw error;
+      return data as { reply: string; updatedDraft: string; documentChanged: boolean };
     },
   });
 }

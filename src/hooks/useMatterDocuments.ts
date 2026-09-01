@@ -190,3 +190,32 @@ export function useUploadDocumentVersion() {
     },
   });
 }
+
+export function useDeleteMatterDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ matterDocumentId, matterId }: { matterDocumentId: string; matterId: string }) => {
+      const { data: versions, error: versionsError } = await supabase
+        .from("document_versions")
+        .select("storage_path")
+        .eq("matter_document_id", matterDocumentId);
+      if (versionsError) throw versionsError;
+
+      const paths = (versions ?? []).map((v) => v.storage_path);
+      if (paths.length > 0) {
+        await supabase.storage.from("matter-documents").remove(paths);
+        for (const path of paths) {
+          await supabase.from("documents").delete().eq("metadata->>storage_path", path);
+        }
+      }
+
+      const { error: deleteError } = await supabase.from("matter_documents").delete().eq("id", matterDocumentId);
+      if (deleteError) throw deleteError;
+
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+    },
+  });
+}

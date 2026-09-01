@@ -36,6 +36,12 @@ Mandate Bot/
 # never let this get staged into this repo.
 whatsapp-dashboard/
 
+# transcription-bot is the original standalone Electron desktop app (now
+# being ported into the web app as Record Meeting / transcription-relay) —
+# it holds real API keys (.env) and is a separate app, not source for this
+# deployment; never let it get staged into this repo.
+transcription-bot/
+
 # Precedent backlog ingestion tool: run-local artifacts, not source
 scripts/precedent_backlog/manifest.json
 scripts/precedent_backlog/report.json

@@ -9,16 +9,22 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Follow-up turns after an initial "Review with AI" pass (suggest-redline) —
+// a lawyer asking a question about the review, or asking for another pass
+// at something specific ("also check the indemnity clause"). Scoped to a
+// document_version_id (not just matter_id), since a matter can have several
+// documents under review in parallel; threads are lazily created on the
+// first message the same way drafting-interview/rag-query already do.
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { documentVersionId } = await req.json();
+    const { documentVersionId, threadId = null, instruction } = await req.json();
 
-    if (!documentVersionId) {
-      return new Response(JSON.stringify({ error: 'documentVersionId is required' }), {
+    if (!documentVersionId || !instruction) {
+      return new Response(JSON.stringify({ error: 'documentVersionId and instruction are required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -67,7 +73,7 @@ serve(async (req) => {
 
     const { data: version, error: versionError } = await supabase
       .from('document_versions')
-      .select('id, storage_path, matter_document:matter_documents(id, title, matter_id, document_type_id, document_type:document_types(name))')
+      .select('id, storage_path, matter_document:matter_documents(id, matter_id, document_type_id, document_type:document_types(name))')
       .eq('id', documentVersionId)
       .single();
 
@@ -79,7 +85,7 @@ serve(async (req) => {
     }
 
     const matterDocument = (version as any).matter_document;
-    const documentTypeId = matterDocument?.document_type_id;
+    const documentTypeId = matterDocument?.document_type_id ?? null;
     const documentTypeName = matterDocument?.document_type?.name ?? 'document';
     const matterId = matterDocument?.matter_id;
 
@@ -87,26 +93,41 @@ serve(async (req) => {
     const { data: fileData, error: downloadError } = await supabase.storage
       .from('matter-documents')
       .download(version.storage_path);
-
-    if (downloadError) {
-      console.error('Error downloading file:', downloadError);
-      throw new Error(`Failed to download file: ${downloadError.message}`);
-    }
+    if (downloadError) throw new Error(`Failed to download file: ${downloadError.message}`);
 
     const { text: fullText } = await extractTextFromFile(fileData, fileName);
     if (!fullText || fullText.trim().length === 0) {
       throw new Error('No text content could be extracted from the document');
     }
 
-    const [{ precedents, statutes }, { data: template }, { data: matterContext }] = await Promise.all([
-      fetchGroundedContext(supabase, voyageKey, fullText, documentTypeId ?? null, matterId ?? null),
+    const [{ precedents, statutes }, { data: template }, { data: matterContext }, { data: existingSuggestions }] = await Promise.all([
+      fetchGroundedContext(supabase, voyageKey, fullText, documentTypeId, matterId ?? null),
       documentTypeId
         ? supabase.from('document_type_templates').select('content_html').eq('document_type_id', documentTypeId).maybeSingle()
         : Promise.resolve({ data: null }),
       matterId
         ? supabase.from('matter_context').select('content').eq('matter_id', matterId).maybeSingle()
         : Promise.resolve({ data: null }),
+      supabase
+        .from('redline_suggestions')
+        .select('clause_reference, original_text, suggested_text, rationale, status')
+        .eq('document_version_id', documentVersionId),
     ]);
+
+    // Lazily create the thread on the first follow-up message — mirrors
+    // drafting-interview/rag-query's threadId-continuation pattern.
+    let activeThreadId = threadId;
+    if (!activeThreadId) {
+      const { data: newThread, error: threadError } = await supabase
+        .from('ai_chat_threads')
+        .insert({ matter_id: matterId ?? null, document_version_id: documentVersionId, title: `Review chat — ${documentTypeName}`, created_by: user.id })
+        .select('id')
+        .single();
+      if (threadError) throw threadError;
+      activeThreadId = newThread.id;
+    }
+
+    await supabase.from('ai_chat_messages').insert({ thread_id: activeThreadId, role: 'user', content: instruction });
 
     const matterContextSection = matterContext?.content?.trim()
       ? `\n\nCONTEXT CARRIED FORWARD ON THIS MATTER (curated by the team from prior work):\n${matterContext.content.trim()}`
@@ -114,35 +135,36 @@ serve(async (req) => {
 
     const hasTemplate = Boolean(template?.content_html?.trim());
     const templateSection = hasTemplate
-      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}. Flag divergences from this, not just from the precedent excerpts below:\n${template!.content_html}`
+      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE:\n${template!.content_html}`
       : '';
 
     const precedentSection = precedents.length > 0
-      ? `\n\nPRECEDENT — excerpts from the firm's past ${documentTypeName} agreements, retrieved for relevance to this document, for comparison:\n${precedents
-          .map((p, i) => `[Precedent ${i + 1}]\n${p.content}`)
-          .join('\n\n---\n\n')}`
-      : '\n\nNo precedent documents of this type are in the firm\'s library yet — flag divergences from standard market practice instead.';
-
-    const statuteSection = statutes.length > 0
-      ? `\n\nRELEVANT PAKISTANI LAW — excerpts from actual statute text, retrieved for relevance to this document. Flag anything in the draft that appears to conflict with these:\n${statutes
-          .map((s, i) => `[${(s.metadata as any)?.act_name ?? `Statute ${i + 1}`}]\n${s.content}`)
-          .join('\n\n---\n\n')}`
+      ? `\n\nPRECEDENT — excerpts from the firm's past ${documentTypeName} agreements:\n${precedents.map((p, i) => `[Precedent ${i + 1}]\n${p.content}`).join('\n\n---\n\n')}`
       : '';
 
-    const systemPrompt = `You are a legal drafting reviewer. Review the following draft ${documentTypeName} against the firm's standard template, precedent, and standard market practice. Flag specific issues: missing standard protections, unusual or one-sided terms, drafting inconsistencies, undefined terms used before definition, divergence from the firm's standard template or precedent, or conflicts with the Pakistani law excerpts below.${matterContextSection}${templateSection}${precedentSection}${statuteSection}
+    const statuteSection = statutes.length > 0
+      ? `\n\nRELEVANT PAKISTANI LAW:\n${statutes.map((s, i) => `[${(s.metadata as any)?.act_name ?? `Statute ${i + 1}`}]\n${s.content}`).join('\n\n---\n\n')}`
+      : '';
 
-DRAFT TO REVIEW:
+    const existingSuggestionsSection = existingSuggestions && existingSuggestions.length > 0
+      ? `\n\nSUGGESTIONS ALREADY MADE ON THIS REVIEW (don't repeat these — the lawyer can already see them; ${existingSuggestions.filter((s) => s.status === 'accepted').length} accepted, ${existingSuggestions.filter((s) => s.status === 'rejected').length} rejected, ${existingSuggestions.filter((s) => s.status === 'pending').length} still pending):\n${existingSuggestions
+          .map((s) => `- [${s.status}] ${s.clause_reference}: ${s.rationale}`)
+          .join('\n')}`
+      : '';
+
+    const systemPrompt = `You are a legal drafting reviewer continuing a review of a "${documentTypeName}". The lawyer has a follow-up question or request about this review.${matterContextSection}${templateSection}${precedentSection}${statuteSection}${existingSuggestionsSection}
+
+DOCUMENT BEING REVIEWED:
 ${fullText}
 
-Respond with ONLY a JSON array, no other text, of suggestion objects matching exactly this shape:
-[{"clause_reference": string, "original_text": string, "suggested_text": string, "rationale": string}]
+LAWYER'S MESSAGE:
+${instruction}
 
-Rules:
-- "original_text" MUST be an exact, verbatim substring copied from the draft above (so it can be located and replaced) — do not paraphrase it.
-- "clause_reference" is a short human label for where this is (e.g. "Section 4.2" or "Governing Law clause").
-- Only flag genuine, material issues — not stylistic nitpicks. If the draft is solid, return fewer suggestions rather than padding the list.
-- Return at most 12 suggestions, ordered by importance.
-- If there is nothing worth flagging, return an empty array [].`;
+If this calls for one or more new redline suggestions (e.g. "also check X", or a request that implies a specific new issue), include them. If it's a question or comment that doesn't need a new suggestion, return an empty suggestions array.
+
+Respond with ONLY the following, no other text:
+REPLY: <a short, one to three sentence reply for the lawyer>
+SUGGESTIONS: <a JSON array of {"clause_reference": string, "original_text": string, "suggested_text": string, "rationale": string} objects, or [] if none. "original_text" must be an exact verbatim substring of the document above.>`;
 
     const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -155,7 +177,7 @@ Rules:
         model: 'claude-sonnet-5',
         max_tokens: 4096,
         system: systemPrompt,
-        messages: [{ role: 'user', content: `Review the ${documentTypeName} now.` }],
+        messages: [{ role: 'user', content: instruction }],
       }),
     });
 
@@ -169,33 +191,28 @@ Rules:
     }
 
     const aiData = await aiResponse.json();
-    // Claude can emit a `thinking` block ahead of the `text` block (extended
-    // thinking) — content[0] isn't reliably the text block, so find it explicitly.
-    const rawText: string = aiData.content?.find((block: any) => block.type === 'text')?.text ?? '[]';
+    const rawText: string = aiData.content?.find((block: any) => block.type === 'text')?.text ?? '';
 
-    let suggestions: Array<{ clause_reference: string; original_text: string; suggested_text: string; rationale: string }>;
+    const replyMatch = rawText.match(/REPLY:\s*([\s\S]*?)(?=\n?SUGGESTIONS:)/);
+    const reply = replyMatch ? replyMatch[1].trim() : rawText.trim();
+
+    let newSuggestionsRaw: Array<{ clause_reference: string; original_text: string; suggested_text: string; rationale: string }> = [];
     try {
       const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-      suggestions = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-      if (!Array.isArray(suggestions)) suggestions = [];
+      if (jsonMatch) newSuggestionsRaw = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(newSuggestionsRaw)) newSuggestionsRaw = [];
     } catch {
-      suggestions = [];
+      newSuggestionsRaw = [];
     }
 
-    // Clear stale pending suggestions from a prior run so re-reviewing doesn't
-    // pile up duplicates; accepted/rejected history is left alone.
-    await supabase
-      .from('redline_suggestions')
-      .delete()
-      .eq('document_version_id', documentVersionId)
-      .eq('status', 'pending');
+    await supabase.from('ai_chat_messages').insert({ thread_id: activeThreadId, role: 'assistant', content: reply });
 
-    let inserted: any[] = [];
-    if (suggestions.length > 0) {
+    let newSuggestions: any[] = [];
+    if (newSuggestionsRaw.length > 0) {
       const { data: insertedRows, error: insertError } = await supabase
         .from('redline_suggestions')
         .insert(
-          suggestions.map((s) => ({
+          newSuggestionsRaw.map((s) => ({
             document_version_id: documentVersionId,
             clause_reference: s.clause_reference,
             original_text: s.original_text,
@@ -206,18 +223,15 @@ Rules:
         )
         .select();
       if (insertError) throw insertError;
-      inserted = insertedRows;
+      newSuggestions = insertedRows;
     }
 
-    return new Response(JSON.stringify({
-      fullText,
-      suggestions: inserted,
-    }), {
+    return new Response(JSON.stringify({ threadId: activeThreadId, reply, newSuggestions }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error in suggest-redline:', error);
+    console.error('Error in redline-chat:', error);
     return new Response(JSON.stringify({
       error: error instanceof Error ? error.message : 'Unknown error',
     }), {

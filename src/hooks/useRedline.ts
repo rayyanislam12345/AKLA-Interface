@@ -64,6 +64,20 @@ export function useRunRedlineReview() {
   });
 }
 
+export function useRedlineChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { documentVersionId: string; threadId?: string; instruction: string }) => {
+      const { data, error } = await supabase.functions.invoke("redline-chat", { body: input });
+      if (error) throw error;
+      return data as { threadId: string; reply: string; newSuggestions: RedlineSuggestion[] };
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["redline-suggestions", variables.documentVersionId] });
+    },
+  });
+}
+
 export function useSetSuggestionStatus() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -85,6 +99,48 @@ export function useSetSuggestionStatus() {
     },
     onSuccess: (documentVersionId) => {
       queryClient.invalidateQueries({ queryKey: ["redline-suggestions", documentVersionId] });
+    },
+  });
+}
+
+export interface ApplyRedlinesResult {
+  previewStoragePath: string;
+  appliedCount: number;
+  skippedCount: number;
+  skipped: Array<{ suggestionId: string; clauseReference: string | null; reason: string }>;
+}
+
+// Applies every non-rejected suggestion as real Word tracked-changes onto a
+// copy of the actual uploaded .docx, and writes it to a fixed, overwritten
+// "preview" path — call after any suggestion-set change (review run,
+// accept/reject, redline-chat) to keep the in-app preview in sync.
+export function useApplyRedlinesPreview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (documentVersionId: string) => {
+      const { data, error } = await supabase.functions.invoke("apply-redlines-to-docx", {
+        body: { documentVersionId },
+      });
+      if (error) throw error;
+      return data as ApplyRedlinesResult;
+    },
+    onSuccess: (_data, documentVersionId) => {
+      queryClient.invalidateQueries({ queryKey: ["redline-preview", documentVersionId] });
+    },
+  });
+}
+
+// Downloads the live preview file's bytes once its storage path is known —
+// separate from the mutation above so the rendered blob can be cached/
+// refetched independently of whichever action last regenerated it.
+export function useRedlinePreviewFile(previewStoragePath: string | undefined) {
+  return useQuery({
+    queryKey: ["redline-preview-file", previewStoragePath],
+    enabled: !!previewStoragePath,
+    queryFn: async () => {
+      const { data, error } = await supabase.storage.from("matter-documents").download(previewStoragePath!);
+      if (error) throw error;
+      return data;
     },
   });
 }

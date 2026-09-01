@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -105,6 +105,51 @@ export type Database = {
         }
         Relationships: []
       }
+      document_type_templates: {
+        Row: {
+          content_html: string
+          created_at: string
+          document_type_id: string
+          id: string
+          seeded_from_storage_path: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          content_html: string
+          created_at?: string
+          document_type_id: string
+          id?: string
+          seeded_from_storage_path?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          content_html?: string
+          created_at?: string
+          document_type_id?: string
+          id?: string
+          seeded_from_storage_path?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_type_templates_document_type_id_fkey"
+            columns: ["document_type_id"]
+            isOneToOne: true
+            referencedRelation: "document_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_type_templates_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_types: {
         Row: {
           category: string
@@ -182,6 +227,7 @@ export type Database = {
           embedding: string | null
           id: string
           is_precedent: boolean
+          is_statute: boolean
           matter_id: string | null
           metadata: Json
           updated_at: string
@@ -194,6 +240,7 @@ export type Database = {
           embedding?: string | null
           id?: string
           is_precedent?: boolean
+          is_statute?: boolean
           matter_id?: string | null
           metadata?: Json
           updated_at?: string
@@ -206,6 +253,7 @@ export type Database = {
           embedding?: string | null
           id?: string
           is_precedent?: boolean
+          is_statute?: boolean
           matter_id?: string | null
           metadata?: Json
           updated_at?: string
@@ -286,6 +334,48 @@ export type Database = {
           title?: string
         }
         Relationships: []
+      }
+      matter_context: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          matter_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          matter_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          matter_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matter_context_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: true
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matter_context_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       matter_documents: {
         Row: {
