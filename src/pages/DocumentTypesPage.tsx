@@ -92,7 +92,7 @@ export default function DocumentTypesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Document Types</h1>
           <p className="text-muted-foreground">The firm's contract taxonomy, used across drafting and review.</p>
@@ -140,37 +140,58 @@ export default function DocumentTypesPage() {
         Object.entries(grouped ?? {}).map(([category, items]) => (
           <div key={category} className="space-y-2">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">{category}</h2>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  {isAdmin && <TableHead className="w-24">Actions</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items!.map((type) => (
-                  <TableRow key={type.id}>
-                    <TableCell>{type.name}</TableCell>
-                    {isAdmin && (
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => openEdit(type.id, type.name, type.category)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button size="icon" variant="ghost" onClick={() => handleDelete(type.id, type.name)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    )}
+
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    {isAdmin && <TableHead className="w-24">Actions</TableHead>}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {items!.map((type) => (
+                    <TableRow key={type.id}>
+                      <TableCell>{type.name}</TableCell>
+                      {isAdmin && (
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openEdit(type.id, type.name, type.category)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button size="icon" variant="ghost" onClick={() => handleDelete(type.id, type.name)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
+              {items!.map((type) => (
+                <div key={type.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2">
+                  <p className="text-sm truncate">{type.name}</p>
+                  {isAdmin && (
+                    <div className="flex gap-1 shrink-0">
+                      <Button size="icon" variant="ghost" onClick={() => openEdit(type.id, type.name, type.category)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => handleDelete(type.id, type.name)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         ))
       )}

@@ -56,36 +56,63 @@ export default function Dashboard() {
             No matters yet — head to the Matters page to create the first one.
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Lead Partner</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Target Close</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Lead Partner</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Target Close</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {matters.map((matter) => (
+                    <TableRow
+                      key={matter.id}
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/matters/${matter.id}`)}
+                    >
+                      <TableCell className="font-medium">{matter.name}</TableCell>
+                      <TableCell>{matter.client?.name || "—"}</TableCell>
+                      <TableCell>{matter.lead_partner?.full_name || "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant={matter.status === "active" ? "default" : "secondary"}>
+                          {matter.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{matter.target_close_date || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
               {matters.map((matter) => (
-                <TableRow
+                <button
                   key={matter.id}
-                  className="cursor-pointer"
+                  className="w-full text-left border rounded-md px-3 py-2.5"
                   onClick={() => navigate(`/matters/${matter.id}`)}
                 >
-                  <TableCell className="font-medium">{matter.name}</TableCell>
-                  <TableCell>{matter.client?.name || "—"}</TableCell>
-                  <TableCell>{matter.lead_partner?.full_name || "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={matter.status === "active" ? "default" : "secondary"}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">{matter.name}</p>
+                    <Badge variant={matter.status === "active" ? "default" : "secondary"} className="shrink-0">
                       {matter.status}
                     </Badge>
-                  </TableCell>
-                  <TableCell>{matter.target_close_date || "—"}</TableCell>
-                </TableRow>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    {[matter.client?.name, matter.lead_partner?.full_name].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                  {matter.target_close_date && (
+                    <p className="text-xs text-muted-foreground mt-1">Target close: {matter.target_close_date}</p>
+                  )}
+                </button>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </>
         )}
       </div>
     </div>

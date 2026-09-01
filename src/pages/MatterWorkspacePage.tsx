@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, Circle, CircleDot, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
-import { useMatter, useMatterStages, useSetStageStatus } from "@/hooks/useMatters";
+import { useMatter, useMatterStages, useSetStageStatus, useDeleteMatter } from "@/hooks/useMatters";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
 import {
   useMatterRelevantLaws,
@@ -36,13 +36,25 @@ import {
   useDeleteMatterDocument,
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
+import { MatterTimeslips } from "@/components/MatterTimeslips";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -290,7 +302,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
             {pendingSearches.map((actName) => (
               <div
                 key={`pending-${actName}`}
-                className="flex items-center gap-2 border rounded-md px-3 py-2 border-dashed"
+                className="flex items-center gap-2 flex-wrap border rounded-md px-3 py-2 border-dashed"
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{actName}</p>
@@ -308,7 +320,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                 <div
                   key={law.id}
                   className={cn(
-                    "flex items-center gap-2 border rounded-md px-3 py-2",
+                    "flex items-center gap-2 flex-wrap border rounded-md px-3 py-2",
                     needsUpload && !isSearching && "border-destructive/40 bg-destructive/5"
                   )}
                 >
@@ -404,6 +416,66 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// Permanent and cascades everything DB-side (documents, versions, redlines,
+// chats, context, relevant laws — see useDeleteMatter) plus the matter's
+// files in Storage, so this asks the associate to type the matter's exact
+// name before enabling the confirm button, same friction as GitHub's repo
+// delete, rather than a single dismissible confirm dialog.
+function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matterName: string }) {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const deleteMatter = useDeleteMatter();
+  const [confirmText, setConfirmText] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const handleDelete = async () => {
+    try {
+      await deleteMatter.mutateAsync(matterId);
+      toast({ title: "Matter deleted" });
+      navigate("/matters");
+    } catch (err: any) {
+      toast({ title: "Failed to delete matter", description: err.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setConfirmText(""); }}>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" className="text-destructive hover:text-destructive">
+          <Trash2 className="h-4 w-4 mr-2" />
+          Delete Matter
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete "{matterName}"?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes the matter and everything under it — all documents and their file
+            versions, AI drafts and chat history, redline suggestions, matter context, and relevant laws.
+            This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            Type <span className="font-semibold">{matterName}</span> to confirm
+          </label>
+          <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoComplete="off" />
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={cn(buttonVariants({ variant: "destructive" }))}
+            disabled={confirmText !== matterName || deleteMatter.isPending}
+            onClick={handleDelete}
+          >
+            {deleteMatter.isPending ? "Deleting…" : "Delete Matter"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -533,10 +605,10 @@ export default function MatterWorkspacePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{matter.name}</h1>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-semibold break-words">{matter.name}</h1>
             <Badge variant={matter.status === "active" ? "default" : "secondary"}>{matter.status}</Badge>
           </div>
           <p className="text-muted-foreground">
@@ -545,10 +617,13 @@ export default function MatterWorkspacePage() {
             {(matter as any).lead_partner?.full_name ? ` · Lead: ${(matter as any).lead_partner.full_name}` : ""}
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/chat`)}>
-          <MessageSquare className="h-4 w-4 mr-2" />
-          Ask AI
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/chat`)}>
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Ask AI
+          </Button>
+          <DeleteMatterDialog matterId={matterId!} matterName={matter.name} />
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -596,7 +671,7 @@ export default function MatterWorkspacePage() {
                 {matterDocuments.map((doc) => (
                   <div
                     key={doc.id}
-                    className="flex items-center gap-3 border rounded-md px-3 py-2"
+                    className="flex items-center gap-3 flex-wrap border rounded-md px-3 py-2"
                   >
                     <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="min-w-0 flex-1">
@@ -617,7 +692,7 @@ export default function MatterWorkspacePage() {
                         })
                       }
                     >
-                      <SelectTrigger className="w-44 h-8 text-xs">
+                      <SelectTrigger className="w-44 h-8 text-xs shrink-0">
                         <Badge variant={statusVariant(doc.status)} className="pointer-events-none">
                           <SelectValue />
                         </Badge>
@@ -630,43 +705,46 @@ export default function MatterWorkspacePage() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      title="Upload a new version"
-                      onClick={() =>
-                        triggerUpload(doc.id, doc.document_type_id, (doc as any).versions?.length || 0)
-                      }
-                    >
-                      <Upload className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      title="Review with AI"
-                      disabled={!(doc as any).versions?.length}
-                      onClick={() => navigate(`/matters/${matterId}/documents/${doc.id}/review`)}
-                    >
-                      <ScanSearch className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      title="Remove document"
-                      onClick={() => handleDeleteDocument(doc.id, doc.title)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        title="Upload a new version"
+                        onClick={() =>
+                          triggerUpload(doc.id, doc.document_type_id, (doc as any).versions?.length || 0)
+                        }
+                      >
+                        <Upload className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        title="Review with AI"
+                        disabled={!(doc as any).versions?.length}
+                        onClick={() => navigate(`/matters/${matterId}/documents/${doc.id}/review`)}
+                      >
+                        <ScanSearch className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        title="Remove document"
+                        onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-2 flex-wrap">
               <Input
                 placeholder="Document title"
                 value={newDocTitle}
                 onChange={(e) => setNewDocTitle(e.target.value)}
+                className="flex-1 min-w-[10rem]"
               />
               <Select value={newDocTypeId} onValueChange={setNewDocTypeId}>
                 <SelectTrigger className="w-56">
@@ -778,6 +856,10 @@ export default function MatterWorkspacePage() {
           </CardContent>
         </Card>
 
+        {matterId && (
+          <MatterTimeslips matterId={matterId} matterName={matter?.name ?? "matter"} />
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Notes</CardTitle>
@@ -838,7 +920,7 @@ export default function MatterWorkspacePage() {
                 {new Date(matterContext!.updated_at).toLocaleDateString()}
               </p>
             )}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button size="sm" onClick={handleSaveContext} disabled={upsertMatterContext.isPending}>
                 Save
               </Button>

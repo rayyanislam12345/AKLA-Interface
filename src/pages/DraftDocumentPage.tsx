@@ -576,7 +576,7 @@ export default function DraftDocumentPage() {
                     </TabsContent>
                     <TabsContent value="preview">
                       {buildingPreview && <p className="text-sm text-muted-foreground mb-2">Building preview…</p>}
-                      <div ref={previewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto" />
+                      <div ref={previewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto overflow-x-auto" />
                     </TabsContent>
                   </Tabs>
                   <Button onClick={handleSaveAsVersion} disabled={saving}>

@@ -104,6 +104,50 @@ export function useCreateMatter() {
   });
 }
 
+// Every table under a matter (matter_documents, document_versions,
+// redline_suggestions, ai_chat_threads/messages, matter_context,
+// matter_relevant_laws, matter_stages/parties/notes/tasks, and the matter's
+// RAG chunks in `documents`) cascades via ON DELETE CASCADE at the DB level
+// — a plain delete on `matters` removes all of it. whatsapp_matters is the
+// one exception, deliberately ON DELETE SET NULL: that's synced WhatsApp
+// bot data the firm doesn't own, so deleting a matter just unlinks it
+// rather than destroying it. The one thing FK cascades can't reach is
+// Storage — matter-documents bucket objects are collected before the
+// delete (their DB rows are about to disappear) and removed after,
+// best-effort, since a few orphaned files aren't worth failing the delete
+// itself over.
+export function useDeleteMatter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (matterId: string) => {
+      const { data: matterDocs } = await supabase
+        .from("matter_documents")
+        .select("id")
+        .eq("matter_id", matterId);
+
+      let storagePaths: string[] = [];
+      if (matterDocs && matterDocs.length > 0) {
+        const { data: versions } = await supabase
+          .from("document_versions")
+          .select("storage_path")
+          .in("matter_document_id", matterDocs.map((d) => d.id));
+        storagePaths = (versions ?? []).map((v) => v.storage_path);
+      }
+
+      const { error } = await supabase.from("matters").delete().eq("id", matterId);
+      if (error) throw error;
+
+      if (storagePaths.length > 0) {
+        const { error: storageError } = await supabase.storage.from("matter-documents").remove(storagePaths);
+        if (storageError) console.error("Matter deleted but some storage files could not be removed:", storageError);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["matters"] });
+    },
+  });
+}
+
 export function useMatterStages(matterId: string | undefined) {
   return useQuery({
     queryKey: ["matter-stages", matterId],

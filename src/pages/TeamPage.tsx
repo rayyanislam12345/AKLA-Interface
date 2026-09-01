@@ -94,28 +94,46 @@ function WhatsAppAccountsSection() {
         ) : !links?.length ? (
           <p className="text-sm text-muted-foreground">No WhatsApp accounts linked yet.</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Dashboard username</TableHead>
-                <TableHead>Linked lawyer</TableHead>
-                <TableHead className="w-12"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Dashboard username</TableHead>
+                    <TableHead>Linked lawyer</TableHead>
+                    <TableHead className="w-12"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {links.map((link) => (
+                    <TableRow key={link.id}>
+                      <TableCell className="font-mono text-sm">{link.whatsapp_user_id}</TableCell>
+                      <TableCell>{link.profile_name || link.profile_email}</TableCell>
+                      <TableCell>
+                        <Button size="icon" variant="ghost" onClick={() => handleUnlink(link.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
               {links.map((link) => (
-                <TableRow key={link.id}>
-                  <TableCell className="font-mono text-sm">{link.whatsapp_user_id}</TableCell>
-                  <TableCell>{link.profile_name || link.profile_email}</TableCell>
-                  <TableCell>
-                    <Button size="icon" variant="ghost" onClick={() => handleUnlink(link.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
+                <div key={link.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm truncate">{link.whatsapp_user_id}</p>
+                    <p className="text-sm text-muted-foreground truncate">{link.profile_name || link.profile_email}</p>
+                  </div>
+                  <Button size="icon" variant="ghost" className="shrink-0" onClick={() => handleUnlink(link.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -147,38 +165,66 @@ function PendingApprovalsSection() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="w-48"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead className="w-48"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pending?.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">{p.full_name || "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.email}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={decide.isPending}
+                            onClick={() => handleDecide(p.id, "rejected")}
+                          >
+                            Reject
+                          </Button>
+                          <Button size="sm" disabled={decide.isPending} onClick={() => handleDecide(p.id, "approved")}>
+                            Approve
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="sm:hidden space-y-2">
               {pending?.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.full_name || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{p.email}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={decide.isPending}
-                        onClick={() => handleDecide(p.id, "rejected")}
-                      >
-                        Reject
-                      </Button>
-                      <Button size="sm" disabled={decide.isPending} onClick={() => handleDecide(p.id, "approved")}>
-                        Approve
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <div key={p.id} className="border rounded-md px-3 py-2.5 space-y-2">
+                  <div className="min-w-0">
+                    <p className="font-medium">{p.full_name || "—"}</p>
+                    <p className="text-sm text-muted-foreground truncate">{p.email}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={decide.isPending}
+                      onClick={() => handleDecide(p.id, "rejected")}
+                    >
+                      Reject
+                    </Button>
+                    <Button size="sm" disabled={decide.isPending} onClick={() => handleDecide(p.id, "approved")}>
+                      Approve
+                    </Button>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -205,44 +251,78 @@ export default function TeamPage() {
       {isLoading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {profiles?.map((profile) => (
+                  <TableRow key={profile.id}>
+                    <TableCell className="font-medium">{profile.full_name || "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{profile.email}</TableCell>
+                    <TableCell>
+                      {isAdmin ? (
+                        <Select
+                          value={profile.role ?? undefined}
+                          onValueChange={(value) => setRole.mutate({ userId: profile.id, role: value as AppRole })}
+                        >
+                          <SelectTrigger className="w-40">
+                            <SelectValue placeholder="No role" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ROLES.map((role) => (
+                              <SelectItem key={role} value={role}>
+                                {role}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge variant="secondary">{profile.role || "no role"}</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="sm:hidden space-y-2">
             {profiles?.map((profile) => (
-              <TableRow key={profile.id}>
-                <TableCell className="font-medium">{profile.full_name || "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{profile.email}</TableCell>
-                <TableCell>
-                  {isAdmin ? (
-                    <Select
-                      value={profile.role ?? undefined}
-                      onValueChange={(value) => setRole.mutate({ userId: profile.id, role: value as AppRole })}
-                    >
-                      <SelectTrigger className="w-40">
-                        <SelectValue placeholder="No role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROLES.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {role}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Badge variant="secondary">{profile.role || "no role"}</Badge>
-                  )}
-                </TableCell>
-              </TableRow>
+              <div key={profile.id} className="border rounded-md px-3 py-2.5 space-y-2">
+                <div className="min-w-0">
+                  <p className="font-medium">{profile.full_name || "—"}</p>
+                  <p className="text-sm text-muted-foreground truncate">{profile.email}</p>
+                </div>
+                {isAdmin ? (
+                  <Select
+                    value={profile.role ?? undefined}
+                    onValueChange={(value) => setRole.mutate({ userId: profile.id, role: value as AppRole })}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="No role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {role}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Badge variant="secondary">{profile.role || "no role"}</Badge>
+                )}
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </>
       )}
 
       {isAdmin && <WhatsAppAccountsSection />}

@@ -401,11 +401,11 @@ export default function RecordMeetingPage() {
           </p>
           {buildingProposalPreview && <p className="text-sm text-muted-foreground">Building preview…</p>}
           {proposalDraft ? (
-            <div ref={proposalPreviewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto" />
+            <div ref={proposalPreviewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto overflow-x-auto" />
           ) : (
             <div className="border rounded-md p-4 text-sm text-muted-foreground">No proposal generated yet.</div>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={() => proposalDraft && handleDownload("proposal", proposalDraft)} disabled={!proposalDraft}>
               <Download className="h-4 w-4 mr-2" />
               Save Proposal (.docx)
@@ -428,11 +428,11 @@ export default function RecordMeetingPage() {
           </p>
           {buildingMinutesPreview && <p className="text-sm text-muted-foreground">Building preview…</p>}
           {minutesDraft ? (
-            <div ref={minutesPreviewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto" />
+            <div ref={minutesPreviewRef} className="border rounded-md p-4 max-h-[600px] overflow-y-auto overflow-x-auto" />
           ) : (
             <div className="border rounded-md p-4 text-sm text-muted-foreground">No minutes generated yet.</div>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               onClick={() => minutesDraft && handleDownload(minutesDraft.format, minutesDraft.text)}

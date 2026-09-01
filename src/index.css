@@ -155,8 +155,13 @@ All colors MUST be HSL.
     scroll-behavior: smooth;
   }
 
+  /* Safety net so the page itself never scrolls horizontally on mobile —
+     wide content (docx previews, data tables) must opt into its own
+     overflow-x-auto container instead of stretching the whole page. */
+  html,
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground overflow-x-hidden;
+    max-width: 100vw;
   }
 }
 

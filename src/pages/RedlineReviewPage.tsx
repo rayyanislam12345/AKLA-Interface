@@ -271,7 +271,7 @@ export default function RedlineReviewPage() {
         <p className="text-muted-foreground">No document version to review yet — upload one first.</p>
       ) : (
         <>
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center flex-wrap">
             <Button onClick={handleRunReview} disabled={runReview.isPending || applyPreview.isPending}>
               <ScanSearch className="h-4 w-4 mr-2" />
               {suggestions?.length ? "Re-run AI Review" : "Run AI Review"}
@@ -310,7 +310,7 @@ export default function RedlineReviewPage() {
             <div className="grid md:grid-cols-[1fr_320px] gap-6 items-start">
               <Card>
                 <CardContent className="pt-6">
-                  <div ref={previewRef} className="max-h-[75vh] overflow-y-auto" />
+                  <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />
                 </CardContent>
               </Card>
               <div className="space-y-2">

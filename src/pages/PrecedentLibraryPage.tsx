@@ -62,41 +62,70 @@ function LawLibraryTab() {
       ) : !statutes?.length ? (
         <p className="text-muted-foreground">Nothing in the law library yet.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Act</TableHead>
-              <TableHead>Chunks</TableHead>
-              <TableHead>Added</TableHead>
-              <TableHead className="w-20"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Act</TableHead>
+                  <TableHead>Chunks</TableHead>
+                  <TableHead>Added</TableHead>
+                  <TableHead className="w-20"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {statutes.map((s) => (
+                  <TableRow key={s.act_name}>
+                    <TableCell className="max-w-md">{s.act_name}</TableCell>
+                    <TableCell className="text-muted-foreground">{s.chunk_count}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {s.source_url && (
+                          <Button size="icon" variant="ghost" asChild>
+                            <a href={s.source_url} target="_blank" rel="noreferrer" title="View source">
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        )}
+                        <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="sm:hidden space-y-2">
             {statutes.map((s) => (
-              <TableRow key={s.act_name}>
-                <TableCell className="max-w-md">{s.act_name}</TableCell>
-                <TableCell className="text-muted-foreground">{s.chunk_count}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1">
-                    {s.source_url && (
-                      <Button size="icon" variant="ghost" asChild>
-                        <a href={s.source_url} target="_blank" rel="noreferrer" title="View source">
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    )}
-                    <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
-                      <Trash2 className="h-4 w-4" />
+              <div key={s.act_name} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm truncate">{s.act_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {s.chunk_count} chunks · {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {s.source_url && (
+                    <Button size="icon" variant="ghost" asChild>
+                      <a href={s.source_url} target="_blank" rel="noreferrer" title="View source">
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
                     </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
+                  )}
+                  <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </>
       )}
     </div>
   );
@@ -119,32 +148,56 @@ function StandardizeTab() {
       ) : !rows?.length ? (
         <p className="text-muted-foreground">No document types yet.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Document Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last Updated</TableHead>
-              <TableHead className="w-32"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Document Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Last Updated</TableHead>
+                  <TableHead className="w-32"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.document_type_id}>
+                    <TableCell className="max-w-md">{row.document_type_name}</TableCell>
+                    <TableCell>
+                      <Badge variant={row.filename ? "default" : "secondary"}>
+                        {row.filename ? "Standardized" : "Not yet standardized"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.updated_at
+                        ? `${new Date(row.updated_at).toLocaleDateString()}${
+                            row.updated_by_name ? ` by ${row.updated_by_name}` : ""
+                          }`
+                        : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
+                      >
+                        {row.filename ? "Replace" : "Upload"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="sm:hidden space-y-2">
             {rows.map((row) => (
-              <TableRow key={row.document_type_id}>
-                <TableCell className="max-w-md">{row.document_type_name}</TableCell>
-                <TableCell>
+              <div key={row.document_type_id} className="border rounded-md px-3 py-2.5 space-y-2">
+                <p className="text-sm font-medium">{row.document_type_name}</p>
+                <div className="flex items-center justify-between gap-2">
                   <Badge variant={row.filename ? "default" : "secondary"}>
                     {row.filename ? "Standardized" : "Not yet standardized"}
                   </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {row.updated_at
-                    ? `${new Date(row.updated_at).toLocaleDateString()}${
-                        row.updated_by_name ? ` by ${row.updated_by_name}` : ""
-                      }`
-                    : "—"}
-                </TableCell>
-                <TableCell>
                   <Button
                     size="sm"
                     variant="outline"
@@ -152,11 +205,17 @@ function StandardizeTab() {
                   >
                     {row.filename ? "Replace" : "Upload"}
                   </Button>
-                </TableCell>
-              </TableRow>
+                </div>
+                {row.updated_at && (
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(row.updated_at).toLocaleDateString()}
+                    {row.updated_by_name ? ` by ${row.updated_by_name}` : ""}
+                  </p>
+                )}
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </>
       )}
     </div>
   );
@@ -325,36 +384,60 @@ export default function PrecedentLibraryPage() {
                   <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
                     {category}
                   </h2>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>File</TableHead>
-                        <TableHead>Chunks</TableHead>
-                        <TableHead>Added</TableHead>
-                        <TableHead className="w-12"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items!.map((s) => (
-                        <TableRow key={s.storage_path}>
-                          <TableCell className="truncate max-w-xs">{s.filename}</TableCell>
-                          <TableCell className={cn("text-muted-foreground")}>{s.chunk_count}</TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {new Date(s.created_at).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => handleDelete(s.storage_path, s.filename)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
+
+                  <div className="hidden sm:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>File</TableHead>
+                          <TableHead>Chunks</TableHead>
+                          <TableHead>Added</TableHead>
+                          <TableHead className="w-12"></TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {items!.map((s) => (
+                          <TableRow key={s.storage_path}>
+                            <TableCell className="truncate max-w-xs">{s.filename}</TableCell>
+                            <TableCell className={cn("text-muted-foreground")}>{s.chunk_count}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(s.created_at).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleDelete(s.storage_path, s.filename)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="sm:hidden space-y-2">
+                    {items!.map((s) => (
+                      <div key={s.storage_path} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm truncate">{s.filename}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {s.chunk_count} chunks · {new Date(s.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="shrink-0"
+                          onClick={() => handleDelete(s.storage_path, s.filename)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))
             )}

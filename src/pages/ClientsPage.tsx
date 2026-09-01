@@ -41,7 +41,7 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Clients</h1>
           <p className="text-muted-foreground">Entities the firm represents across its matters.</p>
@@ -85,26 +85,43 @@ export default function ClientsPage() {
       ) : !clients?.length ? (
         <p className="text-muted-foreground">No clients yet.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Description</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {clients.map((client) => (
+                  <TableRow
+                    key={client.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/matters?client=${client.id}`)}
+                  >
+                    <TableCell className="font-medium">{client.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{client.description || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="sm:hidden space-y-2">
             {clients.map((client) => (
-              <TableRow
+              <button
                 key={client.id}
-                className="cursor-pointer"
+                className="w-full text-left border rounded-md px-3 py-2.5"
                 onClick={() => navigate(`/matters?client=${client.id}`)}
               >
-                <TableCell className="font-medium">{client.name}</TableCell>
-                <TableCell className="text-muted-foreground">{client.description || "—"}</TableCell>
-              </TableRow>
+                <p className="font-medium">{client.name}</p>
+                {client.description && <p className="text-sm text-muted-foreground mt-0.5">{client.description}</p>}
+              </button>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </>
       )}
     </div>
   );

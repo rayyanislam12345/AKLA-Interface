@@ -48,7 +48,7 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
 
   return (
     <Select value={whatsappMatter.matter_id ?? "unlinked"} onValueChange={handleChange}>
-      <SelectTrigger className="w-56" onClick={(e) => e.stopPropagation()}>
+      <SelectTrigger className="w-full sm:w-56" onClick={(e) => e.stopPropagation()}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent onClick={(e) => e.stopPropagation()}>
@@ -63,7 +63,10 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
   );
 }
 
-function DetailRow({ whatsappMatter }: { whatsappMatter: WhatsAppMatter }) {
+// Pure content, shared by the desktop table's expanded row and the mobile
+// card's expanded section — only the wrapper differs (TableRow/TableCell
+// vs a plain div), so this stays presentation-independent.
+function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatter }) {
   const { data: files, isLoading } = useWhatsAppDocuments(whatsappMatter.id);
   const { toast } = useToast();
 
@@ -81,52 +84,107 @@ function DetailRow({ whatsappMatter }: { whatsappMatter: WhatsAppMatter }) {
   };
 
   return (
+    <div className="space-y-4">
+      {whatsappMatter.detailed_summary && (
+        <p className="text-sm text-muted-foreground max-w-3xl">{whatsappMatter.detailed_summary}</p>
+      )}
+
+      {timeline.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recent activity</p>
+          {timeline.map((entry, i) => (
+            <div key={i} className="text-sm flex gap-2 flex-wrap">
+              <span className="text-muted-foreground whitespace-nowrap">
+                {format(new Date(entry.timestamp), "d MMM, h:mm a")}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground shrink-0">{entry.chat}</span>
+              <span>{entry.summary}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading documents…</p>
+      ) : !files?.length ? (
+        <p className="text-sm text-muted-foreground">No documents captured for this matter.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {files.map((file) => (
+            <Button
+              key={file.id}
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpen(file.storage_path)}
+              className="gap-1.5"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {file.filename}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ whatsappMatter }: { whatsappMatter: WhatsAppMatter }) {
+  return (
     <TableRow className="bg-muted/30 hover:bg-muted/30">
       <TableCell colSpan={7} className="py-4">
-        <div className="space-y-4">
-          {whatsappMatter.detailed_summary && (
-            <p className="text-sm text-muted-foreground max-w-3xl">{whatsappMatter.detailed_summary}</p>
-          )}
+        <WhatsAppMatterDetail whatsappMatter={whatsappMatter} />
+      </TableCell>
+    </TableRow>
+  );
+}
 
-          {timeline.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recent activity</p>
-              {timeline.map((entry, i) => (
-                <div key={i} className="text-sm flex gap-2">
-                  <span className="text-muted-foreground whitespace-nowrap">
-                    {format(new Date(entry.timestamp), "d MMM, h:mm a")}
-                  </span>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="text-muted-foreground shrink-0">{entry.chat}</span>
-                  <span>{entry.summary}</span>
-                </div>
+// Mobile equivalent of a table row — everything a TableRow's columns show,
+// stacked instead of laid out side by side, so nothing needs its own
+// horizontal scroll on a narrow screen.
+function WhatsAppMatterCard({ whatsappMatter, expanded, onToggle }: { whatsappMatter: WhatsAppMatter; expanded: boolean; onToggle: () => void }) {
+  return (
+    <div className="border rounded-md">
+      <button className="w-full text-left px-3 py-2.5 flex items-start gap-2" onClick={onToggle}>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+        )}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div>
+            <p className="font-medium">{whatsappMatter.name}</p>
+            {whatsappMatter.summary && <p className="text-xs text-muted-foreground">{whatsappMatter.summary}</p>}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {whatsappMatter.owner_name ?? "Unknown"} · {whatsappMatter.message_count} messages · Last active{" "}
+            {formatDate(whatsappMatter.last_active_at)}
+          </p>
+          {whatsappMatter.chats.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {whatsappMatter.chats.slice(0, 3).map((chat) => (
+                <Badge key={chat} variant="outline" className="text-[10px] font-normal">
+                  {chat}
+                </Badge>
               ))}
-            </div>
-          )}
-
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading documents…</p>
-          ) : !files?.length ? (
-            <p className="text-sm text-muted-foreground">No documents captured for this matter.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {files.map((file) => (
-                <Button
-                  key={file.id}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpen(file.storage_path)}
-                  className="gap-1.5"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  {file.filename}
-                </Button>
-              ))}
+              {whatsappMatter.chats.length > 3 && (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  +{whatsappMatter.chats.length - 3}
+                </Badge>
+              )}
             </div>
           )}
         </div>
-      </TableCell>
-    </TableRow>
+      </button>
+      <div className="px-3 pb-2.5" onClick={(e) => e.stopPropagation()}>
+        <LinkToMatterSelect whatsappMatter={whatsappMatter} />
+      </div>
+      {expanded && (
+        <div className="border-t px-3 py-3">
+          <WhatsAppMatterDetail whatsappMatter={whatsappMatter} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -379,64 +437,83 @@ export default function WhatsAppActivityPage() {
       ) : !filtered.length ? (
         <p className="text-muted-foreground">No WhatsApp activity to show.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8"></TableHead>
-              <TableHead>Matter</TableHead>
-              <TableHead>Captured by</TableHead>
-              <TableHead>Chats</TableHead>
-              <TableHead>Messages</TableHead>
-              <TableHead>Last active</TableHead>
-              <TableHead>Link to Matter</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((m) => {
-              const expanded = expandedId === m.id;
-              return (
-                <Fragment key={m.id}>
-                  <TableRow className="cursor-pointer" onClick={() => setExpandedId(expanded ? null : m.id)}>
-                    <TableCell>
-                      {expanded ? (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-sm">
-                      <p className="font-medium truncate">{m.name}</p>
-                      {m.summary && <p className="text-xs text-muted-foreground truncate">{m.summary}</p>}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{m.owner_name ?? "—"}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1 max-w-48">
-                        {m.chats.slice(0, 3).map((chat) => (
-                          <Badge key={chat} variant="outline" className="text-[10px] font-normal">
-                            {chat}
-                          </Badge>
-                        ))}
-                        {m.chats.length > 3 && (
-                          <Badge variant="outline" className="text-[10px] font-normal">
-                            +{m.chats.length - 3}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{m.message_count}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {formatDate(m.last_active_at)}
-                    </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <LinkToMatterSelect whatsappMatter={m} />
-                    </TableCell>
-                  </TableRow>
-                  {expanded && <DetailRow whatsappMatter={m} />}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
+        <>
+          {/* Below sm, a table forces horizontal scroll no matter how narrow
+              the columns get — a stacked card per matter instead needs no
+              scrolling at all, at the cost of showing one matter at a time
+              instead of a dense grid. */}
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8"></TableHead>
+                  <TableHead>Matter</TableHead>
+                  <TableHead>Captured by</TableHead>
+                  <TableHead>Chats</TableHead>
+                  <TableHead>Messages</TableHead>
+                  <TableHead>Last active</TableHead>
+                  <TableHead>Link to Matter</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((m) => {
+                  const expanded = expandedId === m.id;
+                  return (
+                    <Fragment key={m.id}>
+                      <TableRow className="cursor-pointer" onClick={() => setExpandedId(expanded ? null : m.id)}>
+                        <TableCell>
+                          {expanded ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-sm">
+                          <p className="font-medium truncate">{m.name}</p>
+                          {m.summary && <p className="text-xs text-muted-foreground truncate">{m.summary}</p>}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{m.owner_name ?? "—"}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1 max-w-48">
+                            {m.chats.slice(0, 3).map((chat) => (
+                              <Badge key={chat} variant="outline" className="text-[10px] font-normal">
+                                {chat}
+                              </Badge>
+                            ))}
+                            {m.chats.length > 3 && (
+                              <Badge variant="outline" className="text-[10px] font-normal">
+                                +{m.chats.length - 3}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{m.message_count}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {formatDate(m.last_active_at)}
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <LinkToMatterSelect whatsappMatter={m} />
+                        </TableCell>
+                      </TableRow>
+                      {expanded && <DetailRow whatsappMatter={m} />}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="sm:hidden space-y-2">
+            {filtered.map((m) => (
+              <WhatsAppMatterCard
+                key={m.id}
+                whatsappMatter={m}
+                expanded={expandedId === m.id}
+                onToggle={() => setExpandedId(expandedId === m.id ? null : m.id)}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

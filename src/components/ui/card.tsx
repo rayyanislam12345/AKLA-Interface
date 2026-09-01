@@ -2,8 +2,13 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+// min-w-0 overrides the flex/grid default of min-width:auto — a Card used
+// as a grid or flex item would otherwise refuse to shrink below its
+// content's intrinsic width (e.g. a row of inputs/buttons) and overflow its
+// track instead of letting that content wrap within it. No effect on a Card
+// in normal block flow, where it always shrinks to its container anyway.
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
+  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm min-w-0", className)} {...props} />
 ));
 Card.displayName = "Card";
 
