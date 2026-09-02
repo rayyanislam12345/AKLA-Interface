@@ -686,7 +686,9 @@ export type Database = {
       }
       matter_timeslips: {
         Row: {
+          ak_billable_hours: number | null
           author_id: string
+          billable_hours: number | null
           external_id: string | null
           hours: number
           hub_task_id: string | null
@@ -700,7 +702,9 @@ export type Database = {
           work_date: string
         }
         Insert: {
+          ak_billable_hours?: number | null
           author_id: string
+          billable_hours?: number | null
           external_id?: string | null
           hours: number
           hub_task_id?: string | null
@@ -714,7 +718,9 @@ export type Database = {
           work_date: string
         }
         Update: {
+          ak_billable_hours?: number | null
           author_id?: string
+          billable_hours?: number | null
           external_id?: string | null
           hours?: number
           hub_task_id?: string | null

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
-import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, Save } from "lucide-react";
+import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, Save } from "lucide-react";
 import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
@@ -47,6 +47,7 @@ export default function RecordMeetingPage() {
   const [minutesDraft, setMinutesDraft] = useState<{ format: "minutes-akla" | "minutes-standard"; text: string } | null>(null);
   const [translating, setTranslating] = useState(false);
   const [improving, setImproving] = useState(false);
+  const [transcribingRecording, setTranscribingRecording] = useState(false);
 
   const [uploadMatterId, setUploadMatterId] = useState<string>("");
   const [uploadingFormat, setUploadingFormat] = useState<MeetingOutputFormat | null>(null);
@@ -57,6 +58,7 @@ export default function RecordMeetingPage() {
   const [buildingMinutesPreview, setBuildingMinutesPreview] = useState(false);
 
   const transcriptFileInputRef = useRef<HTMLInputElement>(null);
+  const recordingFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!proposalDraft || !proposalPreviewRef.current) return;
@@ -160,6 +162,37 @@ export default function RecordMeetingPage() {
     if (relay.segments.length > 0 && !window.confirm("This replaces the current transcript. Continue?")) return;
     const text = await file.text();
     relay.setSegments(parseTranscriptText(text));
+  };
+
+  const handleUploadRecordingClick = () => {
+    if (relay.recording) return;
+    recordingFileInputRef.current?.click();
+  };
+
+  // Confirms the replacement up front, before the (potentially slow)
+  // transcription runs — unlike handleTranscriptFileSelected above, where
+  // parsing a text file is instant so there's nothing wasted by confirming
+  // afterward. Ported from transcription-bot's Upload Recording feature.
+  const handleRecordingFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (relay.segments.length > 0 && !window.confirm("This replaces the current transcript. Continue?")) return;
+
+    setTranscribingRecording(true);
+    try {
+      const result = await relay.transcribeFile(file, relay.language);
+      if (!result.ok) {
+        toast({ title: "Could not transcribe recording", description: result.error, variant: "destructive" });
+        return;
+      }
+      relay.setSegments(result.segments ?? []);
+      if (!result.segments || result.segments.length === 0) {
+        toast({ title: "No speech detected in the recording", variant: "destructive" });
+      }
+    } finally {
+      setTranscribingRecording(false);
+    }
   };
 
   const handleSaveTranscript = () => {
@@ -300,6 +333,18 @@ export default function RecordMeetingPage() {
             <Button variant="outline" onClick={handleUploadTranscriptClick} disabled={relay.recording}>
               <FileUp className="h-4 w-4 mr-2" />
               Upload Transcript…
+            </Button>
+
+            <input
+              ref={recordingFileInputRef}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={handleRecordingFileSelected}
+            />
+            <Button variant="outline" onClick={handleUploadRecordingClick} disabled={relay.recording || transcribingRecording}>
+              <FileAudio className="h-4 w-4 mr-2" />
+              {transcribingRecording ? "Transcribing…" : "Upload Recording…"}
             </Button>
 
             <Button variant="outline" onClick={handleImproveDiarization} disabled={!hasContent || improving}>

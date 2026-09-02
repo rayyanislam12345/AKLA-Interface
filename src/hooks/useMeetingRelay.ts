@@ -59,6 +59,7 @@ export function useMeetingRelay() {
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const pendingTranslateResolvers = useRef<Map<number, (r: TranslateResultEvent["results"]) => void>>(new Map());
   const pendingDiarizeResolvers = useRef<((r: DiarizationResultEvent) => void)[]>([]);
+  const pendingStartResolver = useRef<((ok: boolean) => void) | null>(null);
 
   const send = useCallback((payload: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -104,7 +105,18 @@ export function useMeetingRelay() {
       const ws = new WebSocket(`${RELAY_URL}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
-      ws.onopen = () => setConnected(true);
+      // Resolves as soon as the socket itself is open — separate from
+      // whether a meeting has actually been started (see pendingStartResolver
+      // / startMeeting below). Previously this only resolved on a
+      // "start-ack" message, which meant calling connect() on its own (as
+      // improveDiarization/translateSegments below now need to, for an
+      // upload-only session that never called startMeeting) would hang
+      // forever: nothing sends "start" until after connect() resolves, so
+      // the "start-ack" this awaited would never arrive.
+      ws.onopen = () => {
+        setConnected(true);
+        resolve(true);
+      };
       ws.onerror = () => {
         setError("Could not connect to the transcription relay.");
         resolve(false);
@@ -123,7 +135,8 @@ export function useMeetingRelay() {
         switch (msg.type) {
           case "start-ack":
             if (!msg.ok) setError(msg.error || "Failed to start meeting.");
-            resolve(Boolean(msg.ok));
+            pendingStartResolver.current?.(Boolean(msg.ok));
+            pendingStartResolver.current = null;
             return;
           case "transcript":
             handleTranscript(msg);
@@ -185,16 +198,30 @@ export function useMeetingRelay() {
     streamRef.current = null;
   }, []);
 
+  // Opens the relay socket if it isn't already — used by startMeeting and
+  // also by improveDiarization/translateSegments/transcribeFile below, none
+  // of which require a meeting to actually be started, just a socket to send
+  // control messages over (an upload-only session, with no live recording
+  // ever started, otherwise has no open socket at all).
+  const ensureConnected = useCallback(async (): Promise<boolean> => {
+    return wsRef.current?.readyState === WebSocket.OPEN ? true : connect();
+  }, [connect]);
+
   const startMeeting = useCallback(
     async (initialLanguage: MeetingLanguage) => {
       setSegments([]);
       setSpeakerNames(new Map());
       setLanguage(initialLanguage);
 
-      const connectedOk = wsRef.current?.readyState === WebSocket.OPEN ? true : await connect();
+      const connectedOk = await ensureConnected();
       if (!connectedOk) return false;
 
-      send({ type: "start", language: initialLanguage });
+      const startedOk = await new Promise<boolean>((resolve) => {
+        pendingStartResolver.current = resolve;
+        send({ type: "start", language: initialLanguage });
+      });
+      if (!startedOk) return false;
+
       try {
         await startAudioPipeline();
       } catch (err: any) {
@@ -204,7 +231,7 @@ export function useMeetingRelay() {
       setRecording(true);
       return true;
     },
-    [connect, send, startAudioPipeline]
+    [ensureConnected, send, startAudioPipeline]
   );
 
   const stopMeeting = useCallback(() => {
@@ -222,12 +249,16 @@ export function useMeetingRelay() {
     [send]
   );
 
-  const improveDiarization = useCallback((): Promise<DiarizationResultEvent> => {
+  const improveDiarization = useCallback(async (): Promise<DiarizationResultEvent> => {
+    const connectedOk = await ensureConnected();
+    if (!connectedOk) {
+      return { type: "diarization-result", ok: false, error: "Could not connect to the transcription relay." };
+    }
     return new Promise((resolve) => {
       pendingDiarizeResolvers.current.push(resolve);
       send({ type: "improve-diarization" });
     });
-  }, [send]);
+  }, [ensureConnected, send]);
 
   const mergeSpeakers = useCallback((fromId: number, intoLabel: string) => {
     setSpeakerNames((prev) => {
@@ -240,13 +271,14 @@ export function useMeetingRelay() {
   // Groups consecutive same-speaker segments and requests a batch
   // translation for whichever ones need it (Urdu, or already have rawText).
   const translateSegments = useCallback(
-    (ids: number[]) => {
+    async (ids: number[]) => {
+      const targets = segments.filter((s) => ids.includes(s.id));
+      if (targets.length === 0) return;
+
+      const connectedOk = await ensureConnected();
+      if (!connectedOk) return; // best-effort; the caller's UI already surfaces relay.error
+
       return new Promise<void>((resolve) => {
-        const targets = segments.filter((s) => ids.includes(s.id));
-        if (targets.length === 0) {
-          resolve();
-          return;
-        }
         const groups: { id: number; text: string }[][] = [];
         let currentGroup: { id: number; text: string }[] = [];
         let currentSpeaker: number | string | undefined;
@@ -277,7 +309,7 @@ export function useMeetingRelay() {
         send({ type: "translate-batch", groups });
       });
     },
-    [segments, send]
+    [segments, send, ensureConnected]
   );
 
   const disconnect = useCallback(() => {
@@ -298,6 +330,44 @@ export function useMeetingRelay() {
     [speakerNames]
   );
 
+  // Transcribes an already-recorded meeting file. A one-shot HTTP POST to
+  // the relay (not a WebSocket control message like everything else here) —
+  // it doesn't need a persistent session, and this way the browser's File
+  // object can stream straight into the request body with its own MIME type
+  // as Content-Type, matching transcription-bot's Upload Recording feature
+  // (ported from src/main.js's transcribeAudioFile / meeting:transcribe-file).
+  const transcribeFile = useCallback(
+    async (file: File, fileLanguage: MeetingLanguage): Promise<{ ok: boolean; segments?: MeetingSegment[]; error?: string }> => {
+      if (!RELAY_URL) {
+        return { ok: false, error: "Transcription relay is not configured (VITE_TRANSCRIPTION_RELAY_URL)." };
+      }
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) {
+        return { ok: false, error: "Not signed in." };
+      }
+
+      const httpBase = RELAY_URL.replace(/^ws/, "http");
+      const url = `${httpBase}/transcribe-file?token=${encodeURIComponent(token)}&language=${encodeURIComponent(fileLanguage)}`;
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+        const body = await res.json();
+        if (!res.ok || !body.ok) {
+          return { ok: false, error: body.error || `Transcription failed (${res.status}).` };
+        }
+        return { ok: true, segments: body.segments as MeetingSegment[] };
+      } catch (err: any) {
+        return { ok: false, error: err.message || "Could not reach the transcription relay." };
+      }
+    },
+    []
+  );
+
   return {
     connected,
     recording,
@@ -314,6 +384,7 @@ export function useMeetingRelay() {
     improveDiarization,
     mergeSpeakers,
     translateSegments,
+    transcribeFile,
     speakerLabel,
     disconnect,
   };

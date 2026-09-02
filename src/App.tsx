@@ -22,6 +22,7 @@ import StandardizeDocumentTypePage from "./pages/StandardizeDocumentTypePage";
 import MandateOpportunitiesPage from "./pages/MandateOpportunitiesPage";
 import WhatsAppActivityPage from "./pages/WhatsAppActivityPage";
 import ClientsPage from "./pages/ClientsPage";
+import TodaysTimesheetPage from "./pages/TodaysTimesheetPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
 import NotFound from "./pages/NotFound";
@@ -97,6 +98,16 @@ const App = () => {
                     <ProtectedRoute>
                       <AppLayout>
                         <MatterChatPage />
+                      </AppLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/timesheet"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout>
+                        <TodaysTimesheetPage />
                       </AppLayout>
                     </ProtectedRoute>
                   }

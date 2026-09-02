@@ -1,0 +1,267 @@
+import { useEffect, useMemo, useState } from "react";
+import { Clock, Download, Loader2 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useMyProfile } from "@/hooks/useProfiles";
+import { useMatters } from "@/hooks/useMatters";
+import { MyTimeslip, resolveRange, useMyTimeslips, useUpdateMyTimeslip } from "@/hooks/useMatterTimeslips";
+import { buildTimesheetDocxBlob } from "@/lib/timesheetDocx";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+
+function roleLabel(role: string | null) {
+  if (!role) return "Associate";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function todayLabel() {
+  return new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+interface EditableRow {
+  id: string;
+  matterId: string;
+  narrative: string;
+  hours: string;
+  billableHours: string;
+  akBillableHours: string;
+}
+
+function toEditableRow(slip: MyTimeslip): EditableRow {
+  return {
+    id: slip.id,
+    matterId: slip.matter_id,
+    narrative: slip.narrative,
+    hours: String(slip.hours),
+    billableHours: slip.billable_hours === null ? "" : String(slip.billable_hours),
+    akBillableHours: slip.ak_billable_hours === null ? "" : String(slip.ak_billable_hours),
+  };
+}
+
+export default function TodaysTimesheetPage() {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const { data: myProfile } = useMyProfile();
+  const { data: matters } = useMatters();
+  const [downloading, setDownloading] = useState(false);
+  const [rows, setRows] = useState<EditableRow[]>([]);
+
+  const range = useMemo(() => resolveRange("today"), []);
+  const { data: slips, isLoading, error } = useMyTimeslips(user?.id, range);
+  const updateTimeslip = useUpdateMyTimeslip();
+
+  // Only re-seed local editable state when the actual set of entries
+  // changes (add/remove) — not on every refetch — so a field the user is
+  // mid-edit on doesn't get clobbered by the query settling after an
+  // unrelated field's save.
+  const slipIds = (slips ?? []).map((s) => s.id).join(",");
+  useEffect(() => {
+    setRows((slips ?? []).map(toEditableRow));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slipIds]);
+
+  const totalHours = rows.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+
+  const matterName = (matterId: string) => matters?.find((m) => m.id === matterId)?.name ?? "Unknown Matter";
+
+  const patchRow = (id: string, patch: Partial<EditableRow>) => {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  const saveField = async (id: string, edits: Parameters<typeof updateTimeslip.mutateAsync>[0]["edits"]) => {
+    try {
+      await updateTimeslip.mutateAsync({ id, edits });
+    } catch (err: any) {
+      toast({ title: "Failed to save change", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!rows.length) return;
+    setDownloading(true);
+    try {
+      const employeeName = myProfile?.full_name || myProfile?.email || "Associate";
+      const docxRows = rows.map((r, i) => ({
+        srNo: i + 1,
+        matterName: matterName(r.matterId),
+        description: r.narrative,
+        hours: Number(r.hours) || 0,
+        billableHours: r.billableHours === "" ? null : Number(r.billableHours),
+        akBillableHours: r.akBillableHours === "" ? null : Number(r.akBillableHours),
+      }));
+      const today = range.from!;
+      const blob = await buildTimesheetDocxBlob(today, docxRows, roleLabel(myProfile?.role ?? null), employeeName);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Daily-Timesheet-${today}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Failed to generate timesheet", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold">Today's Timesheet</h1>
+          <p className="text-muted-foreground">
+            Your own daily timesheet, built from entries logged via Timekeeper — edit anything below before
+            downloading.
+          </p>
+        </div>
+        <Button onClick={handleDownload} disabled={!rows.length || downloading}>
+          {downloading ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4 mr-2" />
+          )}
+          Download Timesheet (.docx)
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            {todayLabel()}
+          </CardTitle>
+          <span className="text-sm font-medium tabular-nums">{totalHours.toFixed(1)} h</span>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading your time entries…
+            </div>
+          ) : error ? (
+            <div className="py-6 text-sm">
+              <p className="font-medium text-destructive">Could not load your time entries.</p>
+              <p className="mt-1 text-muted-foreground">{(error as Error)?.message ?? "Unknown error"}</p>
+            </div>
+          ) : !rows.length ? (
+            <p className="py-6 text-sm text-muted-foreground">
+              No time recorded today yet. Entries logged via Timekeeper will show up here once uploaded.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">Sr. No.</TableHead>
+                    <TableHead className="w-[200px]">Transaction</TableHead>
+                    <TableHead className="min-w-[260px]">Matter &amp; Description</TableHead>
+                    <TableHead className="w-24">Hours</TableHead>
+                    <TableHead className="w-32">Billable Hours</TableHead>
+                    <TableHead className="w-32">AK Billable Hours</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row, i) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="text-muted-foreground align-top pt-3">{i + 1}</TableCell>
+                      <TableCell className="align-top">
+                        <Select
+                          value={row.matterId}
+                          onValueChange={(value) => {
+                            patchRow(row.id, { matterId: value });
+                            saveField(row.id, { matter_id: value });
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {matters?.map((m) => (
+                              <SelectItem key={m.id} value={m.id}>
+                                {m.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Textarea
+                          value={row.narrative}
+                          onChange={(e) => patchRow(row.id, { narrative: e.target.value })}
+                          onBlur={() => saveField(row.id, { narrative: row.narrative })}
+                          className="min-h-16 text-sm"
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          value={row.hours}
+                          onChange={(e) => patchRow(row.id, { hours: e.target.value })}
+                          onBlur={() => saveField(row.id, { hours: Number(row.hours) || 0 })}
+                          className="h-8 text-xs"
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          placeholder="-"
+                          value={row.billableHours}
+                          onChange={(e) => patchRow(row.id, { billableHours: e.target.value })}
+                          onBlur={() =>
+                            saveField(row.id, {
+                              billable_hours: row.billableHours === "" ? null : Number(row.billableHours),
+                            })
+                          }
+                          className="h-8 text-xs"
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          placeholder="-"
+                          value={row.akBillableHours}
+                          onChange={(e) => patchRow(row.id, { akBillableHours: e.target.value })}
+                          onBlur={() =>
+                            saveField(row.id, {
+                              ak_billable_hours: row.akBillableHours === "" ? null : Number(row.akBillableHours),
+                            })
+                          }
+                          className="h-8 text-xs"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center font-medium">
+                      Total Hours
+                    </TableCell>
+                    <TableCell className="font-medium tabular-nums">{totalHours.toFixed(1)}</TableCell>
+                    <TableCell className="text-muted-foreground">-</TableCell>
+                    <TableCell className="text-muted-foreground">-</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

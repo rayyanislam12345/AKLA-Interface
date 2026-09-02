@@ -66,6 +66,70 @@ export function useMatterTimeslips(
   });
 }
 
+export interface MyTimeslip {
+  id: string;
+  matter_id: string;
+  work_date: string;
+  hours: number;
+  narrative: string;
+  billable_hours: number | null;
+  ak_billable_hours: number | null;
+  matter: { name: string } | null;
+}
+
+// Same shape as useMatterTimeslips but scoped to one associate across every
+// matter they've logged time against, for the self-service "Today's
+// Timesheet" page — RLS already allows any firm member to read all
+// timeslips, so this is purely a client-side author_id filter, not a
+// separate access grant.
+export function useMyTimeslips(
+  userId: string | undefined,
+  range: { from: string | null; to: string | null }
+) {
+  return useQuery({
+    queryKey: ["my-timeslips", userId, range.from, range.to],
+    enabled: !!userId,
+    queryFn: async (): Promise<MyTimeslip[]> => {
+      let q = supabase
+        .from("matter_timeslips")
+        .select(
+          "id, matter_id, work_date, hours, narrative, billable_hours, ak_billable_hours, matter:matters(name)"
+        )
+        .eq("author_id", userId!)
+        .order("uploaded_at", { ascending: true });
+      if (range.from) q = q.gte("work_date", range.from);
+      if (range.to) q = q.lte("work_date", range.to);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as unknown as MyTimeslip[];
+    },
+  });
+}
+
+// Every field a "Today's Timesheet" row can edit inline — matter
+// reassignment included, since the page treats every column (Transaction
+// through AK Billable Hours) as directly editable, not just narrative/hours.
+export interface MyTimeslipEdits {
+  matter_id?: string;
+  narrative?: string;
+  hours?: number;
+  billable_hours?: number | null;
+  ak_billable_hours?: number | null;
+}
+
+export function useUpdateMyTimeslip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, edits }: { id: string; edits: MyTimeslipEdits }) => {
+      const { error } = await supabase.from("matter_timeslips").update(edits).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-timeslips"] });
+    },
+  });
+}
+
 // Every field except author_id — matching who did the work isn't something
 // an edit should change; it's the one thing the RLS policy still can't be
 // talked out of by an admin/partner editing someone else's entry.

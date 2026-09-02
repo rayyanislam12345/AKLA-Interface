@@ -91,13 +91,19 @@ async function translateBatch(groups) {
   return allSegments.map((s) => ({ id: s.id, translation: translations.get(s.id) || null }));
 }
 
-async function transliterateToUrduScript(text) {
+// Romanizes instead of converting to Perso-Arabic Urdu script — updated to
+// match transcription-bot/src/main.js's current transliterateToRoman.
+// Deterministic Devanagari->Roman libraries were tried and ruled out in the
+// standalone app (no schwa deletion, so they render every written-but-silent
+// vowel and mangle code-switched English words phonetically); this stays an
+// LLM call for the same reason.
+async function transliterateToRoman(text) {
   const res = await anthropic.messages.create(
     {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system:
-        "You are a Hindi-Urdu script transliterator. The given text is spoken Urdu that was transcribed by a Hindi speech-to-text model, so it's written in Devanagari (Hindi) script even though it represents Urdu speech. Rewrite it in proper Urdu (Perso-Arabic/Nastaliq) script, preserving the exact same words and pronunciation — this is a script conversion, not a translation, so do not change vocabulary, rephrase, or translate anything. The speaker may have code-switched into English words or phrases that got rendered phonetically in Devanagari; where you recognize this, write those in their standard Urdu-script spelling for English loanwords, or leave them in Latin script if that's how they'd naturally appear in written Urdu. Respond with only the Urdu-script text and nothing else.",
+        "You are converting spoken Urdu into casual Roman Urdu — the way Urdu speakers commonly text informally in Latin script (e.g. \"aap kaise hain\", \"hum retainer discuss karna chahtay hain\"). The given text is spoken Urdu that was transcribed by a Hindi speech-to-text model, so it's written in Devanagari (Hindi) script even though it represents Urdu speech. Romanize it naturally and colloquially — this is a script conversion, not a translation, so do not change vocabulary, rephrase, or translate anything. Drop the written-but-unspoken short vowels the way casual Roman Urdu/Hinglish texting does (\"karna\" not \"karanaa\", \"hum\" not \"hama\", \"hain\" not \"haiM\") — do not use formal academic transliteration with diacritics or capitalized nasalization markers. The speaker may have code-switched into English words or phrases that got rendered phonetically in Devanagari; where you recognize this, write those in their normal English spelling (e.g. \"retainer\", \"contract\", \"meeting\"), not a phonetic respelling. If the given text is already entirely in Latin/English script (the speaker was speaking English for that whole segment, so there's nothing to convert), return it back exactly as given, character for character — do not alter, respell, correct, or reformat it in any way. Respond with only the resulting text and nothing else.",
       messages: [{ role: "user", content: text }],
     },
     SHORT_CALL_OPTS,
@@ -129,8 +135,13 @@ function buildWavBuffer(pcmBuffer, { sampleRate = 16000, channels = 1, bitsPerSa
   return Buffer.concat([header, pcmBuffer]);
 }
 
-async function reprocessDiarization(pcmBuffer, language) {
-  const wavBuffer = buildWavBuffer(pcmBuffer);
+// Shared low-level call to Deepgram's batch (prerecorded) REST endpoint —
+// used for reprocessing a live meeting's recorded PCM with the
+// higher-accuracy diarizer, transcribing an uploaded recording from scratch,
+// and reprocessing an uploaded recording's diarization the same way a live
+// meeting's can be. Matches transcription-bot/src/main.js's
+// deepgramBatchTranscribe.
+async function deepgramBatchTranscribe(bodyBuffer, contentType, language) {
   const params = new URLSearchParams({
     model: "nova-3",
     diarize_model: "latest",
@@ -144,8 +155,8 @@ async function reprocessDiarization(pcmBuffer, language) {
 
   const res = await fetch(`https://api.deepgram.com/v1/listen?${params.toString()}`, {
     method: "POST",
-    headers: { Authorization: `Token ${DEEPGRAM_API_KEY}`, "Content-Type": "audio/wav" },
-    body: wavBuffer,
+    headers: { Authorization: `Token ${DEEPGRAM_API_KEY}`, "Content-Type": contentType },
+    body: bodyBuffer,
   });
 
   if (!res.ok) {
@@ -153,18 +164,67 @@ async function reprocessDiarization(pcmBuffer, language) {
   }
 
   const data = await res.json();
-  const utterances = data.results?.utterances || [];
+  return data.results?.utterances || [];
+}
+
+// Diarization-only reprocessing: deliberately ignores the batch pass's own
+// transcript text — the client aligns this timeline against the existing
+// (possibly hand-corrected) segments by time overlap and only touches
+// speaker assignment, never the words themselves.
+async function diarizeOnly(bodyBuffer, contentType, language) {
+  const utterances = await deepgramBatchTranscribe(bodyBuffer, contentType, language);
   return utterances.map((u) => ({ speaker: u.speaker, start: u.start, end: u.end }));
+}
+
+async function reprocessDiarization(pcmBuffer, language) {
+  return diarizeOnly(buildWavBuffer(pcmBuffer), "audio/wav", language);
+}
+
+// Transcribes an already-recorded meeting file (as opposed to live audio),
+// using the same higher-accuracy diarizer as reprocessDiarization above —
+// since this is the first and only pass for an uploaded recording, there's
+// no reason to settle for the streaming-tier diarizer a live meeting has to.
+async function transcribeAudioFile(fileBuffer, contentType, language) {
+  const utterances = await deepgramBatchTranscribe(fileBuffer, contentType, language);
+  return utterances
+    .map((u) => ({ speaker: u.speaker, start: u.start, end: u.end, transcript: u.transcript }))
+    .filter((u) => u.transcript && u.transcript.trim());
+}
+
+// Runs async `fn` over `items` with at most `limit` in flight at once — used
+// to romanize a whole uploaded recording's Urdu utterances without firing
+// off hundreds of concurrent Haiku calls at once.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function deepgramLanguageFor(uiLanguage) {
   return uiLanguage === "ur" ? "hi" : "en-US";
 }
 
+// { buffer, contentType, language } for each user's most recently uploaded
+// recording, so its diarization can be improved on-demand the same way a
+// live meeting's can — an upload is a one-shot HTTP call with no persistent
+// session, so this can't live in per-connection session state the way
+// recordingBuffers does. Single slot per user (overwritten on each new
+// upload); bounded by how many distinct users have ever uploaded a
+// recording, which is fine for a small internal tool.
+const uploadedRecordingsByUser = new Map();
+
 // ---- Per-connection session state (one per browser WebSocket) ----
 
-function createSession(ws) {
+function createSession(ws, userId) {
   const state = {
+    userId,
     currentLanguage: "en-US",
     segmentSeq: 0,
     pendingText: "",
@@ -193,15 +253,15 @@ function createSession(ws) {
     const id = ++state.segmentSeq;
 
     if (state.currentLanguage === "ur") {
-      transliterateToUrduScript(text)
-        .then((urduText) => {
-          send({ type: "transcript", id, text: urduText, rawText: text, isFinal: true, speaker, startSec, endSec });
+      transliterateToRoman(text)
+        .then((romanText) => {
+          send({ type: "transcript", id, text: romanText, rawText: text, isFinal: true, speaker, startSec, endSec });
         })
         .catch(() => {
           send({
             type: "transcript",
             id,
-            text: "[could not convert to Urdu script]",
+            text: "[could not romanize]",
             rawText: text,
             isFinal: true,
             speaker,
@@ -314,6 +374,7 @@ function createSession(ws) {
           return;
         }
         state.recordingBuffers = [];
+        uploadedRecordingsByUser.delete(state.userId);
         connectDeepgram(deepgramLanguageFor(state.currentLanguage));
         send({ type: "start-ack", ok: true });
         return;
@@ -348,12 +409,19 @@ function createSession(ws) {
         return;
       }
       case "improve-diarization": {
-        if (state.recordingBuffers.length === 0) {
+        if (state.recordingBuffers.length > 0) {
+          const pcm = Buffer.concat(state.recordingBuffers);
+          reprocessDiarization(pcm, deepgramLanguageFor(state.currentLanguage))
+            .then((utterances) => send({ type: "diarization-result", ok: true, utterances }))
+            .catch((err) => send({ type: "diarization-result", ok: false, error: err.message || String(err) }));
+          return;
+        }
+        const uploaded = uploadedRecordingsByUser.get(state.userId);
+        if (!uploaded) {
           send({ type: "diarization-result", ok: false, error: "No recorded audio available for this transcript." });
           return;
         }
-        const pcm = Buffer.concat(state.recordingBuffers);
-        reprocessDiarization(pcm, deepgramLanguageFor(state.currentLanguage))
+        diarizeOnly(uploaded.buffer, uploaded.contentType, uploaded.language)
           .then((utterances) => send({ type: "diarization-result", ok: true, utterances }))
           .catch((err) => send({ type: "diarization-result", ok: false, error: err.message || String(err) }));
         return;
@@ -392,7 +460,86 @@ function createSession(ws) {
 
 // ---- HTTP + WebSocket server ----
 
+// Transcribes an already-recorded meeting file, uploaded from the browser as
+// a plain POST body (the browser's File object already carries the correct
+// MIME type via Content-Type, so — unlike the Electron app's file-dialog
+// path, which only gets a filesystem path and has to guess from the
+// extension — there's no need for an extension->Content-Type table here).
+// A one-shot HTTP call, not a WebSocket control message, since it doesn't
+// need a persistent session the way live audio streaming does.
+async function handleTranscribeFileUpload(req, res, url) {
+  const token = url.searchParams.get("token");
+  const user = await verifySupabaseToken(token);
+  if (!user) {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+    return;
+  }
+
+  const uiLanguage = url.searchParams.get("language") === "ur" ? "ur" : "en-US";
+  const contentType = req.headers["content-type"] || "";
+  if (!contentType.startsWith("audio/")) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: `Unsupported content type "${contentType || "(none)"}".` }));
+    return;
+  }
+  if (!DEEPGRAM_API_KEY) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "DEEPGRAM_API_KEY is not set" }));
+    return;
+  }
+
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", async () => {
+    try {
+      const fileBuffer = Buffer.concat(chunks);
+      const dgLanguage = deepgramLanguageFor(uiLanguage);
+      const utterances = await transcribeAudioFile(fileBuffer, contentType, dgLanguage);
+
+      uploadedRecordingsByUser.set(user.id, { buffer: fileBuffer, contentType, language: dgLanguage });
+
+      // Deepgram's speaker indices are already small ints in practice, but
+      // map them to sequential ids in order of first appearance to
+      // guarantee it, matching how live-diarized speakers are numbered.
+      const speakerIndex = new Map();
+      for (const u of utterances) {
+        if (!speakerIndex.has(u.speaker)) speakerIndex.set(u.speaker, speakerIndex.size);
+      }
+
+      let segmentSeq = 0;
+      const segments = await mapWithConcurrency(utterances, 8, async (u) => {
+        const id = ++segmentSeq;
+        const speakerId = speakerIndex.get(u.speaker);
+        const startSec = u.start;
+        const endSec = u.end;
+
+        if (uiLanguage !== "ur") {
+          return { id, speakerId, text: u.transcript, startSec, endSec };
+        }
+        try {
+          const text = await transliterateToRoman(u.transcript);
+          return { id, speakerId, text, rawText: u.transcript, startSec, endSec };
+        } catch {
+          return { id, speakerId, text: "[could not romanize]", rawText: u.transcript, startSec, endSec };
+        }
+      });
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, segments }));
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: err.message || String(err) }));
+    }
+  });
+}
+
 const httpServer = createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (req.method === "POST" && url.pathname === "/transcribe-file") {
+    handleTranscribeFileUpload(req, res, url);
+    return;
+  }
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("transcription-relay ok");
 });
@@ -408,7 +555,7 @@ wss.on("connection", async (ws, req) => {
     return;
   }
 
-  const session = createSession(ws);
+  const session = createSession(ws, user.id);
 
   ws.on("message", (data, isBinary) => {
     if (isBinary) {

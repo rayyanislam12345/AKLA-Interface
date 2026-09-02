@@ -64,6 +64,26 @@ export function useOwnProfileStatus() {
   });
 }
 
+// The signed-in user's own name + role — e.g. for a "{Role}: {Name}" byline
+// on a self-service document, where fetching the entire firm roster via
+// useProfiles() would be wasteful.
+export function useMyProfile() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["my-profile", user?.id],
+    enabled: !!user,
+    queryFn: async (): Promise<{ full_name: string | null; email: string; role: AppRole | null }> => {
+      const [{ data: profile, error: profileError }, { data: roleRow, error: roleError }] = await Promise.all([
+        supabase.from("profiles").select("full_name, email").eq("id", user!.id).single(),
+        supabase.from("user_roles").select("role").eq("user_id", user!.id).maybeSingle(),
+      ]);
+      if (profileError) throw profileError;
+      if (roleError) throw roleError;
+      return { full_name: profile.full_name, email: profile.email, role: roleRow?.role ?? null };
+    },
+  });
+}
+
 // Admin-only: signups awaiting a decision. Relies on the "Admins can view
 // all profiles" RLS policy — a non-admin gets zero rows here regardless.
 export function usePendingProfiles() {

@@ -11,6 +11,22 @@ interface SegmentListProps {
   onMergeSpeaker: (fromId: number, intoId: number) => void;
 }
 
+// How often, in recording time, to drop a timestamp marker into the
+// transcript pane — mainly useful for an uploaded recording (or a long live
+// meeting reviewed afterward), where there's no sense of "now" the way there
+// is while watching a live meeting happen. Ported from
+// transcription-bot/src/renderer/renderer.js's TIMESTAMP_MARKER_INTERVAL_SEC.
+const TIMESTAMP_MARKER_INTERVAL_SEC = 60;
+
+function formatTimestamp(sec: number) {
+  const total = Math.max(0, Math.round(sec));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
 // Ported from transcription-bot/src/renderer/renderer.js's segment list +
 // inline speaker-merge picker — text is never rewritten, only the
 // speaker-id-to-label mapping changes, so merged speakers just start
@@ -24,45 +40,66 @@ export default function SegmentList({ segments, interimText, interimSpeaker, spe
     return Array.from(ids).sort((a, b) => a - b);
   }, [segments]);
 
+  // Segments with no startSec (a manually typed or plain-text-imported line)
+  // never get a marker.
+  let lastShownTimestampSec: number | null = null;
+
   return (
     <div className="space-y-3">
-      {segments.map((seg) => (
-        <div key={seg.id} className="text-sm">
-          <div className="flex items-center gap-2">
-            {seg.speakerId !== undefined && (
-              <button
-                className="text-xs font-medium text-primary hover:underline shrink-0"
-                onClick={() => setMergeMenuFor(mergeMenuFor === seg.speakerId ? null : seg.speakerId!)}
-              >
-                {speakerLabel(seg.speakerId)}
-              </button>
-            )}
-            {mergeMenuFor === seg.speakerId && seg.speakerId !== undefined && (
-              <Select
-                onValueChange={(value) => {
-                  onMergeSpeaker(seg.speakerId!, Number(value));
-                  setMergeMenuFor(null);
-                }}
-              >
-                <SelectTrigger className="h-6 w-40 text-xs">
-                  <SelectValue placeholder="Merge into…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {knownSpeakerIds
-                    .filter((id) => id !== seg.speakerId)
-                    .map((id) => (
-                      <SelectItem key={id} value={String(id)}>
-                        {speakerLabel(id)}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            )}
+      {segments.map((seg) => {
+        let marker: JSX.Element | null = null;
+        if (
+          seg.startSec !== undefined &&
+          (lastShownTimestampSec === null || seg.startSec - lastShownTimestampSec >= TIMESTAMP_MARKER_INTERVAL_SEC)
+        ) {
+          lastShownTimestampSec = seg.startSec;
+          marker = (
+            <p key={`ts-${seg.id}`} className="text-center text-xs text-muted-foreground tracking-wide">
+              {formatTimestamp(seg.startSec)}
+            </p>
+          );
+        }
+        return (
+          <div key={seg.id}>
+            {marker}
+            <div className="text-sm">
+              <div className="flex items-center gap-2">
+                {seg.speakerId !== undefined && (
+                  <button
+                    className="text-xs font-medium text-primary hover:underline shrink-0"
+                    onClick={() => setMergeMenuFor(mergeMenuFor === seg.speakerId ? null : seg.speakerId!)}
+                  >
+                    {speakerLabel(seg.speakerId)}
+                  </button>
+                )}
+                {mergeMenuFor === seg.speakerId && seg.speakerId !== undefined && (
+                  <Select
+                    onValueChange={(value) => {
+                      onMergeSpeaker(seg.speakerId!, Number(value));
+                      setMergeMenuFor(null);
+                    }}
+                  >
+                    <SelectTrigger className="h-6 w-40 text-xs">
+                      <SelectValue placeholder="Merge into…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {knownSpeakerIds
+                        .filter((id) => id !== seg.speakerId)
+                        .map((id) => (
+                          <SelectItem key={id} value={String(id)}>
+                            {speakerLabel(id)}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <p className="text-foreground">{seg.text}</p>
+              {seg.translation && <p className="text-muted-foreground pl-4">→ {seg.translation}</p>}
+            </div>
           </div>
-          <p className="text-foreground">{seg.text}</p>
-          {seg.translation && <p className="text-muted-foreground pl-4">→ {seg.translation}</p>}
-        </div>
-      ))}
+        );
+      })}
       {interimText && (
         <div className="text-sm opacity-60">
           {interimSpeaker !== undefined && (
