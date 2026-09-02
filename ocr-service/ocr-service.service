@@ -7,7 +7,7 @@ Type=simple
 User=opc
 WorkingDirectory=/opt/ocr-service
 EnvironmentFile=/opt/ocr-service/.env
-ExecStart=/opt/ocr-service/.venv/bin/gunicorn --bind 127.0.0.1:8090 --workers 2 --timeout 600 app:app
+ExecStart=/opt/ocr-service/.venv/bin/gunicorn --bind 127.0.0.1:8090 --workers 2 --timeout 1800 app:app
 Restart=always
 RestartSec=5
 

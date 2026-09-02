@@ -33,7 +33,7 @@ OCR_DPI = 150  # enough for typed contract text; keeps per-page size modest
 # Cheap safety valve — an unbounded page count would just tie up the service
 # for minutes on end; anything this long is unusual for a contract and worth
 # a human's attention rather than a silent multi-minute hang.
-MAX_PAGES = 60
+MAX_PAGES = 200
 
 
 def _check_auth():
