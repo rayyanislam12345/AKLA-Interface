@@ -15,7 +15,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const ROLES: AppRole[] = ["admin", "partner", "associate", "paralegal"];
+const ROLES: AppRole[] = ["admin", "partner", "senior_counsel", "associate", "paralegal"];
+
+// Senior Counsel is the one multi-word role — everything else already
+// reads fine lowercase-raw, but "senior_counsel" needs the underscore
+// turned into a space and each word capitalized.
+function roleLabel(role: string) {
+  return role
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 
 function WhatsAppAccountsSection() {
   const { data: profiles } = useProfiles();
@@ -278,13 +288,13 @@ export default function TeamPage() {
                           <SelectContent>
                             {ROLES.map((role) => (
                               <SelectItem key={role} value={role}>
-                                {role}
+                                {roleLabel(role)}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Badge variant="secondary">{profile.role || "no role"}</Badge>
+                        <Badge variant="secondary">{profile.role ? roleLabel(profile.role) : "no role"}</Badge>
                       )}
                     </TableCell>
                   </TableRow>
@@ -311,13 +321,13 @@ export default function TeamPage() {
                     <SelectContent>
                       {ROLES.map((role) => (
                         <SelectItem key={role} value={role}>
-                          {role}
+                          {roleLabel(role)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Badge variant="secondary">{profile.role || "no role"}</Badge>
+                  <Badge variant="secondary">{profile.role ? roleLabel(profile.role) : "no role"}</Badge>
                 )}
               </div>
             ))}

@@ -25,7 +25,13 @@ import { useToast } from "@/hooks/use-toast";
 
 function roleLabel(role: string | null) {
   if (!role) return "Associate";
-  return role.charAt(0).toUpperCase() + role.slice(1);
+  // Every role reads fine capitalizing just the first letter, except
+  // "senior_counsel" — split on underscore and title-case each word so
+  // that one doesn't render as "Senior_counsel".
+  return role
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function todayLabel() {
