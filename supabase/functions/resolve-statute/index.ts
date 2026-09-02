@@ -38,6 +38,10 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    // Optional — resolveStatute degrades to direct-search-only (its
+    // original behavior) without it, it's just less likely to find an Act
+    // pakistancode.gov.pk's own search can't surface.
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
 
     const supabase = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
@@ -69,7 +73,7 @@ serve(async (req) => {
       canonicalActName = (existingDocs[0].metadata as any)?.act_name ?? actName;
       status = 'available';
     } else {
-      const result = await resolveStatute(actName);
+      const result = await resolveStatute(actName, anthropicKey);
       if (result.found) {
         canonicalActName = result.title;
         const { error: ingestError } = await supabase.functions.invoke('ingest-documents', {
@@ -77,7 +81,7 @@ serve(async (req) => {
             content: result.text,
             metadata: {
               act_name: result.title,
-              source: 'pakistancode.gov.pk',
+              source: result.viaWebSearch ? 'ai-web-search' : 'pakistancode.gov.pk',
               source_url: result.pageUrl,
               pdf_url: result.pdfUrl,
               scraped_at: new Date().toISOString(),

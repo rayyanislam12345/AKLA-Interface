@@ -9,8 +9,23 @@ firm's own precedent documents in retrieval.
 Mirrors precedent_backlog's dry-run-first shape on purpose: real legal text
 going into a live system shouldn't get ingested without a review step.
 
+Two small, cheap Claude Haiku calls (see _ai_call) plug the gaps plain regex
+can't cover, at exactly the two points where this scraper was silently
+weak: (1) search_act's word-containment match can't tell a principal Act
+apart from an amendment Act or a repealed older version that happens to
+share the same title words — ambiguous cases get an AI pick instead of
+just taking the first regex match; (2) MIN_TEXT_LENGTH only catches a PDF
+producing near-zero text, not one that extracted plenty of *garbled* text
+(jumbled multi-column order, OCR noise) or the wrong Act's text entirely —
+assess_extraction spot-checks coherence and identity before an Act is
+allowed to reach pending_ingest. Neither call ever rewrites the extracted
+text itself — verbatim legal text is what goes into the RAG store either
+way; AI here only judges/selects, never edits.
+
     python3 scrape.py --scan
     python3 scrape.py --scan --confirm
+    python3 scrape.py --confirm --include-flagged   # ingest AI-flagged Acts anyway
+    python3 scrape.py --verify-existing             # spot-check what's already live
 """
 
 from __future__ import annotations
@@ -153,6 +168,103 @@ def _get(url: str, **kwargs) -> requests.Response:
     return resp
 
 
+AI_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _ai_call(system: str, user: str, max_tokens: int = 200) -> str | None:
+    """Small, cheap Claude Haiku call. Returns None (never raises) if the
+    key is missing or the request fails, so a hiccup here degrades to the
+    old regex-only behavior — search/extraction still work, just without
+    the extra check — rather than crashing a scan over one bad call."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
+    except requests.exceptions.RequestException as err:
+        print(f"  (AI check failed, continuing without it: {err})", file=sys.stderr)
+        return None
+
+
+def _ai_pick_candidate(name: str, candidates: list[dict]) -> dict | None:
+    """Used only when more than one search result contains all of the
+    target Act's significant words — regex can't tell a principal Act
+    apart from its own amendment Act(s) or an older repealed version that
+    shares the same core title. Asks Haiku to pick the one result that
+    actually IS the named Act."""
+    listing = "\n".join(f"{i}: {c['title']}" for i, c in enumerate(candidates))
+    reply = _ai_call(
+        system=(
+            "You are matching a Pakistani statute name to the correct result from an "
+            "official legislation database. Multiple candidates below share the same core "
+            "title words — likely a mix of the principal Act, one or more amendment Acts, "
+            "and/or an older repealed version. Pick the ONE result that IS the named Act "
+            "itself, not an amendment to it and not a different year's version.\n\n"
+            'Respond with ONLY the candidate\'s number, or "none" if none of them is actually it.'
+        ),
+        user=f"Target Act: {name}\n\nCandidates:\n{listing}",
+        max_tokens=20,
+    )
+    if reply is None:
+        return None
+    match = re.search(r"\d+", reply)
+    if not match:
+        return None
+    idx = int(match.group())
+    return candidates[idx] if 0 <= idx < len(candidates) else None
+
+
+def assess_extraction(name: str, text: str) -> dict:
+    """Cheap coherence/identity spot-check on extracted statute text.
+    Catches two things MIN_TEXT_LENGTH's character count can't: (1) a PDF
+    that produced plenty of text but is actually the wrong Act — a mismatch
+    that slipped past search_act; (2) text that's long enough to pass but
+    is garbled — jumbled multi-column reading order, OCR noise, running
+    headers/footers mixed into the body — rather than coherent statute
+    text. Only judges; never rewrites the text itself."""
+    excerpt = text[:2500].strip()
+    if not excerpt:
+        return {"ok": False, "note": "No text to assess"}
+    reply = _ai_call(
+        system=(
+            "You are sanity-checking text extracted from a PDF that is supposed to be the "
+            "Pakistani statute named below. Two things could be wrong: (1) it's actually a "
+            "different Act, an amendment-only Act, or a repealed prior version rather than "
+            "the named Act itself; (2) the text is garbled — jumbled word/line order from a "
+            "bad multi-column extraction, OCR noise, or repeated running headers/footers "
+            "mixed into the body — rather than coherent readable statute text. Ignore minor "
+            "OCR typos or missing diacritics; only flag genuine incoherence or a substance "
+            "mismatch.\n\n"
+            'Respond with EXACTLY one line: either "OK" or "PROBLEM: <short reason>".'
+        ),
+        user=f"Named Act: {name}\n\nExtracted text (start of document):\n{excerpt}",
+        max_tokens=100,
+    )
+    if reply is None:
+        # AI check unavailable — don't block the pipeline over it, but say so.
+        return {"ok": True, "note": "AI check unavailable, unverified"}
+    if reply.strip().upper().startswith("OK"):
+        return {"ok": True, "note": None}
+    return {"ok": False, "note": reply.strip()}
+
+
 def search_act(name: str) -> dict | None:
     """Searches pakistancode.gov.pk for an Act by name and returns the best
     match's {title, page_url, pdf_url}, or None if nothing usable was found.
@@ -166,6 +278,15 @@ def search_act(name: str) -> dict | None:
     resp = _get(SEARCH_URL, params={"query": query, "search": 1})
     result_links = sorted(set(re.findall(r'href="(https?://pakistancode\.gov\.pk/english/[^"]*-con-\d+-sg-[^"]*)"', resp.text)))
 
+    # Loose match: the searched name's significant words should all appear
+    # in the result title — good enough to reject an obviously unrelated
+    # Act without needing exact-string equality (titles carry inconsistent
+    # spacing/punctuation across the site). Collects every candidate that
+    # passes rather than stopping at the first, since more than one often
+    # does (an Act and its own amendments frequently share every word of
+    # the base title) — see _ai_pick_candidate for how ties are broken.
+    name_words = [w.lower() for w in re.findall(r"[A-Za-z]+", name) if len(w) > 2]
+    candidates = []
     for link in result_links[:10]:
         try:
             page = _get(link)
@@ -174,18 +295,19 @@ def search_act(name: str) -> dict | None:
         title_match = re.search(r"<h2>([^<]+)", page.text)
         title = title_match.group(1).strip() if title_match else None
         pdf_match = re.search(r'href="(https://pakistancode\.gov\.pk/pdffiles/[^"]+\.pdf)"', page.text)
-        if not pdf_match:
+        if not pdf_match or not title:
             continue
-        # Loose match: the searched name's significant words should all
-        # appear in the result title — good enough to reject an obviously
-        # unrelated Act without needing exact-string equality (titles carry
-        # inconsistent spacing/punctuation across the site).
-        name_words = [w.lower() for w in re.findall(r"[A-Za-z]+", name) if len(w) > 2]
-        title_lower = (title or "").lower()
-        if title and all(w in title_lower for w in name_words):
-            return {"title": title, "page_url": link, "pdf_url": pdf_match.group(1)}
+        title_lower = title.lower()
+        if all(w in title_lower for w in name_words):
+            candidates.append({"title": title, "page_url": link, "pdf_url": pdf_match.group(1)})
 
-    return None
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    picked = _ai_pick_candidate(name, candidates)
+    return picked if picked is not None else candidates[0]
 
 
 def extract_pdf_text(pdf_path: Path) -> str:
@@ -243,6 +365,14 @@ def scan(manifest: dict) -> dict:
         text = extract_pdf_text(pdf_path)
         needs_ocr = len(text.strip()) < MIN_TEXT_LENGTH
 
+        # OCR happens later (only during --confirm, since it's slow and
+        # costs real service time) — nothing to assess yet for those; the
+        # same check runs on the OCR'd text in confirm() below instead.
+        ai_check = None
+        if not needs_ocr:
+            print(f"  Checking extraction quality...")
+            ai_check = assess_extraction(name, text)
+
         manifest[name] = {
             "outcome": "pending_ingest",
             "title": found["title"],
@@ -251,20 +381,26 @@ def scan(manifest: dict) -> dict:
             "pdf_path": str(pdf_path),
             "needs_ocr": needs_ocr,
             "text_length": len(text) if not needs_ocr else None,
+            "ai_check": ai_check,
         }
-        print(f"  Found: {found['title']} ({'needs OCR' if needs_ocr else f'{len(text)} chars extracted'})")
+        flag = f" [AI FLAG: {ai_check['note']}]" if ai_check and not ai_check["ok"] else ""
+        print(f"  Found: {found['title']} ({'needs OCR' if needs_ocr else f'{len(text)} chars extracted'}){flag}")
         # Save after every act (not batched) — a scan over dozens of Acts
         # hitting a real network could be interrupted partway, and nothing
         # already-found should be silently lost on the next attempt.
         save_manifest(manifest)
     print(f"\n=== Report ===")
     for name, row in manifest.items():
-        print(f"  {name}: {row['outcome']}" + (" (needs OCR)" if row.get("needs_ocr") else ""))
-    print(f"\nReview above, then re-run with --confirm to ingest.")
+        flag = ""
+        if row.get("ai_check") and not row["ai_check"]["ok"]:
+            flag = f"  [AI FLAG: {row['ai_check']['note']}]"
+        print(f"  {name}: {row['outcome']}" + (" (needs OCR)" if row.get("needs_ocr") else "") + flag)
+    print(f"\nReview above, then re-run with --confirm to ingest. AI-flagged Acts are")
+    print(f"skipped by --confirm unless you also pass --include-flagged.")
     return manifest
 
 
-def confirm(manifest: dict, sb: SupabaseClient):
+def confirm(manifest: dict, sb: SupabaseClient, include_flagged: bool = False):
     pending = [(name, row) for name, row in manifest.items() if row.get("outcome") == "pending_ingest"]
     print(f"{len(pending)} act(s) to ingest")
 
@@ -276,8 +412,21 @@ def confirm(manifest: dict, sb: SupabaseClient):
                     raise RuntimeError("Act needs OCR but OCR_SERVICE_URL/OCR_SERVICE_SECRET not set")
                 print(f"  {name}: running OCR (can take a while for a long Act)...")
                 text = sb.ocr_pdf(pdf_path.read_bytes())
+                print(f"  {name}: checking extraction quality...")
+                ai_check = assess_extraction(name, text)
             else:
                 text = extract_pdf_text(pdf_path)
+                # scan() already ran this for the non-OCR path — reuse it
+                # rather than paying for a second identical AI call.
+                ai_check = row.get("ai_check") or assess_extraction(name, text)
+
+            if ai_check and not ai_check["ok"] and not include_flagged:
+                row["outcome"] = "needs_review"
+                row["ai_check"] = ai_check
+                manifest[name] = row
+                save_manifest(manifest)
+                print(f"  SKIPPED (AI flagged — {ai_check['note']}); re-run with --include-flagged to ingest anyway: {name}")
+                continue
 
             sb.ingest_document_text(
                 text,
@@ -292,6 +441,7 @@ def confirm(manifest: dict, sb: SupabaseClient):
                 },
             )
             row["outcome"] = "ingested"
+            row["ai_check"] = ai_check
             manifest[name] = row
             save_manifest(manifest)
             print(f"  Ingested: {name}")
@@ -303,6 +453,52 @@ def confirm(manifest: dict, sb: SupabaseClient):
             print(f"  FAILED: {name}: {err}", file=sys.stderr)
 
 
+def verify_existing(sb: SupabaseClient):
+    """Retroactive quality pass over Acts already ingested into the live
+    RAG store — reads directly from Supabase (local downloads/ files may no
+    longer exist or may have been re-run since) so the report reflects
+    what's actually live right now. Read-only: reports, never modifies
+    anything, so it's safe to run any time out of curiosity or to check a
+    library that's grown since the last scan."""
+    print("Fetching ingested statute chunks from Supabase...")
+    rows: list[dict] = []
+    offset = 0
+    page_size = 1000
+    while True:
+        resp = requests.get(
+            f"{sb.rest_url}/documents",
+            headers=sb.headers,
+            params={
+                "select": "id,content,metadata",
+                "is_statute": "eq.true",
+                "order": "id.asc",
+                "limit": page_size,
+                "offset": offset,
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        batch = resp.json()
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    by_act: dict[str, list[dict]] = {}
+    for row in rows:
+        act_name = (row.get("metadata") or {}).get("act_name") or "(unknown)"
+        by_act.setdefault(act_name, []).append(row)
+
+    print(f"\n{len(by_act)} Acts in the live library, {len(rows)} chunks total.")
+    print("Sorted by chunk count (lowest first) — a real Act with very few chunks")
+    print("relative to its peers, or an AI flag below, is worth a manual look.\n")
+
+    for act_name, chunks in sorted(by_act.items(), key=lambda kv: len(kv[1])):
+        check = assess_extraction(act_name, chunks[0]["content"])
+        flag = "" if check["ok"] else f"  [AI FLAG: {check['note']}]"
+        print(f"  {len(chunks):4d} chunks  —  {act_name}{flag}")
+
+
 def save_manifest(manifest: dict):
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, default=str))
 
@@ -312,17 +508,27 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan", action="store_true", help="Search, download, and extract text — no Supabase writes")
     parser.add_argument("--confirm", action="store_true", help="Ingest whatever --scan found into the RAG store")
+    parser.add_argument(
+        "--include-flagged", action="store_true",
+        help="Also ingest Acts the AI extraction check flagged (skipped by default)",
+    )
+    parser.add_argument(
+        "--verify-existing", action="store_true",
+        help="Read-only: spot-check Acts already ingested into the live library, no scan/confirm needed",
+    )
     args = parser.parse_args()
 
     manifest = json.loads(MANIFEST_PATH.read_text()) if MANIFEST_PATH.exists() else {}
 
-    if not args.scan and not args.confirm:
-        sys.exit("Pass --scan (dry run) and/or --confirm (ingest)")
+    if not args.scan and not args.confirm and not args.verify_existing:
+        sys.exit("Pass --scan (dry run), --confirm (ingest), and/or --verify-existing (spot-check what's live)")
 
     if args.scan:
         manifest = scan(manifest)
 
-    if args.confirm:
+    needs_supabase = args.confirm or args.verify_existing
+    sb = None
+    if needs_supabase:
         supabase_url = os.environ.get("SUPABASE_URL")
         service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         session_email = os.environ.get("SUPABASE_SESSION_EMAIL")
@@ -334,7 +540,12 @@ def main():
             ocr_service_url=os.environ.get("OCR_SERVICE_URL"),
             ocr_service_secret=os.environ.get("OCR_SERVICE_SECRET"),
         )
-        confirm(manifest, sb)
+
+    if args.confirm:
+        confirm(manifest, sb, include_flagged=args.include_flagged)
+
+    if args.verify_existing:
+        verify_existing(sb)
 
 
 if __name__ == "__main__":
