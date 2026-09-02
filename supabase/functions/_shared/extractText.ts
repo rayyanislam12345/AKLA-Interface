@@ -42,6 +42,50 @@ async function ocrPdfFallback(pdfBytes: Uint8Array): Promise<string | null> {
   }
 }
 
+// mammoth's in-process docx-to-HTML conversion has to hold the whole
+// unzipped document.xml (plus its own intermediate structures) in memory
+// at once. A large Word file with heavy tracked-changes history (every
+// insertion/deletion is its own XML run) can expand many times over its
+// zipped size — confirmed directly against a real 5.5MB precedent file: it
+// produced 14MB of HTML, and killed this function with Supabase's
+// WORKER_RESOURCE_LIMIT in under 7 seconds. That's a hard platform-level
+// memory kill of the whole isolate, not a normal JS exception — nothing in
+// this function's own code gets a chance to catch it or fall back
+// afterwards, so the only real fix is deciding before ever calling mammoth
+// in-process. Anything over this threshold routes to ocr-service's
+// /extract/docx instead (same VM as the PDF OCR fallback below, just no
+// per-request memory ceiling there).
+const LARGE_DOCX_BYTES = 2 * 1024 * 1024;
+
+async function docxHtmlFallback(docxBytes: Uint8Array): Promise<string | null> {
+  const ocrUrl = Deno.env.get("OCR_SERVICE_URL");
+  const ocrSecret = Deno.env.get("OCR_SERVICE_SECRET");
+  if (!ocrUrl || !ocrSecret) {
+    console.warn("Large-docx fallback not configured (OCR_SERVICE_URL/OCR_SERVICE_SECRET unset) — skipping.");
+    return null;
+  }
+  try {
+    const resp = await fetch(`${ocrUrl}/extract/docx`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ocrSecret}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: docxBytes,
+      signal: AbortSignal.timeout(150_000),
+    });
+    if (!resp.ok) {
+      console.error(`Docx extraction service error: ${resp.status} ${await resp.text()}`);
+      return null;
+    }
+    const data = await resp.json();
+    return data.html as string;
+  } catch (err) {
+    console.error("Large-docx fallback request failed:", err);
+    return null;
+  }
+}
+
 export async function extractTextFromFile(fileData: Blob, fileName: string): Promise<ExtractResult> {
   const fileExtension = fileName.toLowerCase().split(".").pop();
 
@@ -64,8 +108,20 @@ export async function extractTextFromFile(fileData: Blob, fileName: string): Pro
   }
 
   if (fileExtension === "docx") {
-    const mammoth = await import("https://esm.sh/mammoth@1.6.0");
     const arrayBuffer = await fileData.arrayBuffer();
+
+    if (arrayBuffer.byteLength > LARGE_DOCX_BYTES) {
+      const html = await docxHtmlFallback(new Uint8Array(arrayBuffer));
+      if (html) {
+        return { text: html, metadata: { original_format: "docx", large_docx_offloaded: true } };
+      }
+      // ocr-service unreachable/misconfigured — fall through and attempt
+      // mammoth in-process anyway. Worse odds than the normal path, but
+      // silently returning no text at all is a worse outcome than a shot
+      // at it, and this is the same posture the PDF OCR fallback takes.
+    }
+
+    const mammoth = await import("https://esm.sh/mammoth@1.6.0");
     // esm.sh can resolve either mammoth's browser build (wants `arrayBuffer`)
     // or its Node build (wants a Node `buffer`) depending on how it infers
     // the target — pass both so extraction works regardless of which loads.

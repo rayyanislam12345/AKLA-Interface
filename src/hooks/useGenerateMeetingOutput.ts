@@ -1,7 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-export type MeetingOutputFormat = "proposal" | "minutes-akla" | "minutes-standard";
+// Every meeting output is AKLA-format now — "minutes-standard" (a plain
+// attendees/decisions/action-items format) was removed as an option.
+export type MeetingOutputFormat = "proposal" | "minutes-akla";
 
 export function useGenerateMeetingOutput() {
   return useMutation({

@@ -72,49 +72,6 @@ Formatting (this gets converted straight into a Word document with real legal nu
 - Do not use tables, code blocks, links, numbered-list markdown, or any other Markdown syntax beyond what's specified above.`;
 }
 
-// Ported verbatim from transcription-bot/src/minutesTemplate.js.
-function buildStandardMinutesSystemPrompt() {
-  const MINUTES_STRUCTURE = `
-## Meeting Minutes
-
-## Attendees
-List each speaker who appears in the transcript, using whatever name or label identifies them (e.g. "Speaker 0" if no name was given or assigned).
-
-## Summary of Discussion
-Organize what was discussed into clear topic-based sections, in roughly the order they came up.
-
-## Decisions Made
-List any decisions or agreements reached during the meeting. If none were made, write "None recorded."
-
-## Action Items
-List follow-up tasks, who is responsible for each (if stated), and any deadline mentioned. If none were discussed, write "None recorded."
-
-## Next Steps
-Any next meeting date or next steps mentioned. If none were discussed, write "None recorded."
-`.trim();
-
-  return `You are a legal assistant drafting meeting minutes for an attorney to review, based on a transcript of a client meeting.
-
-Structure the minutes exactly as follows:
-
-${MINUTES_STRUCTURE}
-
-Rules:
-- Only use facts, names, and figures actually present in the transcript. Never invent attendee names, decisions, dates, or figures.
-- Where something is unclear or ambiguous in the transcript, write "[UNCLEAR]" rather than guessing.
-- This is a factual record, not a persuasive document — keep the tone neutral and concise.
-- Do not give legal advice or state legal conclusions as fact.
-- Do not add commentary about the transcript itself.
-- Begin the output with this exact line, on its own: "DRAFT MINUTES — for review before circulating. Not a verified official record."
-
-Formatting (this gets converted straight into a Word document, so follow it exactly):
-- Use "##" for each section heading, exactly as shown above. Do not use "#" or "###".
-- Use "**bold**" for emphasis (e.g. names, dates, deadlines). Use "*italic*" sparingly, if at all.
-- Use "- " for bulleted list items (e.g. attendees, action items). Do not use numbered lists or nested lists.
-- Separate every paragraph, heading, and list item with a blank line.
-- Do not use tables, code blocks, links, or any other Markdown syntax.`;
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -129,8 +86,8 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    if (format !== 'proposal' && format !== 'minutes-akla' && format !== 'minutes-standard') {
-      return new Response(JSON.stringify({ error: 'format must be "proposal", "minutes-akla", or "minutes-standard"' }), {
+    if (format !== 'proposal' && format !== 'minutes-akla') {
+      return new Response(JSON.stringify({ error: 'format must be "proposal" or "minutes-akla"' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -172,9 +129,7 @@ serve(async (req) => {
 
     const systemPrompt = format === 'proposal'
       ? buildProposalSystemPrompt(exampleProposals)
-      : format === 'minutes-akla'
-      ? buildAklaMinutesSystemPrompt()
-      : buildStandardMinutesSystemPrompt();
+      : buildAklaMinutesSystemPrompt();
 
     const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

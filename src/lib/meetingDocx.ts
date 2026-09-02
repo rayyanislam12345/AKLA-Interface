@@ -4,7 +4,6 @@ import {
   Document,
   Footer,
   Header,
-  HeadingLevel,
   LevelFormat,
   Packer,
   PageNumber,
@@ -17,15 +16,13 @@ import {
   WidthType,
 } from "docx";
 
-// Two distinct house styles for meeting output, both ported verbatim from
-// transcription-bot/src/markdownToDocx.js: "AKLA" (buildAklaDocxBlob — used
-// for proposals and AKLA-format minutes) and the plain firm-formatting-guide
-// style (buildStandardDocxBlob — used for standard-format minutes only).
-// Both are distinct from DraftDocumentPage's firmNumberingConfig.
+// Ported verbatim from transcription-bot/src/markdownToDocx.js. All meeting
+// output (proposals and minutes alike) uses this single "AKLA" house style —
+// the plain firm-formatting-guide style this file used to also export
+// (buildStandardDocxBlob, for a since-removed standard-minutes option) is
+// gone; DraftDocumentPage's firmNumberingConfig is unrelated to either.
 
 const pt = (points: number) => points * 2; // docx sizes are in half-points
-
-const HEADING_LEVELS = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3];
 
 interface RunSpec {
   text: string;
@@ -54,102 +51,6 @@ function parseInlineRuns(text: string): RunSpec[] {
     runs.push({ text: text.slice(lastIndex) });
   }
   return runs.length ? runs : [{ text }];
-}
-
-// Plain firm-formatting-guide style: Arial body, centered small-caps
-// bordered H1/H2, underlined small-caps H3, native bullets, "Page X of Y"
-// footer (absent on the first page).
-export async function buildStandardDocxBlob(markdown: string, title?: string): Promise<Blob> {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-  const paragraphs: Paragraph[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    if (!line.trim()) continue;
-
-    const headingMatch = /^(#{1,3})\s+(.*)$/.exec(line);
-    if (headingMatch) {
-      paragraphs.push(
-        new Paragraph({
-          heading: HEADING_LEVELS[headingMatch[1].length - 1],
-          children: parseInlineRuns(headingMatch[2]).map((r) => new TextRun(r)),
-        })
-      );
-      continue;
-    }
-
-    const bulletMatch = /^[-*]\s+(.*)$/.exec(line);
-    if (bulletMatch) {
-      paragraphs.push(
-        new Paragraph({
-          bullet: { level: 0 },
-          spacing: { after: 80 },
-          children: parseInlineRuns(bulletMatch[1]).map((r) => new TextRun(r)),
-        })
-      );
-      continue;
-    }
-
-    paragraphs.push(
-      new Paragraph({
-        spacing: { after: 160 },
-        children: parseInlineRuns(line).map((r) => new TextRun(r)),
-      })
-    );
-  }
-
-  const headingBorder = {
-    bottom: { style: BorderStyle.SINGLE, size: 6, space: 4, color: "000000" },
-  };
-
-  const doc = new Document({
-    title: title || "Meeting Minutes",
-    styles: {
-      default: {
-        document: { run: { font: "Arial", size: pt(11) } },
-        heading1: {
-          run: { font: "Arial", size: pt(13), bold: true, smallCaps: true },
-          paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 240, after: 160 }, border: headingBorder },
-        },
-        heading2: {
-          run: { font: "Arial", size: pt(13), bold: true, smallCaps: true },
-          paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 240, after: 160 }, border: headingBorder },
-        },
-        heading3: {
-          run: { font: "Arial", size: pt(11), bold: true, underline: {}, smallCaps: true },
-          paragraph: { spacing: { before: 200, after: 120 } },
-        },
-      },
-    },
-    sections: [
-      {
-        properties: { titlePage: true },
-        headers: {
-          first: new Header({ children: [new Paragraph({ children: [] })] }),
-        },
-        footers: {
-          first: new Footer({ children: [new Paragraph({ children: [] })] }),
-          default: new Footer({
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({
-                    font: "Arial",
-                    size: pt(8),
-                    children: ["Page ", PageNumber.CURRENT, " of ", PageNumber.TOTAL_PAGES],
-                  }),
-                ],
-              }),
-            ],
-          }),
-        },
-        children: paragraphs,
-      },
-    ],
-  });
-
-  return Packer.toBlob(doc);
 }
 
 // AKLA format: a legal-memo outline (navy/gold title banner, real 3-level

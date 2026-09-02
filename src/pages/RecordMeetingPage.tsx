@@ -5,7 +5,7 @@ import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { buildAklaDocxBlob, buildStandardDocxBlob } from "@/lib/meetingDocx";
+import { buildAklaDocxBlob } from "@/lib/meetingDocx";
 import SegmentList, {
   parseTranscriptText,
   segmentsToEnglishTranscriptText,
@@ -18,21 +18,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 
+// Every generation option is AKLA format now — there's no non-AKLA
+// alternative left to disambiguate from, but the label still says so since
+// it's meaningful information about the output's style either way.
 const OUTPUT_LABELS: Record<MeetingOutputFormat, string> = {
-  proposal: "Client Proposal Letter",
+  proposal: "Client Proposal Letter (AKLA Format)",
   "minutes-akla": "Meeting Minutes (AKLA Format)",
-  "minutes-standard": "Meeting Minutes",
 };
 
 const UPLOAD_DOCUMENT_TYPE_NAME: Record<MeetingOutputFormat, string> = {
   proposal: "Client Proposal Letter",
   "minutes-akla": "Meeting Minutes",
-  "minutes-standard": "Meeting Minutes",
 };
-
-function buildDocxForFormat(format: MeetingOutputFormat, text: string, title: string) {
-  return format === "minutes-standard" ? buildStandardDocxBlob(text, title) : buildAklaDocxBlob(text, title);
-}
 
 export default function RecordMeetingPage() {
   const { toast } = useToast();
@@ -44,7 +41,7 @@ export default function RecordMeetingPage() {
 
   const [exampleProposals, setExampleProposals] = useState("");
   const [proposalDraft, setProposalDraft] = useState<string | null>(null);
-  const [minutesDraft, setMinutesDraft] = useState<{ format: "minutes-akla" | "minutes-standard"; text: string } | null>(null);
+  const [minutesDraft, setMinutesDraft] = useState<{ format: "minutes-akla"; text: string } | null>(null);
   const [translating, setTranslating] = useState(false);
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
@@ -75,7 +72,7 @@ export default function RecordMeetingPage() {
   useEffect(() => {
     if (!minutesDraft || !minutesPreviewRef.current) return;
     setBuildingMinutesPreview(true);
-    buildDocxForFormat(minutesDraft.format, minutesDraft.text, OUTPUT_LABELS[minutesDraft.format])
+    buildAklaDocxBlob(minutesDraft.text, OUTPUT_LABELS[minutesDraft.format])
       .then((blob) => {
         if (!minutesPreviewRef.current) return;
         minutesPreviewRef.current.innerHTML = "";
@@ -138,13 +135,13 @@ export default function RecordMeetingPage() {
     }
   };
 
-  const handleGenerateMinutes = async (format: "minutes-akla" | "minutes-standard") => {
+  const handleGenerateMinutes = async () => {
     if (relay.segments.length === 0) return;
     await ensureTranslated();
     const transcriptText = segmentsToEnglishTranscriptText(relay.segments, relay.speakerLabel);
     try {
-      const result = await minutesMutation.mutateAsync({ transcriptText, format });
-      setMinutesDraft({ format, text: result.draft });
+      const result = await minutesMutation.mutateAsync({ transcriptText, format: "minutes-akla" });
+      setMinutesDraft({ format: "minutes-akla", text: result.draft });
     } catch (err: any) {
       toast({ title: "Minutes generation failed", description: err.message, variant: "destructive" });
     }
@@ -162,6 +159,7 @@ export default function RecordMeetingPage() {
     if (relay.segments.length > 0 && !window.confirm("This replaces the current transcript. Continue?")) return;
     const text = await file.text();
     relay.setSegments(parseTranscriptText(text));
+    relay.clearRecording();
   };
 
   const handleUploadRecordingClick = () => {
@@ -187,6 +185,7 @@ export default function RecordMeetingPage() {
         return;
       }
       relay.setSegments(result.segments ?? []);
+      relay.clearRecording();
       if (!result.segments || result.segments.length === 0) {
         toast({ title: "No speech detected in the recording", variant: "destructive" });
       }
@@ -208,8 +207,25 @@ export default function RecordMeetingPage() {
     URL.revokeObjectURL(url);
   };
 
+  // The recorded meeting's raw audio, built client-side from the same PCM
+  // chunks streamed to the relay while recording (see useMeetingRelay) —
+  // available once a live meeting has been stopped, until a new meeting
+  // starts or an uploaded transcript/recording replaces it.
+  const handleDownloadRecording = () => {
+    const blob = relay.getRecordingBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "meeting-recording.wav";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleDownload = async (format: MeetingOutputFormat, text: string) => {
-    const blob = await buildDocxForFormat(format, text, OUTPUT_LABELS[format]);
+    const blob = await buildAklaDocxBlob(text, OUTPUT_LABELS[format]);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -241,7 +257,7 @@ export default function RecordMeetingPage() {
         .single();
       if (createError) throw createError;
 
-      const blob = await buildDocxForFormat(format, text, title);
+      const blob = await buildAklaDocxBlob(text, title);
       const fileName = `${title.replace(/\s+/g, "-")}.docx`;
       const storagePath = `${uploadMatterId}/${matterDocument.id}/v1-${fileName}`;
 
@@ -355,6 +371,10 @@ export default function RecordMeetingPage() {
               <Save className="h-4 w-4 mr-2" />
               Save Transcript
             </Button>
+            <Button variant="outline" onClick={handleDownloadRecording} disabled={!relay.hasRecording}>
+              <Download className="h-4 w-4 mr-2" />
+              Download Recording
+            </Button>
 
             <span className="text-xs text-muted-foreground ml-auto">
               {relay.recording ? "recording" : relay.connected ? "connected" : "idle"}
@@ -392,19 +412,11 @@ export default function RecordMeetingPage() {
               disabled={!hasContent || proposalMutation.isPending || translating}
             >
               <FileText className="h-4 w-4 mr-2" />
-              Generate Proposal
+              Generate Proposal (AKLA Format)
             </Button>
             <Button
               variant="outline"
-              onClick={() => handleGenerateMinutes("minutes-standard")}
-              disabled={!hasContent || minutesMutation.isPending || translating}
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              Generate Minutes
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleGenerateMinutes("minutes-akla")}
+              onClick={handleGenerateMinutes}
               disabled={!hasContent || minutesMutation.isPending || translating}
             >
               <FileText className="h-4 w-4 mr-2" />
@@ -492,7 +504,7 @@ export default function RecordMeetingPage() {
               disabled={
                 !minutesDraft ||
                 !uploadMatterId ||
-                !documentTypeIdFor(minutesDraft?.format ?? "minutes-standard") ||
+                !documentTypeIdFor(minutesDraft?.format ?? "minutes-akla") ||
                 uploadingFormat === minutesDraft?.format
               }
             >

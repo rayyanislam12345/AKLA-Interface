@@ -1,12 +1,13 @@
 import { Fragment, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { marked } from "marked";
-import { ChevronDown, ChevronRight, FileText, MessageCircle, MessageSquareText, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, FileText, MessageCircle, MessageSquareText, Send } from "lucide-react";
 import {
   useWhatsAppMatters,
   useWhatsAppDocuments,
   useLinkWhatsAppMatter,
   openWhatsAppDocument,
+  downloadWhatsAppDocument,
   type WhatsAppMatter,
 } from "@/hooks/useWhatsAppMatters";
 import {
@@ -83,6 +84,14 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
     }
   };
 
+  const handleDownload = async (path: string, fileName: string) => {
+    try {
+      await downloadWhatsAppDocument(path, fileName);
+    } catch (err: any) {
+      toast({ title: "Failed to download document", description: err.message, variant: "destructive" });
+    }
+  };
+
   return (
     <div className="space-y-4">
       {whatsappMatter.detailed_summary && (
@@ -112,16 +121,26 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
       ) : (
         <div className="flex flex-wrap gap-2">
           {files.map((file) => (
-            <Button
-              key={file.id}
-              variant="outline"
-              size="sm"
-              onClick={() => handleOpen(file.storage_path)}
-              className="gap-1.5"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              {file.filename}
-            </Button>
+            <div key={file.id} className="flex items-center gap-0.5 border rounded-md">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleOpen(file.storage_path)}
+                className="gap-1.5 rounded-r-none"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                {file.filename}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Download"
+                onClick={() => handleDownload(file.storage_path, file.filename)}
+                className="h-8 w-8 rounded-l-none border-l"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           ))}
         </div>
       )}

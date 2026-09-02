@@ -119,13 +119,23 @@ function dataRow(row: TimesheetEntryRow) {
   });
 }
 
-function totalRow(totalHours: number) {
+function totalRow(rows: TimesheetEntryRow[]) {
+  const totalHours = rows.reduce((sum, r) => sum + r.hours, 0);
+  const anyBillable = rows.some((r) => r.billableHours !== null);
+  const anyAkBillable = rows.some((r) => r.akBillableHours !== null);
+  const totalBillable = rows.reduce((sum, r) => sum + (r.billableHours ?? 0), 0);
+  const totalAkBillable = rows.reduce((sum, r) => sum + (r.akBillableHours ?? 0), 0);
+
   return new TableRow({
     children: [
       new TableCell({ columnSpan: 3, children: [bodyParagraph("Total Hours", AlignmentType.CENTER)] }),
       new TableCell({ children: [bodyParagraph(totalHours.toFixed(1), AlignmentType.CENTER)] }),
-      new TableCell({ children: [bodyParagraph("-", AlignmentType.CENTER)] }),
-      new TableCell({ children: [bodyParagraph("-", AlignmentType.CENTER)] }),
+      new TableCell({
+        children: [bodyParagraph(anyBillable ? totalBillable.toFixed(1) : "-", AlignmentType.CENTER)],
+      }),
+      new TableCell({
+        children: [bodyParagraph(anyAkBillable ? totalAkBillable.toFixed(1) : "-", AlignmentType.CENTER)],
+      }),
     ],
   });
 }
@@ -140,12 +150,11 @@ export async function buildTimesheetDocxBlob(
   roleLabel: string,
   employeeName: string
 ): Promise<Blob> {
-  const totalHours = rows.reduce((sum, r) => sum + r.hours, 0);
   const table = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     columnWidths: COLUMN_WIDTHS,
     borders: tableBorders,
-    rows: [headerRow(), ...rows.map(dataRow), totalRow(totalHours)],
+    rows: [headerRow(), ...rows.map(dataRow), totalRow(rows)],
   });
 
   const children: (Paragraph | Table)[] = [

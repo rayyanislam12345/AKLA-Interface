@@ -40,12 +40,42 @@ interface TranslateResultEvent {
 
 const RELAY_URL = import.meta.env.VITE_TRANSCRIPTION_RELAY_URL as string | undefined;
 
+// Wraps raw 16-bit mono PCM chunks (exactly what pcm-worklet.js emits, and
+// exactly what's streamed to the relay) in a WAV header — a direct TS port
+// of transcription-bot/src/main.js's buildWavBuffer, minus the Node Buffer
+// API. Blob's multi-part constructor stands in for Buffer.concat.
+function buildWavBlob(pcmChunks: ArrayBuffer[], { sampleRate = 16000, channels = 1, bitsPerSample = 16 } = {}) {
+  const dataLength = pcmChunks.reduce((sum, c) => sum + c.byteLength, 0);
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataLength, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataLength, true);
+  return new Blob([header, ...pcmChunks], { type: "audio/wav" });
+}
+
 // Ported from transcription-bot/src/renderer/renderer.js — same segment
 // model and speaker-merge-by-relabeling approach, driven over a WebSocket
 // to the transcription-relay service instead of Electron IPC.
 export function useMeetingRelay() {
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [hasRecording, setHasRecording] = useState(false);
   const [language, setLanguage] = useState<MeetingLanguage>("en-US");
   const [segments, setSegments] = useState<MeetingSegment[]>([]);
   const [interimText, setInterimText] = useState<string | null>(null);
@@ -60,6 +90,10 @@ export function useMeetingRelay() {
   const pendingTranslateResolvers = useRef<Map<number, (r: TranslateResultEvent["results"]) => void>>(new Map());
   const pendingDiarizeResolvers = useRef<((r: DiarizationResultEvent) => void)[]>([]);
   const pendingStartResolver = useRef<((ok: boolean) => void) | null>(null);
+  // The recorded meeting's raw PCM chunks — kept client-side purely so the
+  // user can download the recording after stopping; never sent anywhere but
+  // the relay's live audio stream.
+  const recordedChunksRef = useRef<ArrayBuffer[]>([]);
 
   const send = useCallback((payload: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -175,6 +209,10 @@ export function useMeetingRelay() {
     const worklet = new AudioWorkletNode(audioContext, "pcm-recorder");
     workletNodeRef.current = worklet;
     worklet.port.onmessage = (event) => {
+      // event.data is a fresh, transferred ArrayBuffer per chunk (see
+      // pcm-worklet.js) — safe to keep a reference to it here as well as
+      // sending it; WebSocket.send() copies rather than detaching it.
+      recordedChunksRef.current.push(event.data);
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(event.data);
       }
@@ -212,6 +250,8 @@ export function useMeetingRelay() {
       setSegments([]);
       setSpeakerNames(new Map());
       setLanguage(initialLanguage);
+      recordedChunksRef.current = [];
+      setHasRecording(false);
 
       const connectedOk = await ensureConnected();
       if (!connectedOk) return false;
@@ -238,8 +278,25 @@ export function useMeetingRelay() {
     send({ type: "stop" });
     stopAudioPipeline();
     setRecording(false);
+    setHasRecording(recordedChunksRef.current.length > 0);
     setInterimText(null);
   }, [send, stopAudioPipeline]);
+
+  // Builds a downloadable WAV of the current meeting's recorded audio, or
+  // null if there isn't one (nothing recorded yet, or the transcript came
+  // from an upload instead — see clearRecording).
+  const getRecordingBlob = useCallback((): Blob | null => {
+    if (recordedChunksRef.current.length === 0) return null;
+    return buildWavBlob(recordedChunksRef.current);
+  }, []);
+
+  // Called when an uploaded transcript/recording replaces the current one —
+  // any previously recorded live audio no longer corresponds to what's
+  // displayed, so it shouldn't be offered for download anymore.
+  const clearRecording = useCallback(() => {
+    recordedChunksRef.current = [];
+    setHasRecording(false);
+  }, []);
 
   const switchLanguage = useCallback(
     (newLanguage: MeetingLanguage) => {
@@ -371,6 +428,7 @@ export function useMeetingRelay() {
   return {
     connected,
     recording,
+    hasRecording,
     language,
     segments,
     setSegments,
@@ -385,6 +443,8 @@ export function useMeetingRelay() {
     mergeSpeakers,
     translateSegments,
     transcribeFile,
+    getRecordingBlob,
+    clearRecording,
     speakerLabel,
     disconnect,
   };

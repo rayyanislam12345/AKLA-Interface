@@ -119,3 +119,20 @@ export async function openWhatsAppDocument(path: string) {
   if (error) throw error;
   window.open(data.signedUrl, "_blank", "noopener,noreferrer");
 }
+
+// Forces an actual save-to-disk (openWhatsAppDocument opens in a new tab,
+// which only previews for types the browser can render inline — a PDF or
+// image, e.g., never prompts a save). Fetches the original bytes exactly
+// as captured, same as every other download in this app.
+export async function downloadWhatsAppDocument(path: string, fileName: string) {
+  const { data, error } = await supabase.storage.from("whatsapp-documents").download(path);
+  if (error) throw error;
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

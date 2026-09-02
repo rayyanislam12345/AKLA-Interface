@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, CircleDot, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Pencil, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Pencil, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus, useDeleteMatter } from "@/hooks/useMatters";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
 import {
@@ -17,6 +17,7 @@ import {
   useWhatsAppMattersForMatter,
   useWhatsAppDocuments,
   openWhatsAppDocument,
+  downloadWhatsAppDocument,
 } from "@/hooks/useWhatsAppMatters";
 import {
   useMatterParties,
@@ -100,16 +101,40 @@ function WhatsAppMatterDocuments({ whatsappMatterId }: { whatsappMatterId: strin
     }
   };
 
+  const handleDownload = async (path: string, fileName: string) => {
+    try {
+      await downloadWhatsAppDocument(path, fileName);
+    } catch (err: any) {
+      toast({ title: "Failed to download document", description: err.message, variant: "destructive" });
+    }
+  };
+
   if (isLoading) return null;
   if (!files?.length) return null;
 
   return (
     <div className="flex flex-wrap gap-2 mt-2">
       {files.map((file) => (
-        <Button key={file.id} variant="outline" size="sm" onClick={() => handleOpen(file.storage_path)} className="gap-1.5">
-          <FileText className="h-3.5 w-3.5" />
-          {file.filename}
-        </Button>
+        <div key={file.id} className="flex items-center gap-0.5 border rounded-md">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleOpen(file.storage_path)}
+            className="gap-1.5 rounded-r-none"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {file.filename}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Download"
+            onClick={() => handleDownload(file.storage_path, file.filename)}
+            className="h-8 w-8 rounded-l-none border-l"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       ))}
     </div>
   );
@@ -560,6 +585,26 @@ export default function MatterWorkspacePage() {
     }
   };
 
+  // Downloads the original file exactly as uploaded — process-document only
+  // ever reads a copy of this object to extract text for RAG, it never
+  // writes back to it, so what's in Storage is always the untouched original.
+  const handleDownloadVersion = async (storagePath: string, fileName: string) => {
+    try {
+      const { data, error } = await supabase.storage.from("matter-documents").download(storagePath);
+      if (error) throw error;
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Failed to download file", description: err.message, variant: "destructive" });
+    }
+  };
+
   const handleDeleteVersion = async (versionId: string, storagePath: string, versionCount: number) => {
     if (!matterId) return;
     if (versionCount <= 1) {
@@ -783,6 +828,18 @@ export default function MatterWorkspacePage() {
                       <Button
                         size="icon"
                         variant="outline"
+                        title="Download latest version"
+                        disabled={!versions.length}
+                        onClick={() => {
+                          const latest = versions.reduce((a, b) => (b.version_number > a.version_number ? b : a));
+                          handleDownloadVersion(latest.storage_path, latest.file_name || `${doc.title}-v${latest.version_number}`);
+                        }}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
                         title="Upload a new version"
                         onClick={() =>
                           triggerUpload(doc.id, doc.document_type_id, (doc as any).versions?.length || 0)
@@ -893,6 +950,17 @@ export default function MatterWorkspacePage() {
                                     size="icon"
                                     variant="ghost"
                                     className="h-7 w-7 shrink-0"
+                                    title="Download this version"
+                                    onClick={() =>
+                                      handleDownloadVersion(v.storage_path, v.file_name || `${doc.title}-v${v.version_number}`)
+                                    }
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 shrink-0"
                                     title="Delete this version"
                                     disabled={versions.length <= 1}
                                     onClick={() => handleDeleteVersion(v.id, v.storage_path, versions.length)}
@@ -934,6 +1002,7 @@ export default function MatterWorkspacePage() {
               <Button
                 size="icon"
                 variant="outline"
+                title="Add document"
                 disabled={!newDocTitle.trim()}
                 onClick={() => {
                   createMatterDocument.mutate({

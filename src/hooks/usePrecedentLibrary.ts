@@ -10,37 +10,18 @@ export interface PrecedentSource {
   created_at: string;
 }
 
+// Grouped server-side (precedent_sources() RPC) rather than pulling every
+// chunk row and deduping client-side — that approach silently truncated at
+// PostgREST's default 1000-row response cap once total chunk count grew
+// past it, which (ordered by created_at desc) could crowd whole documents
+// out of the list behind a handful of large recently-ingested ones.
 export function usePrecedentSources() {
   return useQuery({
     queryKey: ["precedent-sources"],
     queryFn: async (): Promise<PrecedentSource[]> => {
-      const { data, error } = await supabase
-        .from("documents")
-        .select("metadata, document_type_id, created_at, document_type:document_types(name)")
-        .eq("is_precedent", true)
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.rpc("precedent_sources");
       if (error) throw error;
-
-      const bySource = new Map<string, PrecedentSource>();
-      for (const row of data) {
-        const meta = row.metadata as Record<string, any>;
-        const path = meta?.storage_path as string | undefined;
-        if (!path) continue;
-        const existing = bySource.get(path);
-        if (existing) {
-          existing.chunk_count += 1;
-        } else {
-          bySource.set(path, {
-            storage_path: path,
-            filename: meta?.filename ?? path.split("/").pop() ?? path,
-            document_type_id: row.document_type_id,
-            document_type_name: (row as any).document_type?.name ?? null,
-            chunk_count: 1,
-            created_at: row.created_at,
-          });
-        }
-      }
-      return Array.from(bySource.values());
+      return data as PrecedentSource[];
     },
   });
 }

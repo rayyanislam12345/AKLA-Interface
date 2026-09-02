@@ -1,11 +1,13 @@
-"""OCR fallback service for the AKLA Matter Hub's document pipeline.
+"""OCR / large-document fallback service for the AKLA Matter Hub's document
+pipeline.
 
-extractText.ts (the shared function process-document uses) can only read a
-PDF's real text layer — scanned/photographed signed copies have none, and
-come back essentially empty. Running real Tesseract OCR isn't viable inside
-a Supabase Edge Function (150-256MB memory, 2s CPU time per request — OCR
-blows through both), so this is a small dedicated service on its own VM that
-extractText.ts calls as a fallback when normal extraction yields ~nothing.
+extractText.ts (the shared module every document-processing edge function
+uses) can only read a PDF's real text layer — scanned/photographed signed
+copies have none, and come back essentially empty. Running real Tesseract
+OCR isn't viable inside a Supabase Edge Function (150-256MB memory, 2s CPU
+time per request — OCR blows through both), so this is a small dedicated
+service on its own VM that extractText.ts calls as a fallback when normal
+extraction yields ~nothing.
 
 Poppler rasterizes the whole PDF to page image files on disk in one pass
 (confirmed the hard way: doing this per-page instead re-parses the entire
@@ -14,8 +16,21 @@ source PDF from scratch on every single page — 54x redundant work for a
 Tesseract even starts). Tesseract then runs over those files one at a time,
 deleting each as it goes — memory and disk both stay flat regardless of
 document length.
+
+/extract/docx exists for the same underlying reason, different failure
+mode: mammoth's in-Edge-Function docx-to-HTML conversion needs to hold the
+whole unzipped document.xml (plus mammoth's own intermediate structures) in
+memory at once, and a large Word file with heavy tracked-changes history
+(every insertion/deletion is its own XML run) can expand to many times its
+zipped size — confirmed directly against a real 5.5MB precedent file, which
+killed the Edge Function with Supabase's WORKER_RESOURCE_LIMIT in under 7
+seconds (a hard memory kill, not a timeout — nothing in the function's own
+code could have caught it). This VM has no such ceiling, so extractText.ts
+routes docx files over a size threshold here instead of attempting mammoth
+in-process at all.
 """
 
+import io
 import os
 import tempfile
 
@@ -24,6 +39,7 @@ from pdf2image import convert_from_path
 from pdf2image.pdf2image import pdfinfo_from_path
 from PIL import Image
 import pytesseract
+import mammoth
 
 app = Flask(__name__)
 
@@ -34,6 +50,11 @@ OCR_DPI = 150  # enough for typed contract text; keeps per-page size modest
 # for minutes on end; anything this long is unusual for a contract and worth
 # a human's attention rather than a silent multi-minute hang.
 MAX_PAGES = 200
+
+# Same idea for docx — this VM has no per-request memory ceiling, but an
+# absurdly large upload (a corrupt file, someone's entire drive zipped into
+# a .docx) shouldn't be allowed to run unbounded either.
+MAX_DOCX_BYTES = 50 * 1024 * 1024
 
 
 def _check_auth():
@@ -79,6 +100,26 @@ def ocr_pdf():
             os.remove(image_path)
 
     return jsonify({"text": "\n\n".join(texts), "pages": page_count})
+
+
+@app.route("/extract/docx", methods=["POST"])
+def extract_docx():
+    if not _check_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_data()
+    if not data:
+        return jsonify({"error": "No file body provided"}), 400
+
+    if len(data) > MAX_DOCX_BYTES:
+        return jsonify({"error": f"File is {len(data)} bytes, over the {MAX_DOCX_BYTES}-byte limit"}), 413
+
+    try:
+        result = mammoth.convert_to_html(io.BytesIO(data))
+    except Exception as err:
+        return jsonify({"error": f"Could not convert docx: {err}"}), 400
+
+    return jsonify({"html": result.value})
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import { useMatterTasks } from "@/hooks/useMatterDetail";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -61,12 +62,16 @@ function formatDate(iso: string) {
 function toCsv(slips: MatterTimeslip[], matterName: string) {
   const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
   const rows = [
-    ["Date", "Associate", "Hours", "Task code", "Narrative", "Matter"].join(","),
+    // Billable added for this table's split — Task/Narrative were also
+    // previously swapped relative to their header labels here; fixed
+    // alongside it since this file goes straight to billing.
+    ["Date", "Associate", "Hours", "Billable", "Task code", "Task", "Narrative", "Matter"].join(","),
     ...slips.map((s) =>
       [
         s.work_date,
         esc(authorName(s)),
         Number(s.hours).toFixed(1),
+        s.billable ? "Yes" : "No",
         esc(s.task_code ?? ""),
         esc(s.task?.title ?? ""),
         esc(s.narrative),
@@ -223,7 +228,7 @@ export function MatterTimeslips({
   const isPrivileged = currentRole === "admin" || currentRole === "partner";
   const canEdit = (s: MatterTimeslip) => isPrivileged || s.author_id === user?.id;
 
-  const { total, byDay, byAuthor } = useMemo(
+  const { total, billableTotal, nonBillableTotal, byDay, byAuthor } = useMemo(
     () => summarise(slips ?? []),
     [slips]
   );
@@ -251,9 +256,14 @@ export function MatterTimeslips({
           Timeslips
         </CardTitle>
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium tabular-nums">
-            {total.toFixed(1)} h
-          </span>
+          <div className="text-right leading-tight">
+            <div className="text-sm font-medium tabular-nums">{billableTotal.toFixed(1)} h billable</div>
+            {nonBillableTotal > 0 && (
+              <div className="text-xs text-muted-foreground tabular-nums">
+                +{nonBillableTotal.toFixed(1)} h non-billable
+              </div>
+            )}
+          </div>
           <Button
             size="sm"
             variant="outline"
@@ -347,7 +357,19 @@ export function MatterTimeslips({
                       <TableCell className="text-muted-foreground text-xs">
                         {s.task_code ?? "—"}
                       </TableCell>
-                      <TableCell className="text-sm">{s.narrative}</TableCell>
+                      <TableCell className="text-sm">
+                        <div className="flex items-baseline gap-1.5">
+                          {!s.billable && (
+                            <Badge
+                              variant="outline"
+                              className="h-4 shrink-0 whitespace-nowrap px-1 text-[10px] font-normal"
+                            >
+                              Non-billable
+                            </Badge>
+                          )}
+                          <span>{s.narrative}</span>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {s.task?.title ?? "—"}
                       </TableCell>
@@ -388,7 +410,14 @@ export function MatterTimeslips({
                       )}
                     </div>
                   </div>
-                  <p className="text-sm mt-1.5">{s.narrative}</p>
+                  <div className="flex items-baseline gap-1.5 text-sm mt-1.5">
+                    {!s.billable && (
+                      <Badge variant="outline" className="h-4 shrink-0 whitespace-nowrap px-1 text-[10px] font-normal">
+                        Non-billable
+                      </Badge>
+                    )}
+                    <span>{s.narrative}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -407,7 +436,7 @@ export function MatterTimeslips({
                         : "Associate"}
                     </TableHead>
                     <TableHead className="w-[90px] text-right">Hours</TableHead>
-                    <TableHead className="w-[45%]">Share</TableHead>
+                    <TableHead className="w-[45%]">Share (billable in solid)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -415,23 +444,30 @@ export function MatterTimeslips({
                     .sort((a, b) =>
                       view === "day"
                         ? b[0].localeCompare(a[0])
-                        : b[1] - a[1]
+                        : b[1].total - a[1].total
                     )
-                    .map(([key, hours]) => (
+                    .map(([key, split]) => (
                       <TableRow key={key}>
                         <TableCell className="whitespace-nowrap">
                           {view === "day" ? formatDate(key) : key}
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
-                          {hours.toFixed(1)}
+                          {split.total.toFixed(1)}
+                          {split.billable < split.total && (
+                            <span className="block text-xs font-normal text-muted-foreground">
+                              {split.billable.toFixed(1)} billable
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <div className="h-2 w-full rounded bg-muted">
+                          <div className="h-2 w-full rounded bg-muted flex overflow-hidden">
                             <div
-                              className={cn("h-2 rounded bg-primary")}
-                              style={{
-                                width: `${total ? (hours / total) * 100 : 0}%`,
-                              }}
+                              className={cn("h-2 bg-primary")}
+                              style={{ width: `${total ? (split.billable / total) * 100 : 0}%` }}
+                            />
+                            <div
+                              className={cn("h-2 bg-muted-foreground/40")}
+                              style={{ width: `${total ? ((split.total - split.billable) / total) * 100 : 0}%` }}
                             />
                           </div>
                         </TableCell>
@@ -443,17 +479,28 @@ export function MatterTimeslips({
 
             <div className="sm:hidden space-y-2">
               {[...grouped.entries()]
-                .sort((a, b) => (view === "day" ? b[0].localeCompare(a[0]) : b[1] - a[1]))
-                .map(([key, hours]) => (
+                .sort((a, b) => (view === "day" ? b[0].localeCompare(a[0]) : b[1].total - a[1].total))
+                .map(([key, split]) => (
                   <div key={key} className="border rounded-md px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm truncate">{view === "day" ? formatDate(key) : key}</p>
-                      <span className="text-sm font-medium tabular-nums shrink-0">{hours.toFixed(1)}h</span>
+                      <span className="text-sm font-medium tabular-nums shrink-0">
+                        {split.total.toFixed(1)}h
+                        {split.billable < split.total && (
+                          <span className="block text-xs font-normal text-muted-foreground text-right">
+                            {split.billable.toFixed(1)} billable
+                          </span>
+                        )}
+                      </span>
                     </div>
-                    <div className="h-1.5 w-full rounded bg-muted mt-1.5">
+                    <div className="h-1.5 w-full rounded bg-muted mt-1.5 flex overflow-hidden">
                       <div
-                        className="h-1.5 rounded bg-primary"
-                        style={{ width: `${total ? (hours / total) * 100 : 0}%` }}
+                        className="h-1.5 bg-primary"
+                        style={{ width: `${total ? (split.billable / total) * 100 : 0}%` }}
+                      />
+                      <div
+                        className="h-1.5 bg-muted-foreground/40"
+                        style={{ width: `${total ? ((split.total - split.billable) / total) * 100 : 0}%` }}
                       />
                     </div>
                   </div>

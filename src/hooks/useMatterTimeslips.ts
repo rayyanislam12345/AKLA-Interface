@@ -7,6 +7,7 @@ export interface MatterTimeslip {
   author_id: string;
   work_date: string;
   hours: number;
+  billable: boolean;
   task_code: string | null;
   narrative: string;
   source: string;
@@ -52,7 +53,7 @@ export function useMatterTimeslips(
       let q = supabase
         .from("matter_timeslips")
         .select(
-          "id, matter_id, author_id, work_date, hours, task_code, narrative, source, uploaded_at, hub_task_id, author:profiles!matter_timeslips_author_id_fkey(full_name, email), task:matter_tasks(title)"
+          "id, matter_id, author_id, work_date, hours, billable, task_code, narrative, source, uploaded_at, hub_task_id, author:profiles!matter_timeslips_author_id_fkey(full_name, email), task:matter_tasks(title)"
         )
         .eq("matter_id", matterId!)
         .order("work_date", { ascending: false })
@@ -74,6 +75,7 @@ export interface MyTimeslip {
   narrative: string;
   billable_hours: number | null;
   ak_billable_hours: number | null;
+  sort_order: number | null;
   matter: { name: string } | null;
 }
 
@@ -82,6 +84,11 @@ export interface MyTimeslip {
 // Timesheet" page — RLS already allows any firm member to read all
 // timeslips, so this is purely a client-side author_id filter, not a
 // separate access grant.
+//
+// Ordered by sort_order (the associate's own drag-to-reorder choice) with
+// upload order as a fallback for rows that never got one — never re-sorted
+// by anything that could shift under an edit (e.g. hours or a text field),
+// which is what "the rows keep reordering themselves" was actually about.
 export function useMyTimeslips(
   userId: string | undefined,
   range: { from: string | null; to: string | null }
@@ -93,15 +100,35 @@ export function useMyTimeslips(
       let q = supabase
         .from("matter_timeslips")
         .select(
-          "id, matter_id, work_date, hours, narrative, billable_hours, ak_billable_hours, matter:matters(name)"
+          "id, matter_id, work_date, hours, narrative, billable_hours, ak_billable_hours, sort_order, matter:matters(name)"
         )
         .eq("author_id", userId!)
+        .order("sort_order", { ascending: true, nullsFirst: false })
         .order("uploaded_at", { ascending: true });
       if (range.from) q = q.gte("work_date", range.from);
       if (range.to) q = q.lte("work_date", range.to);
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as unknown as MyTimeslip[];
+    },
+  });
+}
+
+// Persists a full new row order in one go (drag-and-drop drop handler) —
+// every visible row gets an explicit sort_order 0..n-1 so the ordering no
+// longer depends on upload order at all, even for rows that never had one.
+export function useReorderMyTimeslips() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderedIds: string[]) => {
+      await Promise.all(
+        orderedIds.map((id, index) =>
+          supabase.from("matter_timeslips").update({ sort_order: index }).eq("id", id)
+        )
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-timeslips"] });
     },
   });
 }
@@ -163,12 +190,27 @@ export function useUpdateTimeslip() {
   });
 }
 
+/** An hours total split by billable status — the hours themselves are never
+ * hidden or filtered, just also broken out into how much of them bill. */
+export interface HourSplit {
+  total: number;
+  billable: number;
+}
+
+function addToSplit(split: HourSplit | undefined, hours: number, billable: boolean): HourSplit {
+  const base = split ?? { total: 0, billable: 0 };
+  return {
+    total: base.total + hours,
+    billable: base.billable + (billable ? hours : 0),
+  };
+}
+
 /** Totals keyed by the task the work was billed against. */
 export function byTask(slips: MatterTimeslip[]) {
-  const out = new Map<string, number>();
+  const out = new Map<string, HourSplit>();
   for (const s of slips) {
     const key = s.task?.title ?? "No task";
-    out.set(key, (out.get(key) ?? 0) + Number(s.hours));
+    out.set(key, addToSplit(out.get(key), Number(s.hours), s.billable));
   }
   return out;
 }
@@ -177,17 +219,20 @@ export function authorName(slip: MatterTimeslip): string {
   return slip.author?.full_name || slip.author?.email || "Unknown";
 }
 
-/** Totals keyed by day and by author, for the two grouped views. */
+/** Totals keyed by day and by author, for the two grouped views — plus the
+ * overall billable/non-billable split for the card's headline figures. */
 export function summarise(slips: MatterTimeslip[]) {
-  const byDay = new Map<string, number>();
-  const byAuthor = new Map<string, number>();
+  const byDay = new Map<string, HourSplit>();
+  const byAuthor = new Map<string, HourSplit>();
   let total = 0;
+  let billableTotal = 0;
   for (const s of slips) {
     const h = Number(s.hours);
     total += h;
-    byDay.set(s.work_date, (byDay.get(s.work_date) ?? 0) + h);
+    if (s.billable) billableTotal += h;
+    byDay.set(s.work_date, addToSplit(byDay.get(s.work_date), h, s.billable));
     const who = authorName(s);
-    byAuthor.set(who, (byAuthor.get(who) ?? 0) + h);
+    byAuthor.set(who, addToSplit(byAuthor.get(who), h, s.billable));
   }
-  return { total, byDay, byAuthor };
+  return { total, billableTotal, nonBillableTotal: total - billableTotal, byDay, byAuthor };
 }

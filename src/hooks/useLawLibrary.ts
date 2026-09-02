@@ -12,37 +12,17 @@ export interface StatuteSource {
 // Statutes are scraped/ingested by scripts/law_library/ (not uploaded by a
 // lawyer through this page), so there's no source file in Storage to key
 // off the way usePrecedentLibrary.ts does with storage_path — grouping by
-// act_name is the natural equivalent here.
+// act_name is the natural equivalent here. Grouped server-side
+// (statute_sources() RPC) for the same reason usePrecedentSources() is —
+// pulling every chunk row client-side silently truncated at PostgREST's
+// default 1000-row response cap once total chunk count grew past it.
 export function useStatuteSources() {
   return useQuery({
     queryKey: ["statute-sources"],
     queryFn: async (): Promise<StatuteSource[]> => {
-      const { data, error } = await supabase
-        .from("documents")
-        .select("metadata, created_at")
-        .eq("is_statute", true)
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.rpc("statute_sources");
       if (error) throw error;
-
-      const byAct = new Map<string, StatuteSource>();
-      for (const row of data) {
-        const meta = row.metadata as Record<string, any>;
-        const actName = meta?.act_name as string | undefined;
-        if (!actName) continue;
-        const existing = byAct.get(actName);
-        if (existing) {
-          existing.chunk_count += 1;
-        } else {
-          byAct.set(actName, {
-            act_name: actName,
-            source: meta?.source ?? null,
-            source_url: meta?.source_url ?? null,
-            chunk_count: 1,
-            scraped_at: meta?.scraped_at ?? row.created_at,
-          });
-        }
-      }
-      return Array.from(byAct.values());
+      return data as StatuteSource[];
     },
   });
 }

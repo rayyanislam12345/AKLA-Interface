@@ -688,6 +688,7 @@ export type Database = {
         Row: {
           ak_billable_hours: number | null
           author_id: string
+          billable: boolean
           billable_hours: number | null
           external_id: string | null
           hours: number
@@ -695,6 +696,7 @@ export type Database = {
           id: string
           matter_id: string
           narrative: string
+          sort_order: number | null
           source: string
           task_code: string | null
           updated_at: string
@@ -704,6 +706,7 @@ export type Database = {
         Insert: {
           ak_billable_hours?: number | null
           author_id: string
+          billable?: boolean
           billable_hours?: number | null
           external_id?: string | null
           hours: number
@@ -711,6 +714,7 @@ export type Database = {
           id?: string
           matter_id: string
           narrative: string
+          sort_order?: number | null
           source?: string
           task_code?: string | null
           updated_at?: string
@@ -720,6 +724,7 @@ export type Database = {
         Update: {
           ak_billable_hours?: number | null
           author_id?: string
+          billable?: boolean
           billable_hours?: number | null
           external_id?: string | null
           hours?: number
@@ -727,6 +732,7 @@ export type Database = {
           id?: string
           matter_id?: string
           narrative?: string
+          sort_order?: number | null
           source?: string
           task_code?: string | null
           updated_at?: string
@@ -1135,6 +1141,27 @@ export type Database = {
           matter_id: string
           metadata: Json
           similarity: number
+        }[]
+      }
+      precedent_sources: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          chunk_count: number
+          created_at: string
+          document_type_id: string
+          document_type_name: string
+          filename: string
+          storage_path: string
+        }[]
+      }
+      statute_sources: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          act_name: string
+          chunk_count: number
+          scraped_at: string
+          source: string
+          source_url: string
         }[]
       }
     }
