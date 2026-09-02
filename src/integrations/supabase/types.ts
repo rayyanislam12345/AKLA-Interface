@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -50,6 +50,7 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          document_version_id: string | null
           id: string
           matter_id: string | null
           title: string | null
@@ -57,6 +58,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          document_version_id?: string | null
           id?: string
           matter_id?: string | null
           title?: string | null
@@ -64,11 +66,19 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          document_version_id?: string | null
           id?: string
           matter_id?: string | null
           title?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_chat_threads_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ai_chat_threads_matter_id_fkey"
             columns: ["matter_id"]
@@ -77,6 +87,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      app_releases: {
+        Row: {
+          created_by: string | null
+          id: string
+          mandatory: boolean
+          notes: string | null
+          published_at: string
+          sha256: string
+          storage_path: string
+          version: string
+        }
+        Insert: {
+          created_by?: string | null
+          id?: string
+          mandatory?: boolean
+          notes?: string | null
+          published_at?: string
+          sha256: string
+          storage_path: string
+          version: string
+        }
+        Update: {
+          created_by?: string | null
+          id?: string
+          mandatory?: boolean
+          notes?: string | null
+          published_at?: string
+          sha256?: string
+          storage_path?: string
+          version?: string
+        }
+        Relationships: []
       }
       clients: {
         Row: {
@@ -110,8 +153,10 @@ export type Database = {
           content_html: string
           created_at: string
           document_type_id: string
+          filename: string | null
           id: string
           seeded_from_storage_path: string | null
+          storage_path: string | null
           updated_at: string
           updated_by: string | null
         }
@@ -119,8 +164,10 @@ export type Database = {
           content_html: string
           created_at?: string
           document_type_id: string
+          filename?: string | null
           id?: string
           seeded_from_storage_path?: string | null
+          storage_path?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -128,8 +175,10 @@ export type Database = {
           content_html?: string
           created_at?: string
           document_type_id?: string
+          filename?: string | null
           id?: string
           seeded_from_storage_path?: string | null
+          storage_path?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -183,8 +232,10 @@ export type Database = {
       document_versions: {
         Row: {
           created_at: string
+          file_name: string | null
           id: string
           is_ai_generated: boolean
+          label: string | null
           matter_document_id: string
           storage_path: string
           uploaded_by: string | null
@@ -192,8 +243,10 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          file_name?: string | null
           id?: string
           is_ai_generated?: boolean
+          label?: string | null
           matter_document_id: string
           storage_path: string
           uploaded_by?: string | null
@@ -201,8 +254,10 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          file_name?: string | null
           id?: string
           is_ai_generated?: boolean
+          label?: string | null
           matter_document_id?: string
           storage_path?: string
           uploaded_by?: string | null
@@ -502,6 +557,44 @@ export type Database = {
           },
         ]
       }
+      matter_relevant_laws: {
+        Row: {
+          act_name: string
+          added_by: string | null
+          created_at: string
+          id: string
+          matter_id: string
+          source: string
+          status: string
+        }
+        Insert: {
+          act_name: string
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          matter_id: string
+          source: string
+          status?: string
+        }
+        Update: {
+          act_name?: string
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          matter_id?: string
+          source?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matter_relevant_laws_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       matter_stages: {
         Row: {
           completed_at: string | null
@@ -584,6 +677,73 @@ export type Database = {
           },
           {
             foreignKeyName: "matter_tasks_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      matter_timeslips: {
+        Row: {
+          author_id: string
+          external_id: string | null
+          hours: number
+          hub_task_id: string | null
+          id: string
+          matter_id: string
+          narrative: string
+          source: string
+          task_code: string | null
+          updated_at: string
+          uploaded_at: string
+          work_date: string
+        }
+        Insert: {
+          author_id: string
+          external_id?: string | null
+          hours: number
+          hub_task_id?: string | null
+          id?: string
+          matter_id: string
+          narrative: string
+          source?: string
+          task_code?: string | null
+          updated_at?: string
+          uploaded_at?: string
+          work_date: string
+        }
+        Update: {
+          author_id?: string
+          external_id?: string | null
+          hours?: number
+          hub_task_id?: string | null
+          id?: string
+          matter_id?: string
+          narrative?: string
+          source?: string
+          task_code?: string | null
+          updated_at?: string
+          uploaded_at?: string
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matter_timeslips_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matter_timeslips_hub_task_id_fkey"
+            columns: ["hub_task_id"]
+            isOneToOne: false
+            referencedRelation: "matter_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matter_timeslips_matter_id_fkey"
             columns: ["matter_id"]
             isOneToOne: false
             referencedRelation: "matters"
@@ -689,6 +849,7 @@ export type Database = {
           id: string
           original_text: string | null
           rationale: string | null
+          review_type: string
           status: Database["public"]["Enums"]["redline_status"]
           suggested_text: string | null
         }
@@ -699,6 +860,7 @@ export type Database = {
           id?: string
           original_text?: string | null
           rationale?: string | null
+          review_type?: string
           status?: Database["public"]["Enums"]["redline_status"]
           suggested_text?: string | null
         }
@@ -709,6 +871,7 @@ export type Database = {
           id?: string
           original_text?: string | null
           rationale?: string | null
+          review_type?: string
           status?: Database["public"]["Enums"]["redline_status"]
           suggested_text?: string | null
         }
@@ -950,12 +1113,14 @@ export type Database = {
       is_firm_member: { Args: { _user_id: string }; Returns: boolean }
       match_documents: {
         Args: {
+          filter_act_names?: string[]
           filter_document_type_id?: string
           filter_matter_id?: string
           match_count?: number
           match_threshold?: number
           precedent_only?: boolean
           query_embedding: string
+          statute_only?: boolean
         }
         Returns: {
           content: string

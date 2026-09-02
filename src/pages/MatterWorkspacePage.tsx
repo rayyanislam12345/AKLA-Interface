@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Circle, CircleDot, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, CircleDot, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Pencil, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus, useDeleteMatter } from "@/hooks/useMatters";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
 import {
@@ -34,6 +34,8 @@ import {
   useSetMatterDocumentStatus,
   useUploadDocumentVersion,
   useDeleteMatterDocument,
+  useDeleteDocumentVersion,
+  useUpdateVersionLabel,
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
 import { MatterTimeslips } from "@/components/MatterTimeslips";
@@ -513,10 +515,15 @@ export default function MatterWorkspacePage() {
   const setDocumentStatus = useSetMatterDocumentStatus();
   const uploadVersion = useUploadDocumentVersion();
   const deleteMatterDocument = useDeleteMatterDocument();
+  const deleteDocumentVersion = useDeleteDocumentVersion();
+  const updateVersionLabel = useUpdateVersionLabel();
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocTypeId, setNewDocTypeId] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<{ matterDocumentId: string; documentTypeId: string | null; nextVersion: number } | null>(null);
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+  const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
+  const [editingLabelDraft, setEditingLabelDraft] = useState("");
 
   const triggerUpload = (matterDocumentId: string, documentTypeId: string | null, versionCount: number) => {
     uploadTargetRef.current = { matterDocumentId, documentTypeId, nextVersion: versionCount + 1 };
@@ -550,6 +557,47 @@ export default function MatterWorkspacePage() {
       toast({ title: "Document removed" });
     } catch (err: any) {
       toast({ title: "Failed to remove document", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleDeleteVersion = async (versionId: string, storagePath: string, versionCount: number) => {
+    if (!matterId) return;
+    if (versionCount <= 1) {
+      toast({
+        title: "Can't delete the only version",
+        description: "Upload a new version first, or remove the whole document instead.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!window.confirm("Delete this version? This cannot be undone.")) return;
+    try {
+      await deleteDocumentVersion.mutateAsync({ versionId, storagePath, matterId });
+      toast({ title: "Version deleted" });
+    } catch (err: any) {
+      toast({ title: "Failed to delete version", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const startEditingLabel = (versionId: string, currentLabel: string | null) => {
+    setEditingVersionId(versionId);
+    setEditingLabelDraft(currentLabel ?? "");
+  };
+
+  const cancelEditingLabel = () => {
+    setEditingVersionId(null);
+    setEditingLabelDraft("");
+  };
+
+  const saveVersionLabel = async (versionId: string) => {
+    if (!matterId) return;
+    try {
+      await updateVersionLabel.mutateAsync({ versionId, label: editingLabelDraft, matterId });
+    } catch (err: any) {
+      toast({ title: "Failed to save tag", description: err.message, variant: "destructive" });
+    } finally {
+      setEditingVersionId(null);
+      setEditingLabelDraft("");
     }
   };
 
@@ -668,20 +716,46 @@ export default function MatterWorkspacePage() {
               <p className="text-sm text-muted-foreground">No documents yet.</p>
             ) : (
               <div className="space-y-2">
-                {matterDocuments.map((doc) => (
+                {matterDocuments.map((doc) => {
+                  const versions = ((doc as any).versions ?? []) as Array<{
+                    id: string;
+                    version_number: number;
+                    created_at: string;
+                    storage_path: string;
+                    file_name: string | null;
+                    label: string | null;
+                    is_ai_generated: boolean;
+                  }>;
+                  const isExpanded = expandedDocId === doc.id;
+                  return (
                   <div
                     key={doc.id}
-                    className="flex items-center gap-3 flex-wrap border rounded-md px-3 py-2"
+                    className="border rounded-md px-3 py-2"
                   >
+                  <div
+                    className="flex items-center gap-3 flex-wrap"
+                  >
+                    <button
+                      type="button"
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      title={isExpanded ? "Hide versions" : "Show versions"}
+                      onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                    >
+                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
                     <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                    >
                       <p className="text-sm font-medium truncate">{doc.title}</p>
                       <p className="text-xs text-muted-foreground">
                         {(doc as any).document_type?.name || "No type"} ·{" "}
-                        {(doc as any).versions?.length || 0} version
-                        {(doc as any).versions?.length === 1 ? "" : "s"}
+                        {versions.length || 0} version
+                        {versions.length === 1 ? "" : "s"}
                       </p>
-                    </div>
+                    </button>
                     <Select
                       value={doc.status}
                       onValueChange={(value) =>
@@ -735,7 +809,106 @@ export default function MatterWorkspacePage() {
                       </Button>
                     </div>
                   </div>
-                ))}
+
+                  {isExpanded && (
+                    <div className="mt-2 pl-9 space-y-1.5">
+                      {versions.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No versions uploaded yet.</p>
+                      ) : (
+                        [...versions]
+                          .sort((a, b) => b.version_number - a.version_number)
+                          .map((v) => (
+                            <div
+                              key={v.id}
+                              className="flex items-center gap-2 flex-wrap text-sm bg-muted/40 rounded-md px-2 py-1.5"
+                            >
+                              <span
+                                className="text-xs font-medium truncate flex-1 min-w-[8rem]"
+                                title={v.file_name ?? undefined}
+                              >
+                                {v.file_name || `Version ${v.version_number}`}
+                              </span>
+                              {editingVersionId === v.id ? (
+                                <>
+                                  <Input
+                                    autoFocus
+                                    value={editingLabelDraft}
+                                    onChange={(e) => setEditingLabelDraft(e.target.value)}
+                                    placeholder="e.g. v1, v2, Execution"
+                                    className="h-7 text-xs w-40 shrink-0"
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveVersionLabel(v.id);
+                                      if (e.key === "Escape") cancelEditingLabel();
+                                    }}
+                                  />
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 shrink-0"
+                                    title="Save tag"
+                                    onClick={() => saveVersionLabel(v.id)}
+                                  >
+                                    <Check className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 shrink-0"
+                                    title="Cancel"
+                                    onClick={cancelEditingLabel}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-left"
+                                    title="Click to edit tag"
+                                    onClick={() => startEditingLabel(v.id, v.label)}
+                                  >
+                                    {v.label ? (
+                                      <Badge variant="outline" className="font-normal">
+                                        {v.label}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground italic">No tag</span>
+                                    )}
+                                  </button>
+                                  <span className="text-xs text-muted-foreground shrink-0">
+                                    {new Date(v.created_at).toLocaleDateString()}
+                                    {v.is_ai_generated ? " · AI-generated" : ""}
+                                  </span>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 shrink-0"
+                                    title="Edit tag"
+                                    onClick={() => startEditingLabel(v.id, v.label)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 shrink-0"
+                                    title="Delete this version"
+                                    disabled={versions.length <= 1}
+                                    onClick={() => handleDeleteVersion(v.id, v.storage_path, versions.length)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  )}
+                  </div>
+                  );
+                })}
               </div>
             )}
 

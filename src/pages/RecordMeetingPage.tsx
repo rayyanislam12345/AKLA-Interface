@@ -223,6 +223,7 @@ export default function RecordMeetingPage() {
         matter_document_id: matterDocument.id,
         version_number: 1,
         storage_path: storagePath,
+        file_name: fileName,
         is_ai_generated: true,
         uploaded_by: userData.user?.id,
       });

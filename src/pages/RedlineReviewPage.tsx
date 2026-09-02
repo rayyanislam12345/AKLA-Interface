@@ -241,6 +241,7 @@ export default function RedlineReviewPage() {
         matter_document_id: matterDocumentId,
         version_number: nextVersion,
         storage_path: storagePath,
+        file_name: fileName,
         is_ai_generated: true,
         uploaded_by: userData.user?.id,
       });

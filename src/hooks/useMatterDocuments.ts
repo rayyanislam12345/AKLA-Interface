@@ -71,9 +71,12 @@ export function useMatterDocuments(matterId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("matter_documents")
-        .select("*, document_type:document_types(name), versions:document_versions(id, version_number, created_at)")
+        .select(
+          "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by)"
+        )
         .eq("matter_id", matterId!)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("version_number", { ascending: false, foreignTable: "document_versions" });
       if (error) throw error;
       return data;
     },
@@ -157,6 +160,7 @@ export function useUploadDocumentVersion() {
         matter_document_id: matterDocumentId,
         version_number: nextVersionNumber,
         storage_path: storagePath,
+        file_name: file.name,
         is_ai_generated: false,
         uploaded_by: userData.user?.id,
       });
@@ -212,6 +216,57 @@ export function useDeleteMatterDocument() {
       const { error: deleteError } = await supabase.from("matter_documents").delete().eq("id", matterDocumentId);
       if (deleteError) throw deleteError;
 
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+    },
+  });
+}
+
+export function useDeleteDocumentVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      versionId,
+      storagePath,
+      matterId,
+    }: {
+      versionId: string;
+      storagePath: string;
+      matterId: string;
+    }) => {
+      await supabase.storage.from("matter-documents").remove([storagePath]);
+      await supabase.from("documents").delete().eq("metadata->>storage_path", storagePath);
+
+      const { error } = await supabase.from("document_versions").delete().eq("id", versionId);
+      if (error) throw error;
+
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+    },
+  });
+}
+
+export function useUpdateVersionLabel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      versionId,
+      label,
+      matterId,
+    }: {
+      versionId: string;
+      label: string;
+      matterId: string;
+    }) => {
+      const { error } = await supabase
+        .from("document_versions")
+        .update({ label: label.trim() || null })
+        .eq("id", versionId);
+      if (error) throw error;
       return matterId;
     },
     onSuccess: (matterId) => {
