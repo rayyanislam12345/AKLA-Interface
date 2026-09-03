@@ -66,7 +66,7 @@ src/
 │   ├── PrecedentLibraryPage.tsx  Bulk-upload firm-wide precedent, independent of any matter
 │   ├── MandateOpportunitiesPage.tsx  Read-only feed synced from the external Mandate Bot scraper
 │   ├── WhatsAppActivityPage.tsx  LLM-inferred matters synced from the external whatsapp-dashboard app
-│   ├── DraftDocumentPage.tsx / RedlineReviewPage.tsx / MatterChatPage.tsx
+│   ├── AiWorkspacePage.tsx    Ask / Draft / Verify tabs (panels in components/ai/, firm .docx styling in lib/firmDocx.ts)
 │   └── Auth.tsx / ResetPassword.tsx / HelpPage.tsx / NotFound.tsx
 ├── integrations/supabase/   Client + generated types
 └── App.tsx                  Routes
@@ -190,8 +190,8 @@ whatsapp-dashboard is a standalone Node.js/Express app (in `whatsapp-dashboard/`
 ## Known gaps / deliberate v1 limitations
 
 - **`useActivityTracking` is a stub.** The FactorIQ-era version logged against tables that no longer exist. A matter-hub-appropriate audit trail (logins, matter/document access) hasn't been rebuilt.
-- **Redline export requires the same session.** `RedlineReviewPage` needs the extracted source text to build the clean export, and that text isn't cached across visits — re-run the review to enable export if you're returning to a page with existing suggestions.
-- **No native Word tracked-changes.** Redline suggestions are accept/reject in-app; the export is a clean revised `.docx`, not a document with OOXML revision marks. Flagged from the start as a deliberate v1 scope decision, not an oversight.
+- **Tracked-changes review is Word-only.** `apply-redlines-to-docx` patches the real uploaded `.docx` with OOXML revision marks; a PDF/Excel/PowerPoint version still gets the three review passes, but only as a list (original → suggested text), with no preview, download or save-as-version.
+- **AI Workspace tab state is per visit.** Interview/draft/review state survives switching tabs but not leaving the page or reloading — only what's been saved as a document version persists.
 - **`document_types.required_fields`** exists in the schema (a hint for the drafting interview) but has no editing UI yet — no document type currently has it populated.
 - **No data-residency option in Pakistan.** The Supabase project runs on the nearest available region; there is no AWS/Supabase presence in Pakistan itself. See [SECURITY.md](SECURITY.md).
 - **Onboarding the rest of the firm** (10-11 more lawyers) hasn't happened yet — there's one admin test account.

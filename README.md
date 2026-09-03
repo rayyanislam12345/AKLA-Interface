@@ -8,9 +8,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a full technical writeup and [SECURIT
 
 - **Matters** — track a transaction's client, sector, lead partner, and a stage checklist (Origination → Due Diligence → Drafting → Negotiation → Financial Close → Post-Closing), plus parties, tasks, and notes.
 - **Documents** — upload drafts against a matter, version them, and move them through a status pipeline (not started → drafting → internal review → with counterparty → negotiation → finalized → executed). Every upload is text-extracted and embedded into the firm's document knowledge base.
-- **Draft with AI** — generate a first draft of a document either from the firm's own precedent for that document type, or through a guided Q&A interview when no close precedent exists.
-- **Review with AI** — get clause-level redline suggestions on an uploaded draft, benchmarked against precedent and standard market practice; accept or reject each, then export a clean revised `.docx`.
-- **Ask AI** — a per-matter chat grounded in that matter's documents and the firm's precedent library.
+- **AI Workspace** — one per-matter page with three tabs: **Ask** (chat grounded in that matter's documents and the firm's precedent library), **Draft** (a guided interview, then a first draft grounded in the firm's standard template and precedent for that document type, exported as a firm-formatted `.docx`), and **Verify** (three review passes — legal clauses & citations, formatting, content & conflicts — with accept/reject and, for Word files, real tracked changes applied to the uploaded `.docx`). Documents can be uploaded, with a document type, from inside the workspace.
 - **Document Types** — admin-editable contract taxonomy (Concession Agreement, EPC Contract, financing agreements, etc.) that drives drafting and review.
 
 ## Tech stack

@@ -86,6 +86,132 @@ async function docxHtmlFallback(docxBytes: Uint8Array): Promise<string | null> {
   }
 }
 
+// PowerPoint. A .pptx is a zip of small XML parts plus (usually) large media;
+// the slide text is tiny, so the in-process path only inflates the XML parts
+// it needs and never touches the images. The threshold is about how much
+// zipped file we're comfortable holding in this function's memory at all,
+// not about parsing cost — above it the whole file goes to ocr-service's
+// /extract/pptx (python-pptx) instead, same posture as docx.
+//
+// Output must be deterministic: suggest-redline and redline-chat re-extract
+// the same file and require a suggestion's original_text to be a verbatim
+// substring of it. Both this path and the Python one emit the same shape —
+// "[Slide N]" blocks, one line per paragraph, notes appended as "Notes: …".
+const LARGE_PPTX_BYTES = 20 * 1024 * 1024;
+
+async function pptxTextFallback(pptxBytes: Uint8Array): Promise<{ text: string; slides: number } | null> {
+  const ocrUrl = Deno.env.get("OCR_SERVICE_URL");
+  const ocrSecret = Deno.env.get("OCR_SERVICE_SECRET");
+  if (!ocrUrl || !ocrSecret) {
+    console.warn("Large-pptx fallback not configured (OCR_SERVICE_URL/OCR_SERVICE_SECRET unset) — skipping.");
+    return null;
+  }
+  try {
+    const resp = await fetch(`${ocrUrl}/extract/pptx`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ocrSecret}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: pptxBytes,
+      signal: AbortSignal.timeout(150_000),
+    });
+    if (!resp.ok) {
+      console.error(`Pptx extraction service error: ${resp.status} ${await resp.text()}`);
+      return null;
+    }
+    const data = await resp.json();
+    return { text: data.text as string, slides: data.slides as number };
+  } catch (err) {
+    console.error("Large-pptx fallback request failed:", err);
+    return null;
+  }
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&amp;/g, "&");
+}
+
+// DrawingML → lines: one line per <a:p> paragraph, runs joined with nothing
+// (a run boundary is a formatting change, not a word boundary), <a:br/> as a
+// newline. Tables and grouped shapes use the same <a:p>/<a:t> markup, so
+// document order of the XML is the reading order for all of them.
+function drawingMlToLines(xml: string): string[] {
+  const lines: string[] = [];
+  for (const paragraph of xml.split("</a:p>")) {
+    const runs: string[] = [];
+    const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>|<a:br\s*\/>/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(paragraph)) !== null) {
+      runs.push(match[0].startsWith("<a:br") ? "\n" : decodeXmlEntities(match[1]));
+    }
+    const line = runs.join("").trim();
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+async function extractPptxInProcess(bytes: Uint8Array): Promise<{ text: string; slides: number }> {
+  const { unzipSync } = await import("https://esm.sh/fflate@0.8.3");
+  const wanted =
+    /^ppt\/(presentation\.xml|_rels\/presentation\.xml\.rels|slides\/slide\d+\.xml|slides\/_rels\/slide\d+\.xml\.rels|notesSlides\/notesSlide\d+\.xml)$/;
+  const entries = unzipSync(bytes, { filter: (file) => wanted.test(file.name) });
+  const decoder = new TextDecoder();
+  const part = (name: string) => (entries[name] ? decoder.decode(entries[name]) : "");
+
+  // Presentation order is the <p:sldId> list, resolved through the rels file
+  // — slideN numbering is just creation order and goes stale on reordering.
+  const rels = new Map<string, string>();
+  for (const m of part("ppt/_rels/presentation.xml.rels").matchAll(/<Relationship\b([^>]*)\/?>/g)) {
+    const id = /\bId="([^"]+)"/.exec(m[1])?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(m[1])?.[1];
+    if (id && target) rels.set(id, target.replace(/^\/?ppt\//, "").replace(/^\//, ""));
+  }
+  const ordered: string[] = [];
+  for (const m of part("ppt/presentation.xml").matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"/g)) {
+    const target = rels.get(m[1]);
+    if (target) ordered.push(`ppt/${target}`);
+  }
+  const slidePaths =
+    ordered.length > 0
+      ? ordered
+      : Object.keys(entries)
+          .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+          .sort((a, b) => Number(/slide(\d+)/.exec(a)![1]) - Number(/slide(\d+)/.exec(b)![1]));
+
+  const blocks: string[] = [];
+  slidePaths.forEach((slidePath, index) => {
+    const lines = drawingMlToLines(part(slidePath));
+
+    // The notes slide is linked from the slide's own rels, and only its body
+    // placeholder is the lawyer's notes — the other shapes on a notes page
+    // are the slide thumbnail and the page-number field.
+    const slideFile = slidePath.split("/").pop()!;
+    const notesTarget = /<Relationship\b[^>]*Type="[^"]*\/notesSlide"[^>]*Target="([^"]+)"/.exec(
+      part(`ppt/slides/_rels/${slideFile}.rels`)
+    )?.[1];
+    if (notesTarget) {
+      const notesXml = part(`ppt/notesSlides/${notesTarget.split("/").pop()}`);
+      const noteLines = notesXml
+        .split("<p:sp>")
+        .filter((shape) => /<p:ph\b[^>]*type="body"/.test(shape))
+        .flatMap(drawingMlToLines);
+      if (noteLines.length > 0) lines.push(`Notes: ${noteLines.join("\n")}`);
+    }
+
+    blocks.push(`[Slide ${index + 1}]\n${lines.join("\n")}`);
+  });
+
+  return { text: blocks.join("\n\n"), slides: slidePaths.length };
+}
+
 export async function extractTextFromFile(fileData: Blob, fileName: string): Promise<ExtractResult> {
   const fileExtension = fileName.toLowerCase().split(".").pop();
 
@@ -131,6 +257,26 @@ export async function extractTextFromFile(fileData: Blob, fileName: string): Pro
     // retains far more of the original document's real formatting signal.
     const result = await mammoth.convertToHtml({ arrayBuffer, buffer: Buffer.from(arrayBuffer) } as any);
     return { text: result.value, metadata: { original_format: "docx" } };
+  }
+
+  if (fileExtension === "pptx") {
+    const arrayBuffer = await fileData.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    if (bytes.byteLength > LARGE_PPTX_BYTES) {
+      const offloaded = await pptxTextFallback(bytes);
+      if (offloaded) {
+        return {
+          text: offloaded.text,
+          metadata: { original_format: "pptx", slide_count: offloaded.slides, large_pptx_offloaded: true },
+        };
+      }
+      // ocr-service unreachable/misconfigured — fall through and try in-process
+      // anyway, same as the docx path: a shot at it beats silently no text.
+    }
+
+    const { text, slides } = await extractPptxInProcess(bytes);
+    return { text, metadata: { original_format: "pptx", slide_count: slides } };
   }
 
   if (fileExtension === "xlsx" || fileExtension === "xls") {

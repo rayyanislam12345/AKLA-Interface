@@ -20,7 +20,7 @@ import {
 // output (proposals and minutes alike) uses this single "AKLA" house style —
 // the plain firm-formatting-guide style this file used to also export
 // (buildStandardDocxBlob, for a since-removed standard-minutes option) is
-// gone; DraftDocumentPage's firmNumberingConfig is unrelated to either.
+// gone; lib/firmDocx.ts's firmNumberingConfig is unrelated to either.
 
 const pt = (points: number) => points * 2; // docx sizes are in half-points
 

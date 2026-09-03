@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
-import { Check, Download, Save, ScanSearch, X } from "lucide-react";
+import { ArrowLeftRight, Check, Download, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useMatterDocuments } from "@/hooks/useMatterDocuments";
 import {
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
@@ -16,11 +17,13 @@ import {
   type RedlineSuggestion,
 } from "@/hooks/useRedline";
 import DocumentChatPanel, { type DocumentChatMessage } from "@/components/chat/DocumentChatPanel";
+import DocumentUploadCard from "@/components/ai/DocumentUploadCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeStorageFilename } from "@/lib/utils";
 
 function statusBadgeVariant(status: RedlineSuggestion["status"]) {
   if (status === "accepted") return "default" as const;
@@ -47,19 +50,23 @@ const REVIEW_TYPE_DESCRIPTIONS: Record<RedlineReviewType, string> = {
   chat: "",
 };
 
-// Just the clause reference/rationale/status now — the actual before/after
-// text is visible directly in the real rendered document (tracked changes)
-// alongside this list, so repeating it here would be redundant.
+// For a Word document the before/after text is visible directly in the
+// rendered tracked-changes preview, so the list item is just the clause
+// reference, rationale and status. For anything else (PDF, Excel,
+// PowerPoint) there's no preview to show it in, so `showText` puts the
+// original → suggested text on the item itself.
 function SuggestionListItem({
   suggestion,
   onAccept,
   onReject,
   disabled,
+  showText,
 }: {
   suggestion: RedlineSuggestion;
   onAccept: () => void;
   onReject: () => void;
   disabled: boolean;
+  showText: boolean;
 }) {
   const isPending = suggestion.status === "pending";
 
@@ -75,6 +82,20 @@ function SuggestionListItem({
     >
       {suggestion.clause_reference && (
         <div className="text-xs font-medium text-muted-foreground mb-1">{suggestion.clause_reference}</div>
+      )}
+      {showText && (suggestion.original_text || suggestion.suggested_text) && (
+        <div className="space-y-1 mb-2">
+          {suggestion.original_text && (
+            <p className="text-xs whitespace-pre-wrap line-through text-red-700/80 dark:text-red-400/80">
+              {suggestion.original_text}
+            </p>
+          )}
+          {suggestion.suggested_text && (
+            <p className="text-xs whitespace-pre-wrap text-emerald-800 dark:text-emerald-300">
+              {suggestion.suggested_text}
+            </p>
+          )}
+        </div>
       )}
       {suggestion.rationale && <div className="text-xs text-muted-foreground">{suggestion.rationale}</div>}
       {isPending ? (
@@ -97,31 +118,132 @@ function SuggestionListItem({
   );
 }
 
-export default function RedlineReviewPage() {
-  const { matterId, matterDocumentId } = useParams<{ matterId: string; matterDocumentId: string }>();
+interface VerifyPanelProps {
+  matterId: string;
+  matterDocumentId: string | undefined;
+  onSelectDocument: (matterDocumentId: string | undefined) => void;
+}
+
+// Picker (which document to review) wrapping the review session itself. The
+// session is keyed on the document id so preview/summary/chat state starts
+// clean for every document — the old standalone page got that for free by
+// being remounted per route.
+export default function VerifyPanel({ matterId, matterDocumentId, onSelectDocument }: VerifyPanelProps) {
+  if (!matterDocumentId) {
+    return <DocumentPicker matterId={matterId} onSelectDocument={onSelectDocument} />;
+  }
+  return (
+    <ReviewSession
+      key={matterDocumentId}
+      matterId={matterId}
+      matterDocumentId={matterDocumentId}
+      onChangeDocument={() => onSelectDocument(undefined)}
+    />
+  );
+}
+
+function DocumentPicker({
+  matterId,
+  onSelectDocument,
+}: {
+  matterId: string;
+  onSelectDocument: (matterDocumentId: string) => void;
+}) {
+  const { data: matterDocuments, isLoading } = useMatterDocuments(matterId);
+
+  const reviewable = (matterDocuments ?? []).filter((doc) => ((doc as any).versions?.length ?? 0) > 0);
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Document to review</label>
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : reviewable.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No documents with an uploaded version on this matter yet — upload one below.
+              </p>
+            ) : (
+              <Select value="" onValueChange={onSelectDocument}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a document" />
+                </SelectTrigger>
+                <SelectContent>
+                  {reviewable.map((doc) => {
+                    const versions = (doc as any).versions as Array<{ version_number: number; file_name: string | null }>;
+                    const latest = versions.reduce((a, b) => (b.version_number > a.version_number ? b : a));
+                    const typeName = (doc as any).document_type?.name as string | undefined;
+                    return (
+                      <SelectItem key={doc.id} value={doc.id}>
+                        {doc.title}
+                        {typeName ? ` · ${typeName}` : ""}
+                        {latest.file_name ? ` · ${latest.file_name}` : ""}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Three review passes — legal clauses &amp; citations, formatting, and content &amp; conflicts — against
+            the firm's precedent and this matter's other documents. Word documents get a tracked-changes preview.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6">
+          <DocumentUploadCard
+            matterId={matterId}
+            hint="…or upload a new document to review. It's added to the matter like any other upload."
+            onUploaded={onSelectDocument}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ReviewSession({
+  matterId,
+  matterDocumentId,
+  onChangeDocument,
+}: {
+  matterId: string;
+  matterDocumentId: string;
+  onChangeDocument: () => void;
+}) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const { data: matterDocument } = useQuery({
     queryKey: ["matter-document", matterDocumentId],
-    enabled: !!matterDocumentId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("matter_documents")
         .select("id, title, document_type_id, document_type:document_types(name)")
-        .eq("id", matterDocumentId!)
+        .eq("id", matterDocumentId)
         .single();
       if (error) throw error;
       return data;
     },
   });
 
-  const { data: version } = useLatestDocumentVersion(matterDocumentId);
+  const { data: version, isLoading: versionLoading } = useLatestDocumentVersion(matterDocumentId);
   const { data: suggestions } = useRedlineSuggestions(version?.id);
   const runReview = useRunRedlineReview();
   const setStatus = useSetSuggestionStatus();
   const redlineChat = useRedlineChat();
   const applyPreview = useApplyRedlinesPreview();
+
+  // apply-redlines-to-docx patches the real uploaded .docx with OOXML
+  // revision marks — it refuses anything else, so for a PDF/Excel/PowerPoint
+  // version the review still runs but there's no preview, download or
+  // save-as-version, only the suggestion list.
+  const canPreview = !!version && version.storage_path.toLowerCase().endsWith(".docx");
 
   const [previewStoragePath, setPreviewStoragePath] = useState<string | undefined>();
   const [applySummary, setApplySummary] = useState<{ appliedCount: number; skippedCount: number } | null>(null);
@@ -133,6 +255,7 @@ export default function RedlineReviewPage() {
   const [saving, setSaving] = useState(false);
 
   const regeneratePreview = async (documentVersionId: string) => {
+    if (!canPreview) return;
     try {
       const result = await applyPreview.mutateAsync(documentVersionId);
       setPreviewStoragePath(result.previewStoragePath);
@@ -144,14 +267,14 @@ export default function RedlineReviewPage() {
 
   // Rebuild the preview automatically once suggestions exist and nothing's
   // been generated yet this visit — apply-redlines-to-docx re-downloads the
-  // original file itself, so (unlike the old plain-text flow) there's
-  // nothing that needs to have been generated earlier in the same session.
+  // original file itself, so there's nothing that needs to have been
+  // generated earlier in the same session.
   useEffect(() => {
-    if (version?.id && suggestions && suggestions.length > 0 && !previewStoragePath && !applyPreview.isPending) {
+    if (canPreview && version?.id && suggestions && suggestions.length > 0 && !previewStoragePath && !applyPreview.isPending) {
       regeneratePreview(version.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version?.id, suggestions]);
+  }, [version?.id, suggestions, canPreview]);
 
   useEffect(() => {
     if (previewBlob && previewRef.current) {
@@ -212,11 +335,9 @@ export default function RedlineReviewPage() {
   };
 
   // Saves the current tracked-changes preview into the matter's own version
-  // history, the same way every other document on the matter is versioned
-  // — previously this page only offered a plain download, with no way to
-  // keep the redlined file as part of the matter's record.
+  // history, the same way every other document on the matter is versioned.
   const handleSaveAsVersion = async () => {
-    if (!previewBlob || !matterId || !matterDocumentId) return;
+    if (!previewBlob) return;
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -228,7 +349,7 @@ export default function RedlineReviewPage() {
 
       const title = matterDocument?.title ?? "document";
       const fileName = `${title.replace(/\s+/g, "-")}-v${nextVersion}-redlined.docx`;
-      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersion}-${fileName}`;
+      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersion}-${sanitizeStorageFilename(fileName)}`;
 
       const { error: uploadError } = await supabase.storage
         .from("matter-documents")
@@ -273,22 +394,75 @@ export default function RedlineReviewPage() {
     }
   };
 
-  if (!matterId || !matterDocumentId) return null;
+  const suggestionGroups = (
+    <div className="space-y-5">
+      {STRUCTURED_REVIEW_TYPES.map((type) => {
+        const group = (suggestions ?? []).filter((s) => s.review_type === type);
+        return (
+          <div key={type} className="space-y-2">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {REVIEW_TYPE_LABELS[type]}
+                {group.length > 0 ? ` (${group.length})` : ""}
+              </p>
+              <p className="text-[11px] text-muted-foreground/80">{REVIEW_TYPE_DESCRIPTIONS[type]}</p>
+            </div>
+            {group.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">Nothing flagged in this pass.</p>
+            ) : (
+              group.map((s) => (
+                <SuggestionListItem
+                  key={s.id}
+                  suggestion={s}
+                  showText={!canPreview}
+                  disabled={setStatus.isPending || applyPreview.isPending}
+                  onAccept={() => handleSetStatus(s.id, "accepted")}
+                  onReject={() => handleSetStatus(s.id, "rejected")}
+                />
+              ))
+            )}
+          </div>
+        );
+      })}
+      {(suggestions ?? []).some((s) => s.review_type === "chat") && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {REVIEW_TYPE_LABELS.chat}
+          </p>
+          {(suggestions ?? [])
+            .filter((s) => s.review_type === "chat")
+            .map((s) => (
+              <SuggestionListItem
+                key={s.id}
+                suggestion={s}
+                showText={!canPreview}
+                disabled={setStatus.isPending || applyPreview.isPending}
+                onAccept={() => handleSetStatus(s.id, "accepted")}
+                onReject={() => handleSetStatus(s.id, "rejected")}
+              />
+            ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <ScanSearch className="h-5 w-5 text-primary" />
-          Review with AI
-        </h1>
-        <p className="text-muted-foreground">
-          {matterDocument?.title}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{matterDocument?.title ?? "…"}</span>
           {(matterDocument as any)?.document_type?.name ? ` · ${(matterDocument as any).document_type.name}` : ""}
+          {version?.file_name ? ` · ${version.file_name}` : ""}
         </p>
+        <Button size="sm" variant="outline" onClick={onChangeDocument}>
+          <ArrowLeftRight className="h-4 w-4 mr-2" />
+          Choose a different document
+        </Button>
       </div>
 
-      {!version ? (
+      {versionLoading ? (
+        <p className="text-muted-foreground">Loading…</p>
+      ) : !version ? (
         <p className="text-muted-foreground">No document version to review yet — upload one first.</p>
       ) : (
         <>
@@ -311,6 +485,13 @@ export default function RedlineReviewPage() {
             )}
           </div>
 
+          {!canPreview && (
+            <p className="text-xs text-muted-foreground">
+              Tracked-changes preview, download and save-as-version are only available for Word (.docx) documents —
+              for this file the suggestions are listed with their original and proposed text.
+            </p>
+          )}
+
           {(runReview.isPending || applyPreview.isPending) && (
             <p className="text-muted-foreground">
               {runReview.isPending
@@ -328,60 +509,18 @@ export default function RedlineReviewPage() {
           )}
 
           {suggestions && suggestions.length > 0 && (
-            <div className="grid md:grid-cols-[1fr_320px] gap-6 items-start">
-              <Card>
-                <CardContent className="pt-6">
-                  <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />
-                </CardContent>
-              </Card>
-              <div className="space-y-5">
-                {STRUCTURED_REVIEW_TYPES.map((type) => {
-                  const group = suggestions.filter((s) => s.review_type === type);
-                  return (
-                    <div key={type} className="space-y-2">
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          {REVIEW_TYPE_LABELS[type]}
-                          {group.length > 0 ? ` (${group.length})` : ""}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground/80">{REVIEW_TYPE_DESCRIPTIONS[type]}</p>
-                      </div>
-                      {group.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic">Nothing flagged in this pass.</p>
-                      ) : (
-                        group.map((s) => (
-                          <SuggestionListItem
-                            key={s.id}
-                            suggestion={s}
-                            disabled={setStatus.isPending || applyPreview.isPending}
-                            onAccept={() => handleSetStatus(s.id, "accepted")}
-                            onReject={() => handleSetStatus(s.id, "rejected")}
-                          />
-                        ))
-                      )}
-                    </div>
-                  );
-                })}
-                {suggestions.some((s) => s.review_type === "chat") && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {REVIEW_TYPE_LABELS.chat}
-                    </p>
-                    {suggestions
-                      .filter((s) => s.review_type === "chat")
-                      .map((s) => (
-                        <SuggestionListItem
-                          key={s.id}
-                          suggestion={s}
-                          disabled={setStatus.isPending || applyPreview.isPending}
-                          onAccept={() => handleSetStatus(s.id, "accepted")}
-                          onReject={() => handleSetStatus(s.id, "rejected")}
-                        />
-                      ))}
-                  </div>
-                )}
+            canPreview ? (
+              <div className="grid md:grid-cols-[1fr_320px] gap-6 items-start">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />
+                  </CardContent>
+                </Card>
+                {suggestionGroups}
               </div>
-            </div>
+            ) : (
+              <div className="max-w-3xl">{suggestionGroups}</div>
+            )
           )}
 
           {suggestions && suggestions.length === 0 && !runReview.isPending && runReview.isSuccess && (

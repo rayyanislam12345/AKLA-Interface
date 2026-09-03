@@ -104,7 +104,7 @@ const HelpPage = () => {
         {
           question: "How do I create a matter?",
           answer:
-            "Go to Matters and click New Matter. Give it a name, and optionally a client, sector, and lead partner. A default stage checklist is seeded automatically for you.",
+            "Go to Matters and click New Matter. Give it a name, and optionally a client, sector, and project lead. A default stage checklist is seeded automatically for you.",
         },
         {
           question: "What are the default stages?",
@@ -117,7 +117,7 @@ const HelpPage = () => {
             "Stages (the checklist), Documents (every document on the matter with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
           bullets: [
             "Stages — click to advance not started → in progress → complete.",
-            "Documents — create a document, upload versions, change status, or launch Draft/Review with AI.",
+            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Review with AI).",
             "Parties — add a name and role for each counterparty on the deal.",
             "Tasks — add a task; check it off when done.",
             "Notes — free-text notes, newest first.",
@@ -156,12 +156,12 @@ const HelpPage = () => {
         {
           question: "How do I upload a document?",
           answer:
-            "In a matter workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten.",
+            "In a matter workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. You can also upload straight from the AI Workspace (Ask or Verify tab) — same result, it lands on the matter.",
         },
         {
           question: "What happens to a file after I upload it?",
           answer:
-            "Its text is extracted (PDF, DOCX, or XLSX) and embedded into the document knowledge base, so it becomes searchable and usable by Ask AI, Draft with AI, and Review with AI on that matter.",
+            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Verify on that matter.",
         },
         {
           question: "What document types are available?",
@@ -172,7 +172,7 @@ const HelpPage = () => {
       faqs: [
         {
           question: "What file formats are supported?",
-          answer: "PDF, DOCX, and XLSX/XLS.",
+          answer: "PDF, DOCX, XLSX/XLS, and PPTX.",
         },
         {
           question: "Why didn't my document show up in AI answers?",
@@ -190,17 +190,17 @@ const HelpPage = () => {
         {
           question: "How do I generate a draft?",
           answer:
-            "From a matter's Documents card, click Draft with AI. Pick a document type and a mode, then follow the flow for that mode.",
+            "From a matter's Documents card, click Draft with AI — it opens the AI Workspace on the Draft tab. Pick a document type and click Start Interview.",
         },
         {
-          question: "What's the difference between the two modes?",
+          question: "How does the interview work?",
           answer:
-            "From precedent pulls the firm's most recent agreements of that document type plus any known matter parties, and drafts a complete first version in one pass. Guided interview has Claude ask you one question at a time about the key commercial terms — parties, term, payment structure, security, governing law, and so on — until it has enough to draft from your answers.",
+            "Claude asks you one question at a time about the key commercial terms — parties, term, payment structure, security, governing law, and so on. When it has enough, Generate Draft lights up; you can also click Draft Now Anyway at any point and it will draft from what it has, grounded in the firm's standard template and precedent for that document type.",
         },
         {
           question: "What happens to the draft once it's generated?",
           answer:
-            "It loads into an editable rich-text editor — never a locked or final file. Review and edit it before doing anything else with it.",
+            "It loads into an editable rich-text editor — never a locked or final file. The Preview as Word Document tab shows exactly how it will look as a firm-formatted .docx. Review and edit it before doing anything else with it.",
         },
         {
           question: "How do I save a draft?",
@@ -215,14 +215,14 @@ const HelpPage = () => {
       ],
       faqs: [
         {
-          question: "What if there's no precedent for a document type yet?",
+          question: "What if there's no precedent or standard template for a document type yet?",
           answer:
-            "From-precedent mode drafts from standard market practice instead, and the draft itself will say so.",
+            "It drafts from standard market practice instead, and the note above the draft will say so.",
         },
         {
-          question: "Can I keep answering questions across multiple visits?",
+          question: "Will I lose my interview if I switch to the Ask or Verify tab?",
           answer:
-            "The guided interview is a persisted chat thread, so you can take your time. You can also generate the draft at any point, even before the AI signals it has everything it would ideally want.",
+            "No — the tabs keep their state while you stay on the page, so you can hop over to Ask to check something and come back. Leaving the page (or reloading) does start fresh.",
         },
       ],
     },
@@ -235,12 +235,12 @@ const HelpPage = () => {
         {
           question: "How do I get redline suggestions on a draft?",
           answer:
-            "In the Documents card, a document needs at least one uploaded version. Click the review icon next to it, then Run AI Review.",
+            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace on the Verify tab with that document selected. Or open the Verify tab yourself and pick any document on the matter, or upload a new one right there. Then click Run AI Review.",
         },
         {
           question: "What does the review actually check?",
           answer:
-            "It compares the uploaded draft against the firm's precedent for that document type (and standard market practice where no precedent exists), flagging missing standard protections, unusual or one-sided terms, and drafting inconsistencies.",
+            "Three separate passes: Legal Clauses & Citations (clause correctness against statute and precedent, and assertions made without citation), Formatting (structure against the firm's template and precedent), and Content & Conflicts (content against precedent, and against this matter's other documents). Suggestions are grouped by pass.",
         },
         {
           question: "How do I act on a suggestion?",
@@ -248,14 +248,14 @@ const HelpPage = () => {
             "Accept or Reject each one individually. Nothing is applied to the document automatically — every change is a deliberate choice.",
         },
         {
-          question: "How do I get a clean revised document out of this?",
+          question: "Where do I see the changes?",
           answer:
-            "Click Export Clean Revised Draft. It applies every suggestion you accepted and saves the result as a new document version.",
+            "For a Word document, the real uploaded file is shown alongside the list with every accepted or pending suggestion applied as genuine tracked changes (insertions underlined, deletions struck through). Download .docx gives you that file to open in Word; Save as Document Version keeps it on the matter as a new version.",
         },
         {
-          question: "Does this produce Word-native tracked changes?",
+          question: "Can I review a PDF, Excel file, or PowerPoint?",
           answer:
-            "Not yet. The current version is in-app accept/reject plus a clean exported .docx — not a file with OOXML revision marks you'd see as tracked changes in Word.",
+            "Yes — the review runs the same way, and each suggestion shows its original and proposed text in the list. Only the tracked-changes preview, download and save-as-version are Word-only, because they patch the actual .docx.",
         },
       ],
       faqs: [
@@ -265,9 +265,9 @@ const HelpPage = () => {
             "Yes. Re-running clears out the old pending suggestions before generating fresh ones, but any suggestions you already accepted or rejected are left alone.",
         },
         {
-          question: "I came back later and Export is disabled — why?",
+          question: "Some suggestions say they couldn't be located in the file — why?",
           answer:
-            "Export needs the document's extracted text from the same session's review run, which isn't cached across visits yet. Run the review again to re-enable it.",
+            "A suggestion is applied as a tracked change only where its original wording can be matched exactly in the document. If the AI paraphrased or the passage spans odd formatting, it's still listed for you to act on by hand — it just isn't drawn into the preview.",
         },
       ],
     },
@@ -284,7 +284,13 @@ const HelpPage = () => {
         },
         {
           question: "Where do I find it?",
-          answer: "Open a matter's workspace and click Ask AI near the top of the page.",
+          answer:
+            "Open a matter's workspace and click Ask AI near the top of the page. That opens the AI Workspace on the Ask tab — Draft and Verify are the other two tabs on the same page, so you can switch without going back to the matter.",
+        },
+        {
+          question: "Can I add a document from here?",
+          answer:
+            "Yes — click Add a document above the chat, choose a file and a document type. It's uploaded to the matter like any other document and, once indexed, you can ask about it straight away.",
         },
         {
           question: "Does it remember earlier questions in the same conversation?",

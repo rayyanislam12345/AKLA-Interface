@@ -18,8 +18,8 @@ interface DocumentChatPanelProps {
 }
 
 // Shared chat log + bottom input bar for iterating on a document with the
-// AI after an initial draft/review — same bubble styling as MatterChatPage,
-// used both there in spirit and directly by DraftDocumentPage/RedlineReviewPage.
+// AI after an initial draft/review — same bubble styling as the Ask panel,
+// used directly by the AI Workspace's Draft and Verify panels.
 export default function DocumentChatPanel({
   messages,
   onSend,

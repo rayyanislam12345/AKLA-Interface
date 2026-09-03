@@ -40,6 +40,8 @@ from pdf2image.pdf2image import pdfinfo_from_path
 from PIL import Image
 import pytesseract
 import mammoth
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 app = Flask(__name__)
 
@@ -55,6 +57,9 @@ MAX_PAGES = 200
 # absurdly large upload (a corrupt file, someone's entire drive zipped into
 # a .docx) shouldn't be allowed to run unbounded either.
 MAX_DOCX_BYTES = 50 * 1024 * 1024
+
+# Decks are mostly images, so the bar is higher than docx — but still a bar.
+MAX_PPTX_BYTES = 200 * 1024 * 1024
 
 
 def _check_auth():
@@ -120,6 +125,64 @@ def extract_docx():
         return jsonify({"error": f"Could not convert docx: {err}"}), 400
 
     return jsonify({"html": result.value})
+
+
+def _text_frame_lines(text_frame, lines):
+    for paragraph in text_frame.paragraphs:
+        # paragraph.text renders an <a:br/> as a vertical tab.
+        text = paragraph.text.replace("\v", "\n").strip()
+        if text:
+            lines.append(text)
+
+
+def _shape_lines(shape, lines):
+    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+        for child in shape.shapes:
+            _shape_lines(child, lines)
+        return
+    if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+        _text_frame_lines(shape.text_frame, lines)
+    if getattr(shape, "has_table", False) and shape.has_table:
+        for row in shape.table.rows:
+            for cell in row.cells:
+                _text_frame_lines(cell.text_frame, lines)
+
+
+@app.route("/extract/pptx", methods=["POST"])
+def extract_pptx():
+    """Large-deck counterpart of extractText.ts's in-process pptx path. The
+    output shape is deliberately identical to that path — "[Slide N]" blocks,
+    one line per paragraph in document order, notes appended as "Notes: …" —
+    because redline suggestions quote the extracted text verbatim and the
+    same file can go down either path depending only on its size."""
+    if not _check_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_data()
+    if not data:
+        return jsonify({"error": "No file body provided"}), 400
+
+    if len(data) > MAX_PPTX_BYTES:
+        return jsonify({"error": f"File is {len(data)} bytes, over the {MAX_PPTX_BYTES}-byte limit"}), 413
+
+    try:
+        presentation = Presentation(io.BytesIO(data))
+    except Exception as err:
+        return jsonify({"error": f"Could not open pptx: {err}"}), 400
+
+    blocks = []
+    for index, slide in enumerate(presentation.slides, start=1):
+        lines = []
+        for shape in slide.shapes:
+            _shape_lines(shape, lines)
+        if slide.has_notes_slide:
+            note_lines = []
+            _text_frame_lines(slide.notes_slide.notes_text_frame, note_lines)
+            if note_lines:
+                lines.append("Notes: " + "\n".join(note_lines))
+        blocks.append(f"[Slide {index}]\n" + "\n".join(lines))
+
+    return jsonify({"text": "\n\n".join(blocks), "slides": len(blocks)})
 
 
 if __name__ == "__main__":

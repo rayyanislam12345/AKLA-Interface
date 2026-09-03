@@ -11,8 +11,8 @@ interface RichTextEditorProps {
 
 // Wraps the TipTap editor used both for AI-generated drafts and for
 // standard-version editing. Exposes the underlying Editor instance via ref
-// so callers that need ProseMirror JSON (e.g. DraftDocumentPage's docx
-// export) can still get at it directly.
+// so callers that need ProseMirror JSON (e.g. the Draft panel's docx
+// export via lib/firmDocx.ts) can still get at it directly.
 const RichTextEditor = forwardRef<Editor | null, RichTextEditorProps>(
   ({ content, onChange, editable = true, className }, ref) => {
     const editor = useEditor({

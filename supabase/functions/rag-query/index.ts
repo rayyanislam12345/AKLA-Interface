@@ -15,16 +15,24 @@ serve(async (req) => {
   try {
     const {
       query,
-      // voyage-law-2 cosine similarities run lower than OpenAI's embeddings for
-      // genuinely relevant matches (observed ~0.6 on a clean match) — 0.5 is a
-      // provisional default, worth re-tuning once there's a larger precedent corpus.
-      matchThreshold = 0.5,
+      matchThreshold: requestedThreshold,
       matchCount = 5,
       matterId = null,
       documentTypeId = null,
       precedentOnly = false,
       threadId = null,
     } = await req.json();
+
+    // voyage-law-2 cosine similarities run lower than OpenAI's embeddings for
+    // genuinely relevant matches (observed ~0.6 on a clean match against
+    // contract prose) — 0.5 is a provisional library-wide default, worth
+    // re-tuning once there's a larger precedent corpus. A matter-scoped
+    // question only searches that matter's own uploads: a small corpus where
+    // recall matters more than precision, and where short bullet-style
+    // content (a slide deck, a spreadsheet) scores noticeably lower than
+    // prose — a clean hit on a deck's slide measured 0.41-0.44 — so the bar
+    // is lower there.
+    const matchThreshold = requestedThreshold ?? (matterId ? 0.35 : 0.5);
 
     if (!query) {
       return new Response(JSON.stringify({ error: 'Query is required' }), {

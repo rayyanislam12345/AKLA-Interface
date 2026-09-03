@@ -331,7 +331,7 @@ export default function PrecedentLibraryPage() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".pdf,.docx,.xlsx,.xls"
+                  accept=".pdf,.docx,.xlsx,.xls,.pptx"
                   className="hidden"
                   onChange={handleFilesSelected}
                 />

@@ -729,7 +729,7 @@ export default function MatterWorkspacePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/chat`)}>
+          <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=ask`)}>
             <MessageSquare className="h-4 w-4 mr-2" />
             Ask AI
           </Button>
@@ -762,7 +762,7 @@ export default function MatterWorkspacePage() {
         <Card className="md:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Documents</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/draft`)}>
+            <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=draft`)}>
               <Sparkles className="h-4 w-4 mr-2" />
               Draft with AI
             </Button>
@@ -771,7 +771,7 @@ export default function MatterWorkspacePage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.docx,.xlsx,.xls"
+              accept=".pdf,.docx,.xlsx,.xls,.pptx"
               className="hidden"
               onChange={handleFileSelected}
             />
@@ -870,7 +870,7 @@ export default function MatterWorkspacePage() {
                         variant="outline"
                         title="Review with AI"
                         disabled={!(doc as any).versions?.length}
-                        onClick={() => navigate(`/matters/${matterId}/documents/${doc.id}/review`)}
+                        onClick={() => navigate(`/matters/${matterId}/ai?mode=verify&doc=${doc.id}`)}
                       >
                         <ScanSearch className="h-4 w-4" />
                       </Button>

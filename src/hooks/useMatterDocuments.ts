@@ -171,7 +171,7 @@ export function useUploadDocumentVersion() {
       // unsupported file types (e.g. plain .txt) or extraction failures shouldn't
       // block the upload itself, since the version is already saved.
       const extension = file.name.toLowerCase().split(".").pop();
-      if (["pdf", "docx", "xlsx", "xls"].includes(extension || "")) {
+      if (["pdf", "docx", "xlsx", "xls", "pptx"].includes(extension || "")) {
         const { error: processError } = await supabase.functions.invoke("process-document", {
           body: {
             filePath: storagePath,

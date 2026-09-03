@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { MessageSquare, Send } from "lucide-react";
-import { useMatter } from "@/hooks/useMatters";
+import { FilePlus2, Send } from "lucide-react";
 import { useMatterChatThread, useMatterChatMessages, useAskMatterQuestion } from "@/hooks/useMatterChat";
+import DocumentUploadCard from "@/components/ai/DocumentUploadCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-export default function MatterChatPage() {
-  const { matterId } = useParams<{ matterId: string }>();
-  const { data: matter } = useMatter(matterId);
+interface AskPanelProps {
+  matterId: string;
+  active: boolean;
+}
+
+// Matter Q&A grounded (via rag-query) in this matter's documents and the
+// firm's precedent library. The upload card lets a lawyer add a document
+// here and ask about it straight away — it lands on the matter like any
+// other upload, so it's not scratch context, it's part of the record.
+export default function AskPanel({ matterId, active }: AskPanelProps) {
   const { data: thread } = useMatterChatThread(matterId);
   const [localThreadId, setLocalThreadId] = useState<string | undefined>();
   const activeThreadId = localThreadId ?? thread?.id;
@@ -20,14 +26,17 @@ export default function MatterChatPage() {
 
   const [input, setInput] = useState("");
   const [lastSources, setLastSources] = useState<any[]>([]);
+  const [showUpload, setShowUpload] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // scrollIntoView is a no-op while the panel is hidden behind another tab,
+  // so re-run it when this tab becomes active, not only when messages change.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (active) endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, active]);
 
   const handleSend = async () => {
-    if (!input.trim() || !matterId) return;
+    if (!input.trim()) return;
     const query = input.trim();
     setInput("");
     try {
@@ -39,19 +48,29 @@ export default function MatterChatPage() {
     }
   };
 
-  if (!matterId) return null;
-
   return (
     <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <MessageSquare className="h-5 w-5 text-primary" />
-          Ask AI
-        </h1>
-        <p className="text-muted-foreground">
-          {matter?.name} — grounded in this matter's documents and the firm's precedent library.
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <p className="text-sm text-muted-foreground">
+          Grounded in this matter's documents and the firm's precedent library.
         </p>
+        <Button size="sm" variant="outline" onClick={() => setShowUpload((v) => !v)}>
+          <FilePlus2 className="h-4 w-4 mr-2" />
+          {showUpload ? "Hide upload" : "Add a document"}
+        </Button>
       </div>
+
+      {showUpload && (
+        <Card>
+          <CardContent className="pt-6">
+            <DocumentUploadCard
+              matterId={matterId}
+              hint="Upload a document to this matter and it becomes part of what Ask AI can answer from."
+              onUploaded={() => setShowUpload(false)}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="pt-6 space-y-4">
