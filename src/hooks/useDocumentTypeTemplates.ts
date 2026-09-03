@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sanitizeStorageFilename } from "@/lib/utils";
 
 export interface DocumentTypeTemplateRow {
   document_type_id: string;
@@ -80,7 +81,7 @@ export function useUploadDocumentTypeTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ documentTypeId, file }: { documentTypeId: string; file: File }) => {
-      const storagePath = `standards/${documentTypeId}/${Date.now()}-${file.name}`;
+      const storagePath = `standards/${documentTypeId}/${Date.now()}-${sanitizeStorageFilename(file.name)}`;
 
       const { error: uploadError } = await supabase.storage.from("precedent-library").upload(storagePath, file);
       if (uploadError) throw uploadError;

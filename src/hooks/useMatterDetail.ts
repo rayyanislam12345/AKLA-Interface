@@ -84,6 +84,20 @@ export function useToggleTaskStatus() {
   });
 }
 
+export function useDeleteMatterTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, matterId }: { taskId: string; matterId: string }) => {
+      const { error } = await supabase.from("matter_tasks").delete().eq("id", taskId);
+      if (error) throw error;
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-tasks", matterId] });
+    },
+  });
+}
+
 export function useMatterNotes(matterId: string | undefined) {
   return useQuery({
     queryKey: ["matter-notes", matterId],

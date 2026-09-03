@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sanitizeStorageFilename } from "@/lib/utils";
 
 export interface MatterRelevantLaw {
   id: string;
@@ -92,7 +93,7 @@ export function useUploadRelevantLawFile() {
       actName: string;
       file: File;
     }) => {
-      const storagePath = `statutes/${actName.replace(/[^a-zA-Z0-9]+/g, "-")}-${Date.now()}-${file.name}`;
+      const storagePath = `statutes/${actName.replace(/[^a-zA-Z0-9]+/g, "-")}-${Date.now()}-${sanitizeStorageFilename(file.name)}`;
 
       const { error: uploadError } = await supabase.storage.from("law-library").upload(storagePath, file);
       if (uploadError) throw uploadError;

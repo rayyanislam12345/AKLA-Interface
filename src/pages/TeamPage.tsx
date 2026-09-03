@@ -4,6 +4,7 @@ import {
   useWhatsAppAccountLinks,
   useLinkWhatsAppAccount,
   useUnlinkWhatsAppAccount,
+  type WhatsAppAccountLink,
 } from "@/hooks/useWhatsAppAccountLinks";
 import { useAuth } from "@/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,34 @@ function roleLabel(role: string) {
     .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+// A firm's founder(s) get displayed as "Founder" instead of "Admin" — purely
+// cosmetic. Their actual role in user_roles stays "admin" (that's what
+// grants real permissions everywhere in the app), and the role-editing
+// Select below stays driven by the real ROLES/AppRole enum, unchanged — this
+// only touches how an existing admin's badge is labeled here. Only ever a
+// couple of people, so a hardcoded list beats a schema change.
+const FOUNDER_EMAILS: string[] = [];
+
+function displayRoleLabel(profile: { role: string | null; email: string }) {
+  if (profile.role === "admin" && FOUNDER_EMAILS.includes(profile.email)) return "Founder";
+  return profile.role ? roleLabel(profile.role) : "no role";
+}
+
+function WhatsAppStatusBadge({ link }: { link: WhatsAppAccountLink | undefined }) {
+  if (!link) {
+    return (
+      <Badge variant="outline" className="text-muted-foreground font-normal">
+        Not linked
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="font-normal">
+      Linked · {link.whatsapp_user_id}
+    </Badge>
+  );
 }
 
 function WhatsAppAccountsSection() {
@@ -249,6 +278,9 @@ export default function TeamPage() {
   const currentUser = profiles?.find((p) => p.id === user?.id);
   const isAdmin = currentUser?.role === "admin";
 
+  const { data: links } = useWhatsAppAccountLinks();
+  const linkByProfileId = new Map(links?.map((link) => [link.profile_id, link]));
+
   return (
     <div className="space-y-6">
       <div>
@@ -269,6 +301,7 @@ export default function TeamPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  {isAdmin && <TableHead>WhatsApp</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -294,9 +327,14 @@ export default function TeamPage() {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Badge variant="secondary">{profile.role ? roleLabel(profile.role) : "no role"}</Badge>
+                        <Badge variant="secondary">{displayRoleLabel(profile)}</Badge>
                       )}
                     </TableCell>
+                    {isAdmin && (
+                      <TableCell>
+                        <WhatsAppStatusBadge link={linkByProfileId.get(profile.id)} />
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -327,8 +365,9 @@ export default function TeamPage() {
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Badge variant="secondary">{profile.role ? roleLabel(profile.role) : "no role"}</Badge>
+                  <Badge variant="secondary">{displayRoleLabel(profile)}</Badge>
                 )}
+                {isAdmin && <WhatsAppStatusBadge link={linkByProfileId.get(profile.id)} />}
               </div>
             ))}
           </div>

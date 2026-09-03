@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Enums } from "@/integrations/supabase/types";
+import { sanitizeStorageFilename } from "@/lib/utils";
 
 export type DocumentStatus = Enums<"document_status">;
 
@@ -149,7 +150,7 @@ export function useUploadDocumentVersion() {
       nextVersionNumber: number;
     }) => {
       const { data: userData } = await supabase.auth.getUser();
-      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersionNumber}-${file.name}`;
+      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersionNumber}-${sanitizeStorageFilename(file.name)}`;
 
       const { error: uploadError } = await supabase.storage
         .from("matter-documents")

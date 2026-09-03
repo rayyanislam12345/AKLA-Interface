@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sanitizeStorageFilename } from "@/lib/utils";
 
 export interface PrecedentSource {
   storage_path: string;
@@ -30,7 +31,7 @@ export function useUploadPrecedentDocument() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ file, documentTypeId }: { file: File; documentTypeId: string }) => {
-      const storagePath = `precedent/${documentTypeId}/${Date.now()}-${file.name}`;
+      const storagePath = `precedent/${documentTypeId}/${Date.now()}-${sanitizeStorageFilename(file.name)}`;
 
       const { error: uploadError } = await supabase.storage
         .from("precedent-library")

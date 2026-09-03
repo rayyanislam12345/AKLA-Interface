@@ -25,9 +25,12 @@ import {
   useMatterTasks,
   useAddMatterTask,
   useToggleTaskStatus,
+  useDeleteMatterTask,
   useMatterNotes,
   useAddMatterNote,
 } from "@/hooks/useMatterDetail";
+import { useAuth } from "@/hooks/useAuth";
+import { useProfiles } from "@/hooks/useProfiles";
 import {
   useDocumentTypes,
   useMatterDocuments,
@@ -521,7 +524,11 @@ export default function MatterWorkspacePage() {
   const { data: tasks } = useMatterTasks(matterId);
   const addTask = useAddMatterTask();
   const toggleTask = useToggleTaskStatus();
+  const deleteTask = useDeleteMatterTask();
   const [taskTitle, setTaskTitle] = useState("");
+  const { user } = useAuth();
+  const { data: profiles } = useProfiles();
+  const isAdmin = profiles?.find((p) => p.id === user?.id)?.role === "admin";
 
   const { data: notes } = useMatterNotes(matterId);
   const addNote = useAddMatterNote();
@@ -582,6 +589,17 @@ export default function MatterWorkspacePage() {
       toast({ title: "Document removed" });
     } catch (err: any) {
       toast({ title: "Failed to remove document", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string, title: string) => {
+    if (!matterId) return;
+    if (!window.confirm(`Delete task "${title}"?`)) return;
+    try {
+      await deleteTask.mutateAsync({ taskId, matterId });
+      toast({ title: "Task deleted" });
+    } catch (err: any) {
+      toast({ title: "Failed to delete task", description: err.message, variant: "destructive" });
     }
   };
 
@@ -707,7 +725,7 @@ export default function MatterWorkspacePage() {
           <p className="text-muted-foreground">
             {(matter as any).client?.name || "No client"}
             {matter.sector ? ` · ${matter.sector}` : ""}
-            {(matter as any).lead_partner?.full_name ? ` · Lead: ${(matter as any).lead_partner.full_name}` : ""}
+            {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(matter as any).lead_partner.full_name}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1070,11 +1088,24 @@ export default function MatterWorkspacePage() {
                 <span className={cn(task.status === "done" && "line-through text-muted-foreground")}>
                   {task.title}
                 </span>
-                {(task as any).assignee?.full_name && (
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    {(task as any).assignee.full_name}
-                  </span>
-                )}
+                <div className="flex items-center gap-2 ml-auto">
+                  {(task as any).assignee?.full_name && (
+                    <span className="text-xs text-muted-foreground">
+                      {(task as any).assignee.full_name}
+                    </span>
+                  )}
+                  {isAdmin && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 shrink-0"
+                      title="Delete task"
+                      onClick={() => handleDeleteTask(task.id, task.title)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
             <div className="flex gap-2 pt-2">
