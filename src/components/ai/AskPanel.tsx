@@ -103,6 +103,10 @@ export default function AskPanel({ matterId, active }: AskPanelProps) {
               </p>
               {lastSources.map((s) => (
                 <p key={s.id} className="text-xs text-muted-foreground truncate">
+                  <span className="font-medium">
+                    {s.scope === "matter" ? s.filename ?? "This matter" : "Precedent"}
+                  </span>
+                  {" · "}
                   {(s.similarity * 100).toFixed(0)}% match — {s.content.slice(0, 100)}…
                 </p>
               ))}
