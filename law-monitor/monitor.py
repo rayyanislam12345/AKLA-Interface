@@ -717,7 +717,14 @@ def main() -> int:
             counts["written"] += 1
             log(f"  CONFIRMED: {title}")
 
-            action, note = apply_library_action(hub, finding, doc_text or "", update_id)
+            # Isolated: refreshing the library involves an ingest call that can
+            # fail on its own (no bot session configured, Voyage timeout, a
+            # malformed PDF). That must cost this one finding its library
+            # action, not the rest of the morning's run.
+            try:
+                action, note = apply_library_action(hub, finding, doc_text or "", update_id)
+            except Exception as err:  # noqa: BLE001
+                action, note = "failed", f"library update failed: {err}"
             log(f"    library: {action} — {note}")
             if update_id:
                 hub.patch(
