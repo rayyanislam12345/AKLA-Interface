@@ -265,6 +265,85 @@ def assess_extraction(name: str, text: str) -> dict:
     return {"ok": False, "note": reply.strip()}
 
 
+def web_search_act(name: str) -> dict | None:
+    """pakistancode.gov.pk only carries FEDERAL primary legislation, and its
+    own search is fragile even for that. Everything the firm actually works
+    with provincially — the Sindh/Punjab/KP/Balochistan PPP and procurement
+    Acts, provincial environmental and services-tax law — simply isn't there,
+    and comes back 'Not found' every time.
+
+    This is the same fallback supabase/functions/_shared/statuteResolver.ts
+    already uses in the app, ported here: ask Claude with the hosted
+    web_search tool to LOCATE a direct PDF of the Act's real text on any
+    official source (a provincial assembly, a department, the Gazette), and
+    nothing more. The text itself is still downloaded and extracted by us and
+    still has to clear assess_extraction() — so a hallucinated citation or a
+    summary article can't become statute text in the library.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "max_tokens": 1024,
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        f'Find a direct PDF URL for the full official text of the Pakistani '
+                        f'statute "{name}".\n\n'
+                        "It may be provincial rather than federal — check the relevant provincial "
+                        "assembly (e.g. pas.gov.pk for Sindh, pap.gov.pk for Punjab, "
+                        "kp.gov.pk / kpcode.kp.gov.pk, balochistanassembly.gov.pk), the responsible "
+                        "department or authority's own site, or the provincial Gazette. Federal Acts "
+                        "may be on pakistancode.gov.pk or na.gov.pk.\n\n"
+                        "It must link directly to a PDF (or an official full-text page) of the Act's "
+                        "ACTUAL TEXT — not a summary, a news article, a law-firm commentary, or a "
+                        "page that merely mentions the Act. Prefer the current consolidated version.\n\n"
+                        'Respond with ONLY a JSON object, no other text: '
+                        '{"found": true, "title": "<exact official title>", "pdfUrl": "<direct URL>"} '
+                        '— or {"found": false} if you cannot locate the actual text.'
+                    ),
+                }],
+            },
+            timeout=180,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.RequestException as err:
+        print(f"  (web search failed: {err})", file=sys.stderr)
+        return None
+
+    # With a server-side tool in play, earlier text blocks are the model's own
+    # search narration — the answer is the LAST text block.
+    blocks = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
+    if not blocks:
+        return None
+    match = re.search(r"\{[\s\S]*\}", blocks[-1])
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group())
+    except json.JSONDecodeError:
+        return None
+    if not parsed.get("found") or not parsed.get("pdfUrl") or not parsed.get("title"):
+        return None
+    return {
+        "title": parsed["title"],
+        "page_url": parsed.get("sourceUrl") or parsed["pdfUrl"],
+        "pdf_url": parsed["pdfUrl"],
+        "via_web_search": True,
+    }
+
+
 def search_act(name: str) -> dict | None:
     """Searches pakistancode.gov.pk for an Act by name and returns the best
     match's {title, page_url, pdf_url}, or None if nothing usable was found.
@@ -320,10 +399,10 @@ def extract_pdf_text(pdf_path: Path) -> str:
     return "\n".join(text_parts)
 
 
-def scan(manifest: dict) -> dict:
+def scan(manifest: dict, target_acts: list[str] | None = None) -> dict:
     DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-    for name in TARGET_ACTS:
+    for name in target_acts if target_acts is not None else TARGET_ACTS:
         if name in manifest and manifest[name].get("outcome") in ("pending_ingest", "ingested"):
             print(f"Already resolved, skipping: {name}")
             continue
@@ -347,8 +426,14 @@ def scan(manifest: dict) -> dict:
             continue
 
         if not found:
+            print("  Not on pakistancode.gov.pk — searching the wider web...")
+            found = web_search_act(name)
+            if found:
+                print(f"  Located via web search: {found['title']}")
+
+        if not found:
             manifest[name] = {"outcome": "not_found"}
-            print(f"  Not found on pakistancode.gov.pk")
+            print(f"  Not found (pakistancode or web search)")
             save_manifest(manifest)
             continue
 
@@ -378,6 +463,10 @@ def scan(manifest: dict) -> dict:
             "title": found["title"],
             "page_url": found["page_url"],
             "pdf_url": found["pdf_url"],
+            # Provenance travels with the row so confirm() can record where
+            # this text actually came from, rather than labelling everything
+            # pakistancode.gov.pk.
+            "source": "ai-web-search" if found.get("via_web_search") else "pakistancode.gov.pk",
             "pdf_path": str(pdf_path),
             "needs_ocr": needs_ocr,
             "text_length": len(text) if not needs_ocr else None,
@@ -433,7 +522,7 @@ def confirm(manifest: dict, sb: SupabaseClient, include_flagged: bool = False):
                 is_statute=True,
                 metadata={
                     "act_name": row["title"],
-                    "source": "pakistancode.gov.pk",
+                    "source": row.get("source", "pakistancode.gov.pk"),
                     "source_url": row["page_url"],
                     "pdf_url": row["pdf_url"],
                     "scraped_at": datetime.now(timezone.utc).isoformat(),
@@ -516,7 +605,18 @@ def main():
         "--verify-existing", action="store_true",
         help="Read-only: spot-check Acts already ingested into the live library, no scan/confirm needed",
     )
+    parser.add_argument(
+        "--acts-file",
+        help="Newline-separated Act names to scan instead of the built-in TARGET_ACTS list. Blank lines "
+             "and lines starting with # are ignored, so the list can be grouped and commented.",
+    )
     args = parser.parse_args()
+
+    target_acts = None
+    if args.acts_file:
+        lines = Path(args.acts_file).read_text().splitlines()
+        target_acts = [ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+        print(f"Using {len(target_acts)} Act name(s) from {args.acts_file}")
 
     manifest = json.loads(MANIFEST_PATH.read_text()) if MANIFEST_PATH.exists() else {}
 
@@ -524,7 +624,7 @@ def main():
         sys.exit("Pass --scan (dry run), --confirm (ingest), and/or --verify-existing (spot-check what's live)")
 
     if args.scan:
-        manifest = scan(manifest)
+        manifest = scan(manifest, target_acts)
 
     needs_supabase = args.confirm or args.verify_existing
     sb = None

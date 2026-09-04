@@ -1,0 +1,92 @@
+# Acts the firm's actual work needs that the library was missing.
+#
+# Derived from the firm's own filing on the My Passport drive — in particular
+# its curated "Laws", "Laws As Applicable To PR in Regards PPP Projects",
+# "STZ Law", "EPZ Law", "SEZ Law" and "Mining Laws" folders — cross-checked
+# against the 63 Acts already ingested. The library was strong on federal
+# commercial law and almost empty on the things the firm actually does every
+# day: provincial PPP, public procurement, railways, ports, land acquisition,
+# special zones and mining.
+#
+# Used with: python3 scrape.py --scan --acts-file acts_practice_gap.txt
+# Names are best-effort formal titles; the scraper's AI candidate picker
+# resolves near-misses and rejects amendment-only or repealed versions.
+
+# --- Public-private partnership: provincial regimes (federal Act already held)
+Sindh Public Private Partnership Act, 2010
+Khyber Pakhtunkhwa Public Private Partnership Act, 2020
+Punjab Public Private Partnership Act, 2019
+Balochistan Public Private Partnership Act, 2021
+
+# --- Public procurement: provincial regimes (federal PPRA Ordinance already held)
+Sindh Public Procurement Act, 2009
+Punjab Procurement Regulatory Authority Act, 2009
+Khyber Pakhtunkhwa Public Procurement Regulatory Authority Act, 2012
+Balochistan Public Procurement Regulatory Authority Act, 2009
+
+# --- Railways: the single largest body of work on the drive
+Railways Act, 1890
+Pakistan Railways (Amendment) Act, 2024
+
+# --- Ports, shipping and highways
+Ports Act, 1908
+Karachi Port Trust Act, 1886
+Port Qasim Authority Act, 1973
+Gwadar Port Authority Ordinance, 2002
+Pakistan Merchant Shipping Ordinance, 2001
+National Highway Authority Act, 1991
+
+# --- Land: acquisition underpins every infrastructure concession
+Land Acquisition Act, 1894
+
+# --- Power and energy beyond the NEPRA Act
+Alternative Energy Development Board Act, 2010
+Private Power and Infrastructure Board Act, 2012
+Regulation of Mines and Oil-Fields and Mineral Development (Government Control) Act, 1948
+Pakistan Petroleum (Production) Rules, 1949
+
+# --- Special zones: STZ and EPZ folders on the drive, SEZ Act already held
+Special Technology Zones Authority Act, 2021
+Export Processing Zones Authority Ordinance, 1980
+
+# --- Mining
+Mines Act, 1923
+Balochistan Mines and Minerals Act, 2025
+
+# --- Corporate and financial services
+Companies Ordinance, 1984
+Modaraba Companies and Modaraba (Floatation and Control) Ordinance, 1980
+Public Sector Companies (Corporate Governance) Rules, 2013
+Credit Bureaus Act, 2015
+Microfinance Institutions Ordinance, 2001
+
+# --- Public finance and integrity (public-sector counterparties)
+Public Finance Management Act, 2019
+Fiscal Responsibility and Debt Limitation Act, 2005
+National Accountability Ordinance, 1999
+Right of Access to Information Act, 2017
+
+# --- Environment: provincial regimes (federal Act already held)
+Sindh Environmental Protection Act, 2014
+Punjab Environmental Protection Act, 1997
+Khyber Pakhtunkhwa Environmental Protection Act, 2014
+Balochistan Environmental Protection Act, 2012
+
+# --- Provincial services taxation (relevant to every services contract)
+Sindh Sales Tax on Services Act, 2011
+Punjab Sales Tax on Services Act, 2012
+Khyber Pakhtunkhwa Finance Act, 2013
+
+# --- Employment: the firm drafts offer letters and employment contracts
+Payment of Wages Act, 1936
+Sindh Terms of Employment (Standing Orders) Act, 2015
+Punjab Industrial Relations Act, 2010
+Shops and Establishments Ordinance, 1969
+Provincial Employees Social Security Ordinance, 1965
+
+# --- Dispute resolution gap
+Arbitration (Protocol and Convention) Act, 1937
+
+# --- Consumer, data and telecoms adjacent
+Prevention of Electronic Crimes Act, 2016
+Personal Data Protection Act, 2025

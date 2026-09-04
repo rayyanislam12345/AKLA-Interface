@@ -239,12 +239,52 @@ def write_report(manifest: dict, root: str):
     print(f"\nFull detail written to {REPORT_PATH}")
 
 
-def confirm(manifest: dict, root: str, sb: SupabaseClient, only_existing_types: bool = False):
+def confirm(
+    manifest: dict,
+    root: str,
+    sb: SupabaseClient,
+    only_existing_types: bool = False,
+    min_files_per_type: int = 0,
+):
     outcomes = ("pending_ingest",) if only_existing_types else ("pending_ingest", "pending_ingest_new_type")
     pending = [
         (key, row) for key, row in manifest.items()
         if is_under(row.get("path", ""), root) and row["outcome"] in outcomes
     ]
+
+    # A proposed type backed by a single stray file is usually a one-off, not
+    # a category the firm actually works in — creating a document type for it
+    # clutters every type picker in the app permanently. This keeps the long
+    # tail pending (nothing is lost or reclassified) so it can be revisited
+    # later, or ingested by re-running without the threshold.
+    if min_files_per_type > 1:
+        counts: dict[str, int] = {}
+        for _, row in pending:
+            if row["outcome"] == "pending_ingest_new_type" and row.get("proposed_type_name"):
+                key = row["proposed_type_name"].strip().lower()
+                counts[key] = counts.get(key, 0) + 1
+        kept = []
+        for entry in pending:
+            row = entry[1]
+            if row["outcome"] != "pending_ingest_new_type" or not row.get("proposed_type_name"):
+                kept.append(entry)
+                continue
+            if counts[row["proposed_type_name"].strip().lower()] >= min_files_per_type:
+                kept.append(entry)
+        held_back = len(pending) - len(kept)
+        qualifying = sorted({
+            row["proposed_type_name"].strip()
+            for _, row in kept
+            if row["outcome"] == "pending_ingest_new_type" and row.get("proposed_type_name")
+        })
+        print(
+            f"Threshold: only creating a new type where at least {min_files_per_type} files propose it "
+            f"— {len(qualifying)} type(s) qualify, holding back {held_back} file(s)."
+        )
+        for name in qualifying:
+            print(f"  will create/use: {name} ({counts[name.lower()]} files)")
+        pending = kept
+
     if only_existing_types:
         print(f"{len(pending)} file(s) matching EXISTING types to ingest under {root} (new-type proposals held back)")
     else:
@@ -385,6 +425,15 @@ def main():
     parser.add_argument("--confirm", action="store_true", help="Act on already-classified pending files instead of (re-)scanning")
     parser.add_argument("--only-existing-types", action="store_true", help="With --confirm, ingest only files matched to existing types — hold back new-type proposals")
     parser.add_argument("--consolidate-types", action="store_true", help="Group near-duplicate proposed new type names before --confirm")
+    parser.add_argument(
+        "--min-files-per-type",
+        type=int,
+        default=0,
+        help="With --confirm, only create a proposed new document type when at least this many files "
+             "propose it. Files below the threshold stay pending rather than being reclassified, so a "
+             "later run without this flag still picks them up. Run --consolidate-types first, or "
+             "near-duplicate names will each be counted separately.",
+    )
     args = parser.parse_args()
 
     root = os.path.abspath(args.scan)
@@ -427,7 +476,13 @@ def main():
     manifest = load_manifest()
 
     if args.confirm:
-        confirm(manifest, root, sb, only_existing_types=args.only_existing_types)
+        confirm(
+            manifest,
+            root,
+            sb,
+            only_existing_types=args.only_existing_types,
+            min_files_per_type=args.min_files_per_type,
+        )
         return
 
     if args.consolidate_types:
