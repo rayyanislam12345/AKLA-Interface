@@ -32,6 +32,9 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const rawMode = searchParams.get("mode");
   const mode: Mode = isMode(rawMode) ? rawMode : "ask";
   const verifyDocumentId = searchParams.get("doc") ?? undefined;
+  // Set when arriving from a "Revise" button on a law that changed — carries
+  // the amendment into Verify so the review starts with it in context.
+  const lawUpdateId = searchParams.get("update") ?? undefined;
 
   // Panels are mounted on first visit and then kept mounted (just hidden), so
   // an interview mid-way, a generated draft, or a running review survives a
@@ -94,7 +97,12 @@ function AiWorkspace({ matterId }: { matterId: string }) {
       )}
       {visited.has("verify") && (
         <div hidden={mode !== "verify"}>
-          <VerifyPanel matterId={matterId} matterDocumentId={verifyDocumentId} onSelectDocument={setVerifyDocument} />
+          <VerifyPanel
+            matterId={matterId}
+            matterDocumentId={verifyDocumentId}
+            lawUpdateId={lawUpdateId}
+            onSelectDocument={setVerifyDocument}
+          />
         </div>
       )}
     </div>

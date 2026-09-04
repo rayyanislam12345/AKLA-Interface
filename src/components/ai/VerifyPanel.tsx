@@ -2,9 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
-import { ArrowLeftRight, Check, Download, Save, ScanSearch, X } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useMatterDocuments } from "@/hooks/useMatterDocuments";
+import {
+  useLawUpdate,
+  useDocumentsCitingAct,
+  lawUpdateTypeLabel,
+  buildRevisePrompt,
+  type LawUpdate,
+} from "@/hooks/useLawUpdates";
 import {
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
@@ -121,6 +128,10 @@ function SuggestionListItem({
 interface VerifyPanelProps {
   matterId: string;
   matterDocumentId: string | undefined;
+  // Present when the lawyer arrived from a "Revise" button on a law that
+  // changed. Carries the amendment through so the review can name it and
+  // pre-write the instruction.
+  lawUpdateId?: string;
   onSelectDocument: (matterDocumentId: string | undefined) => void;
 }
 
@@ -128,15 +139,23 @@ interface VerifyPanelProps {
 // session is keyed on the document id so preview/summary/chat state starts
 // clean for every document — the old standalone page got that for free by
 // being remounted per route.
-export default function VerifyPanel({ matterId, matterDocumentId, onSelectDocument }: VerifyPanelProps) {
+export default function VerifyPanel({
+  matterId,
+  matterDocumentId,
+  lawUpdateId,
+  onSelectDocument,
+}: VerifyPanelProps) {
+  const { data: lawUpdate } = useLawUpdate(lawUpdateId);
+
   if (!matterDocumentId) {
-    return <DocumentPicker matterId={matterId} onSelectDocument={onSelectDocument} />;
+    return <DocumentPicker matterId={matterId} lawUpdate={lawUpdate ?? null} onSelectDocument={onSelectDocument} />;
   }
   return (
     <ReviewSession
       key={matterDocumentId}
       matterId={matterId}
       matterDocumentId={matterDocumentId}
+      lawUpdate={lawUpdate ?? null}
       onChangeDocument={() => onSelectDocument(undefined)}
     />
   );
@@ -144,17 +163,71 @@ export default function VerifyPanel({ matterId, matterDocumentId, onSelectDocume
 
 function DocumentPicker({
   matterId,
+  lawUpdate,
   onSelectDocument,
 }: {
   matterId: string;
+  lawUpdate: LawUpdate | null;
   onSelectDocument: (matterDocumentId: string) => void;
 }) {
   const { data: matterDocuments, isLoading } = useMatterDocuments(matterId);
+  const { data: citingDocs } = useDocumentsCitingAct(matterId, lawUpdate?.act_name);
 
   const reviewable = (matterDocuments ?? []).filter((doc) => ((doc as any).versions?.length ?? 0) > 0);
+  const reviewableIds = new Set(reviewable.map((doc) => doc.id));
+  // Documents that actually cite the Act, so the lawyer isn't left guessing
+  // which file the amendment touches. Ones with no uploaded version can't be
+  // reviewed at all (the review works on a real file), so they're listed as
+  // affected but not offered as a choice.
+  const affected = (citingDocs ?? []).filter((d) => reviewableIds.has(d.matter_document_id));
+  const affectedWithoutFile = (citingDocs ?? []).filter((d) => !reviewableIds.has(d.matter_document_id));
 
   return (
     <div className="space-y-6 max-w-4xl">
+      {lawUpdate && (
+        <Card className="border-amber-400/60 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/20">
+          <CardContent className="pt-6 space-y-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium">
+                  {lawUpdate.act_name ?? "A relevant law"} changed — {lawUpdateTypeLabel(lawUpdate.update_type)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {lawUpdate.title}
+                  {lawUpdate.published_date ? ` · ${lawUpdate.published_date}` : ""} · {lawUpdate.source_name}
+                </p>
+              </div>
+            </div>
+            {affected.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">Documents on this matter that cite it:</p>
+                {affected.map((doc) => (
+                  <Button
+                    key={doc.matter_document_id}
+                    size="sm"
+                    variant="outline"
+                    className="mr-2"
+                    onClick={() => onSelectDocument(doc.matter_document_id)}
+                  >
+                    {doc.title}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No document on this matter appears to cite it by name — pick one below to review anyway.
+              </p>
+            )}
+            {affectedWithoutFile.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Also cited in {affectedWithoutFile.map((d) => d.title).join(", ")}, which
+                {affectedWithoutFile.length === 1 ? " has" : " have"} no uploaded file to review.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardContent className="pt-6 space-y-4">
           <div className="space-y-2">
@@ -210,10 +283,12 @@ function DocumentPicker({
 function ReviewSession({
   matterId,
   matterDocumentId,
+  lawUpdate,
   onChangeDocument,
 }: {
   matterId: string;
   matterDocumentId: string;
+  lawUpdate: LawUpdate | null;
   onChangeDocument: () => void;
 }) {
   const navigate = useNavigate();
@@ -460,6 +535,37 @@ function ReviewSession({
         </Button>
       </div>
 
+      {lawUpdate && (
+        <Card className="border-amber-400/60 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/20">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium">
+                  Reviewing against a change to {lawUpdate.act_name ?? "a relevant law"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {lawUpdateTypeLabel(lawUpdate.update_type)}: {lawUpdate.title}
+                  {lawUpdate.authority_ref ? ` · ${lawUpdate.authority_ref}` : ""}
+                  {lawUpdate.published_date ? ` · ${lawUpdate.published_date}` : ""} · {lawUpdate.source_name}
+                </p>
+                {lawUpdate.summary && <p className="text-xs text-muted-foreground">{lawUpdate.summary}</p>}
+                {(lawUpdate.document_url || lawUpdate.source_url) && (
+                  <a
+                    href={lawUpdate.document_url || lawUpdate.source_url || undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary inline-flex items-center gap-1 hover:underline"
+                  >
+                    Read the source <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {versionLoading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : !version ? (
@@ -527,18 +633,29 @@ function ReviewSession({
             <p className="text-muted-foreground">No material issues flagged.</p>
           )}
 
-          {(runReview.isSuccess || (suggestions && suggestions.length > 0)) && (
-            <Card>
+          {/* Normally the conversation opens once a review has produced
+              something to talk about. Arriving from a "Revise" link is the
+              exception: the pre-written instruction has to have somewhere to
+              land even on a document nobody has reviewed yet. */}
+          {(runReview.isSuccess || (suggestions && suggestions.length > 0) || lawUpdate) && (
+            <Card className={cn(lawUpdate && "border-amber-400/60")}>
               <CardContent className="pt-6 space-y-4">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Continue the conversation
+                  {lawUpdate ? "Revise against this change" : "Continue the conversation"}
                 </p>
                 <DocumentChatPanel
                   messages={chatMessages}
                   onSend={handleSendReviewMessage}
                   sending={redlineChat.isPending}
                   placeholder="Ask a question or request another check…"
-                  emptyHint='Ask about a suggestion, or request another pass — e.g. "also check the indemnity clause".'
+                  emptyHint={
+                    lawUpdate
+                      ? "Read the instruction below, adjust it if you want, then send it to review this document against the change."
+                      : 'Ask about a suggestion, or request another pass — e.g. "also check the indemnity clause".'
+                  }
+                  initialInput={
+                    lawUpdate ? buildRevisePrompt(lawUpdate, matterDocument?.title ?? undefined) : undefined
+                  }
                 />
               </CardContent>
             </Card>

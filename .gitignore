@@ -71,3 +71,8 @@ supabase/.branches/
 *.njsproj
 *.sln
 *.sw?
+
+# Deploy artefact: copied in by law-monitor/deploy.sh, source of truth is
+# scripts/precedent_backlog/supabase_io.py
+law-monitor/supabase_io.py
+law-monitor/.env

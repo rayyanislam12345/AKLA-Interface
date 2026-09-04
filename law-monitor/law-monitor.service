@@ -1,0 +1,16 @@
+[Unit]
+Description=AKLA Matter Hub daily legal-update monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# A batch job, not a server — unlike ocr-service.service this must NOT set
+# Restart=always, or a run that fails at 07:00 would relaunch in a loop and
+# spend the day paying for web searches.
+Type=oneshot
+User=opc
+WorkingDirectory=/opt/law-monitor
+EnvironmentFile=/opt/law-monitor/.env
+# flock so a manual run and the timer can never overlap and double-ingest.
+ExecStart=/usr/bin/flock -n /tmp/law-monitor.lock /opt/law-monitor/.venv/bin/python /opt/law-monitor/monitor.py
+TimeoutStartSec=3600

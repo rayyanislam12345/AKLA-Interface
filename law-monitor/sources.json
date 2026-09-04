@@ -1,0 +1,74 @@
+{
+  "_comment": "Edit this file to change what the morning sweep watches — no code change needed. allowed_domains is a hard gate: a finding whose document lives outside these domains is rejected before it can reach the database, so add a domain here before adding a source that uses it.",
+
+  "lookback_days": 2,
+  "max_acts_per_run": 10,
+  "max_published_age_days": 30,
+  "library_source_name": "Law library check",
+
+  "allowed_domains": [
+    "gov.pk",
+    "secp.gov.pk",
+    "pppa.gov.pk",
+    "pakistancode.gov.pk",
+    "na.gov.pk",
+    "senate.gov.pk",
+    "fbr.gov.pk",
+    "sbp.org.pk",
+    "nepra.org.pk",
+    "ogra.org.pk",
+    "ppra.org.pk",
+    "punjab.gov.pk",
+    "pppa.punjab.gov.pk",
+    "sindh.gov.pk",
+    "pppunit.sindh.gov.pk",
+    "kp.gov.pk",
+    "kppppu.gov.pk",
+    "balochistan.gov.pk"
+  ],
+
+  "sources": [
+    {
+      "name": "SECP",
+      "description": "Securities and Exchange Commission of Pakistan — circulars, SROs, notifications and amendments to company and securities law",
+      "sites": ["secp.gov.pk"],
+      "max_searches": 4
+    },
+    {
+      "name": "PPP Authority (Federal)",
+      "description": "Pakistan Public Private Partnership Authority — PPP policy, rules, guidelines and amendments to the PPP Authority Act",
+      "sites": ["pppa.gov.pk"],
+      "max_searches": 4
+    },
+    {
+      "name": "Punjab PPP",
+      "description": "Punjab PPP Authority and the Punjab government — provincial PPP legislation, rules and notifications",
+      "sites": ["pppa.punjab.gov.pk", "punjab.gov.pk"],
+      "max_searches": 3
+    },
+    {
+      "name": "Sindh PPP",
+      "description": "Sindh PPP Unit and the Sindh government — provincial PPP legislation, rules and notifications",
+      "sites": ["pppunit.sindh.gov.pk", "sindh.gov.pk"],
+      "max_searches": 3
+    },
+    {
+      "name": "Khyber Pakhtunkhwa PPP",
+      "description": "KP PPP Unit and the KP government — provincial PPP legislation, rules and notifications",
+      "sites": ["kppppu.gov.pk", "kp.gov.pk"],
+      "max_searches": 3
+    },
+    {
+      "name": "Balochistan PPP",
+      "description": "Balochistan government — provincial PPP legislation, rules and notifications",
+      "sites": ["balochistan.gov.pk"],
+      "max_searches": 2
+    },
+    {
+      "name": "NEPRA",
+      "description": "National Electric Power Regulatory Authority — rules, tariff regimes and amendments affecting power projects",
+      "sites": ["nepra.org.pk"],
+      "max_searches": 3
+    }
+  ]
+}

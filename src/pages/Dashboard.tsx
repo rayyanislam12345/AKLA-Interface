@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatters } from "@/hooks/useMatters";
+import LegalUpdatesCard from "@/components/dashboard/LegalUpdatesCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -46,6 +47,8 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <LegalUpdatesCard />
 
       <div>
         <h2 className="text-lg font-medium mb-3">Matters</h2>

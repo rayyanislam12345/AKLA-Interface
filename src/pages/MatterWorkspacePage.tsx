@@ -12,6 +12,12 @@ import {
   useDeleteRelevantLaw,
 } from "@/hooks/useMatterRelevantLaws";
 import { useStatuteSources } from "@/hooks/useLawLibrary";
+import {
+  useMatterLawUpdates,
+  useAcknowledgeLawUpdate,
+  lawUpdateTypeLabel,
+  type LawUpdate,
+} from "@/hooks/useLawUpdates";
 import { supabase } from "@/integrations/supabase/client";
 import {
   useWhatsAppMattersForMatter,
@@ -220,6 +226,18 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
   const uploadLawFile = useUploadRelevantLawFile();
   const deleteLaw = useDeleteRelevantLaw();
 
+  const navigate = useNavigate();
+  const { data: lawUpdates } = useMatterLawUpdates(matterId);
+  const acknowledgeUpdate = useAcknowledgeLawUpdate();
+
+  // Newest unacknowledged development per Act, so a law that changed twice
+  // shows the most recent change rather than a stale one. useMatterLawUpdates
+  // already returns newest-first and excludes bills.
+  const updateByAct = new Map<string, LawUpdate>();
+  for (const update of lawUpdates ?? []) {
+    if (update.act_name && !updateByAct.has(update.act_name)) updateByAct.set(update.act_name, update);
+  }
+
   const [selectedAct, setSelectedAct] = useState("");
   const [typedAct, setTypedAct] = useState("");
   const [resolvingRowId, setResolvingRowId] = useState<string | null>(null);
@@ -346,12 +364,15 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
             {laws?.map((law) => {
               const isSearching = resolvingRowId === law.id;
               const needsUpload = law.status === "needs_upload";
+              const update = updateByAct.get(law.act_name);
+              const wasUpdated = !!update && !needsUpload && !isSearching;
               return (
                 <div
                   key={law.id}
                   className={cn(
                     "flex items-center gap-2 flex-wrap border rounded-md px-3 py-2",
-                    needsUpload && !isSearching && "border-destructive/40 bg-destructive/5"
+                    needsUpload && !isSearching && "border-destructive/40 bg-destructive/5",
+                    wasUpdated && "border-amber-400/60 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/20"
                   )}
                 >
                   <div className="min-w-0 flex-1">
@@ -359,9 +380,12 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                       {needsUpload && !isSearching && (
                         <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
                       )}
+                      {wasUpdated && (
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                      )}
                       <p className="text-sm font-medium truncate">{law.act_name}</p>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       <Badge variant="outline" className="text-[10px] font-normal">
                         {relevantLawSourceLabel(law.source)}
                       </Badge>
@@ -370,8 +394,49 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                           In Library
                         </Badge>
                       )}
+                      {wasUpdated && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] font-normal border-amber-500/60 text-amber-700 dark:text-amber-400"
+                        >
+                          Updated
+                        </Badge>
+                      )}
                     </div>
+                    {wasUpdated && update && (
+                      <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-1">
+                        {lawUpdateTypeLabel(update.update_type)}: {update.title}
+                        {update.published_date ? ` (${update.published_date})` : ""}
+                        {update.library_action === "replaced_act" || update.library_action === "ingested_amendment"
+                          ? " — the law library has been updated."
+                          : ""}
+                      </p>
+                    )}
                   </div>
+                  {wasUpdated && update && (
+                    <>
+                      <Button
+                        size="sm"
+                        className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
+                        onClick={() =>
+                          navigate(`/matters/${matterId}/ai?mode=verify&update=${update.id}`)
+                        }
+                      >
+                        <Wand2 className="h-4 w-4 mr-1.5" />
+                        Revise
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Dismiss on this matter only"
+                        onClick={() =>
+                          acknowledgeUpdate.mutate({ matterId: matterId!, lawUpdateId: update.id })
+                        }
+                      >
+                        Dismiss
+                      </Button>
+                    </>
+                  )}
                   {isSearching ? (
                     <Button size="sm" variant="outline" disabled className="shrink-0">
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

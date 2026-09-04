@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the AKLA legal-update monitor every morning
+
+[Timer]
+# 07:00 Pakistan Standard Time. The VM runs on UTC and PKT has no daylight
+# saving, so this is a fixed UTC+5 offset.
+OnCalendar=*-*-* 02:00:00 UTC
+# If the VM was down at 02:00, run once it comes back rather than skipping
+# the day — the failure mode the Mandate Bot's launchd job has on a sleeping
+# laptop, and the reason this job lives on the VM instead.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

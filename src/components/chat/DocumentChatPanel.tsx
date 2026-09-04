@@ -15,6 +15,10 @@ interface DocumentChatPanelProps {
   sending: boolean;
   placeholder?: string;
   emptyHint?: string;
+  // Seeds the box with a ready-to-send instruction — used when arriving from
+  // a "Revise" link, where the prompt is written for the lawyer but
+  // deliberately not sent for them.
+  initialInput?: string;
 }
 
 // Shared chat log + bottom input bar for iterating on a document with the
@@ -26,9 +30,20 @@ export default function DocumentChatPanel({
   sending,
   placeholder = "Type a message…",
   emptyHint,
+  initialInput,
 }: DocumentChatPanelProps) {
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput ?? "");
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Only re-seed when the seed itself changes (a different law update), so
+  // this can never overwrite something the lawyer is part-way through typing.
+  const lastSeed = useRef(initialInput);
+  useEffect(() => {
+    if (initialInput && initialInput !== lastSeed.current) {
+      lastSeed.current = initialInput;
+      setInput(initialInput);
+    }
+  }, [initialInput]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });

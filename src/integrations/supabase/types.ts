@@ -330,6 +330,189 @@ export type Database = {
           },
         ]
       }
+      law_library_versions: {
+        Row: {
+          act_name: string
+          archived_at: string
+          chunk_count: number | null
+          content: string
+          id: string
+          metadata: Json
+          superseded_by_update_id: string | null
+        }
+        Insert: {
+          act_name: string
+          archived_at?: string
+          chunk_count?: number | null
+          content: string
+          id?: string
+          metadata?: Json
+          superseded_by_update_id?: string | null
+        }
+        Update: {
+          act_name?: string
+          archived_at?: string
+          chunk_count?: number | null
+          content?: string
+          id?: string
+          metadata?: Json
+          superseded_by_update_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_library_versions_superseded_by_update_id_fkey"
+            columns: ["superseded_by_update_id"]
+            isOneToOne: false
+            referencedRelation: "law_updates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      law_monitor_runs: {
+        Row: {
+          acts_checked: number
+          error: string | null
+          finished_at: string | null
+          found: number
+          id: string
+          library_cursor: string | null
+          rejected: number
+          sources_checked: number
+          started_at: string
+          status: string
+          written: number
+        }
+        Insert: {
+          acts_checked?: number
+          error?: string | null
+          finished_at?: string | null
+          found?: number
+          id?: string
+          library_cursor?: string | null
+          rejected?: number
+          sources_checked?: number
+          started_at?: string
+          status?: string
+          written?: number
+        }
+        Update: {
+          acts_checked?: number
+          error?: string | null
+          finished_at?: string | null
+          found?: number
+          id?: string
+          library_cursor?: string | null
+          rejected?: number
+          sources_checked?: number
+          started_at?: string
+          status?: string
+          written?: number
+        }
+        Relationships: []
+      }
+      law_update_digests: {
+        Row: {
+          digest_date: string
+          generated_at: string
+          run_id: string | null
+          summary_markdown: string
+          update_count: number
+        }
+        Insert: {
+          digest_date: string
+          generated_at?: string
+          run_id?: string | null
+          summary_markdown: string
+          update_count?: number
+        }
+        Update: {
+          digest_date?: string
+          generated_at?: string
+          run_id?: string | null
+          summary_markdown?: string
+          update_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_update_digests_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "law_monitor_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      law_updates: {
+        Row: {
+          act_name: string | null
+          authority_ref: string | null
+          confidence: string | null
+          dedupe_key: string
+          discovered_at: string
+          document_url: string | null
+          id: string
+          last_seen_at: string
+          library_action: string
+          library_action_at: string | null
+          library_action_note: string | null
+          published_date: string | null
+          run_id: string | null
+          source_name: string
+          source_url: string | null
+          summary: string | null
+          title: string
+          update_type: string
+        }
+        Insert: {
+          act_name?: string | null
+          authority_ref?: string | null
+          confidence?: string | null
+          dedupe_key: string
+          discovered_at?: string
+          document_url?: string | null
+          id?: string
+          last_seen_at?: string
+          library_action?: string
+          library_action_at?: string | null
+          library_action_note?: string | null
+          published_date?: string | null
+          run_id?: string | null
+          source_name: string
+          source_url?: string | null
+          summary?: string | null
+          title: string
+          update_type: string
+        }
+        Update: {
+          act_name?: string | null
+          authority_ref?: string | null
+          confidence?: string | null
+          dedupe_key?: string
+          discovered_at?: string
+          document_url?: string | null
+          id?: string
+          last_seen_at?: string
+          library_action?: string
+          library_action_at?: string | null
+          library_action_note?: string | null
+          published_date?: string | null
+          run_id?: string | null
+          source_name?: string
+          source_url?: string | null
+          summary?: string | null
+          title?: string
+          update_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_updates_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "law_monitor_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mandate_opportunities: {
         Row: {
           category: string | null
@@ -486,6 +669,45 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      matter_law_update_acks: {
+        Row: {
+          acknowledged_at: string
+          acknowledged_by: string | null
+          id: string
+          law_update_id: string
+          matter_id: string
+        }
+        Insert: {
+          acknowledged_at?: string
+          acknowledged_by?: string | null
+          id?: string
+          law_update_id: string
+          matter_id: string
+        }
+        Update: {
+          acknowledged_at?: string
+          acknowledged_by?: string | null
+          id?: string
+          law_update_id?: string
+          matter_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matter_law_update_acks_law_update_id_fkey"
+            columns: ["law_update_id"]
+            isOneToOne: false
+            referencedRelation: "law_updates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matter_law_update_acks_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
             referencedColumns: ["id"]
           },
         ]
@@ -1141,6 +1363,14 @@ export type Database = {
           matter_id: string
           metadata: Json
           similarity: number
+        }[]
+      }
+      matter_documents_citing_act: {
+        Args: { p_act_name: string; p_matter_id: string }
+        Returns: {
+          matter_document_id: string
+          mentions: number
+          title: string
         }[]
       }
       precedent_sources: {
