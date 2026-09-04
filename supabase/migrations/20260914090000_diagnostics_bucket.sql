@@ -10,6 +10,7 @@ insert into storage.buckets (id, name, public)
 values ('diagnostics', 'diagnostics', false)
 on conflict (id) do nothing;
 
+drop policy if exists "Associates upload their own diagnostics" on storage.objects;
 create policy "Associates upload their own diagnostics"
 on storage.objects for insert
 with check (
@@ -18,6 +19,7 @@ with check (
   and (storage.foldername(name))[1] = auth.uid()::text
 );
 
+drop policy if exists "Associates see their own diagnostics" on storage.objects;
 create policy "Associates see their own diagnostics"
 on storage.objects for select
 using (
@@ -28,6 +30,7 @@ using (
   )
 );
 
+drop policy if exists "Admins manage diagnostics" on storage.objects;
 create policy "Admins manage diagnostics"
 on storage.objects for delete
 using (bucket_id = 'diagnostics' and public.has_role(auth.uid(), 'admin'));

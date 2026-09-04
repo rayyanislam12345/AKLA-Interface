@@ -5,7 +5,7 @@
 -- and keeping it that way bounds both the table and what can be inferred from
 -- it. It carries totals and the matter in hand; never window titles, document
 -- names or screenshots, which stay on the associate's machine.
-create table public.live_activity (
+create table if not exists public.live_activity (
   user_id         uuid not null references public.profiles(id) on delete cascade,
   day             date not null,
   as_of           timestamptz not null default now(),
@@ -20,11 +20,12 @@ create table public.live_activity (
   primary key (user_id, day)
 );
 
-create index live_activity_day_idx on public.live_activity(day desc, as_of desc);
+create index if not exists live_activity_day_idx on public.live_activity(day desc, as_of desc);
 
 alter table public.live_activity enable row level security;
 
 -- Everyone writes only their own row. Nobody can post activity as someone else.
+drop policy if exists "Write only your own activity" on public.live_activity;
 create policy "Write only your own activity"
   on public.live_activity for all
   using (user_id = auth.uid())
@@ -33,6 +34,7 @@ create policy "Write only your own activity"
 -- Reading the firm's activity is a supervisory act, so it is limited to those
 -- who supervise. An associate can still read their own row, which matters:
 -- nothing should be collected about someone that they cannot themselves see.
+drop policy if exists "Supervisors see the firm, everyone sees themselves" on public.live_activity;
 create policy "Supervisors see the firm, everyone sees themselves"
   on public.live_activity for select
   using (
