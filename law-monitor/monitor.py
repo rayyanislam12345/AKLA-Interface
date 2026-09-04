@@ -91,6 +91,31 @@ def normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
+def parse_published_period(value: str) -> tuple[date, date] | None:
+    """Sources quote dates at whatever precision they feel like — a full date,
+    a month, or (often) just a year. Returns the first and last day of the
+    period given, with the last day capped at today.
+
+    The age gate runs against the LAST day, so "2026" is judged on how recent
+    it could be rather than being treated as 1 January and rejected as ten
+    months stale. The first day is what gets stored, which is the conventional
+    reading of a year-only citation."""
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+        try:
+            start = datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+        if fmt == "%Y-%m-%d":
+            last = start
+        elif fmt == "%Y-%m":
+            last = (start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        else:
+            last = date(start.year, 12, 31)
+        return start, min(last, date.today())
+    return None
+
+
 def load_config() -> dict:
     with open(SCRIPT_DIR / "sources.json") as f:
         return json.load(f)
@@ -274,14 +299,16 @@ def verify_finding(finding: dict, config: dict) -> tuple[bool, str, str | None]:
 
     published = finding.get("published_date")
     if published:
-        try:
-            age = (date.today() - datetime.strptime(published, "%Y-%m-%d").date()).days
-        except ValueError:
+        period = parse_published_period(str(published))
+        if period is None:
             return False, f"unparseable published_date {published!r}", None
+        first_day, latest_possible = period
+        age = (date.today() - latest_possible).days
         if age > config["max_published_age_days"]:
             return False, f"published {age} days ago", None
-        if age < -1:
+        if (date.today() - first_day).days < -1:
             return False, f"published_date is in the future ({published})", None
+        finding["published_date"] = first_day.isoformat()
 
     text, reason = fetch_document(url, config["allowed_domains"])
     if text is None:

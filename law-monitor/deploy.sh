@@ -16,6 +16,9 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 echo "Deploying law-monitor to $HOST"
 
+# scp needs the destination directory to already exist.
+ssh -i "$KEY" "$HOST" 'rm -rf /tmp/law-monitor-deploy && mkdir -p /tmp/law-monitor-deploy'
+
 # supabase_io.py is the single source of truth in scripts/precedent_backlog/
 # — it solves the ingest-documents auth problem (bot session + retries) and
 # is copied in at deploy time rather than duplicated in the repo.
