@@ -280,7 +280,7 @@ const HelpPage = () => {
         {
           question: "What is Ask AI?",
           answer:
-            "A chat scoped to one matter, grounded in that matter's uploaded documents and the firm-wide precedent library — not general knowledge alone.",
+            "A chat scoped to one matter, grounded in that matter's uploaded documents, the firm-wide precedent library, and the law library — not general knowledge alone. Statute excerpts come from the matter's Relevant Laws when it has any, otherwise the whole law library, and each source in the answer is labelled with where it came from.",
         },
         {
           question: "Where do I find it?",

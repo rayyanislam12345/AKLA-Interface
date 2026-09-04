@@ -52,7 +52,8 @@ export default function AskPanel({ matterId, active }: AskPanelProps) {
     <div className="space-y-4 max-w-3xl">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted-foreground">
-          Grounded in this matter's documents and the firm's precedent library.
+          Grounded in this matter's documents, the firm's precedent library, and the law library (this matter's
+          Relevant Laws first).
         </p>
         <Button size="sm" variant="outline" onClick={() => setShowUpload((v) => !v)}>
           <FilePlus2 className="h-4 w-4 mr-2" />
@@ -104,7 +105,11 @@ export default function AskPanel({ matterId, active }: AskPanelProps) {
               {lastSources.map((s) => (
                 <p key={s.id} className="text-xs text-muted-foreground truncate">
                   <span className="font-medium">
-                    {s.scope === "matter" ? s.filename ?? "This matter" : "Precedent"}
+                    {s.scope === "matter"
+                      ? s.filename ?? "This matter"
+                      : s.scope === "statute"
+                      ? s.act_name ?? "Statute"
+                      : "Precedent"}
                   </span>
                   {" · "}
                   {(s.similarity * 100).toFixed(0)}% match — {s.content.slice(0, 100)}…

@@ -17,6 +17,7 @@ serve(async (req) => {
       query,
       matchThreshold: requestedThreshold,
       matchCount = 5,
+      statuteCount = 3,
       matterId = null,
       documentTypeId = null,
       precedentOnly = false,
@@ -150,16 +151,28 @@ serve(async (req) => {
     const embeddingData = await embeddingResponse.json();
     const queryEmbedding = embeddingData.data[0].embedding;
 
-    // A matter question is grounded in two places: the matter's own uploaded
-    // documents AND the firm's precedent library — a lawyer asking "what did
-    // we agree on step-in rights" wants this deal's draft, and "how do we
-    // normally draft step-in rights" wants precedent, and the question
-    // rarely says which. Both run, each with its own bar, and every source
-    // is labelled with where it came from so the answer can say so too.
-    // Without a matter (the Precedent Library's search box) it's the single
-    // library-wide search it always was.
+    // A matter question is grounded in three places: the matter's own
+    // uploaded documents, the firm's precedent library, and the law library
+    // — a lawyer asking "what did we agree on step-in rights" wants this
+    // deal's draft, "how do we normally draft step-in rights" wants
+    // precedent, and "does the stamp duty exemption we're claiming hold"
+    // wants the Act, and the question rarely says which. All three run and
+    // every source is labelled with where it came from so the answer can
+    // say so too. Statute retrieval is scoped the same way Draft and Verify
+    // scope it (see _shared/retrieval.ts): to the matter's Relevant Laws
+    // list when it has one, the whole statute library otherwise. Without a
+    // matter it's the single library-wide search it always was.
     type Match = { id: string; content: string; metadata: any; matter_id: string | null; document_type_id: string | null; similarity: number };
-    const [matterResult, libraryResult] = await Promise.all([
+    type Scope = 'matter' | 'precedent' | 'statute';
+
+    const { data: relevantLaws } = matterId
+      ? await supabase.from('matter_relevant_laws').select('act_name').eq('matter_id', matterId).eq('status', 'available')
+      : { data: null };
+    const filterActNames = relevantLaws && relevantLaws.length > 0
+      ? (relevantLaws as { act_name: string }[]).map((r) => r.act_name)
+      : null;
+
+    const [matterResult, libraryResult, statuteResult] = await Promise.all([
       matterId
         ? supabase.rpc('match_documents', {
             query_embedding: queryEmbedding,
@@ -176,9 +189,18 @@ serve(async (req) => {
         filter_document_type_id: documentTypeId,
         precedent_only: matterId ? true : precedentOnly,
       }),
+      matterId
+        ? supabase.rpc('match_documents', {
+            query_embedding: queryEmbedding,
+            match_threshold: matchThreshold,
+            match_count: statuteCount,
+            statute_only: true,
+            filter_act_names: filterActNames,
+          })
+        : Promise.resolve({ data: [] as Match[], error: null }),
     ]);
 
-    const matchError = matterResult.error ?? libraryResult.error;
+    const matchError = matterResult.error ?? libraryResult.error ?? statuteResult.error;
     if (matchError) {
       console.error('Error matching documents:', matchError);
       return new Response(JSON.stringify({ error: 'Failed to search documents' }), {
@@ -187,18 +209,21 @@ serve(async (req) => {
       });
     }
 
-    const matches: Array<Match & { scope: 'matter' | 'precedent' }> = [
+    const matches: Array<Match & { scope: Scope }> = [
       ...((matterResult.data ?? []) as Match[]).map((m) => ({ ...m, scope: 'matter' as const })),
       ...((libraryResult.data ?? []) as Match[]).map((m) => ({ ...m, scope: 'precedent' as const })),
+      ...((statuteResult.data ?? []) as Match[]).map((m) => ({ ...m, scope: 'statute' as const })),
     ];
 
-    console.log(`Found ${matches.length} matching documents (${matterResult.data?.length ?? 0} on the matter, ${libraryResult.data?.length ?? 0} precedent)`);
+    console.log(`Found ${matches.length} matching documents (${matterResult.data?.length ?? 0} on the matter, ${libraryResult.data?.length ?? 0} precedent, ${statuteResult.data?.length ?? 0} statute${filterActNames ? ` from ${filterActNames.length} relevant law(s)` : ''})`);
 
     // Format context from matched documents
-    const sourceLabel = (doc: Match & { scope: string }) => {
+    const sourceLabel = (doc: Match & { scope: Scope }) => {
+      const similarity = `similarity ${(doc.similarity * 100).toFixed(1)}%`;
+      if (doc.scope === 'statute') return `statute — ${doc.metadata?.act_name ?? 'unknown Act'}; ${similarity}`;
       const filename = doc.metadata?.filename ? ` — ${doc.metadata.filename}` : '';
       const origin = matterId ? (doc.scope === 'matter' ? "this matter's document" : 'precedent library') : 'knowledge base';
-      return `${origin}${filename}; similarity ${(doc.similarity * 100).toFixed(1)}%`;
+      return `${origin}${filename}; ${similarity}`;
     };
     const context = matches.length > 0
       ? matches.map((doc, index) =>
@@ -206,7 +231,7 @@ serve(async (req) => {
         ).join('\n\n---\n\n')
       : 'No relevant documents found in the knowledge base.';
 
-    const systemPrompt = `You are a legal assistant with access to the firm's document knowledge base: the documents uploaded to the matter being discussed, and the firm's precedent library of past agreements. Use the following sources, retrieved specifically for the latest question, to answer precisely and conservatively. Each source is labelled with where it came from — distinguish clearly between what THIS matter's documents say and what the firm's precedent shows. If the sources don't contain relevant information, say so clearly rather than guessing. Cite sources by number (e.g. "[Source 2]") when you rely on them.
+    const systemPrompt = `You are a legal assistant with access to the firm's knowledge base: the documents uploaded to the matter being discussed, the firm's precedent library of past agreements, and a law library of Pakistani statute text. Use the following sources, retrieved specifically for the latest question, to answer precisely and conservatively. Each source is labelled with where it came from — distinguish clearly between what THIS matter's documents say, what the firm's precedent shows, and what the law itself provides; when you rely on a statute, name the Act and the section. If the sources don't contain relevant information, say so clearly rather than guessing. Cite sources by number (e.g. "[Source 2]") when you rely on them.
 
 KNOWLEDGE BASE SOURCES FOR THE LATEST QUESTION:
 ${context}`;
@@ -272,6 +297,7 @@ ${context}`;
         document_type_id: doc.document_type_id,
         scope: doc.scope,
         filename: doc.metadata?.filename ?? null,
+        act_name: doc.metadata?.act_name ?? null,
       })),
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
