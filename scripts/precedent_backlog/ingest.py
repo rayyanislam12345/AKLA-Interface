@@ -245,12 +245,32 @@ def confirm(
     sb: SupabaseClient,
     only_existing_types: bool = False,
     min_files_per_type: int = 0,
+    only_created_types: bool = False,
 ):
     outcomes = ("pending_ingest",) if only_existing_types else ("pending_ingest", "pending_ingest_new_type")
     pending = [
         (key, row) for key, row in manifest.items()
         if is_under(row.get("path", ""), root) and row["outcome"] in outcomes
     ]
+
+    # Finishing an interrupted --min-files-per-type run. That threshold counts
+    # what is still PENDING, so a type approved at 6 files and ingested down to
+    # its last 2 now scores 2 and would be silently skipped on a re-run —
+    # quietly abandoning work that was already approved and half-done. Keying
+    # off "this type already exists in document_types" says what is actually
+    # meant: finish what was started, create nothing new.
+    if only_created_types:
+        created = {dt["name"].strip().lower() for dt in sb.list_document_types()}
+        before = len(pending)
+        pending = [
+            (key, row) for key, row in pending
+            if row["outcome"] != "pending_ingest_new_type"
+            or (row.get("proposed_type_name", "").strip().lower() in created)
+        ]
+        print(
+            f"Finishing already-created types only — {len(pending)} file(s) to go, "
+            f"{before - len(pending)} left pending under types that were never created."
+        )
 
     # A proposed type backed by a single stray file is usually a one-off, not
     # a category the firm actually works in — creating a document type for it
@@ -434,6 +454,13 @@ def main():
              "later run without this flag still picks them up. Run --consolidate-types first, or "
              "near-duplicate names will each be counted separately.",
     )
+    parser.add_argument(
+        "--only-created-types",
+        action="store_true",
+        help="With --confirm, ingest pending files only where the proposed document type ALREADY "
+             "exists — the safe way to finish an interrupted --min-files-per-type run without "
+             "creating anything new and without the threshold re-deriving itself.",
+    )
     args = parser.parse_args()
 
     root = os.path.abspath(args.scan)
@@ -482,6 +509,7 @@ def main():
             sb,
             only_existing_types=args.only_existing_types,
             min_files_per_type=args.min_files_per_type,
+            only_created_types=args.only_created_types,
         )
         return
 
