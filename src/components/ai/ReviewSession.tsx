@@ -4,14 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
 import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { useMatterDocuments } from "@/hooks/useMatterDocuments";
-import {
-  useLawUpdate,
-  useDocumentsCitingAct,
-  lawUpdateTypeLabel,
-  buildRevisePrompt,
-  type LawUpdate,
-} from "@/hooks/useLawUpdates";
+import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/useLawUpdates";
 import {
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
@@ -24,13 +17,17 @@ import {
   type RedlineSuggestion,
 } from "@/hooks/useRedline";
 import DocumentChatPanel, { type DocumentChatMessage } from "@/components/chat/DocumentChatPanel";
-import DocumentUploadCard from "@/components/ai/DocumentUploadCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn, sanitizeStorageFilename } from "@/lib/utils";
+
+// The three-pass AI review of one matter document — suggestions grouped by
+// pass, accept/reject, a tracked-changes preview of the real .docx, download
+// and save-as-version. It used to be the body of the Verify tab; it is now
+// what the AI Workspace's artifact panel opens for a "review" artifact, and
+// what a Revise link lands on. Everything here is unchanged from that page.
 
 function statusBadgeVariant(status: RedlineSuggestion["status"]) {
   if (status === "accepted") return "default" as const;
@@ -125,162 +122,8 @@ function SuggestionListItem({
   );
 }
 
-interface VerifyPanelProps {
-  matterId: string;
-  matterDocumentId: string | undefined;
-  // Present when the lawyer arrived from a "Revise" button on a law that
-  // changed. Carries the amendment through so the review can name it and
-  // pre-write the instruction.
-  lawUpdateId?: string;
-  onSelectDocument: (matterDocumentId: string | undefined) => void;
-}
 
-// Picker (which document to review) wrapping the review session itself. The
-// session is keyed on the document id so preview/summary/chat state starts
-// clean for every document — the old standalone page got that for free by
-// being remounted per route.
-export default function VerifyPanel({
-  matterId,
-  matterDocumentId,
-  lawUpdateId,
-  onSelectDocument,
-}: VerifyPanelProps) {
-  const { data: lawUpdate } = useLawUpdate(lawUpdateId);
-
-  if (!matterDocumentId) {
-    return <DocumentPicker matterId={matterId} lawUpdate={lawUpdate ?? null} onSelectDocument={onSelectDocument} />;
-  }
-  return (
-    <ReviewSession
-      key={matterDocumentId}
-      matterId={matterId}
-      matterDocumentId={matterDocumentId}
-      lawUpdate={lawUpdate ?? null}
-      onChangeDocument={() => onSelectDocument(undefined)}
-    />
-  );
-}
-
-function DocumentPicker({
-  matterId,
-  lawUpdate,
-  onSelectDocument,
-}: {
-  matterId: string;
-  lawUpdate: LawUpdate | null;
-  onSelectDocument: (matterDocumentId: string) => void;
-}) {
-  const { data: matterDocuments, isLoading } = useMatterDocuments(matterId);
-  const { data: citingDocs } = useDocumentsCitingAct(matterId, lawUpdate?.act_name);
-
-  const reviewable = (matterDocuments ?? []).filter((doc) => ((doc as any).versions?.length ?? 0) > 0);
-  const reviewableIds = new Set(reviewable.map((doc) => doc.id));
-  // Documents that actually cite the Act, so the lawyer isn't left guessing
-  // which file the amendment touches. Ones with no uploaded version can't be
-  // reviewed at all (the review works on a real file), so they're listed as
-  // affected but not offered as a choice.
-  const affected = (citingDocs ?? []).filter((d) => reviewableIds.has(d.matter_document_id));
-  const affectedWithoutFile = (citingDocs ?? []).filter((d) => !reviewableIds.has(d.matter_document_id));
-
-  return (
-    <div className="space-y-6 max-w-4xl">
-      {lawUpdate && (
-        <Card className="border-amber-400/60 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/20">
-          <CardContent className="pt-6 space-y-3">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium">
-                  {lawUpdate.act_name ?? "A relevant law"} changed — {lawUpdateTypeLabel(lawUpdate.update_type)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {lawUpdate.title}
-                  {lawUpdate.published_date ? ` · ${lawUpdate.published_date}` : ""} · {lawUpdate.source_name}
-                </p>
-              </div>
-            </div>
-            {affected.length > 0 ? (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium">Documents on this matter that cite it:</p>
-                {affected.map((doc) => (
-                  <Button
-                    key={doc.matter_document_id}
-                    size="sm"
-                    variant="outline"
-                    className="mr-2"
-                    onClick={() => onSelectDocument(doc.matter_document_id)}
-                  >
-                    {doc.title}
-                  </Button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                No document on this matter appears to cite it by name — pick one below to review anyway.
-              </p>
-            )}
-            {affectedWithoutFile.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Also cited in {affectedWithoutFile.map((d) => d.title).join(", ")}, which
-                {affectedWithoutFile.length === 1 ? " has" : " have"} no uploaded file to review.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Document to review</label>
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : reviewable.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No documents with an uploaded version on this matter yet — upload one below.
-              </p>
-            ) : (
-              <Select value="" onValueChange={onSelectDocument}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a document" />
-                </SelectTrigger>
-                <SelectContent>
-                  {reviewable.map((doc) => {
-                    const versions = (doc as any).versions as Array<{ version_number: number; file_name: string | null }>;
-                    const latest = versions.reduce((a, b) => (b.version_number > a.version_number ? b : a));
-                    const typeName = (doc as any).document_type?.name as string | undefined;
-                    return (
-                      <SelectItem key={doc.id} value={doc.id}>
-                        {doc.title}
-                        {typeName ? ` · ${typeName}` : ""}
-                        {latest.file_name ? ` · ${latest.file_name}` : ""}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Three review passes — legal clauses &amp; citations, formatting, and content &amp; conflicts — against
-            the firm's precedent and this matter's other documents. Word documents get a tracked-changes preview.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6">
-          <DocumentUploadCard
-            matterId={matterId}
-            hint="…or upload a new document to review. It's added to the matter like any other upload."
-            onUploaded={onSelectDocument}
-          />
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function ReviewSession({
+export default function ReviewSession({
   matterId,
   matterDocumentId,
   lawUpdate,
@@ -289,7 +132,9 @@ function ReviewSession({
   matterId: string;
   matterDocumentId: string;
   lawUpdate: LawUpdate | null;
-  onChangeDocument: () => void;
+  // Absent when hosted in the AI Workspace's document panel, where the chat
+  // decides which document is under review.
+  onChangeDocument?: () => void;
 }) {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -522,17 +367,19 @@ function ReviewSession({
   );
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{matterDocument?.title ?? "…"}</span>
           {(matterDocument as any)?.document_type?.name ? ` · ${(matterDocument as any).document_type.name}` : ""}
           {version?.file_name ? ` · ${version.file_name}` : ""}
         </p>
-        <Button size="sm" variant="outline" onClick={onChangeDocument}>
-          <ArrowLeftRight className="h-4 w-4 mr-2" />
-          Choose a different document
-        </Button>
+        {onChangeDocument && (
+          <Button size="sm" variant="outline" onClick={onChangeDocument}>
+            <ArrowLeftRight className="h-4 w-4 mr-2" />
+            Choose a different document
+          </Button>
+        )}
       </div>
 
       {lawUpdate && (
@@ -616,7 +463,7 @@ function ReviewSession({
 
           {suggestions && suggestions.length > 0 && (
             canPreview ? (
-              <div className="grid md:grid-cols-[1fr_320px] gap-6 items-start">
+              <div className="grid xl:grid-cols-[1fr_320px] gap-6 items-start">
                 <Card>
                   <CardContent className="pt-6">
                     <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />

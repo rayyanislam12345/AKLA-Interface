@@ -76,6 +76,7 @@ supabase/
 │   ├── _shared/extractText.ts   Shared PDF/DOCX/XLSX text extraction
 │   ├── process-document/         Storage download → extract → ingest
 │   ├── ingest-documents/         Chunk + embed (Voyage) + insert into `documents`
+│   ├── chat/                     AI Workspace: streaming, skills, artifacts (SSE)
 │   ├── rag-query/                Embed query → match_documents → Claude answer (optionally threaded)
 │   ├── draft-document/           Precedent/interview-grounded draft generation
 │   ├── drafting-interview/       Turn-by-turn intake chat
@@ -154,6 +155,7 @@ documents          (RAG store: matter-scoped context + firm-wide precedent, one 
 |----------|-------|---------|
 | `process-document` | Voyage (via ingest-documents) | Downloads a file from storage, extracts text (PDF via `unpdf`, DOCX via `mammoth`, XLSX via `xlsx`), hands off to `ingest-documents` |
 | `ingest-documents` | Voyage `voyage-law-2` | Chunks text, embeds each chunk (batched), inserts into `documents` with `matter_id`/`document_type_id`/`is_precedent` |
+| `chat` | Voyage + Claude (streaming) | The AI Workspace's endpoint. One SSE request per turn: persists the thread/messages, extracts attachments (`_shared/extractText.ts`, cached on the message so they stay in context), runs the three `match_documents` searches (matter docs, precedents, statutes scoped to Relevant Laws), applies the skill in force (draft / verify / summarise / a custom `ai_skills` row), streams the reply, and stores any `<artifact>` block the model emits as an `ai_artifacts` row (verify instead calls `suggest-redline` + `redline-chat` and records a review artifact). Haiku names the thread after the first exchange |
 | `rag-query` | Voyage + Claude | Embeds a query, runs `match_documents`, asks Claude to answer grounded in the results. Optionally threaded (pass `matterId`) — persists to `ai_chat_threads`/`ai_chat_messages` and feeds prior turns back to Claude so follow-ups have context. Without `matterId`, stays stateless (used for ad hoc precedent search) |
 | `draft-document` | Claude | Pulls the firm's most recent precedent of the chosen document type (direct filter, not semantic — the precedent library isn't large enough yet to need re-ranking) plus known matter parties, and/or a guided-interview transcript, and asks Claude for a full first draft |
 | `drafting-interview` | Claude | Turn-by-turn intake chat — asks one question at a time, returns `{ready, message}` as JSON, persists every turn |
@@ -191,7 +193,7 @@ whatsapp-dashboard is a standalone Node.js/Express app (in `whatsapp-dashboard/`
 
 - **`useActivityTracking` is a stub.** The FactorIQ-era version logged against tables that no longer exist. A matter-hub-appropriate audit trail (logins, matter/document access) hasn't been rebuilt.
 - **Tracked-changes review is Word-only.** `apply-redlines-to-docx` patches the real uploaded `.docx` with OOXML revision marks; a PDF/Excel/PowerPoint version still gets the three review passes, but only as a list (original → suggested text), with no preview, download or save-as-version.
-- **AI Workspace tab state is per visit.** Interview/draft/review state survives switching tabs but not leaving the page or reloading — only what's been saved as a document version persists.
+- **AI Workspace chats persist; documents they produce don't reach the matter on their own.** Every conversation (`ai_chat_threads`/`ai_chat_messages`, per matter) and every draft/memo/review the assistant produces (`ai_artifacts`) is stored and reopens later. But an artifact is only a matter document once someone clicks *Save to matter* — which goes through the same upload + process-document path as a manual upload. Files dropped into the chat live in the private `ai-chat-files` bucket and are read only by the `chat` function; they are not matter documents and are not embedded.
 - **`document_types.required_fields`** exists in the schema (a hint for the drafting interview) but has no editing UI yet — no document type currently has it populated.
 - **No data-residency option in Pakistan.** The Supabase project runs on the nearest available region; there is no AWS/Supabase presence in Pakistan itself. See [SECURITY.md](SECURITY.md).
 - **Onboarding the rest of the firm** (10-11 more lawyers) hasn't happened yet — there's one admin test account.

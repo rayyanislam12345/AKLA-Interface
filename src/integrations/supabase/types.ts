@@ -14,25 +14,95 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_artifacts: {
+        Row: {
+          content: string | null
+          created_at: string
+          created_by: string | null
+          data: Json
+          id: string
+          kind: string
+          matter_id: string | null
+          message_id: string | null
+          thread_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          data?: Json
+          id?: string
+          kind: string
+          matter_id?: string | null
+          message_id?: string | null
+          thread_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          data?: Json
+          id?: string
+          kind?: string
+          matter_id?: string | null
+          message_id?: string | null
+          thread_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_artifacts_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_artifacts_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_artifacts_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_chat_messages: {
         Row: {
           content: string
           created_at: string
+          created_by: string | null
           id: string
+          metadata: Json
           role: string
           thread_id: string
         }
         Insert: {
           content: string
           created_at?: string
+          created_by?: string | null
           id?: string
+          metadata?: Json
           role: string
           thread_id: string
         }
         Update: {
           content?: string
           created_at?: string
+          created_by?: string | null
           id?: string
+          metadata?: Json
           role?: string
           thread_id?: string
         }
@@ -48,28 +118,43 @@ export type Database = {
       }
       ai_chat_threads: {
         Row: {
+          archived: boolean
           created_at: string
           created_by: string | null
           document_version_id: string | null
           id: string
+          last_message_at: string | null
           matter_id: string | null
+          pinned: boolean
+          skill: Json | null
           title: string | null
+          updated_at: string
         }
         Insert: {
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           document_version_id?: string | null
           id?: string
+          last_message_at?: string | null
           matter_id?: string | null
+          pinned?: boolean
+          skill?: Json | null
           title?: string | null
+          updated_at?: string
         }
         Update: {
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           document_version_id?: string | null
           id?: string
+          last_message_at?: string | null
           matter_id?: string | null
+          pinned?: boolean
+          skill?: Json | null
           title?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -88,8 +173,42 @@ export type Database = {
           },
         ]
       }
+      ai_skills: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          instructions: string
+          name: string
+          produces_document: boolean
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          instructions: string
+          name: string
+          produces_document?: boolean
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          instructions?: string
+          name?: string
+          produces_document?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       app_releases: {
         Row: {
+          auto_install: boolean
           created_by: string | null
           id: string
           mandatory: boolean
@@ -100,6 +219,7 @@ export type Database = {
           version: string
         }
         Insert: {
+          auto_install?: boolean
           created_by?: string | null
           id?: string
           mandatory?: boolean
@@ -110,6 +230,7 @@ export type Database = {
           version: string
         }
         Update: {
+          auto_install?: boolean
           created_by?: string | null
           id?: string
           mandatory?: boolean
@@ -513,6 +634,53 @@ export type Database = {
           },
         ]
       }
+      live_activity: {
+        Row: {
+          as_of: string
+          billable_hours: number
+          by_matter: Json
+          current_matter: string | null
+          current_task: string | null
+          day: string
+          other_hours: number
+          state: string
+          tracked_seconds: number
+          user_id: string
+        }
+        Insert: {
+          as_of?: string
+          billable_hours?: number
+          by_matter?: Json
+          current_matter?: string | null
+          current_task?: string | null
+          day: string
+          other_hours?: number
+          state?: string
+          tracked_seconds?: number
+          user_id: string
+        }
+        Update: {
+          as_of?: string
+          billable_hours?: number
+          by_matter?: Json
+          current_matter?: string | null
+          current_task?: string | null
+          day?: string
+          other_hours?: number
+          state?: string
+          tracked_seconds?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_activity_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mandate_opportunities: {
         Row: {
           category: string | null
@@ -735,6 +903,13 @@ export type Database = {
           matter_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "matter_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "matter_notes_matter_id_fkey"
             columns: ["matter_id"]
@@ -1374,7 +1549,7 @@ export type Database = {
         }[]
       }
       precedent_sources: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           chunk_count: number
           created_at: string
@@ -1385,7 +1560,7 @@ export type Database = {
         }[]
       }
       statute_sources: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           act_name: string
           chunk_count: number
@@ -1396,7 +1571,12 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "partner" | "associate" | "paralegal" | "senior_counsel"
+      app_role:
+        | "admin"
+        | "partner"
+        | "associate"
+        | "paralegal"
+        | "senior_counsel"
       document_status:
         | "not_started"
         | "drafting"
@@ -1423,12 +1603,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1452,11 +1632,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1477,11 +1657,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1502,11 +1682,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1519,11 +1699,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1535,7 +1715,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "partner", "associate", "paralegal", "senior_counsel"],
+      app_role: [
+        "admin",
+        "partner",
+        "associate",
+        "paralegal",
+        "senior_counsel",
+      ],
       document_status: [
         "not_started",
         "drafting",

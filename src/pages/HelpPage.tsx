@@ -117,7 +117,7 @@ const HelpPage = () => {
             "Stages (the checklist), Documents (every document on the matter with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
           bullets: [
             "Stages — click to advance not started → in progress → complete.",
-            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Review with AI).",
+            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Verify with AI).",
             "Parties — add a name and role for each counterparty on the deal.",
             "Tasks — add a task; check it off when done.",
             "Notes — free-text notes, newest first.",
@@ -156,7 +156,7 @@ const HelpPage = () => {
         {
           question: "How do I upload a document?",
           answer:
-            "In a matter workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. You can also upload straight from the AI Workspace (Ask or Verify tab) — same result, it lands on the matter.",
+            "In a matter workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. Files you drop into the AI Workspace chat are read by the assistant but are NOT matter documents — save what it produces with \"Save to matter\", or upload the file here.",
         },
         {
           question: "What happens to a file after I upload it?",
@@ -190,7 +190,7 @@ const HelpPage = () => {
         {
           question: "How do I generate a draft?",
           answer:
-            "From a matter's Documents card, click Draft with AI — it opens the AI Workspace on the Draft tab. Pick a document type and click Start Interview.",
+            "From a matter's Documents card, click Draft with AI — it opens the AI Workspace with the Draft skill in force. Pick the document type, then talk to the assistant: it asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, preview it as a Word document, download it, or save it to the matter as a version.",
         },
         {
           question: "How does the interview work?",
@@ -235,7 +235,7 @@ const HelpPage = () => {
         {
           question: "How do I get redline suggestions on a draft?",
           answer:
-            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace on the Verify tab with that document selected. Or open the Verify tab yourself and pick any document on the matter, or upload a new one right there. Then click Run AI Review.",
+            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with the Verify skill in force and the document attached; press send. Or in any chat, type / and choose Verify, then use the + menu → Add from matter to attach the document. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
         },
         {
           question: "What does the review actually check?",
@@ -285,7 +285,7 @@ const HelpPage = () => {
         {
           question: "Where do I find it?",
           answer:
-            "Open a matter's workspace and click Ask AI near the top of the page. That opens the AI Workspace on the Ask tab — Draft and Verify are the other two tabs on the same page, so you can switch without going back to the matter.",
+            "Open a matter's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this matter are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the matter's documents, and type / to put a skill in force (Draft, Verify, Summarise, or one of the firm's own). Every answer is grounded in this matter's documents, the precedent library and the law library, with the sources listed under the reply.",
         },
         {
           question: "Can I add a document from here?",
