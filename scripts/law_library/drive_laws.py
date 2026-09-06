@@ -34,7 +34,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scrape import MANIFEST_PATH, MIN_TEXT_LENGTH, assess_extraction, extract_pdf_text, save_manifest  # noqa: E402
+from scrape import (  # noqa: E402
+    MANIFEST_PATH,
+    MIN_TEXT_LENGTH,
+    _ai_call,
+    assess_extraction,
+    extract_pdf_text,
+    save_manifest,
+)
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "precedent_backlog"))
 from supabase_io import SupabaseClient  # noqa: E402
@@ -95,6 +102,38 @@ def act_name_from_filename(filename: str) -> str:
     return stem.strip()
 
 
+def flag_is_extraction_problem(name: str, note: str) -> bool:
+    """A flagged file failed for one of two very different reasons.
+
+    Either the text came out garbled — two columns interleaved into
+    "EAmppplrooyvmaelsn t", OCR noise, a truncated tail — which rasterising
+    the pages and running real OCR genuinely fixes. Or the document simply
+    isn't the Act it was filed under (the "STZA - State Bank of Pakistan"
+    file is actually FE Circular No. 08 of 2020), which no amount of
+    re-extraction will change.
+
+    Only the first is worth paying OCR time for, so ask rather than guess
+    from keywords. If the check is unavailable, assume it is worth an
+    attempt — better to spend a minute of OCR than silently drop a law.
+    """
+    reply = _ai_call(
+        system=(
+            "A quality check on text extracted from a PDF of a Pakistani legal document "
+            "reported a problem. Decide which kind of problem it is.\n\n"
+            'Answer EXACTLY one word: "GARBLED" if the complaint is about the TEXT being '
+            "unreadable, jumbled, column-interleaved, truncated or full of OCR noise — "
+            'something a clean re-scan could fix. Answer "WRONG_DOCUMENT" if the complaint '
+            "is that the document is a different Act, a circular, a notification, a summary, "
+            "or otherwise not the statute it was filed as."
+        ),
+        user=f"Document filed as: {name}\n\nReported problem: {note}",
+        max_tokens=10,
+    )
+    if reply is None:
+        return True
+    return "GARBLED" in reply.upper()
+
+
 def main() -> int:
     load_dotenv(SCRIPT_DIR / ".env")
     parser = argparse.ArgumentParser(description="Add the firm's own statute PDFs to the law library")
@@ -152,9 +191,19 @@ def main() -> int:
         name = act_name_from_filename(path.name)
         if not name:
             continue
-        if name in manifest and manifest[name].get("outcome") in ("pending_ingest", "ingested"):
+        prior = manifest.get(name)
+        if prior and prior.get("outcome") == "ingested":
             skipped += 1
             continue
+        if prior and prior.get("outcome") == "pending_ingest":
+            prior_check = prior.get("ai_check")
+            # Anything already clean, or already given its one OCR attempt, is
+            # done. A row still flagged from an earlier run gets reprocessed so
+            # the OCR recovery below can have a go at it.
+            if (not prior_check or prior_check.get("ok")) or prior.get("ocr_recovery_attempted"):
+                skipped += 1
+                continue
+            print(f"[{i}/{len(candidates)}] re-checking previously flagged: {name}")
         if name.strip().lower() in existing_titles:
             print(f"[{i}/{len(candidates)}] already held: {name}")
             skipped += 1
@@ -162,6 +211,7 @@ def main() -> int:
 
         print(f"[{i}/{len(candidates)}] {name}")
         try:
+            used_ocr = False
             text = extract_pdf_text(path)
             needs_ocr = len(text.strip()) < MIN_TEXT_LENGTH
             if needs_ocr:
@@ -175,8 +225,36 @@ def main() -> int:
                 print("    no text layer — running OCR (can take a while)...")
                 text = sb.ocr_pdf(path.read_bytes())
                 needs_ocr = False
+                used_ocr = True
 
             ai_check = assess_extraction(name, text)
+
+            # A PDF with a text layer can still extract badly — two-column
+            # statutes interleave into nonsense that no amount of chunking
+            # recovers, and that text would then be embedded and quoted back
+            # to a lawyer as law. Rasterising and running real OCR reads the
+            # page as printed, so it is worth one attempt before giving up on
+            # an Act. Only for genuinely garbled text: OCR cannot turn the
+            # wrong document into the right one.
+            ocr_recovered = False
+            ocr_attempted = False
+            if ai_check and not ai_check["ok"] and sb and sb.ocr_configured:
+                if flag_is_extraction_problem(name, ai_check.get("note") or ""):
+                    ocr_attempted = True
+                    print("    flagged as garbled — re-reading the pages with OCR...")
+                    try:
+                        ocr_text = sb.ocr_pdf(path.read_bytes())
+                        ocr_check = assess_extraction(name, ocr_text)
+                        if ocr_check["ok"] and len(ocr_text.strip()) >= MIN_TEXT_LENGTH:
+                            text, ai_check, ocr_recovered = ocr_text, ocr_check, True
+                            print(f"    recovered via OCR ({len(text)} chars)")
+                        else:
+                            print(f"    OCR did not fix it: {(ocr_check.get('note') or '')[:90]}")
+                    except Exception as err:  # noqa: BLE001 — a failed rescue is not fatal
+                        print(f"    OCR failed: {err}")
+                else:
+                    print("    flagged as the wrong document — OCR cannot help, left flagged")
+
             manifest[name] = {
                 "outcome": "pending_ingest",
                 "title": name,
@@ -187,6 +265,8 @@ def main() -> int:
                 "source": "firm drive (My Passport)",
                 "pdf_path": str(path),
                 "needs_ocr": False,
+                "ocr": used_ocr or ocr_recovered,
+                "ocr_recovery_attempted": ocr_attempted,
                 "text_length": len(text),
                 "ai_check": ai_check,
                 "found_at": datetime.now(timezone.utc).isoformat(),
