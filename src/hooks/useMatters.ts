@@ -19,6 +19,7 @@ export interface MatterListItem {
   status: string;
   opened_date: string;
   target_close_date: string | null;
+  lead_partner_id: string | null;
   client: { name: string } | null;
   lead_partner: { full_name: string | null } | null;
 }
@@ -30,7 +31,7 @@ export function useMatters() {
       const { data, error } = await supabase
         .from("matters")
         .select(
-          "id, name, client_id, sector, matter_type, status, opened_date, target_close_date, client:clients(name), lead_partner:profiles!matters_lead_partner_id_fkey(full_name)"
+          "id, name, client_id, sector, matter_type, status, opened_date, target_close_date, lead_partner_id, client:clients(name), lead_partner:profiles!matters_lead_partner_id_fkey(full_name)"
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -104,6 +105,35 @@ export function useCreateMatter() {
   });
 }
 
+export function useUpdateMatter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      name: string;
+      client_id?: string;
+      sector?: string;
+      lead_partner_id?: string;
+      status: string;
+    }) => {
+      const { error } = await supabase
+        .from("matters")
+        .update({
+          name: input.name,
+          client_id: input.client_id || null,
+          sector: input.sector || null,
+          lead_partner_id: input.lead_partner_id || null,
+          status: input.status,
+        })
+        .eq("id", input.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["matters"] });
+    },
+  });
+}
+
 // Every table under a matter (matter_documents, document_versions,
 // redline_suggestions, ai_chat_threads/messages, matter_context,
 // matter_relevant_laws, matter_stages/parties/notes/tasks, and the matter's
@@ -139,7 +169,7 @@ export function useDeleteMatter() {
 
       if (storagePaths.length > 0) {
         const { error: storageError } = await supabase.storage.from("matter-documents").remove(storagePaths);
-        if (storageError) console.error("Matter deleted but some storage files could not be removed:", storageError);
+        if (storageError) console.error("Project deleted but some storage files could not be removed:", storageError);
       }
     },
     onSuccess: () => {

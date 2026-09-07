@@ -18,13 +18,13 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Welcome{user?.email ? `, ${user.email}` : ""}</h1>
-        <p className="text-muted-foreground">Firm-wide view of every active matter.</p>
+        <p className="text-muted-foreground">Firm-wide view of every active project.</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground font-normal">Active Matters</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground font-normal">Active Projects</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-semibold">{active.length}</p>
@@ -51,12 +51,12 @@ export default function Dashboard() {
       <LegalUpdatesCard />
 
       <div>
-        <h2 className="text-lg font-medium mb-3">Matters</h2>
+        <h2 className="text-lg font-medium mb-3">Projects</h2>
         {isLoading ? (
           <p className="text-muted-foreground">Loading…</p>
         ) : !matters?.length ? (
           <p className="text-muted-foreground">
-            No matters yet — head to the Matters page to create the first one.
+            No projects yet — head to the Projects page to create the first one.
           </p>
         ) : (
           <>
@@ -66,7 +66,7 @@ export default function Dashboard() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Client</TableHead>
-                    <TableHead>Lead Partner</TableHead>
+                    <TableHead>Project Lead</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Target Close</TableHead>
                   </TableRow>
