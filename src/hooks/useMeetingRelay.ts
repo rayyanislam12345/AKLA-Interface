@@ -86,6 +86,7 @@ export function useMeetingRelay() {
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const displayStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const pendingTranslateResolvers = useRef<Map<number, (r: TranslateResultEvent["results"]) => void>>(new Map());
   const pendingDiarizeResolvers = useRef<((r: DiarizationResultEvent) => void)[]>([]);
@@ -94,6 +95,12 @@ export function useMeetingRelay() {
   // user can download the recording after stopping; never sent anywhere but
   // the relay's live audio stream.
   const recordedChunksRef = useRef<ArrayBuffer[]>([]);
+  // The last manually-typed speaker name (for segments with no diarized
+  // speakerId, e.g. Urdu) — defaults the next such segment to the same name
+  // so consecutive turns from the same undiarized person don't need
+  // retyping. Ported from transcription-bot/src/renderer/renderer.js's
+  // lastManualSpeakerLabel.
+  const lastManualSpeakerLabelRef = useRef("");
 
   const send = useCallback((payload: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -116,6 +123,10 @@ export function useMeetingRelay() {
         speakerId: msg.speaker,
         text: msg.text,
         rawText: msg.rawText,
+        // No diarization for this segment (e.g. Urdu) — default to whatever
+        // name was last typed for a manual speaker, so consecutive turns
+        // from the same undiarized person don't need retyping every time.
+        manualSpeaker: msg.speaker === undefined ? lastManualSpeakerLabelRef.current || undefined : undefined,
         startSec: msg.startSec,
         endSec: msg.endSec,
       },
@@ -198,34 +209,79 @@ export function useMeetingRelay() {
     });
   }, [handleTranscript]);
 
-  const startAudioPipeline = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    const audioContext = new AudioContext({ sampleRate: 16000 });
-    audioContextRef.current = audioContext;
-    await audioContext.audioWorklet.addModule("/pcm-worklet.js");
+  // "mic" captures only this machine's microphone — i.e. only what the
+  // person running the app says. "mic+meeting" additionally captures the
+  // audio coming out of a shared tab/screen, so remote participants on a
+  // Zoom/Teams/Meet call land in the transcript too.
+  const startAudioPipeline = useCallback(
+    async ({ captureMeetingAudio }: { captureMeetingAudio: boolean }) => {
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+      await audioContext.audioWorklet.addModule("/pcm-worklet.js");
 
-    const source = audioContext.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(audioContext, "pcm-recorder");
-    workletNodeRef.current = worklet;
-    worklet.port.onmessage = (event) => {
-      // event.data is a fresh, transferred ArrayBuffer per chunk (see
-      // pcm-worklet.js) — safe to keep a reference to it here as well as
-      // sending it; WebSocket.send() copies rather than detaching it.
-      recordedChunksRef.current.push(event.data);
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(event.data);
+      const worklet = new AudioWorkletNode(audioContext, "pcm-recorder");
+      workletNodeRef.current = worklet;
+      worklet.port.onmessage = (event) => {
+        // event.data is a fresh, transferred ArrayBuffer per chunk (see
+        // pcm-worklet.js) — safe to keep a reference to it here as well as
+        // sending it; WebSocket.send() copies rather than detaching it.
+        recordedChunksRef.current.push(event.data);
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(event.data);
+        }
+      };
+
+      // Both sources feed the same worklet node, which sums them. 0.8 on
+      // each leaves headroom so two people talking at once can't clip the
+      // summed signal into distortion the recognizer then has to fight.
+      const connectSource = (stream: MediaStream) => {
+        const gain = audioContext.createGain();
+        gain.gain.value = 0.8;
+        audioContext.createMediaStreamSource(stream).connect(gain);
+        gain.connect(worklet);
+      };
+
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = micStream;
+      connectSource(micStream);
+
+      if (captureMeetingAudio) {
+        // video:true is requested only because browsers won't offer the
+        // "share audio" checkbox for a video-less request; the video track
+        // is stopped immediately below since nothing renders it. The
+        // browser's own picker and persistent sharing indicator handle
+        // consent for the person running this — they always see it.
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        displayStreamRef.current = displayStream;
+        displayStream.getVideoTracks().forEach((t) => t.stop());
+
+        const displayAudioTracks = displayStream.getAudioTracks();
+        if (displayAudioTracks.length === 0) {
+          displayStream.getTracks().forEach((t) => t.stop());
+          displayStreamRef.current = null;
+          throw new Error(
+            "That capture had no audio. Re-share and tick “Also share tab audio” (or “Share system audio”) in the picker."
+          );
+        }
+        connectSource(new MediaStream(displayAudioTracks));
+
+        // Fires if the user hits the browser's own "Stop sharing" button —
+        // the mic keeps recording, so say so rather than silently dropping
+        // everyone else out of the transcript.
+        displayAudioTracks[0].addEventListener("ended", () => {
+          setError("Meeting audio sharing stopped — only your microphone is being transcribed now.");
+        });
       }
-    };
 
-    // Route through a silent gain node — keeps the audio graph alive
-    // without the worklet's connection being audible to the user.
-    const silentGain = audioContext.createGain();
-    silentGain.gain.value = 0;
-    source.connect(worklet);
-    worklet.connect(silentGain);
-    silentGain.connect(audioContext.destination);
-  }, []);
+      // Route through a silent gain node — keeps the audio graph alive
+      // without the worklet's connection being audible to the user.
+      const silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
+      worklet.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+    },
+    []
+  );
 
   const stopAudioPipeline = useCallback(() => {
     workletNodeRef.current?.disconnect();
@@ -234,6 +290,8 @@ export function useMeetingRelay() {
     audioContextRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    displayStreamRef.current?.getTracks().forEach((t) => t.stop());
+    displayStreamRef.current = null;
   }, []);
 
   // Opens the relay socket if it isn't already — used by startMeeting and
@@ -246,11 +304,12 @@ export function useMeetingRelay() {
   }, [connect]);
 
   const startMeeting = useCallback(
-    async (initialLanguage: MeetingLanguage) => {
+    async (initialLanguage: MeetingLanguage, { captureMeetingAudio = false } = {}) => {
       setSegments([]);
       setSpeakerNames(new Map());
       setLanguage(initialLanguage);
       recordedChunksRef.current = [];
+      lastManualSpeakerLabelRef.current = "";
       setHasRecording(false);
 
       const connectedOk = await ensureConnected();
@@ -263,9 +322,15 @@ export function useMeetingRelay() {
       if (!startedOk) return false;
 
       try {
-        await startAudioPipeline();
+        await startAudioPipeline({ captureMeetingAudio });
       } catch (err: any) {
-        setError(err.message || "Could not access the microphone.");
+        // Includes the user dismissing the screen-share picker, which throws
+        // NotAllowedError — not worth a scary message.
+        setError(
+          err?.name === "NotAllowedError"
+            ? "Audio capture was not allowed. Grant microphone access, and pick a tab/screen if capturing meeting audio."
+            : err.message || "Could not access the microphone."
+        );
         return false;
       }
       setRecording(true);
@@ -317,12 +382,25 @@ export function useMeetingRelay() {
     });
   }, [ensureConnected, send]);
 
-  const mergeSpeakers = useCallback((fromId: number, intoLabel: string) => {
+  // Relabels a diarized speaker — used both to merge one speaker id into
+  // another's current name (Deepgram split one person into two ids) and to
+  // give a speaker an actual name typed in fresh; either way it's just a
+  // speakerId->label override, text is never rewritten.
+  const setSpeakerName = useCallback((speakerId: number, name: string) => {
     setSpeakerNames((prev) => {
       const next = new Map(prev);
-      next.set(fromId, intoLabel);
+      next.set(speakerId, name);
       return next;
     });
+  }, []);
+
+  // Sets (or edits) the manual speaker name on one segment with no diarized
+  // speakerId (e.g. Urdu) — remembers it as the default for the next such
+  // segment too (see handleTranscript above).
+  const setManualSpeakerName = useCallback((segmentId: number, name: string) => {
+    const trimmed = name.trim();
+    lastManualSpeakerLabelRef.current = trimmed;
+    setSegments((prev) => prev.map((s) => (s.id === segmentId ? { ...s, manualSpeaker: trimmed || undefined } : s)));
   }, []);
 
   // Groups consecutive same-speaker segments and requests a batch
@@ -440,7 +518,8 @@ export function useMeetingRelay() {
     stopMeeting,
     switchLanguage,
     improveDiarization,
-    mergeSpeakers,
+    setSpeakerName,
+    setManualSpeakerName,
     translateSegments,
     transcribeFile,
     getRecordingBlob,

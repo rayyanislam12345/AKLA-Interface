@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { MeetingSegment } from "@/hooks/useMeetingRelay";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface SegmentListProps {
@@ -9,6 +10,8 @@ interface SegmentListProps {
   interimSpeaker: number | undefined;
   speakerLabel: (speakerId: number | undefined) => string;
   onMergeSpeaker: (fromId: number, intoId: number) => void;
+  onRenameSpeaker: (speakerId: number, name: string) => void;
+  onSetManualSpeakerName: (segmentId: number, name: string) => void;
 }
 
 // How often, in recording time, to drop a timestamp marker into the
@@ -27,12 +30,21 @@ function formatTimestamp(sec: number) {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
-// Ported from transcription-bot/src/renderer/renderer.js's segment list +
-// inline speaker-merge picker — text is never rewritten, only the
-// speaker-id-to-label mapping changes, so merged speakers just start
-// sharing a display name going forward.
-export default function SegmentList({ segments, interimText, interimSpeaker, speakerLabel, onMergeSpeaker }: SegmentListProps) {
-  const [mergeMenuFor, setMergeMenuFor] = useState<number | null>(null);
+// Ported from transcription-bot/src/renderer/renderer.js's segment list,
+// speaker rename, and inline speaker-merge picker — text is never rewritten,
+// only the speaker-id-to-label mapping (diarized) or a segment's
+// manualSpeaker field (undiarized, e.g. Urdu) changes.
+export default function SegmentList({
+  segments,
+  interimText,
+  interimSpeaker,
+  speakerLabel,
+  onMergeSpeaker,
+  onRenameSpeaker,
+  onSetManualSpeakerName,
+}: SegmentListProps) {
+  const [menuFor, setMenuFor] = useState<number | null>(null); // speakerId with the rename/merge popover open
+  const [editingManualFor, setEditingManualFor] = useState<number | null>(null); // segment id being named
 
   const knownSpeakerIds = useMemo(() => {
     const ids = new Set<number>();
@@ -67,32 +79,76 @@ export default function SegmentList({ segments, interimText, interimSpeaker, spe
                 {seg.speakerId !== undefined && (
                   <button
                     className="text-xs font-medium text-primary hover:underline shrink-0"
-                    onClick={() => setMergeMenuFor(mergeMenuFor === seg.speakerId ? null : seg.speakerId!)}
+                    onClick={() => setMenuFor(menuFor === seg.speakerId ? null : seg.speakerId!)}
                   >
                     {speakerLabel(seg.speakerId)}
                   </button>
                 )}
-                {mergeMenuFor === seg.speakerId && seg.speakerId !== undefined && (
-                  <Select
-                    onValueChange={(value) => {
-                      onMergeSpeaker(seg.speakerId!, Number(value));
-                      setMergeMenuFor(null);
-                    }}
-                  >
-                    <SelectTrigger className="h-6 w-40 text-xs">
-                      <SelectValue placeholder="Merge into…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {knownSpeakerIds
-                        .filter((id) => id !== seg.speakerId)
-                        .map((id) => (
-                          <SelectItem key={id} value={String(id)}>
-                            {speakerLabel(id)}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                {menuFor === seg.speakerId && seg.speakerId !== undefined && (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      key={seg.speakerId}
+                      className="h-6 w-32 text-xs"
+                      defaultValue={speakerLabel(seg.speakerId)}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        onRenameSpeaker(seg.speakerId!, e.currentTarget.value);
+                        setMenuFor(null);
+                      }}
+                      onBlur={(e) => {
+                        const name = e.currentTarget.value.trim();
+                        if (name && name !== speakerLabel(seg.speakerId)) onRenameSpeaker(seg.speakerId!, name);
+                        setMenuFor(null);
+                      }}
+                    />
+                    {knownSpeakerIds.filter((id) => id !== seg.speakerId).length > 0 && (
+                      <Select
+                        onValueChange={(value) => {
+                          onMergeSpeaker(seg.speakerId!, Number(value));
+                          setMenuFor(null);
+                        }}
+                      >
+                        <SelectTrigger className="h-6 w-32 text-xs">
+                          <SelectValue placeholder="or merge into…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {knownSpeakerIds
+                            .filter((id) => id !== seg.speakerId)
+                            .map((id) => (
+                              <SelectItem key={id} value={String(id)}>
+                                {speakerLabel(id)}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                 )}
+                {seg.speakerId === undefined &&
+                  (editingManualFor === seg.id ? (
+                    <Input
+                      className="h-6 w-32 text-xs"
+                      defaultValue={seg.manualSpeaker ?? ""}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        onSetManualSpeakerName(seg.id, e.currentTarget.value);
+                        setEditingManualFor(null);
+                      }}
+                      onBlur={(e) => {
+                        onSetManualSpeakerName(seg.id, e.currentTarget.value);
+                        setEditingManualFor(null);
+                      }}
+                    />
+                  ) : (
+                    <button
+                      className="text-xs font-medium text-primary hover:underline shrink-0"
+                      onClick={() => setEditingManualFor(seg.id)}
+                    >
+                      {seg.manualSpeaker || "+ speaker"}
+                    </button>
+                  ))}
               </div>
               <p className="text-foreground">{seg.text}</p>
               {seg.translation && <p className="text-muted-foreground pl-4">→ {seg.translation}</p>}

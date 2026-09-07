@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
-import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, Save } from "lucide-react";
+import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, Save } from "lucide-react";
 import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
@@ -45,6 +45,7 @@ export default function RecordMeetingPage() {
   const [translating, setTranslating] = useState(false);
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
+  const [captureMeetingAudio, setCaptureMeetingAudio] = useState(false);
 
   const [uploadMatterId, setUploadMatterId] = useState<string>("");
   const [uploadingFormat, setUploadingFormat] = useState<MeetingOutputFormat | null>(null);
@@ -86,7 +87,7 @@ export default function RecordMeetingPage() {
   }, [documentTypes]);
 
   const handleStart = async () => {
-    const ok = await relay.startMeeting(relay.language);
+    const ok = await relay.startMeeting(relay.language, { captureMeetingAudio });
     if (!ok && relay.error) toast({ title: "Could not start meeting", description: relay.error, variant: "destructive" });
   };
 
@@ -109,7 +110,12 @@ export default function RecordMeetingPage() {
   };
 
   const handleMergeSpeaker = (fromId: number, intoId: number) => {
-    relay.mergeSpeakers(fromId, relay.speakerLabel(intoId));
+    relay.setSpeakerName(fromId, relay.speakerLabel(intoId));
+  };
+
+  const handleRenameSpeaker = (speakerId: number, name: string) => {
+    if (!name.trim()) return;
+    relay.setSpeakerName(speakerId, name.trim());
   };
 
   const ensureTranslated = async () => {
@@ -291,7 +297,7 @@ export default function RecordMeetingPage() {
       });
       if (processError) console.error("Document uploaded but RAG ingestion failed:", processError);
 
-      toast({ title: `${title} uploaded to matter` });
+      toast({ title: `${title} uploaded to project` });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     } finally {
@@ -326,6 +332,24 @@ export default function RecordMeetingPage() {
                 <SelectContent>
                   <SelectItem value="en-US">English</SelectItem>
                   <SelectItem value="ur">Urdu (translated to English when you generate a document)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Audio source</label>
+              <Select
+                value={captureMeetingAudio ? "mic+meeting" : "mic"}
+                onValueChange={(v) => setCaptureMeetingAudio(v === "mic+meeting")}
+                disabled={relay.recording}
+              >
+                <SelectTrigger className="w-56">
+                  <MonitorSpeaker className="h-4 w-4 mr-2 shrink-0" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mic">Microphone only</SelectItem>
+                  <SelectItem value="mic+meeting">Microphone + meeting audio</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -390,6 +414,8 @@ export default function RecordMeetingPage() {
               interimSpeaker={relay.interimSpeaker}
               speakerLabel={relay.speakerLabel}
               onMergeSpeaker={handleMergeSpeaker}
+              onRenameSpeaker={handleRenameSpeaker}
+              onSetManualSpeakerName={relay.setManualSpeakerName}
             />
           </div>
 
@@ -435,10 +461,10 @@ export default function RecordMeetingPage() {
       <Card>
         <CardContent className="pt-6">
           <div className="space-y-2 max-w-xs">
-            <label className="text-sm font-medium">Matter to upload generated documents to</label>
+            <label className="text-sm font-medium">Project to upload generated documents to</label>
             <Select value={uploadMatterId} onValueChange={setUploadMatterId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select a matter" />
+                <SelectValue placeholder="Select a project" />
               </SelectTrigger>
               <SelectContent>
                 {matters?.map((m) => (
@@ -473,7 +499,7 @@ export default function RecordMeetingPage() {
               disabled={!proposalDraft || !uploadMatterId || !documentTypeIdFor("proposal") || uploadingFormat === "proposal"}
             >
               <Upload className="h-4 w-4 mr-2" />
-              {uploadingFormat === "proposal" ? "Uploading…" : "Upload to Matter"}
+              {uploadingFormat === "proposal" ? "Uploading…" : "Upload to Project"}
             </Button>
           </div>
         </CardContent>
@@ -509,7 +535,7 @@ export default function RecordMeetingPage() {
               }
             >
               <Upload className="h-4 w-4 mr-2" />
-              {minutesDraft && uploadingFormat === minutesDraft.format ? "Uploading…" : "Upload to Matter"}
+              {minutesDraft && uploadingFormat === minutesDraft.format ? "Uploading…" : "Upload to Project"}
             </Button>
           </div>
         </CardContent>
