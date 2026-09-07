@@ -27,7 +27,7 @@ React 18/TypeScript SPA on Vite, backed by Supabase (Postgres + pgvector, Auth, 
 
 ### Roles
 
-`admin`, `partner`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles` (avoids privilege escalation via a profile update), checked through a `SECURITY DEFINER` `has_role()` function used across RLS policies.
+`founder`, `admin`, `partner`, `senior_counsel`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles` (avoids privilege escalation via a profile update), checked through a `SECURITY DEFINER` `has_role()` function used across RLS policies. A `founder` satisfies every `admin` role check.
 
 ### Access model: firm-wide, not per-matter
 
@@ -35,7 +35,7 @@ This is the load-bearing decision in the whole authorization model, made explici
 
 Concretely, RLS policies reduce to two shapes almost everywhere:
 - `is_firm_member(auth.uid())` — general read/write, the vast majority of policies.
-- `has_role(auth.uid(), 'admin')` (or `'partner'`) — gates document-type taxonomy management, role assignment, and client/matter deletion.
+- `has_role(auth.uid(), 'admin')` (or `'partner'`) — gates document-type taxonomy management, role assignment, and client/matter deletion. `founder` satisfies the `admin` check.
 
 **What this means in practice**: there is no technical barrier between matters. If the firm ever needs an ethical wall for a specific engagement (a genuine possibility in a PPP/infrastructure practice where opposing parties on one deal may be co-counseled on another), that is a manual, out-of-band process today — not something the system enforces. Worth knowing before it's needed, not after.
 

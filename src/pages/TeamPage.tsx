@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const ROLES: AppRole[] = ["admin", "partner", "senior_counsel", "associate", "paralegal"];
+const ROLES: AppRole[] = ["founder", "admin", "partner", "senior_counsel", "associate", "paralegal"];
 
 // Senior Counsel is the one multi-word role — everything else already
 // reads fine lowercase-raw, but "senior_counsel" needs the underscore
@@ -28,16 +28,7 @@ function roleLabel(role: string) {
     .join(" ");
 }
 
-// A firm's founder(s) get displayed as "Founder" instead of "Admin" — purely
-// cosmetic. Their actual role in user_roles stays "admin" (that's what
-// grants real permissions everywhere in the app), and the role-editing
-// Select below stays driven by the real ROLES/AppRole enum, unchanged — this
-// only touches how an existing admin's badge is labeled here. Only ever a
-// couple of people, so a hardcoded list beats a schema change.
-const FOUNDER_EMAILS: string[] = [];
-
 function displayRoleLabel(profile: { role: string | null; email: string }) {
-  if (profile.role === "admin" && FOUNDER_EMAILS.includes(profile.email)) return "Founder";
   return profile.role ? roleLabel(profile.role) : "no role";
 }
 
@@ -276,7 +267,7 @@ export default function TeamPage() {
   const setRole = useSetUserRole();
 
   const currentUser = profiles?.find((p) => p.id === user?.id);
-  const isAdmin = currentUser?.role === "admin";
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "founder";
 
   const { data: links } = useWhatsAppAccountLinks();
   const linkByProfileId = new Map(links?.map((link) => [link.profile_id, link]));

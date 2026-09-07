@@ -222,10 +222,10 @@ export function MatterTimeslips({
   const { user } = useAuth();
   const { data: profiles } = useProfiles();
 
-  // Matches the RLS policy exactly: the author, or an admin/partner
+  // Matches the RLS policy exactly: the author, or a founder/admin/partner.
   // correcting someone else's entry.
   const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
-  const isPrivileged = currentRole === "admin" || currentRole === "partner" || currentRole === "senior_counsel";
+  const isPrivileged = currentRole === "founder" || currentRole === "admin" || currentRole === "partner" || currentRole === "senior_counsel";
   const canEdit = (s: MatterTimeslip) => isPrivileged || s.author_id === user?.id;
 
   const { total, billableTotal, nonBillableTotal, byDay, byAuthor } = useMemo(

@@ -348,7 +348,7 @@ const HelpPage = () => {
       content: [
         {
           question: "What roles exist?",
-          answer: "Admin, Partner, Associate, and Paralegal.",
+          answer: "Founder, Admin, Partner, Senior Counsel, Associate, and Paralegal. Founders have the same permissions as admins.",
         },
         {
           question: "How do I change someone's role?",

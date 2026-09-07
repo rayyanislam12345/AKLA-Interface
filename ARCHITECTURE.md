@@ -106,7 +106,7 @@ documents          (RAG store: matter-scoped context + firm-wide precedent, one 
 | Table | Purpose |
 |-------|---------|
 | `profiles` | One row per `auth.users` row, auto-created via a trigger on signup |
-| `user_roles` | `admin` / `partner` / `associate` / `paralegal`, checked via `has_role()` |
+| `user_roles` | `founder` / `admin` / `partner` / `senior_counsel` / `associate` / `paralegal`, checked via `has_role()` |
 | `clients` | Client entities |
 | `matters` | The core transaction/engagement record |
 | `matter_stages` | Per-matter stage checklist, seeded from a default PPP pipeline on creation |
@@ -142,9 +142,9 @@ documents          (RAG store: matter-scoped context + firm-wide precedent, one 
 ## Authentication & Authorization
 
 - **Auth**: Supabase Auth, email/password, with optional TOTP MFA (`MFAEnrollment`/`MFAVerification`).
-- **Roles**: `admin`, `partner`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles`, to avoid privilege-escalation-via-update. `has_role()` is the canonical check, used inside RLS policies.
+- **Roles**: `founder`, `admin`, `partner`, `senior_counsel`, `associate`, `paralegal` — stored in `user_roles`, never on `profiles`, to avoid privilege-escalation-via-update. `founder` has all `admin` privileges through the canonical `has_role()` check used inside RLS policies.
 - **Access model**: firm-wide. Any authenticated firm member can read/write matters, documents, notes, tasks, and chat. There is no per-matter ACL — this was an explicit decision (documented in the original planning pass) favoring simplicity for a small, close-knit practice over conflict-screening infrastructure the firm doesn't currently need.
-- **Admin-gated actions**: managing the document-type taxonomy (`document_types`), assigning roles (`user_roles`), and deleting clients/matters require `admin` (or `partner`, for client/matter deletion).
+- **Admin-gated actions**: managing the document-type taxonomy (`document_types`), assigning roles (`user_roles`), and deleting clients/matters require `admin` or `founder` (or `partner`, for client/matter deletion).
 - **`ProtectedRoute`**: gates on authentication only — no per-feature flag system (the FactorIQ-era `features`/`user_features` tables were dropped along with the rest of that product).
 
 ---

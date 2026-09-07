@@ -33,7 +33,8 @@ export default function MattersPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const isAdmin = profiles?.find((p) => p.id === user?.id)?.role === "admin";
+  const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
+  const isAdmin = currentRole === "admin" || currentRole === "founder";
 
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");

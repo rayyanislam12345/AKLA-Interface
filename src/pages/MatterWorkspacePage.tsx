@@ -593,7 +593,8 @@ export default function MatterWorkspacePage() {
   const [taskTitle, setTaskTitle] = useState("");
   const { user } = useAuth();
   const { data: profiles } = useProfiles();
-  const isAdmin = profiles?.find((p) => p.id === user?.id)?.role === "admin";
+  const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
+  const isAdmin = currentRole === "admin" || currentRole === "founder";
 
   const { data: notes } = useMatterNotes(matterId);
   const addNote = useAddMatterNote();

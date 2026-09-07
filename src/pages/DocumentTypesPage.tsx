@@ -31,7 +31,8 @@ export default function DocumentTypesPage() {
   const deleteType = useDeleteDocumentType();
   const { toast } = useToast();
 
-  const isAdmin = profiles?.find((p) => p.id === user?.id)?.role === "admin";
+  const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
+  const isAdmin = currentRole === "admin" || currentRole === "founder";
 
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
