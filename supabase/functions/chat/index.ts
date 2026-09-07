@@ -32,6 +32,26 @@ const TITLE_MODEL = "claude-haiku-4-5-20251001";
 const MAX_HISTORY = 30;
 const MAX_ATTACHMENT_CHARS = 60_000;
 const MAX_ATTACHMENTS_TOTAL_CHARS = 160_000;
+// A full agreement runs long — longer than one invocation of this function
+// gets to live. Supabase kills the isolate at about 150s of wall clock, with
+// no chance to run any cleanup: measured directly, a draft turn streamed
+// ~24k characters and was then cut off mid-sentence with no "done" event and
+// nothing written to the database at all.
+//
+// So generation stops itself at a deadline comfortably inside that, saves
+// what it has, and tells the client the turn is unfinished. The client
+// immediately asks again with continueMessageId, which starts a fresh
+// invocation (and a fresh wall clock) that resumes from exactly where the
+// text left off. A document of any length therefore completes across as many
+// invocations as it needs, and nothing is ever lost to the timeout.
+const MAX_TOKENS = 32_000;
+const GENERATION_BUDGET_MS = 115_000;
+// Below this there isn't enough left to say anything useful, so stop and let
+// the next invocation do it.
+const MIN_USEFUL_SLICE_MS = 8_000;
+// Continuing inside one invocation is still worth doing when the model hits
+// max_tokens early and there is wall clock to spare.
+const MAX_CONTINUATIONS = 3;
 const MATCH_THRESHOLD = 0.35;
 // A retrieved chunk is normally a few thousand characters, but a handful of
 // legacy rows hold a whole document (the largest is 11MB) — one of those in
@@ -76,11 +96,40 @@ const FIRM_MARKDOWN_RULES = `Format the document as Markdown matching the firm's
 - A Markdown list ("- " per item) for enumerated sub-items within a clause — don't type the letter/number yourself.
 - A blank line between clauses and before/after the execution block.`;
 
+const COMPLETENESS_RULES = `The document must be COMPLETE and ready to edit — this is the single most important requirement:
+- Write every clause in full, from the title through to the execution block. Never stop part-way.
+- Never abbreviate or gesture at content you haven't written: no "[remaining clauses follow the standard form]", no "…", no "(clauses 12-20 omitted)", no "Schedule 1 to be inserted", no "the rest continues as usual". If a clause belongs in the document, write it out.
+- Never ask whether to continue, never offer to write the rest on request, and never end a turn mid-document to check in. Produce the whole thing.
+- Length is not a reason to stop. A long agreement is expected to be long; keep writing until the document is genuinely finished.
+- If you genuinely cannot complete it in one turn, finish the clause you are on and say plainly where you stopped — do not pretend the document is done.`;
+
 const ARTIFACT_RULES = `When you produce a complete document (a draft, a memo, a note), wrap ONLY the document itself in an artifact block so it opens in its own panel:
 <artifact kind="draft|memo" title="Short document title">
 …the document in Markdown…
 </artifact>
 Everything outside the block is your normal reply to the lawyer (keep that short — a sentence or two about what you did or need). Never put commentary inside the block. If you revise a document already produced in this conversation, output the FULL revised document in a new artifact block with the same title.`;
+
+// How a half-written reply is picked up again. The obvious mechanism —
+// prefilling the assistant turn and letting the model run straight on from it —
+// is not available: this model rejects it outright ("This model does not
+// support assistant message prefill. The conversation must end with a user
+// message"). So the partial goes in as a normal assistant turn and this follows
+// it as the user turn, a shape the API does accept. The wording has to be
+// blunt, because the model's instinct is to greet, recap, or start over.
+function continueInstruction(partial: string): string {
+  return [
+    "CONTINUE — you were cut off part-way through the reply above. Carry straight on from exactly where it stops.",
+    "",
+    "- Your very next character continues that text. Do NOT repeat any of it, do NOT summarise it, do NOT start again.",
+    "- Start with whatever character makes the join seamless — including a newline if the text stops at the end of a line or paragraph.",
+    '- No preamble. Never write "continuing", "here is the rest", or anything of that kind.',
+    "- Keep the same formatting, numbering and drafting conventions you were already using.",
+    "- If you opened an <artifact> block that is still open, keep writing inside it and close it with </artifact> once the document is genuinely finished.",
+    "",
+    "For precision, the text you are continuing ends with:",
+    partial.slice(-300),
+  ].join("\n");
+}
 
 function sse(controller: ReadableStreamDefaultController<Uint8Array>, encoder: TextEncoder, event: string, data: unknown) {
   controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
@@ -104,17 +153,21 @@ async function anthropicJson(apiKey: string, body: Record<string, unknown>): Pro
   return resp.json();
 }
 
-// Streams an Anthropic messages call, invoking onDelta for each text delta,
-// and resolves with the full text.
-async function anthropicStream(
+// Streams one Anthropic messages call, invoking onDelta for each text delta.
+// Resolves with the text *and* why generation stopped — "max_tokens" means the
+// response was cut off mid-sentence, which the caller has to handle rather
+// than pass off as a finished answer.
+async function anthropicStreamOnce(
   apiKey: string,
   body: Record<string, unknown>,
   onDelta: (text: string) => void,
-): Promise<string> {
+  signal?: AbortSignal,
+): Promise<{ text: string; stopReason: string | null; aborted: boolean }> {
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
     body: JSON.stringify({ ...body, stream: true }),
+    signal,
   });
   if (!resp.ok || !resp.body) throw new Error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
 
@@ -122,9 +175,23 @@ async function anthropicStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
+  let stopReason: string | null = null;
+  // Running out of time is a normal outcome here, not a failure: the text
+  // generated so far is kept and handed back for the next invocation.
+  let aborted = false;
   while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+    let value: Uint8Array | undefined;
+    try {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      value = chunk.value;
+    } catch (err) {
+      if (signal?.aborted || (err as Error)?.name === "AbortError" || (err as Error)?.name === "TimeoutError") {
+        aborted = true;
+        break;
+      }
+      throw err;
+    }
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n");
     buffer = events.pop() ?? "";
@@ -136,6 +203,8 @@ async function anthropicStream(
         if (payload.type === "content_block_delta" && payload.delta?.type === "text_delta") {
           full += payload.delta.text;
           onDelta(payload.delta.text);
+        } else if (payload.type === "message_delta" && payload.delta?.stop_reason) {
+          stopReason = payload.delta.stop_reason;
         } else if (payload.type === "error") {
           throw new Error(payload.error?.message ?? "stream error");
         }
@@ -145,12 +214,75 @@ async function anthropicStream(
       }
     }
   }
-  return full;
+  return { text: full, stopReason, aborted };
+}
+
+// Generates until the answer is genuinely finished, the wall-clock budget runs
+// out, or the model stops producing. Text already written is never discarded:
+// whatever exists is handed back with `incomplete` saying whether more is owed.
+//
+// `initialText` is what a previous invocation already wrote. It is replayed as
+// an assistant turn followed by a continue instruction (see continueInstruction
+// — prefill is not available on this model), which is what lets one document
+// span as many invocations as it takes.
+async function anthropicComplete(
+  apiKey: string,
+  body: Record<string, unknown>,
+  onDelta: (text: string) => void,
+  opts: { initialText?: string; deadlineAt: number; maxContinuations?: number },
+): Promise<{ text: string; generated: string; incomplete: boolean }> {
+  const { initialText = "", deadlineAt, maxContinuations = MAX_CONTINUATIONS } = opts;
+  const baseMessages = (body.messages ?? []) as Array<{ role: string; content: string }>;
+  let accumulated = initialText;
+  let generated = "";
+  let incomplete = false;
+
+  for (let attempt = 0; attempt <= maxContinuations; attempt++) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= MIN_USEFUL_SLICE_MS) {
+      incomplete = true;
+      break;
+    }
+    // Deliberately NOT trimmed: the partial is replayed verbatim so a trailing
+    // newline survives. Stripping it would leave the model guessing whether the
+    // text stopped mid-line or at a line end, and it guesses wrong — a dropped
+    // newline welds the next clause onto the end of the previous one.
+    //
+    // The conversation has to end on a user turn, so the partial becomes the
+    // assistant turn and the instruction to carry on becomes the user turn.
+    const messages = accumulated
+      ? [
+          ...baseMessages,
+          { role: "assistant", content: accumulated },
+          { role: "user", content: continueInstruction(accumulated) },
+        ]
+      : baseMessages;
+
+    const result = await anthropicStreamOnce(
+      apiKey,
+      { ...body, messages },
+      onDelta,
+      AbortSignal.timeout(remaining),
+    );
+    accumulated += result.text;
+    generated += result.text;
+
+    if (result.aborted) {
+      incomplete = true;
+      break;
+    }
+    if (result.stopReason !== "max_tokens") break;
+    if (!result.text) break;  // nothing came back — continuing would just spin
+    if (attempt === maxContinuations) incomplete = true;
+  }
+
+  return { text: accumulated, generated, incomplete };
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
   const encoder = new TextEncoder();
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -167,10 +299,21 @@ serve(async (req) => {
     message = "",
     attachments: rawAttachments = [],
     skill = null,
-  } = body as { matterId: string; threadId?: string | null; message: string; attachments?: Attachment[]; skill?: Skill | null };
+    // Set when picking up a reply a previous invocation ran out of time to
+    // finish. Not a new turn: no user message is recorded, and the partial
+    // reply already stored under this id is what generation resumes from.
+    continueMessageId = null,
+  } = body as {
+    matterId: string; threadId?: string | null; message: string;
+    attachments?: Attachment[]; skill?: Skill | null; continueMessageId?: string | null;
+  };
+  const isContinuation = !!continueMessageId;
 
   if (!matterId) return json(400, { error: "matterId is required" });
-  if (!message.trim() && rawAttachments.length === 0) return json(400, { error: "Say something or attach a document" });
+  if (isContinuation && !requestedThreadId) return json(400, { error: "threadId is required to continue a reply" });
+  if (!isContinuation && !message.trim() && rawAttachments.length === 0) {
+    return json(400, { error: "Say something or attach a document" });
+  }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return json(401, { error: "Authorization header required" });
@@ -232,13 +375,27 @@ serve(async (req) => {
   }
   const threadId = thread!.id;
 
+  let resumeMessage: { id: string; content: string } | null = null;
+  if (isContinuation) {
+    const { data } = await supabase
+      .from("ai_chat_messages")
+      .select("id, content")
+      .eq("id", continueMessageId)
+      .eq("thread_id", threadId)
+      .maybeSingle();
+    if (!data) return json(404, { error: "The reply to continue no longer exists" });
+    resumeMessage = data as { id: string; content: string };
+  }
+
   const { data: history } = await supabase
     .from("ai_chat_messages")
     .select("id, role, content, metadata")
     .eq("thread_id", threadId)
     .order("created_at", { ascending: false })
     .limit(MAX_HISTORY);
-  const priorMessages = (history ?? []).reverse();
+  // The partial reply is the prefill, not a prior turn — it must not appear
+  // twice in the conversation handed to the model.
+  const priorMessages = (history ?? []).reverse().filter((m: any) => m.id !== continueMessageId);
 
   const attachments: Attachment[] = (rawAttachments as Attachment[]).map((a) => ({
     bucket: a.bucket,
@@ -250,18 +407,22 @@ serve(async (req) => {
     versionId: a.versionId,
   }));
 
-  const { data: userMessage, error: userMsgError } = await supabase
-    .from("ai_chat_messages")
-    .insert({
-      thread_id: threadId,
-      role: "user",
-      content: message,
-      created_by: user.id,
-      metadata: { attachments, skill: skill ?? null },
-    })
-    .select("id")
-    .single();
-  if (userMsgError || !userMessage) return json(500, { error: `Could not save the message: ${userMsgError?.message}` });
+  let userMessageId: string | null = null;
+  if (!isContinuation) {
+    const { data: userMessage, error: userMsgError } = await supabase
+      .from("ai_chat_messages")
+      .insert({
+        thread_id: threadId,
+        role: "user",
+        content: message,
+        created_by: user.id,
+        metadata: { attachments, skill: skill ?? null },
+      })
+      .select("id")
+      .single();
+    if (userMsgError || !userMessage) return json(500, { error: `Could not save the message: ${userMsgError?.message}` });
+    userMessageId = userMessage.id;
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -269,7 +430,7 @@ serve(async (req) => {
 
       (async () => {
         try {
-          send("meta", { threadId, userMessageId: userMessage.id, title: thread!.title });
+          send("meta", { threadId, userMessageId, title: thread!.title, continuing: isContinuation });
 
           // ---- attachments: read them now, remember the text on the message so
           // the document stays in context for the rest of the conversation ----
@@ -289,8 +450,8 @@ serve(async (req) => {
               send("notice", { text: `Couldn't read "${a.name}": ${err instanceof Error ? err.message : String(err)}` });
             }
           }
-          if (attachments.length > 0) {
-            await supabase.from("ai_chat_messages").update({ metadata: { attachments, skill: skill ?? null } }).eq("id", userMessage.id);
+          if (attachments.length > 0 && userMessageId) {
+            await supabase.from("ai_chat_messages").update({ metadata: { attachments, skill: skill ?? null } }).eq("id", userMessageId);
           }
 
           // Documents attached earlier in this conversation stay in context —
@@ -377,7 +538,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
               send("delta", { text });
             }
             try {
-              text += await anthropicStream(anthropicKey, { model: CHAT_MODEL, max_tokens: 700, system: summaryPrompt, messages: [{ role: "user", content: "Summarise the review." }] }, (d) => send("delta", { text: d }));
+              text += (await anthropicStreamOnce(anthropicKey, { model: CHAT_MODEL, max_tokens: 700, system: summaryPrompt, messages: [{ role: "user", content: "Summarise the review." }] }, (d) => send("delta", { text: d }))).text;
             } catch {
               const fallback = `Review complete: ${suggestions.length} suggestion(s).`;
               text += fallback;
@@ -391,13 +552,18 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
               .single();
             await supabase.from("ai_artifacts").update({ message_id: assistantMsg?.id }).eq("id", artifact.id);
             send("artifact", artifact);
-            send("done", { assistantMessageId: assistantMsg?.id, threadId });
+            send("done", { assistantMessageId: assistantMsg?.id, threadId, incomplete: false });
             controller.close();
             return;
           }
 
           // ---- retrieval: the same three searches rag-query runs ----
-          const retrievalQuery = [message, ...attachments.map((a) => a.name)].join("\n").slice(0, 8000) || documentType?.name || "";
+          // A continuation carries no new message, so the grounding is rebuilt
+          // from the question that started the turn — same query, same corpus,
+          // so the model resumes against the sources it began with.
+          const lastUserMessage = [...priorMessages].reverse().find((m: any) => m.role === "user")?.content ?? "";
+          const effectiveMessage = message || lastUserMessage;
+          const retrievalQuery = [effectiveMessage, ...attachments.map((a) => a.name)].join("\n").slice(0, 8000) || documentType?.name || "";
           let sources: Array<Match & { scope: Scope }> = [];
           let templateHtml: string | null = null;
           if (retrievalQuery) {
@@ -474,18 +640,20 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
 
 How to work: you are conducting a short intake, then drafting. If the conversation does not yet give you the essentials — parties and roles, term, payment or tariff structure, performance security, governing law, dispute resolution, termination, and anything specific to this document type — ask ONE focused question at a time (short, concrete). Stop asking as soon as you have enough for a solid first version, or the moment the lawyer says to draft now / just draft. Then draft the COMPLETE document: proper drafting conventions (defined terms capitalised on first use, recitals, operative clauses, execution block), and a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] wherever a specific commercial term wasn't given rather than an invented figure. This is a first draft for a lawyer to edit, not a final.
 
+${COMPLETENESS_RULES}
+
 ${FIRM_MARKDOWN_RULES}
 
 ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="draft"')}`;
           } else if (skill?.key === "summarise") {
-            skillBlock = `\n\nSKILL IN FORCE — "NOTES ON …" MEMO. Explain the attached (or discussed) document in plain English for a busy lawyer, as a short memo in the firm's house style: a "# Notes On <document>" title, then "## " sections — What it does; The points that matter (short numbered points via "- " list items, each one idea); What to watch. Tight and selective, not an exhaustive clause list. If nothing was attached and nothing was retrieved, say what you need.
+            skillBlock = `\n\nSKILL IN FORCE — "NOTES ON …" MEMO. Explain the attached (or discussed) document in plain English for a busy lawyer, as a short memo in the firm's house style: a "# Notes On <document>" title, then "## " sections — What it does; The points that matter (short numbered points via "- " list items, each one idea); What to watch. Tight and selective, not an exhaustive clause list. If nothing was attached and nothing was retrieved, say what you need. Finish the memo — never break off part-way or ask whether to carry on.
 
 ${FIRM_MARKDOWN_RULES}
 
 ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}`;
           } else if (skill?.key === "custom" && customSkill) {
             skillBlock = `\n\nSKILL IN FORCE — "${customSkill.name}" (the firm's own instructions):\n${customSkill.instructions}` +
-              (customSkill.produces_document ? `\n\n${FIRM_MARKDOWN_RULES}\n\n${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}` : "");
+              (customSkill.produces_document ? `\n\n${COMPLETENESS_RULES}\n\n${FIRM_MARKDOWN_RULES}\n\n${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}` : "");
           } else {
             skillBlock = `\n\n${ARTIFACT_RULES}`;
           }
@@ -494,27 +662,64 @@ ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}`;
 
 You answer the way a careful senior associate would: precise, conservative, and honest about the limits of what the sources show. Ground every legal statement in the retrieved sources or the attached documents and cite them by number (e.g. [Source 2]); distinguish clearly between what THIS matter's documents say, what the firm's precedent shows, and what the law itself provides — and name the Act and section when you rely on a statute. If the sources don't answer the question, say so rather than guessing. Write in Markdown: headings only when they help, short paragraphs, lists for lists, tables for genuinely tabular comparisons.${docsBlock}${sourcesBlock}${skillBlock}`;
 
-          const anthropicMessages = [
-            ...priorMessages.map((m: any) => ({
-              role: m.role,
-              content: String(m.content).replace(/\[\[artifact:([^\]]+)\]\]/g, "[a document was produced here and is open in the panel]"),
-            })),
-            { role: "user", content: message || `(attached ${attachments.map((a) => a.name).join(", ")})` },
-          ];
+          const historyTurns = priorMessages.map((m: any) => ({
+            role: m.role,
+            content: String(m.content).replace(/\[\[artifact:([^\]]+)\]\]/g, "[a document was produced here and is open in the panel]"),
+          }));
+          // On a continuation the original question is already the last turn in
+          // the history — appending it again would ask it twice.
+          const anthropicMessages = isContinuation
+            ? historyTurns
+            : [...historyTurns, { role: "user", content: message || `(attached ${attachments.map((a) => a.name).join(", ")})` }];
 
-          const fullText = await anthropicStream(
+          const { text: fullText, generated, incomplete } = await anthropicComplete(
             anthropicKey,
-            { model: CHAT_MODEL, max_tokens: 12_000, system: systemPrompt, messages: anthropicMessages },
+            { model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages },
             (d) => send("delta", { text: d }),
+            { initialText: resumeMessage?.content ?? "", deadlineAt: startedAt + GENERATION_BUDGET_MS },
           );
 
+          // Out of time, not out of document. Save the partial exactly as
+          // written — artifact markup and all, so the next invocation resumes
+          // mid-tag if that is where it stopped — and tell the client to come
+          // straight back for the rest.
+          if (incomplete) {
+            const partialMetadata = { sources: sourceSummaries, skill: skill ?? null, incomplete: true };
+            let partialId = resumeMessage?.id ?? null;
+            if (partialId) {
+              await supabase.from("ai_chat_messages")
+                .update({ content: fullText, metadata: partialMetadata })
+                .eq("id", partialId);
+            } else {
+              const { data } = await supabase.from("ai_chat_messages")
+                .insert({ thread_id: threadId, role: "assistant", content: fullText, metadata: partialMetadata })
+                .select("id")
+                .single();
+              partialId = data?.id ?? null;
+            }
+            // generatedChars lets the client tell "still writing, come back" from
+            // "this round produced nothing", which would otherwise loop.
+            send("done", { assistantMessageId: partialId, threadId, incomplete: true, generatedChars: generated.length });
+            controller.close();
+            return;
+          }
+
           // ---- artifacts the model produced ----
+          // A document cut off before its closing tag would otherwise match
+          // nothing below — the draft would be lost and the raw "<artifact …>"
+          // tag dumped into the chat. Close it here instead: a draft the
+          // lawyer can open and finish beats no draft at all.
+          const opened = (fullText.match(/<artifact\s/g) ?? []).length;
+          const closed = (fullText.match(/<\/artifact>/g) ?? []).length;
+          const documentTruncated = opened > closed;
+          const modelText = documentTruncated ? `${fullText}\n</artifact>` : fullText;
+
           const artifactIds: string[] = [];
-          let content = fullText;
+          let content = modelText;
           const re = /<artifact\s+([^>]*)>([\s\S]*?)<\/artifact>/g;
           let match: RegExpExecArray | null;
           const replacements: Array<[string, string]> = [];
-          while ((match = re.exec(fullText)) !== null) {
+          while ((match = re.exec(modelText)) !== null) {
             const attrs = match[1];
             const kindAttr = /kind="([^"]+)"/.exec(attrs)?.[1];
             const kind = kindAttr === "draft" ? "draft" : "memo";
@@ -528,7 +733,10 @@ You answer the way a careful senior associate would: precise, conservative, and 
                 kind,
                 title,
                 content: body,
-                data: documentType ? { documentTypeId: documentType.id, documentTypeName: documentType.name } : {},
+                data: {
+                  ...(documentType ? { documentTypeId: documentType.id, documentTypeName: documentType.name } : {}),
+                  ...(documentTruncated ? { truncated: true } : {}),
+                },
                 created_by: user.id,
               })
               .select("*")
@@ -541,22 +749,25 @@ You answer the way a careful senior associate would: precise, conservative, and 
           }
           for (const [from, to] of replacements) content = content.replace(from, to);
 
-          const { data: assistantMsg } = await supabase
-            .from("ai_chat_messages")
-            .insert({
-              thread_id: threadId,
-              role: "assistant",
-              content: content.trim(),
-              metadata: { sources: sourceSummaries, artifacts: artifactIds, skill: skill ?? null },
-            })
-            .select("id")
-            .single();
-          if (assistantMsg && artifactIds.length) {
-            await supabase.from("ai_artifacts").update({ message_id: assistantMsg.id }).in("id", artifactIds);
+          const finalMetadata = { sources: sourceSummaries, artifacts: artifactIds, skill: skill ?? null };
+          let assistantMessageId = resumeMessage?.id ?? null;
+          if (assistantMessageId) {
+            await supabase.from("ai_chat_messages")
+              .update({ content: content.trim(), metadata: finalMetadata })
+              .eq("id", assistantMessageId);
+          } else {
+            const { data } = await supabase.from("ai_chat_messages")
+              .insert({ thread_id: threadId, role: "assistant", content: content.trim(), metadata: finalMetadata })
+              .select("id")
+              .single();
+            assistantMessageId = data?.id ?? null;
+          }
+          if (assistantMessageId && artifactIds.length) {
+            await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", artifactIds);
           }
 
           // ---- a real title once there's something to name ----
-          if (isNewThread || priorMessages.length === 0) {
+          if (!isContinuation && (isNewThread || priorMessages.length === 0)) {
             try {
               const t = await anthropicJson(anthropicKey, {
                 model: TITLE_MODEL, max_tokens: 30,
@@ -571,7 +782,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
             } catch { /* a missing title is not worth failing the turn */ }
           }
 
-          send("done", { assistantMessageId: assistantMsg?.id ?? null, threadId });
+          send("done", { assistantMessageId, threadId, incomplete: false });
           controller.close();
         } catch (err) {
           console.error("chat error:", err);

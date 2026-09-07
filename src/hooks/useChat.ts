@@ -227,6 +227,15 @@ interface SendInput {
   skill: ActiveSkill | null;
 }
 
+// The chat function stops generating before Supabase kills it at ~150s of wall
+// clock, saves what it wrote, and reports the turn unfinished. Asking again
+// with continueMessageId starts a fresh invocation that resumes from exactly
+// where the text stopped, so a long agreement finishes over as many rounds as
+// it needs. This caps the rounds so a pathological loop can't run forever —
+// at roughly two minutes of writing each, it is far more than any real
+// document needs.
+const MAX_CONTINUATION_ROUNDS = 12;
+
 // One turn of the conversation: POST to the chat function, consume its SSE
 // stream, and expose the partial reply as state so the message list can show
 // it typing. On "done" the persisted rows are refetched and take over.
@@ -239,6 +248,97 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
+  // One request/response round against the chat function. Streams its events
+  // into `stream` and reports back whether the reply is finished.
+  const runRound = useCallback(
+    async (
+      matterId: string,
+      payload: Record<string, unknown>,
+      signal: AbortSignal,
+      isFirstRound: boolean,
+    ): Promise<{ threadId: string | null; assistantMessageId: string | null; incomplete: boolean; generatedChars: number }> => {
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session!.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+      if (!resp.ok || !resp.body) {
+        let detail = `Request failed (${resp.status})`;
+        try {
+          detail = (await resp.json()).error ?? detail;
+        } catch { /* not json */ }
+        throw new Error(detail);
+      }
+
+      let roundThreadId: string | null = null;
+      let assistantMessageId: string | null = null;
+      let incomplete = false;
+      let generatedChars = 0;
+
+      const handle = (event: string, data: any) => {
+        switch (event) {
+          case "meta":
+            roundThreadId = data.threadId;
+            setStream((s) => ({ ...s, threadId: data.threadId }));
+            if (isFirstRound && data.threadId) onThreadCreated?.(data.threadId);
+            break;
+          case "delta":
+            setStream((s) => ({ ...s, text: s.text + data.text }));
+            break;
+          case "sources":
+            setStream((s) => ({ ...s, sources: data }));
+            break;
+          case "notice":
+            setStream((s) => ({ ...s, notices: [...s.notices, data.text] }));
+            break;
+          case "artifact":
+            setStream((s) => ({ ...s, artifacts: [...s.artifacts, data] }));
+            onArtifact?.(data);
+            break;
+          case "title":
+            queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+            break;
+          case "done":
+            assistantMessageId = data.assistantMessageId ?? null;
+            incomplete = !!data.incomplete;
+            generatedChars = data.generatedChars ?? 0;
+            break;
+          case "error":
+            throw new Error(data.message);
+        }
+      };
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          let event = "message";
+          let dataLine = "";
+          for (const line of part.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+          }
+          if (!dataLine) continue;
+          handle(event, JSON.parse(dataLine));
+        }
+      }
+      return { threadId: roundThreadId, assistantMessageId, incomplete, generatedChars };
+    },
+    [session, queryClient, onThreadCreated, onArtifact],
+  );
+
   const send = useCallback(
     async ({ matterId, threadId, message, attachments, skill }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
@@ -247,79 +347,47 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       setPending({ content: message, attachments });
       setStream({ ...EMPTY_STREAM, threadId });
 
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+      const skillPayload = skill
+        ? { key: skill.key, documentTypeId: skill.documentTypeId, customSkillId: skill.customSkillId }
+        : null;
       let resolvedThreadId = threadId;
       try {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            matterId,
-            threadId,
-            message,
-            attachments,
-            skill: skill ? { key: skill.key, documentTypeId: skill.documentTypeId, customSkillId: skill.customSkillId } : null,
-          }),
-          signal: controller.signal,
-        });
-        if (!resp.ok || !resp.body) {
-          let detail = `Request failed (${resp.status})`;
-          try {
-            detail = (await resp.json()).error ?? detail;
-          } catch { /* not json */ }
-          throw new Error(detail);
-        }
+        let round = await runRound(
+          matterId,
+          { matterId, threadId, message, attachments, skill: skillPayload },
+          controller.signal,
+          !threadId,
+        );
+        resolvedThreadId = round.threadId ?? resolvedThreadId;
 
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const handle = (event: string, data: any) => {
-          switch (event) {
-            case "meta":
-              resolvedThreadId = data.threadId;
-              setStream((s) => ({ ...s, threadId: data.threadId }));
-              if (!threadId && data.threadId) onThreadCreated?.(data.threadId);
-              break;
-            case "delta":
-              setStream((s) => ({ ...s, text: s.text + data.text }));
-              break;
-            case "sources":
-              setStream((s) => ({ ...s, sources: data }));
-              break;
-            case "notice":
-              setStream((s) => ({ ...s, notices: [...s.notices, data.text] }));
-              break;
-            case "artifact":
-              setStream((s) => ({ ...s, artifacts: [...s.artifacts, data] }));
-              onArtifact?.(data);
-              break;
-            case "title":
-              queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
-              break;
-            case "error":
-              throw new Error(data.message);
-          }
-        };
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-          for (const part of parts) {
-            let event = "message";
-            let dataLine = "";
-            for (const line of part.split("\n")) {
-              if (line.startsWith("event:")) event = line.slice(6).trim();
-              else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
-            }
-            if (!dataLine) continue;
-            handle(event, JSON.parse(dataLine));
-          }
+        // The reply is only half-written because the function ran out of wall
+        // clock. Go straight back for the rest — the text keeps streaming into
+        // the same bubble, so this is invisible apart from a short pause.
+        let rounds = 0;
+        while (round.incomplete && round.assistantMessageId && rounds < MAX_CONTINUATION_ROUNDS) {
+          rounds++;
+          round = await runRound(
+            matterId,
+            {
+              matterId,
+              threadId: resolvedThreadId,
+              message: "",
+              attachments: [],
+              skill: skillPayload,
+              continueMessageId: round.assistantMessageId,
+            },
+            controller.signal,
+            false,
+          );
+          // A round that wrote nothing will not write anything next time
+          // either — stop rather than burn the whole round budget.
+          if (round.incomplete && round.generatedChars === 0) break;
+        }
+        if (round.incomplete) {
+          setStream((s) => ({
+            ...s,
+            notices: [...s.notices, "This is running unusually long, so it stops here. Ask to carry on from the last clause."],
+          }));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -338,7 +406,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         setStream((s) => (s.error ? { ...s, text: "" } : EMPTY_STREAM));
       }
     },
-    [session, queryClient, onThreadCreated, onArtifact],
+    [session, queryClient, runRound],
   );
 
   const clearError = useCallback(() => setStream(EMPTY_STREAM), []);

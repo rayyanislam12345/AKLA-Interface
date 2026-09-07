@@ -13,6 +13,10 @@ interface MarkdownMessageProps {
 }
 
 const ARTIFACT_MARKER = /\[\[artifact:([0-9a-f-]{36})\]\]/g;
+// A reply saved mid-generation still holds the raw opening tag of the document
+// being written — the artifact row is only created once the block closes. Show
+// the placeholder rather than the markup if someone reloads at that moment.
+const UNTERMINATED_ARTIFACT = /<artifact\b[\s\S]*$/;
 
 export function artifactIcon(kind: string) {
   if (kind === "review") return ScanSearch;
@@ -25,14 +29,17 @@ export function artifactIcon(kind: string) {
 // stores those as [[artifact:id]] markers where the block was) rather than
 // inline in the bubble.
 export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className }: MarkdownMessageProps) {
+  const writingDocument = UNTERMINATED_ARTIFACT.test(content);
+  const visible = writingDocument ? content.replace(UNTERMINATED_ARTIFACT, "") : content;
+
   const parts: Array<{ type: "md"; text: string } | { type: "artifact"; id: string }> = [];
   let last = 0;
-  for (const m of content.matchAll(ARTIFACT_MARKER)) {
-    if (m.index! > last) parts.push({ type: "md", text: content.slice(last, m.index) });
+  for (const m of visible.matchAll(ARTIFACT_MARKER)) {
+    if (m.index! > last) parts.push({ type: "md", text: visible.slice(last, m.index) });
     parts.push({ type: "artifact", id: m[1] });
     last = m.index! + m[0].length;
   }
-  if (last < content.length) parts.push({ type: "md", text: content.slice(last) });
+  if (last < visible.length) parts.push({ type: "md", text: visible.slice(last) });
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -49,6 +56,11 @@ export default function MarkdownMessage({ content, artifacts, onOpenArtifact, ac
             onOpen={onOpenArtifact}
           />
         ),
+      )}
+      {writingDocument && (
+        <div className="flex max-w-md items-center gap-2 rounded-xl border bg-background px-3 py-2.5 text-sm text-muted-foreground">
+          <FileText className="h-4 w-4 animate-pulse" /> Writing document…
+        </div>
       )}
     </div>
   );

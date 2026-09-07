@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { marked } from "marked";
 import { renderAsync } from "docx-preview";
 import type { Editor } from "@tiptap/react";
-import { Check, Copy, Download, FileText, Loader2, Save, X } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, FileText, Loader2, Save, X } from "lucide-react";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import ReviewSession from "@/components/ai/ReviewSession";
 import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
@@ -54,7 +54,7 @@ export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdat
 function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; artifact: ChatArtifact; lawUpdate: LawUpdate | null }) {
   const matterDocumentId = (artifact.data as any)?.matterDocumentId as string | undefined;
   if (!matterDocumentId) {
-    return <p className="p-4 text-sm text-muted-foreground">This review isn't tied to a matter document, so there's nothing to open here.</p>;
+    return <p className="p-4 text-sm text-muted-foreground">This review isn't tied to a project document, so there's nothing to open here.</p>;
   }
   return (
     <div className="p-4">
@@ -167,7 +167,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber },
       });
       toast({
-        title: `Saved to the matter as v${result.versionNumber}`,
+        title: `Saved to the project as v${result.versionNumber}`,
         description: result.fileName,
       });
     } catch (err: any) {
@@ -178,6 +178,10 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   };
 
   const saved = (artifact.data as any)?.savedMatterDocumentId as string | undefined;
+  // Set by the chat function when the model ran out of room even after being
+  // continued — worth saying loudly, because saving a half-written agreement
+  // to the matter as a version is exactly the mistake this would cause.
+  const truncated = !!(artifact.data as any)?.truncated;
   // Content is Markdown from the model or HTML after a manual save.
   const editorContent = artifact.content?.trimStart().startsWith("<") ? artifact.content : html;
 
@@ -232,6 +236,16 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
           </Button>
         )}
       </div>
+
+      {truncated && (
+        <div className="flex items-start gap-2 border-b border-amber-400/60 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700/50 dark:bg-amber-950/20">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+          <span>
+            This document stops before the end — it ran past the model's limit. Ask in the chat to carry on from the
+            last clause before saving it to the project.
+          </span>
+        </div>
+      )}
 
       {/* Both stay mounted: the docx export reads the editor even while the preview tab is showing. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
