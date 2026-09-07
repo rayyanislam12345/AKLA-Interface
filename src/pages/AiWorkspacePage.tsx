@@ -156,9 +156,9 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const emptyState = (
     <div className="flex flex-col items-center gap-6 pt-16 text-center">
       <div>
-        <h2 className="text-2xl font-semibold">How can I help with {matter?.name ?? "this matter"}?</h2>
+        <h2 className="text-2xl font-semibold">How can I help with {matter?.name ?? "this project"}?</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Grounded in this matter's documents, the firm's precedents and the law library. Drop a file in, or type <kbd className="rounded border px-1">/</kbd> for a skill.
+          Grounded in this project's documents, the firm's precedents and the law library. Drop a file in, or type <kbd className="rounded border px-1">/</kbd> for a skill.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">

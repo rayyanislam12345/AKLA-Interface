@@ -44,7 +44,7 @@ export default function ClientsPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Clients</h1>
-          <p className="text-muted-foreground">Entities the firm represents across its matters.</p>
+          <p className="text-muted-foreground">Entities the firm represents across its projects.</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>

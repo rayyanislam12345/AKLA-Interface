@@ -335,7 +335,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Statutes the AI grounds drafting/review in for this matter specifically — falls back to
+          Statutes the AI grounds drafting/review in for this project specifically — falls back to
           searching the whole law library until at least one is attached here.
         </p>
 
@@ -428,7 +428,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                       <Button
                         size="sm"
                         variant="ghost"
-                        title="Dismiss on this matter only"
+                        title="Dismiss on this project only"
                         onClick={() =>
                           acknowledgeUpdate.mutate({ matterId: matterId!, lawUpdateId: update.id })
                         }
@@ -529,10 +529,10 @@ function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matter
   const handleDelete = async () => {
     try {
       await deleteMatter.mutateAsync(matterId);
-      toast({ title: "Matter deleted" });
+      toast({ title: "Project deleted" });
       navigate("/matters");
     } catch (err: any) {
-      toast({ title: "Failed to delete matter", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to delete project", description: err.message, variant: "destructive" });
     }
   };
 
@@ -541,15 +541,15 @@ function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matter
       <AlertDialogTrigger asChild>
         <Button variant="outline" className="text-destructive hover:text-destructive">
           <Trash2 className="h-4 w-4 mr-2" />
-          Delete Matter
+          Delete Project
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete "{matterName}"?</AlertDialogTitle>
           <AlertDialogDescription>
-            This permanently deletes the matter and everything under it — all documents and their file
-            versions, AI drafts and chat history, redline suggestions, matter context, and relevant laws.
+            This permanently deletes the project and everything under it — all documents and their file
+            versions, AI drafts and chat history, redline suggestions, project context, and relevant laws.
             This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -566,7 +566,7 @@ function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matter
             disabled={confirmText !== matterName || deleteMatter.isPending}
             onClick={handleDelete}
           >
-            {deleteMatter.isPending ? "Deleting…" : "Delete Matter"}
+            {deleteMatter.isPending ? "Deleting…" : "Delete Project"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -648,7 +648,7 @@ export default function MatterWorkspacePage() {
 
   const handleDeleteDocument = async (matterDocumentId: string, title: string) => {
     if (!matterId) return;
-    if (!window.confirm(`Remove "${title}" and all its versions from this matter?`)) return;
+    if (!window.confirm(`Remove "${title}" and all its versions from this project?`)) return;
     try {
       await deleteMatterDocument.mutateAsync({ matterDocumentId, matterId });
       toast({ title: "Document removed" });
@@ -740,7 +740,7 @@ export default function MatterWorkspacePage() {
     upsertMatterContext.mutate(
       { matterId, content: contextDraft },
       {
-        onSuccess: () => toast({ title: "Matter context saved" }),
+        onSuccess: () => toast({ title: "Project context saved" }),
         onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
       }
     );
@@ -755,7 +755,7 @@ export default function MatterWorkspacePage() {
       });
       if (error) throw error;
       if (!data.summary) {
-        toast({ title: "Nothing to summarize yet — no documents or past AI sessions on this matter" });
+        toast({ title: "Nothing to summarize yet — no documents or past AI sessions on this project" });
         return;
       }
       setContextDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${data.summary}` : data.summary));
@@ -789,8 +789,8 @@ export default function MatterWorkspacePage() {
           </div>
           <p className="text-muted-foreground">
             {(matter as any).client?.name || "No client"}
-            {matter.sector ? ` · ${matter.sector}` : ""}
-            {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(matter as any).lead_partner.full_name}` : ""}
+            {matter.sector ? ` · ${project.sector}` : ""}
+            {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(project as any).lead_partner.full_name}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1237,17 +1237,17 @@ export default function MatterWorkspacePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Matter Context</CardTitle>
+            <CardTitle className="text-base">Project Context</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Curated facts carried forward across "Draft with AI" sessions on this matter, so the next
+              Curated facts carried forward across "Draft with AI" sessions on this project, so the next
               document doesn't have to re-ask what an earlier one already established. Use "Summarize"
-              to pull a first draft of this from the matter's existing documents and past AI sessions —
+              to pull a first draft of this from the project's existing documents and past AI sessions —
               review and edit before saving.
             </p>
             <Textarea
-              placeholder="Key facts, decisions, and preferences for this matter…"
+              placeholder="Key facts, decisions, and preferences for this project…"
               value={contextDraft}
               onChange={(e) => setContextDraft(e.target.value)}
               className="min-h-[140px]"

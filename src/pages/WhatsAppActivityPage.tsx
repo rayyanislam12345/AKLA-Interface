@@ -117,7 +117,7 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading documents…</p>
       ) : !files?.length ? (
-        <p className="text-sm text-muted-foreground">No documents captured for this matter.</p>
+        <p className="text-sm text-muted-foreground">No documents captured for this project.</p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {files.map((file) => (
@@ -235,7 +235,7 @@ function AskDialog() {
         <div className="space-y-3 max-h-96 overflow-y-auto">
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              Ask about anything tracked in your linked WhatsApp chats — matters, documents, or specific
+              Ask about anything tracked in your linked WhatsApp chats — projects, documents, or specific
               conversations.
             </p>
           )}
@@ -428,8 +428,8 @@ export default function WhatsAppActivityPage() {
           WhatsApp Activity
         </h1>
         <p className="text-muted-foreground">
-          Matters tracked automatically from linked lawyers' WhatsApp accounts. Unlinked matters are only
-          visible to the lawyer who captured them — link one to a firm Matter to share it.
+          Projects tracked automatically from linked lawyers' WhatsApp accounts. Unlinked projects are only
+          visible to the lawyer who captured them — link one to a firm Project to share it.
         </p>
       </div>
 
@@ -466,12 +466,12 @@ export default function WhatsAppActivityPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
-                  <TableHead>Matter</TableHead>
+                  <TableHead>Project</TableHead>
                   <TableHead>Captured by</TableHead>
                   <TableHead>Chats</TableHead>
                   <TableHead>Messages</TableHead>
                   <TableHead>Last active</TableHead>
-                  <TableHead>Link to Matter</TableHead>
+                  <TableHead>Link to Project</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

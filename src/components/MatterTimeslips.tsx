@@ -65,7 +65,7 @@ function toCsv(slips: MatterTimeslip[], matterName: string) {
     // Billable added for this table's split — Task/Narrative were also
     // previously swapped relative to their header labels here; fixed
     // alongside it since this file goes straight to billing.
-    ["Date", "Associate", "Hours", "Billable", "Task code", "Task", "Narrative", "Matter"].join(","),
+    ["Date", "Associate", "Hours", "Billable", "Task code", "Task", "Narrative", "Project"].join(","),
     ...slips.map((s) =>
       [
         s.work_date,
@@ -322,7 +322,7 @@ export function MatterTimeslips({
           </div>
         ) : !slips?.length ? (
           <p className="py-6 text-sm text-muted-foreground">
-            No time recorded against this matter in this period. Associates
+            No time recorded against this project in this period. Associates
             upload approved entries from Timekeeper.
           </p>
         ) : view === "entries" ? (

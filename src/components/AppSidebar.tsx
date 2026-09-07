@@ -21,7 +21,7 @@ import aklaMonogram from "@/assets/akla-monogram.png";
 
 const NAV_ITEMS = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Matters", url: "/matters", icon: FolderKanban },
+  { title: "Projects", url: "/matters", icon: FolderKanban },
   { title: "Clients", url: "/clients", icon: Building2 },
   { title: "Team", url: "/team", icon: Users },
   { title: "Today's Timesheet", url: "/timesheet", icon: Clock },

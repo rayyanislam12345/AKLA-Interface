@@ -144,7 +144,7 @@ export default function DocumentUploadCard({ matterId, onUploaded, hint }: Docum
         ) : (
           <>
             <Upload className="h-4 w-4 mr-2" />
-            Upload to matter
+            Upload to project
           </>
         )}
       </Button>

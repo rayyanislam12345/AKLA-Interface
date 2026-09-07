@@ -84,7 +84,7 @@ export default function DocumentTypesPage() {
     } catch (e: any) {
       toast({
         title: "Failed to delete",
-        description: "This type is likely still in use by a matter document.",
+        description: "This type is likely still in use by a project document.",
         variant: "destructive",
       });
     }

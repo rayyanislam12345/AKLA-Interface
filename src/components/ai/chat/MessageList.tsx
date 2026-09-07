@@ -150,7 +150,7 @@ function scopeMeta(s: ChatSource) {
     case "precedent":
       return { Icon: BookOpen, label: s.filename ?? "Precedent" };
     default:
-      return { Icon: Landmark, label: s.filename ?? "Matter document" };
+      return { Icon: Landmark, label: s.filename ?? "Project document" };
   }
 }
 

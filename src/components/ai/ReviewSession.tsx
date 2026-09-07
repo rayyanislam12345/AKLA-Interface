@@ -50,7 +50,7 @@ const REVIEW_TYPE_LABELS: Record<RedlineReviewType, string> = {
 const REVIEW_TYPE_DESCRIPTIONS: Record<RedlineReviewType, string> = {
   legal_clauses: "Clause correctness against statute and precedent, and legal assertions made without citation.",
   formatting: "Structure and formatting against the firm's template and precedent — not clause substance.",
-  content_conflicts: "Content against precedent, and against this matter's other documents for conflicts.",
+  content_conflicts: "Content against precedent, and against this project's other documents for conflicts.",
   chat: "",
 };
 

@@ -94,8 +94,8 @@ function WhatsAppAccountsSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Maps a lawyer's whatsapp-dashboard username to their AKLA Matter Hub account, so their tracked
-          WhatsApp matters sync in under their own name.
+          Maps a lawyer's whatsapp-dashboard username to their AKLA Project Hub account, so their tracked
+          WhatsApp projects sync in under their own name.
         </p>
 
         <div className="flex gap-3 items-end flex-wrap">
@@ -285,7 +285,7 @@ export default function TeamPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Team</h1>
-        <p className="text-muted-foreground">Lawyers with access to the firm's matters.</p>
+        <p className="text-muted-foreground">Lawyers with access to the firm's projects.</p>
       </div>
 
       {isAdmin && <PendingApprovalsSection />}

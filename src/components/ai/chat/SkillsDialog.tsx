@@ -82,7 +82,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="text-sm font-medium">Produces a document</div>
-                <div className="text-xs text-muted-foreground">The result opens in the document panel and can be saved to the matter as a Word file.</div>
+                <div className="text-xs text-muted-foreground">The result opens in the document panel and can be saved to the project as a Word file.</div>
               </div>
               <Switch checked={!!editing.produces_document} onCheckedChange={(v) => setEditing({ ...editing, produces_document: v })} />
             </div>

@@ -54,27 +54,27 @@ const HelpPage = () => {
       id: "getting-started",
       title: "Getting Started",
       icon: BookOpen,
-      description: "What AKLA Matter Hub is and how it's organized",
+      description: "What AKLA Project Hub is and how it's organized",
       content: [
         {
-          question: "What is AKLA Matter Hub?",
+          question: "What is AKLA Project Hub?",
           answer:
-            "The firm's internal matter management and AI drafting hub. It tracks PPP transactions and due-diligence engagements through their document lifecycle, and layers AI drafting, redline review, and Q&A on top of the firm's own document history — every AI feature is grounded in matters and precedent that actually exist, not general knowledge alone.",
+            "The firm's internal project management and AI drafting hub. It tracks PPP transactions and due-diligence engagements through their document lifecycle, and layers AI drafting, redline review, and Q&A on top of the firm's own document history — every AI feature is grounded in projects and precedent that actually exist, not general knowledge alone.",
         },
         {
           question: "How do I navigate the platform?",
           answer:
-            "The left sidebar covers the whole app: Dashboard (firm-wide view of every matter), Matters (create and manage transactions), Clients, Team (lawyer directory and roles), Precedent Library (the firm's past agreements), Document Types (the contract taxonomy), and Help. AI drafting, review, and chat are reached from within a matter's workspace rather than the sidebar, since they're always scoped to a specific matter.",
+            "The left sidebar covers the whole app: Dashboard (firm-wide view of every project), Projects (create and manage transactions), Clients, Team (lawyer directory and roles), Precedent Library (the firm's past agreements), Document Types (the contract taxonomy), and Help. AI drafting, review, and chat are reached from within a project's workspace rather than the sidebar, since they're always scoped to a specific project.",
         },
         {
           question: "What are the key features?",
           answer:
-            "Matter tracking with a stage checklist and per-document status pipeline; document upload with automatic text extraction and indexing; AI-assisted drafting either from the firm's precedent or a guided intake interview; AI redline review benchmarked against precedent; a per-matter AI chat; and a firm-wide precedent library with an admin-editable document taxonomy.",
+            "Project tracking with a stage checklist and per-document status pipeline; document upload with automatic text extraction and indexing; AI-assisted drafting either from the firm's precedent or a guided intake interview; AI redline review benchmarked against precedent; a per-matter AI chat; and a firm-wide precedent library with an admin-editable document taxonomy.",
         },
         {
           question: "How is data organized?",
           answer:
-            "Client → Matter → Documents, Stages, Parties, Tasks, and Notes. Access is firm-wide by design — every lawyer can see and work on every matter, rather than being restricted to matters they're staffed on.",
+            "Client → Project → Documents, Stages, Parties, Tasks, and Notes. Access is firm-wide by design — every lawyer can see and work on every project, rather than being restricted to projects they're staffed on.",
         },
         {
           question: "How do the AI features work?",
@@ -86,35 +86,35 @@ const HelpPage = () => {
         {
           question: "Do I need to set anything up before using AI features?",
           answer:
-            "An administrator needs to add two API keys (ANTHROPIC_API_KEY and VOYAGE_API_KEY) as Edge Function secrets in the Supabase project — a one-time setup step. Matter tracking, document upload, and everything else works without them.",
+            "An administrator needs to add two API keys (ANTHROPIC_API_KEY and VOYAGE_API_KEY) as Edge Function secrets in the Supabase project — a one-time setup step. Project tracking, document upload, and everything else works without them.",
         },
         {
-          question: "Can multiple lawyers work on the same matter?",
+          question: "Can multiple lawyers work on the same project?",
           answer:
-            "Yes. Firm-wide access means every lawyer can view and edit every matter — there's no per-matter permission to configure.",
+            "Yes. Firm-wide access means every lawyer can view and edit every project — there's no per-matter permission to configure.",
         },
       ],
     },
     {
       id: "matters",
-      title: "Matters",
+      title: "Projects",
       icon: FolderKanban,
       description: "Track a transaction from origination through closing",
       content: [
         {
-          question: "How do I create a matter?",
+          question: "How do I create a project?",
           answer:
-            "Go to Matters and click New Matter. Give it a name, and optionally a client, sector, and project lead. A default stage checklist is seeded automatically for you.",
+            "Go to Projects and click New Project. Give it a name, and optionally a client, sector, and project lead. A default stage checklist is seeded automatically for you.",
         },
         {
           question: "What are the default stages?",
           answer:
-            "A standard PPP transaction pipeline: Origination, Due Diligence, Drafting, Negotiation, Financial Close, and Post-Closing. Click a stage in the matter workspace to cycle it through not started → in progress → complete.",
+            "A standard PPP transaction pipeline: Origination, Due Diligence, Drafting, Negotiation, Financial Close, and Post-Closing. Click a stage in the project workspace to cycle it through not started → in progress → complete.",
         },
         {
-          question: "What's in a matter workspace?",
+          question: "What's in a project workspace?",
           answer:
-            "Stages (the checklist), Documents (every document on the matter with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
+            "Stages (the checklist), Documents (every document on the project with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
           bullets: [
             "Stages — click to advance not started → in progress → complete.",
             "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Verify with AI).",
@@ -131,17 +131,17 @@ const HelpPage = () => {
         {
           question: "What are Clients?",
           answer:
-            "Client entities that matters are attached to, managed from the Clients page. A matter doesn't require a client, but linking one lets you filter and gives AI drafting more context.",
+            "Client entities that projects are attached to, managed from the Clients page. A project doesn't require a client, but linking one lets you filter and gives AI drafting more context.",
         },
       ],
       faqs: [
         {
-          question: "Can I restrict a matter to specific lawyers?",
+          question: "Can I restrict a project to specific lawyers?",
           answer:
             "Not currently — the firm uses firm-wide visibility by design, so there's no per-matter access control to set.",
         },
         {
-          question: "Can I edit the stage checklist after a matter is created?",
+          question: "Can I edit the stage checklist after a project is created?",
           answer:
             "Stages seed automatically on creation; there's no UI yet to add or remove stages after the fact.",
         },
@@ -151,17 +151,17 @@ const HelpPage = () => {
       id: "documents",
       title: "Documents",
       icon: FileText,
-      description: "Upload, version, and track documents on a matter",
+      description: "Upload, version, and track documents on a project",
       content: [
         {
           question: "How do I upload a document?",
           answer:
-            "In a matter workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. Files you drop into the AI Workspace chat are read by the assistant but are NOT matter documents — save what it produces with \"Save to matter\", or upload the file here.",
+            "In a project workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. Files you drop into the AI Workspace chat are read by the assistant but are NOT project documents — save what it produces with \"Save to project\", or upload the file here.",
         },
         {
           question: "What happens to a file after I upload it?",
           answer:
-            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Verify on that matter.",
+            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Verify on that project.",
         },
         {
           question: "What document types are available?",
@@ -190,7 +190,7 @@ const HelpPage = () => {
         {
           question: "How do I generate a draft?",
           answer:
-            "From a matter's Documents card, click Draft with AI — it opens the AI Workspace with the Draft skill in force. Pick the document type, then talk to the assistant: it asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, preview it as a Word document, download it, or save it to the matter as a version.",
+            "From a project's Documents card, click Draft with AI — it opens the AI Workspace with the Draft skill in force. Pick the document type, then talk to the assistant: it asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, preview it as a Word document, download it, or save it to the project as a version.",
         },
         {
           question: "How does the interview work?",
@@ -205,7 +205,7 @@ const HelpPage = () => {
         {
           question: "How do I save a draft?",
           answer:
-            "Click Save as Document Version. This creates (or reuses) a matter document of that type and saves your edited text as a new .docx version.",
+            "Click Save as Document Version. This creates (or reuses) a project document of that type and saves your edited text as a new .docx version.",
         },
         {
           question: "Will the AI invent commercial terms I never gave it?",
@@ -235,12 +235,12 @@ const HelpPage = () => {
         {
           question: "How do I get redline suggestions on a draft?",
           answer:
-            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with the Verify skill in force and the document attached; press send. Or in any chat, type / and choose Verify, then use the + menu → Add from matter to attach the document. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
+            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with the Verify skill in force and the document attached; press send. Or in any chat, type / and choose Verify, then use the + menu → Add from project to attach the document. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
         },
         {
           question: "What does the review actually check?",
           answer:
-            "Three separate passes: Legal Clauses & Citations (clause correctness against statute and precedent, and assertions made without citation), Formatting (structure against the firm's template and precedent), and Content & Conflicts (content against precedent, and against this matter's other documents). Suggestions are grouped by pass.",
+            "Three separate passes: Legal Clauses & Citations (clause correctness against statute and precedent, and assertions made without citation), Formatting (structure against the firm's template and precedent), and Content & Conflicts (content against precedent, and against this project's other documents). Suggestions are grouped by pass.",
         },
         {
           question: "How do I act on a suggestion?",
@@ -250,7 +250,7 @@ const HelpPage = () => {
         {
           question: "Where do I see the changes?",
           answer:
-            "For a Word document, the real uploaded file is shown alongside the list with every accepted or pending suggestion applied as genuine tracked changes (insertions underlined, deletions struck through). Download .docx gives you that file to open in Word; Save as Document Version keeps it on the matter as a new version.",
+            "For a Word document, the real uploaded file is shown alongside the list with every accepted or pending suggestion applied as genuine tracked changes (insertions underlined, deletions struck through). Download .docx gives you that file to open in Word; Save as Document Version keeps it on the project as a new version.",
         },
         {
           question: "Can I review a PDF, Excel file, or PowerPoint?",
@@ -275,27 +275,27 @@ const HelpPage = () => {
       id: "ask-ai",
       title: "Ask AI",
       icon: MessageCircle,
-      description: "Chat grounded in a matter's documents and firm precedent",
+      description: "Chat grounded in a project's documents and firm precedent",
       content: [
         {
           question: "What is Ask AI?",
           answer:
-            "A chat scoped to one matter, grounded in that matter's uploaded documents, the firm-wide precedent library, and the law library — not general knowledge alone. Statute excerpts come from the matter's Relevant Laws when it has any, otherwise the whole law library, and each source in the answer is labelled with where it came from.",
+            "A chat scoped to one project, grounded in that project's uploaded documents, the firm-wide precedent library, and the law library — not general knowledge alone. Statute excerpts come from the project's Relevant Laws when it has any, otherwise the whole law library, and each source in the answer is labelled with where it came from.",
         },
         {
           question: "Where do I find it?",
           answer:
-            "Open a matter's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this matter are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the matter's documents, and type / to put a skill in force (Draft, Verify, Summarise, or one of the firm's own). Every answer is grounded in this matter's documents, the precedent library and the law library, with the sources listed under the reply.",
+            "Open a project's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this project are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the project's documents, and type / to put a skill in force (Draft, Verify, Summarise, or one of the firm's own). Every answer is grounded in this project's documents, the precedent library and the law library, with the sources listed under the reply.",
         },
         {
           question: "Can I add a document from here?",
           answer:
-            "Yes — click Add a document above the chat, choose a file and a document type. It's uploaded to the matter like any other document and, once indexed, you can ask about it straight away.",
+            "Yes — click Add a document above the chat, choose a file and a document type. It's uploaded to the project like any other document and, once indexed, you can ask about it straight away.",
         },
         {
           question: "Does it remember earlier questions in the same conversation?",
           answer:
-            "Yes — within a matter, the conversation persists across turns, so follow-up questions like \"what about the dispute resolution clause\" carry the context of what was already discussed.",
+            "Yes — within a project, the conversation persists across turns, so follow-up questions like \"what about the dispute resolution clause\" carry the context of what was already discussed.",
         },
         {
           question: "What happens if it doesn't know the answer?",
@@ -314,7 +314,7 @@ const HelpPage = () => {
         {
           question: "What is the Precedent Library?",
           answer:
-            "Firm-wide past agreements, independent of any single matter. This is what Draft with AI and Review with AI actually pull from when drafting or benchmarking a document type.",
+            "Firm-wide past agreements, independent of any single project. This is what Draft with AI and Review with AI actually pull from when drafting or benchmarking a document type.",
         },
         {
           question: "How do I add documents to it?",
@@ -327,9 +327,9 @@ const HelpPage = () => {
             "Yes — deleting a source removes both the underlying file and everything indexed from it.",
         },
         {
-          question: "Is precedent tied to a specific matter?",
+          question: "Is precedent tied to a specific project?",
           answer:
-            "No. It's firm-wide and available to every matter that uses a matching document type.",
+            "No. It's firm-wide and available to every project that uses a matching document type.",
         },
       ],
       faqs: [
@@ -392,7 +392,7 @@ const HelpPage = () => {
           <HelpCircle className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-3xl font-bold">Help Center</h1>
-            <p className="text-muted-foreground">Learn how to use AKLA Matter Hub</p>
+            <p className="text-muted-foreground">Learn how to use AKLA Project Hub</p>
           </div>
         </div>
 

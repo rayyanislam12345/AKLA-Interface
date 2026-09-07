@@ -72,7 +72,7 @@ function headerRow() {
   const cols: string[][] = [
     ["Sr. No."],
     ["Transaction"],
-    ["Matter &", "Description"],
+    ["Project &", "Description"],
     ["Hours"],
     ["Billable Hours"],
     ["AK", "Billable Hours"],

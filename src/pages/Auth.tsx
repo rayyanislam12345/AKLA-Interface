@@ -255,7 +255,7 @@ export default function Auth() {
               <CardTitle>You've been invited!</CardTitle>
               <CardDescription>
                 {inviteOrgName
-                  ? `Set a password to join ${inviteOrgName} on AKLA Matter Hub.`
+                  ? `Set a password to join ${inviteOrgName} on AKLA Project Hub.`
                   : 'Set a password to complete your account setup.'}
               </CardDescription>
             </CardHeader>
@@ -341,7 +341,7 @@ export default function Auth() {
                 variant="ghost"
                 className="w-full"
                 onClick={() => {
-                  toast({ title: 'Welcome to AKLA Matter Hub!', description: 'You can enable 2FA later in settings.' });
+                  toast({ title: 'Welcome to AKLA Project Hub!', description: 'You can enable 2FA later in settings.' });
                   navigate('/dashboard', { replace: true });
                 }}
               >

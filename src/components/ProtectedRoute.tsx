@@ -63,7 +63,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return (
       <StatusScreen
         title="Access not approved"
-        description="An admin has not approved this account for AKLA Matter Hub. If you believe this is a mistake, contact your firm admin directly."
+        description="An admin has not approved this account for AKLA Project Hub. If you believe this is a mistake, contact your firm admin directly."
       />
     );
   }

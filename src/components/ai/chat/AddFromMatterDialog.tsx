@@ -30,8 +30,8 @@ export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add from matter</DialogTitle>
-          <DialogDescription>Attach the latest version of a document already on this matter.</DialogDescription>
+          <DialogTitle>Add from project</DialogTitle>
+          <DialogDescription>Attach the latest version of a document already on this project.</DialogDescription>
         </DialogHeader>
         <div className="relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -40,7 +40,7 @@ export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPi
         <div className="max-h-80 overflow-y-auto rounded-md border">
           {rows.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground">
-              {documents?.length ? "No documents match." : "No documents with an uploaded version on this matter yet."}
+              {documents?.length ? "No documents match." : "No documents with an uploaded version on this project yet."}
             </p>
           )}
           {rows.map(({ doc, latest }) => (

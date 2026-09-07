@@ -38,7 +38,7 @@ type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string 
 
 const BUILT_IN = [
   { key: "draft" as const, label: "Draft", description: "Interview, then draft a document of a chosen type", Icon: Sparkles },
-  { key: "verify" as const, label: "Verify", description: "Three-pass review of a matter document (legal, formatting, conflicts)", Icon: ScanSearch },
+  { key: "verify" as const, label: "Verify", description: "Three-pass review of a project document (legal, formatting, conflicts)", Icon: ScanSearch },
   { key: "summarise" as const, label: "Summarise", description: "A short \"Notes On …\" memo about the attached document", Icon: StickyNote },
 ];
 
@@ -243,8 +243,8 @@ export default function Composer({
                   skill?.key === "draft"
                     ? "Describe the deal, or just say \"draft it\"…"
                     : skill?.key === "verify"
-                      ? "Attach a matter document and press send to review it…"
-                      : "Ask about this matter, or type / for skills…"
+                      ? "Attach a project document and press send to review it…"
+                      : "Ask about this project, or type / for skills…"
                 }
                 className="max-h-60 min-h-[44px] w-full resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
                 data-testid="composer-input"
@@ -298,7 +298,7 @@ export default function Composer({
                   <Paperclip className="mr-2 h-4 w-4" />Upload a file
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setAddFromMatterOpen(true)}>
-                  <FolderOpen className="mr-2 h-4 w-4" />Add from matter
+                  <FolderOpen className="mr-2 h-4 w-4" />Add from project
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs text-muted-foreground">Skills</DropdownMenuLabel>

@@ -236,7 +236,7 @@ export default function TodaysTimesheetPage() {
   const totalBillableHours = rows.reduce((sum, r) => sum + (Number(r.billableHours) || 0), 0);
   const totalAkBillableHours = rows.reduce((sum, r) => sum + (Number(r.akBillableHours) || 0), 0);
 
-  const matterName = (matterId: string) => matters?.find((m) => m.id === matterId)?.name ?? "Unknown Matter";
+  const matterName = (matterId: string) => matters?.find((m) => m.id === matterId)?.name ?? "Unknown Project";
 
   const patchRow = (id: string, patch: Partial<EditableRow>) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -364,7 +364,7 @@ export default function TodaysTimesheetPage() {
                   <TableRow>
                     <TableHead className="w-16">Sr. No.</TableHead>
                     <TableHead className="w-[200px]">Transaction</TableHead>
-                    <TableHead className="min-w-[260px]">Matter &amp; Description</TableHead>
+                    <TableHead className="min-w-[260px]">Project &amp; Description</TableHead>
                     <TableHead className="w-24">Hours</TableHead>
                     <TableHead className="w-32">Billable Hours</TableHead>
                     <TableHead className="w-32">AK Billable Hours</TableHead>

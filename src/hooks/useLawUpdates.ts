@@ -184,7 +184,7 @@ export function lawUpdateTypeLabel(type: string) {
 // Revise. Pre-filled rather than auto-sent, so they can read it, adjust the
 // emphasis, and decide — the AI review runs when they press send.
 export function buildRevisePrompt(update: LawUpdate, documentTitle?: string) {
-  const act = update.act_name ?? "a law this matter relies on";
+  const act = update.act_name ?? "a law this project relies on";
   const ref = update.authority_ref ? ` (${update.authority_ref})` : "";
   const published = update.published_date ? `, published ${update.published_date}` : "";
   const source = update.document_url || update.source_url;
