@@ -8,6 +8,7 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 const PORT = process.env.PORT || 8091;
+const SERVER_STARTED_AT = new Date().toISOString(); // see /version below
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -534,10 +535,37 @@ async function handleTranscribeFileUpload(req, res, url) {
   });
 }
 
+// Reports the git commit this running process was actually started from, so
+// a stale deploy (code pushed to GitHub but this process never restarted,
+// e.g. after a systemd-managed update) can be checked over the network
+// without needing SSH access to the box. Only meaningful if this directory
+// is itself a git checkout (i.e. deployed via `git pull`, not rsync/scp) —
+// falls back to "unknown" rather than erroring if it isn't.
+function getDeployedVersion() {
+  try {
+    const commit = require("child_process")
+      .execSync("git rev-parse HEAD", { cwd: __dirname, stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    const committedAt = require("child_process")
+      .execSync("git log -1 --format=%cI", { cwd: __dirname, stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    return { commit, committedAt };
+  } catch {
+    return { commit: "unknown", committedAt: null };
+  }
+}
+
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "POST" && url.pathname === "/transcribe-file") {
     handleTranscribeFileUpload(req, res, url);
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/version") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ...getDeployedVersion(), startedAt: SERVER_STARTED_AT }));
     return;
   }
   res.writeHead(200, { "Content-Type": "text/plain" });
