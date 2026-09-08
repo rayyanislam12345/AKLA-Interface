@@ -535,12 +535,15 @@ async function handleTranscribeFileUpload(req, res, url) {
   });
 }
 
-// Reports the git commit this running process was actually started from, so
-// a stale deploy (code pushed to GitHub but this process never restarted,
-// e.g. after a systemd-managed update) can be checked over the network
-// without needing SSH access to the box. Only meaningful if this directory
-// is itself a git checkout (i.e. deployed via `git pull`, not rsync/scp) —
-// falls back to "unknown" rather than erroring if it isn't.
+// Reports the commit this running process was actually started from, so a
+// stale deploy (code pushed to GitHub but this process never restarted) can
+// be checked over the network without SSH access to the box.
+//
+// Two sources, because this relay is deployed by scp, not `git pull`: the box
+// has no checkout and no git binary at all, so asking git would always answer
+// "unknown" and the endpoint would be useless exactly where it is needed.
+// deploy.sh writes DEPLOYED_VERSION alongside server.js; git is still tried
+// first for the case where someone does run this from a checkout.
 function getDeployedVersion() {
   try {
     const commit = require("child_process")
@@ -551,9 +554,17 @@ function getDeployedVersion() {
       .execSync("git log -1 --format=%cI", { cwd: __dirname, stdio: ["ignore", "pipe", "ignore"] })
       .toString()
       .trim();
-    return { commit, committedAt };
+    return { commit, committedAt, source: "git" };
   } catch {
-    return { commit: "unknown", committedAt: null };
+    // fall through to the deploy stamp
+  }
+  try {
+    const stamp = JSON.parse(
+      require("fs").readFileSync(require("path").join(__dirname, "DEPLOYED_VERSION"), "utf8")
+    );
+    return { commit: stamp.commit ?? "unknown", committedAt: stamp.committedAt ?? null, deployedAt: stamp.deployedAt ?? null, source: "deploy-stamp" };
+  } catch {
+    return { commit: "unknown", committedAt: null, source: "none" };
   }
 }
 
