@@ -790,8 +790,8 @@ export default function MatterWorkspacePage() {
           </div>
           <p className="text-muted-foreground">
             {(matter as any).client?.name || "No client"}
-            {matter.sector ? ` · ${project.sector}` : ""}
-            {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(project as any).lead_partner.full_name}` : ""}
+            {matter.sector ? ` · ${matter.sector}` : ""}
+            {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(matter as any).lead_partner.full_name}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

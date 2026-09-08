@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { RouteErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/AppLayout";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -46,158 +47,160 @@ const App = () => {
             <Toaster />
             <Sonner />
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-              <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <Dashboard />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/matters"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <MattersPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/matters/:matterId"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <MatterWorkspacePage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/matters/:matterId/ai"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <AiWorkspacePage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="/matters/:matterId/chat" element={<RedirectToAiWorkspace mode="ask" />} />
-                <Route path="/matters/:matterId/draft" element={<RedirectToAiWorkspace mode="draft" />} />
-                <Route
-                  path="/matters/:matterId/documents/:matterDocumentId/review"
-                  element={<RedirectToAiWorkspace mode="verify" />}
-                />
-                <Route
-                  path="/timesheet"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <TodaysTimesheetPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/record-meeting"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <RecordMeetingPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/precedent-library"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <PrecedentLibraryPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/precedent-library/standardize/:documentTypeId"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <StandardizeDocumentTypePage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/mandate-opportunities"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <MandateOpportunitiesPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/whatsapp-activity"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <WhatsAppActivityPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/document-types"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <DocumentTypesPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/clients"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <ClientsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/team"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <TeamPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/help"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <HelpPage />
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+              <RouteErrorBoundary>
+                <Routes>
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/auth" element={<Auth />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <Dashboard />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/matters"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <MattersPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/matters/:matterId"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <MatterWorkspacePage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/matters/:matterId/ai"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <AiWorkspacePage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="/matters/:matterId/chat" element={<RedirectToAiWorkspace mode="ask" />} />
+                  <Route path="/matters/:matterId/draft" element={<RedirectToAiWorkspace mode="draft" />} />
+                  <Route
+                    path="/matters/:matterId/documents/:matterDocumentId/review"
+                    element={<RedirectToAiWorkspace mode="verify" />}
+                  />
+                  <Route
+                    path="/timesheet"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <TodaysTimesheetPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/record-meeting"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <RecordMeetingPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/precedent-library"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <PrecedentLibraryPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/precedent-library/standardize/:documentTypeId"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <StandardizeDocumentTypePage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/mandate-opportunities"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <MandateOpportunitiesPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/whatsapp-activity"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <WhatsAppActivityPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/document-types"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <DocumentTypesPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/clients"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <ClientsPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/team"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <TeamPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/help"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <HelpPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </RouteErrorBoundary>
             </BrowserRouter>
           </TooltipProvider>
         </AuthProvider>
