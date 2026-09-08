@@ -76,6 +76,9 @@ export function useMeetingRelay() {
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
   const [hasRecording, setHasRecording] = useState(false);
+  // Exposed only when on-screen speaker detection is on, so the vision
+  // hook can read frames from the same capture the audio came from.
+  const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const [language, setLanguage] = useState<MeetingLanguage>("en-US");
   const [segments, setSegments] = useState<MeetingSegment[]>([]);
   const [interimText, setInterimText] = useState<string | null>(null);
@@ -214,7 +217,7 @@ export function useMeetingRelay() {
   // audio coming out of a shared tab/screen, so remote participants on a
   // Zoom/Teams/Meet call land in the transcript too.
   const startAudioPipeline = useCallback(
-    async ({ captureMeetingAudio }: { captureMeetingAudio: boolean }) => {
+    async ({ captureMeetingAudio, keepVideo }: { captureMeetingAudio: boolean; keepVideo: boolean }) => {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
       await audioContext.audioWorklet.addModule("/pcm-worklet.js");
@@ -246,14 +249,19 @@ export function useMeetingRelay() {
       connectSource(micStream);
 
       if (captureMeetingAudio) {
-        // video:true is requested only because browsers won't offer the
-        // "share audio" checkbox for a video-less request; the video track
-        // is stopped immediately below since nothing renders it. The
+        // video:true is requested because browsers won't offer the "share
+        // audio" checkbox for a video-less request. It's normally stopped
+        // straight away since nothing renders it — but on-screen speaker
+        // detection reads frames from it, so that case keeps it alive. The
         // browser's own picker and persistent sharing indicator handle
         // consent for the person running this — they always see it.
         const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         displayStreamRef.current = displayStream;
-        displayStream.getVideoTracks().forEach((t) => t.stop());
+        if (keepVideo) {
+          setDisplayStream(displayStream);
+        } else {
+          displayStream.getVideoTracks().forEach((t) => t.stop());
+        }
 
         const displayAudioTracks = displayStream.getAudioTracks();
         if (displayAudioTracks.length === 0) {
@@ -292,6 +300,7 @@ export function useMeetingRelay() {
     streamRef.current = null;
     displayStreamRef.current?.getTracks().forEach((t) => t.stop());
     displayStreamRef.current = null;
+    setDisplayStream(null);
   }, []);
 
   // Opens the relay socket if it isn't already — used by startMeeting and
@@ -304,7 +313,7 @@ export function useMeetingRelay() {
   }, [connect]);
 
   const startMeeting = useCallback(
-    async (initialLanguage: MeetingLanguage, { captureMeetingAudio = false } = {}) => {
+    async (initialLanguage: MeetingLanguage, { captureMeetingAudio = false, detectSpeakers = false } = {}) => {
       setSegments([]);
       setSpeakerNames(new Map());
       setLanguage(initialLanguage);
@@ -322,7 +331,7 @@ export function useMeetingRelay() {
       if (!startedOk) return false;
 
       try {
-        await startAudioPipeline({ captureMeetingAudio });
+        await startAudioPipeline({ captureMeetingAudio, keepVideo: detectSpeakers });
       } catch (err: any) {
         // Includes the user dismissing the screen-share picker, which throws
         // NotAllowedError — not worth a scary message.
@@ -507,6 +516,7 @@ export function useMeetingRelay() {
     connected,
     recording,
     hasRecording,
+    displayStream,
     language,
     segments,
     setSegments,

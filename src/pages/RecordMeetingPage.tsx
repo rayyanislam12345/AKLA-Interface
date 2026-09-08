@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
-import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, Save } from "lucide-react";
+import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, ScanSearch, Save } from "lucide-react";
 import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { buildAklaDocxBlob } from "@/lib/meetingDocx";
+import NameLabelCalibrator from "@/components/meeting/NameLabelCalibrator";
+import { useSpeakerVision } from "@/hooks/useSpeakerVision";
+import { reassignSpeakerIds, voteSpeakerNames } from "@/lib/speakerTimeline";
 import SegmentList, {
   parseTranscriptText,
   segmentsToEnglishTranscriptText,
@@ -46,6 +49,10 @@ export default function RecordMeetingPage() {
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
   const [captureMeetingAudio, setCaptureMeetingAudio] = useState(false);
+  const [detectSpeakers, setDetectSpeakers] = useState(false);
+  const [calibratorOpen, setCalibratorOpen] = useState(false);
+  const [calibrationFrame, setCalibrationFrame] = useState<string | null>(null);
+  const vision = useSpeakerVision();
 
   const [uploadMatterId, setUploadMatterId] = useState<string>("");
   const [uploadingFormat, setUploadingFormat] = useState<MeetingOutputFormat | null>(null);
@@ -82,28 +89,103 @@ export default function RecordMeetingPage() {
       .finally(() => setBuildingMinutesPreview(false));
   }, [minutesDraft]);
 
+  // Depends on the stable callback rather than the whole hook object, which
+  // is a fresh literal every render and would re-attach on each one.
+  const attachVisionStream = vision.attachStream;
+  useEffect(() => {
+    void attachVisionStream(relay.displayStream);
+  }, [relay.displayStream, attachVisionStream]);
+
   const documentTypeIdFor = useMemo(() => {
     return (format: MeetingOutputFormat) => documentTypes?.find((t) => t.name === UPLOAD_DOCUMENT_TYPE_NAME[format])?.id;
   }, [documentTypes]);
 
+  const wantsSpeakerDetection = captureMeetingAudio && detectSpeakers;
+
   const handleStart = async () => {
-    const ok = await relay.startMeeting(relay.language, { captureMeetingAudio });
-    if (!ok && relay.error) toast({ title: "Could not start meeting", description: relay.error, variant: "destructive" });
+    const ok = await relay.startMeeting(relay.language, {
+      captureMeetingAudio,
+      detectSpeakers: wantsSpeakerDetection,
+    });
+    if (!ok) {
+      if (relay.error) toast({ title: "Could not start meeting", description: relay.error, variant: "destructive" });
+      return;
+    }
+    if (wantsSpeakerDetection) {
+      vision.reset();
+      // Same clock as the transcript: Deepgram's timestamps are relative to
+      // when audio started flowing, so observations are stamped from here.
+      const started = await vision.start(Date.now());
+      if (!started && vision.error) {
+        toast({ title: "Speaker detection off", description: vision.error, variant: "destructive" });
+      }
+    }
   };
 
   const handleStop = () => {
     relay.stopMeeting();
+    void vision.stop();
   };
 
+  const handleOpenCalibrator = () => {
+    setCalibrationFrame(vision.captureStillFrame());
+    setCalibratorOpen(true);
+  };
+
+  // Names seen on screen are matched to diarized speakers by overlap, with
+  // every observation voting — so a stray OCR misread, or Zoom's highlight
+  // lagging a beat behind who's actually talking, gets outvoted rather than
+  // renaming someone wrongly.
+  const handleApplyDetectedSpeakers = () => {
+    const timeline = vision.buildTimeline();
+    if (timeline.length === 0) {
+      toast({ title: "No speakers detected on screen", variant: "destructive" });
+      return;
+    }
+    const winners = voteSpeakerNames(relay.segments, timeline);
+    if (winners.size === 0) {
+      toast({
+        title: "Couldn't match detected names to speakers",
+        description: "The detected names didn't line up in time with any transcribed speech.",
+        variant: "destructive",
+      });
+      return;
+    }
+    for (const [speakerId, name] of winners) {
+      relay.setSpeakerName(speakerId, name);
+    }
+    toast({ title: `Named ${winners.size} speaker${winners.size === 1 ? "" : "s"} from screen` });
+  };
+
+  // The relay returns a better speaker-vs-time timeline from its batch pass;
+  // this aligns the existing segments against it by overlap. Only who a
+  // segment is attributed to changes — the transcribed text, including any
+  // hand-corrections, is left exactly as it is.
   const handleImproveDiarization = async () => {
     setImproving(true);
     try {
       const result = await relay.improveDiarization();
-      if (!result.ok) {
+      if (!result.ok || !result.utterances) {
         toast({ title: "Couldn't improve speaker labels", description: result.error, variant: "destructive" });
-      } else {
-        toast({ title: "Speaker labels reconciled from the full recording" });
+        return;
       }
+
+      const assignments = reassignSpeakerIds(relay.segments, result.utterances);
+      let changed = 0;
+      relay.setSegments((prev) =>
+        prev.map((segment) => {
+          const next = assignments.get(segment.id);
+          if (next === undefined || next === segment.speakerId) return segment;
+          changed++;
+          return { ...segment, speakerId: next, manualSpeaker: undefined };
+        })
+      );
+
+      toast({
+        title: changed
+          ? `Speaker labels updated (${changed} segment${changed === 1 ? "" : "s"} reassigned)`
+          : "Speaker labels already matched the full recording",
+      });
     } finally {
       setImproving(false);
     }
@@ -405,6 +487,46 @@ export default function RecordMeetingPage() {
             </span>
           </div>
 
+          {captureMeetingAudio && (
+            <div className="flex items-center gap-3 flex-wrap rounded-md border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={detectSpeakers}
+                  disabled={relay.recording}
+                  onChange={(e) => setDetectSpeakers(e.target.checked)}
+                />
+                Name speakers from Zoom's screen
+              </label>
+
+              <Button size="sm" variant="outline" onClick={handleOpenCalibrator} disabled={!relay.displayStream}>
+                <ScanSearch className="h-4 w-4 mr-2" />
+                {vision.region ? "Recalibrate name label" : "Calibrate name label"}
+              </Button>
+
+              {detectSpeakers && !vision.region && (
+                <span className="text-xs text-destructive">Calibrate once before starting.</span>
+              )}
+              {vision.sampling && (
+                <span className="text-xs text-muted-foreground">
+                  Reading screen… {vision.lastRead ? `last seen: ${vision.lastRead}` : "no name yet"} (
+                  {vision.observations.length} samples)
+                </span>
+              )}
+              {!vision.sampling && vision.observations.length > 0 && (
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    Detected: {vision.detectedNames().join(", ") || "none"}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={handleApplyDetectedSpeakers} disabled={!hasContent}>
+                    Apply detected names
+                  </Button>
+                </>
+              )}
+              {vision.error && <span className="text-xs text-destructive">{vision.error}</span>}
+            </div>
+          )}
+
           {relay.error && <p className="text-sm text-destructive">{relay.error}</p>}
 
           <div className="border rounded-md p-4 max-h-[400px] overflow-y-auto">
@@ -540,6 +662,17 @@ export default function RecordMeetingPage() {
           </div>
         </CardContent>
       </Card>
+
+      <NameLabelCalibrator
+        frameDataUrl={calibrationFrame}
+        open={calibratorOpen}
+        onOpenChange={setCalibratorOpen}
+        onConfirm={(region) => {
+          vision.setRegion(region);
+          setCalibratorOpen(false);
+          toast({ title: "Name label region saved" });
+        }}
+      />
     </div>
   );
 }
