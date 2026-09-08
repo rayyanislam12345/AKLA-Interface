@@ -771,8 +771,28 @@ export default function MatterWorkspacePage() {
     }
   };
 
-  if (isLoading || !matter) {
+  if (isLoading) {
     return <p className="text-muted-foreground">Loading…</p>;
+  }
+
+  // Deleted, or never existed — a stale link or a bookmark to something that
+  // has since been removed. Saying so beats sitting on "Loading…" forever.
+  if (!matter) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center p-6">
+        <Card className="max-w-md">
+          <CardContent className="space-y-4 pt-6">
+            <div className="space-y-1">
+              <h2 className="font-semibold">This project isn't available</h2>
+              <p className="text-sm text-muted-foreground">
+                It may have been deleted, or the link may be out of date.
+              </p>
+            </div>
+            <Button onClick={() => navigate("/matters")}>Back to Projects</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   const cycleStage = (stageId: string, current: string) => {

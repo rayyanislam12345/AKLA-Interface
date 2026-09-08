@@ -51,7 +51,11 @@ export function useMatter(matterId: string | undefined) {
           "*, client:clients(id, name), lead_partner:profiles!matters_lead_partner_id_fkey(id, full_name)"
         )
         .eq("id", matterId!)
-        .single();
+        // maybeSingle, not single: a project that has been deleted (or that
+        // this user can't see) is a normal outcome, and single() turns it
+        // into a 406 that React Query then retries three more times. null
+        // lets the page say so instead of spinning.
+        .maybeSingle();
       if (error) throw error;
       return data;
     },
