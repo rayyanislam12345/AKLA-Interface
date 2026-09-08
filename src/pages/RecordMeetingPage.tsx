@@ -8,6 +8,7 @@ import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { buildAklaDocxBlob } from "@/lib/meetingDocx";
 import NameLabelCalibrator from "@/components/meeting/NameLabelCalibrator";
 import { useSpeakerVision } from "@/hooks/useSpeakerVision";
+import { captureFrameFromStream, type NameReadResult } from "@/lib/speakerVision";
 import { reassignSpeakerIds, voteSpeakerNames } from "@/lib/speakerTimeline";
 import SegmentList, {
   parseTranscriptText,
@@ -53,6 +54,8 @@ export default function RecordMeetingPage() {
   const [calibratorOpen, setCalibratorOpen] = useState(false);
   const [calibrationFrame, setCalibrationFrame] = useState<string | null>(null);
   const vision = useSpeakerVision();
+  const [testResult, setTestResult] = useState<(NameReadResult & { error?: string }) | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const [uploadMatterId, setUploadMatterId] = useState<string>("");
   const [uploadingFormat, setUploadingFormat] = useState<MeetingOutputFormat | null>(null);
@@ -102,6 +105,22 @@ export default function RecordMeetingPage() {
 
   const wantsSpeakerDetection = captureMeetingAudio && detectSpeakers;
 
+  // Deepgram's segment timestamps are relative to when audio started
+  // flowing, so screen observations have to be stamped from the same origin —
+  // including when sampling starts partway through, after a mid-meeting
+  // calibration. Stamping from "now" in that case would push every
+  // observation later than the speech it describes and nothing would line up.
+  const meetingStartedAtRef = useRef<number>(0);
+
+  const beginSampling = async () => {
+    vision.reset();
+    const started = await vision.start(meetingStartedAtRef.current || Date.now());
+    if (!started && vision.error) {
+      toast({ title: "Speaker detection off", description: vision.error, variant: "destructive" });
+    }
+    return started;
+  };
+
   const handleStart = async () => {
     const ok = await relay.startMeeting(relay.language, {
       captureMeetingAudio,
@@ -111,14 +130,9 @@ export default function RecordMeetingPage() {
       if (relay.error) toast({ title: "Could not start meeting", description: relay.error, variant: "destructive" });
       return;
     }
+    meetingStartedAtRef.current = Date.now();
     if (wantsSpeakerDetection) {
-      vision.reset();
-      // Same clock as the transcript: Deepgram's timestamps are relative to
-      // when audio started flowing, so observations are stamped from here.
-      const started = await vision.start(Date.now());
-      if (!started && vision.error) {
-        toast({ title: "Speaker detection off", description: vision.error, variant: "destructive" });
-      }
+      await beginSampling();
     }
   };
 
@@ -127,9 +141,41 @@ export default function RecordMeetingPage() {
     void vision.stop();
   };
 
-  const handleOpenCalibrator = () => {
-    setCalibrationFrame(vision.captureStillFrame());
-    setCalibratorOpen(true);
+  // Calibration needs a frame of the shared screen, but before a meeting
+  // starts there isn't one — and requiring a meeting first created a
+  // deadlock, since sampling refuses to start without a calibration. So
+  // outside a meeting this takes a throwaway capture purely to grab one
+  // frame, and releases it immediately.
+  const handleOpenCalibrator = async () => {
+    const live = vision.captureStillFrame();
+    if (live) {
+      setCalibrationFrame(live);
+      setCalibratorOpen(true);
+      return;
+    }
+
+    try {
+      const temp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const frame = await captureFrameFromStream(temp);
+      temp.getTracks().forEach((t) => t.stop());
+      if (!frame) {
+        toast({ title: "Couldn't read that screen", variant: "destructive" });
+        return;
+      }
+      setCalibrationFrame(frame);
+      setCalibratorOpen(true);
+    } catch {
+      toast({ title: "Screen sharing was cancelled", variant: "destructive" });
+    }
+  };
+
+  const handleTestRead = async () => {
+    setTesting(true);
+    try {
+      setTestResult(await vision.testRead());
+    } finally {
+      setTesting(false);
+    }
   };
 
   // Names seen on screen are matched to diarized speakers by overlap, with
@@ -499,9 +545,19 @@ export default function RecordMeetingPage() {
                 Name speakers from Zoom's screen
               </label>
 
-              <Button size="sm" variant="outline" onClick={handleOpenCalibrator} disabled={!relay.displayStream}>
+              <Button size="sm" variant="outline" onClick={handleOpenCalibrator}>
                 <ScanSearch className="h-4 w-4 mr-2" />
                 {vision.region ? "Recalibrate name label" : "Calibrate name label"}
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleTestRead}
+                disabled={!vision.region || testing}
+                title="Read the calibrated region once and show exactly what was seen"
+              >
+                {testing ? "Reading…" : "Test read"}
               </Button>
 
               {detectSpeakers && !vision.region && (
@@ -524,6 +580,36 @@ export default function RecordMeetingPage() {
                 </>
               )}
               {vision.error && <span className="text-xs text-destructive">{vision.error}</span>}
+
+              {testResult && (
+                <div className="w-full flex items-start gap-3 border-t pt-2 mt-1">
+                  {testResult.cropDataUrl && (
+                    <img
+                      src={testResult.cropDataUrl}
+                      alt="What OCR sees"
+                      className="border rounded bg-white max-h-16"
+                    />
+                  )}
+                  <div className="text-xs space-y-0.5">
+                    {testResult.error ? (
+                      <p className="text-destructive">{testResult.error}</p>
+                    ) : testResult.accepted ? (
+                      <p className="text-green-700">
+                        Reading “{testResult.accepted}”
+                        {testResult.confidence !== null && ` (${Math.round(testResult.confidence)}% confidence)`}
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-destructive">{testResult.rejectedBecause ?? "Nothing readable."}</p>
+                        <p className="text-muted-foreground">
+                          Check the box covers only the name, that Zoom is in Speaker View, and that Zoom's “always
+                          show participant name” setting is on.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -670,7 +756,17 @@ export default function RecordMeetingPage() {
         onConfirm={(region) => {
           vision.setRegion(region);
           setCalibratorOpen(false);
-          toast({ title: "Name label region saved" });
+          setTestResult(null);
+          // Calibrating during a meeting used to leave detection stuck off
+          // for the rest of it: sampling had already refused to start for
+          // want of a region, and nothing retried once one existed.
+          if (relay.recording && wantsSpeakerDetection && !vision.sampling) {
+            void beginSampling().then((started) => {
+              toast({ title: started ? "Speaker detection started" : "Name label region saved" });
+            });
+          } else {
+            toast({ title: "Name label region saved" });
+          }
         }}
       />
     </div>

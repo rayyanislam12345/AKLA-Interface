@@ -77,6 +77,29 @@ export function cropRegion(source: HTMLCanvasElement, region: NameLabelRegion): 
 // build, and speaker detection is an opt-in extra that most sessions never
 // touch. A static import would put all of that in the main bundle for every
 // page load in the app.
+// One frame from a stream, for calibrating before a meeting has started.
+// The caller owns the stream and is expected to stop it afterwards.
+export async function captureFrameFromStream(stream: MediaStream): Promise<string | null> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  try {
+    await video.play();
+  } catch {
+    return null;
+  }
+  // A freshly-playing video reports 0x0 for a moment; wait for real
+  // dimensions rather than capturing an empty frame.
+  for (let attempt = 0; attempt < 20 && !video.videoWidth; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const frame = grabFrame(video);
+  video.pause();
+  video.srcObject = null;
+  return frame ? frame.toDataURL("image/png") : null;
+}
+
 export async function createOcrWorker(): Promise<Worker> {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
@@ -99,21 +122,65 @@ export function tidyName(raw: string): string {
     .trim();
 }
 
+export interface NameReadResult {
+  // The exact pixels handed to OCR, so a bad region is visible rather than
+  // guessed at.
+  cropDataUrl: string | null;
+  rawText: string;
+  tidied: string;
+  confidence: number | null;
+  accepted: string | null;
+  rejectedBecause?: string;
+}
+
+const MIN_CONFIDENCE = 55;
+
+// The full picture of one read, including why it was thrown away. Silent
+// rejection is the hard thing to debug here: an empty transcript looks
+// identical whether the region is wrong, the label is hidden, or OCR simply
+// read nothing.
+export async function readNameLabelDetailed(
+  worker: Worker,
+  video: HTMLVideoElement,
+  region: NameLabelRegion,
+  { includeCrop = false }: { includeCrop?: boolean } = {}
+): Promise<NameReadResult> {
+  const empty: NameReadResult = { cropDataUrl: null, rawText: "", tidied: "", confidence: null, accepted: null };
+
+  const frame = grabFrame(video);
+  if (!frame) return { ...empty, rejectedBecause: "No video frame available from the shared screen." };
+  const crop = cropRegion(frame, region);
+  if (!crop) return { ...empty, rejectedBecause: "Could not crop the calibrated region." };
+
+  const cropDataUrl = includeCrop ? crop.toDataURL("image/png") : null;
+  const { data } = await worker.recognize(crop);
+  const rawText = data.text ?? "";
+  const tidied = tidyName(rawText);
+  const confidence = typeof data.confidence === "number" ? data.confidence : null;
+
+  // Two characters is below any real display name and is usually the pill's
+  // rounded border read as punctuation.
+  if (tidied.length < 3) {
+    return { cropDataUrl, rawText, tidied, confidence, accepted: null, rejectedBecause: "No readable text in that region." };
+  }
+  if (confidence !== null && confidence < MIN_CONFIDENCE) {
+    return {
+      cropDataUrl,
+      rawText,
+      tidied,
+      confidence,
+      accepted: null,
+      rejectedBecause: `Read "${tidied}" but confidence was only ${Math.round(confidence)}%.`,
+    };
+  }
+  return { cropDataUrl, rawText, tidied, confidence, accepted: tidied };
+}
+
 export async function readNameLabel(
   worker: Worker,
   video: HTMLVideoElement,
   region: NameLabelRegion
 ): Promise<string | null> {
-  const frame = grabFrame(video);
-  if (!frame) return null;
-  const crop = cropRegion(frame, region);
-  if (!crop) return null;
-
-  const { data } = await worker.recognize(crop);
-  const name = tidyName(data.text ?? "");
-  // A confident read of a plausible name, or nothing. Two characters is
-  // below any real display name and is usually the pill's border.
-  if (name.length < 3) return null;
-  if (typeof data.confidence === "number" && data.confidence < 55) return null;
-  return name;
+  const result = await readNameLabelDetailed(worker, video, region);
+  return result.accepted;
 }

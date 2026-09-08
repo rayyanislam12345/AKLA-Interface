@@ -4,7 +4,9 @@ import {
   createOcrWorker,
   grabFrame,
   readNameLabel,
+  readNameLabelDetailed,
   type NameLabelRegion,
+  type NameReadResult,
   type SpeakerObservation,
 } from "@/lib/speakerVision";
 import { canonicaliseNames, type TimelineEntry } from "@/lib/speakerTimeline";
@@ -166,6 +168,30 @@ export function useSpeakerVision() {
     return [...new Set([...canonical.values()])];
   }, [observations]);
 
+  // Runs a single read right now and reports everything about it, including
+  // the exact crop and why a result was discarded. Without this, a region
+  // that's off by a little looks the same as one that's perfect but the
+  // label happens to be hidden.
+  const testRead = useCallback(async (): Promise<NameReadResult & { error?: string }> => {
+    const blank: NameReadResult = { cropDataUrl: null, rawText: "", tidied: "", confidence: null, accepted: null };
+    if (!region) return { ...blank, error: "Calibrate the name label position first." };
+    if (!videoRef.current) {
+      return { ...blank, error: "No shared screen yet — start the meeting, or calibrate to share one." };
+    }
+
+    // Reuse the running worker mid-meeting; otherwise spin one up just for
+    // this check and dispose of it.
+    const existing = workerRef.current;
+    const worker = existing ?? (await createOcrWorker());
+    try {
+      return await readNameLabelDetailed(worker, videoRef.current, region, { includeCrop: true });
+    } catch (err: unknown) {
+      return { ...blank, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      if (!existing) await worker.terminate();
+    }
+  }, [region]);
+
   const reset = useCallback(() => {
     setObservations([]);
     setLastRead(null);
@@ -185,6 +211,7 @@ export function useSpeakerVision() {
     stop,
     buildTimeline,
     detectedNames,
+    testRead,
     reset,
   };
 }
