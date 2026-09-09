@@ -1,0 +1,19 @@
+{
+  "name": "chat-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The AI Workspace's chat endpoint, moved off Supabase Edge Functions so a long draft can be written in one pass.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^16.4.5",
+    "fflate": "^0.8.3",
+    "mammoth": "^1.6.0",
+    "unpdf": "^0.11.0",
+    "xlsx": "^0.18.5"
+  }
+}
