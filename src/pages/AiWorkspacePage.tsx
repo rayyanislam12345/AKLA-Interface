@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { FileText, Menu, PanelRightOpen, ScanSearch, Sparkles, StickyNote } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import { useMatter } from "@/hooks/useMatters";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { buildRevisePrompt, useDocumentsCitingAct, useLawUpdate } from "@/hooks/useLawUpdates";
@@ -10,6 +13,8 @@ import {
   type ActiveSkill,
   type ChatArtifact,
   type ChatAttachment,
+  type EditTarget,
+  openDocumentForEdit,
   useChatMessages,
   useChatThreads,
   useSendChatMessage,
@@ -59,6 +64,11 @@ function AiWorkspace({ matterId }: { matterId: string }) {
 
   const [openArtifact, setOpenArtifact] = useState<ChatArtifact | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [editPickerOpen, setEditPickerOpen] = useState(false);
+  const [editSkill, setEditSkill] = useState<ActiveSkill | null>(null);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const selectThread = useCallback(
     (threadId: string | null) => {
@@ -67,9 +77,31 @@ function AiWorkspace({ matterId }: { matterId: string }) {
       setSearchParams(params);
       setOpenArtifact(null);
       setSidebarOpen(false);
+      setEditSkill(null);
     },
     [setSearchParams],
   );
+
+  // Edit mode: open the chosen version in the panel straight away, on a
+  // thread of its own, with the Edit skill in force for what gets typed next.
+  const handleEditDocument = async (target: EditTarget) => {
+    try {
+      const { threadId, artifact } = await openDocumentForEdit(matterId, target, user?.id);
+      setEditSkill({
+        key: "edit",
+        documentVersionId: target.versionId,
+        matterDocumentId: target.matterDocumentId,
+        documentTypeId: target.documentTypeId ?? undefined,
+        label: `Edit · ${target.title} v${target.versionNumber}`,
+      });
+      setSearchParams(new URLSearchParams({ chat: threadId }));
+      setOpenArtifact(artifact);
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-artifacts", threadId] });
+    } catch (err: any) {
+      toast({ title: "Couldn't open that document", description: err.message, variant: "destructive" });
+    }
+  };
 
   const chat = useSendChatMessage(
     (threadId) => {
@@ -137,6 +169,18 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   }, [lawUpdate, seedDoc?.title]);
 
   const activeThread = threads?.find((t) => t.id === activeThreadId);
+  // A reopened edit thread (reload, or picked from the sidebar) keeps its
+  // Edit skill in force — the thread row remembers which version it is on.
+  const threadEditSkill = useMemo<ActiveSkill | null>(() => {
+    const sk = activeThread?.skill as any;
+    if (sk?.key !== "edit" || !sk.documentVersionId) return null;
+    return {
+      key: "edit",
+      documentVersionId: sk.documentVersionId,
+      matterDocumentId: sk.matterDocumentId,
+      label: (activeThread?.title ?? "Edit").replace(/^Edit: /, "Edit · "),
+    };
+  }, [activeThread]);
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
 
   const handleSend = async (input: { message: string; attachments: ChatAttachment[]; skill: ActiveSkill | null }) => {
@@ -165,11 +209,13 @@ function AiWorkspace({ matterId }: { matterId: string }) {
         <SuggestionChip Icon={Sparkles} label="Draft a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "draft" }), { replace: true })} />
         <SuggestionChip Icon={ScanSearch} label="Verify a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "verify" }), { replace: true })} />
         <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
+        <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => setEditPickerOpen(true)} />
       </div>
     </div>
   );
 
   const seedSkillWithSummarise = mode === "summarise" ? ({ key: "summarise", label: "Summarise" } as ActiveSkill) : seedSkill;
+  const composerSkill = editSkill ?? threadEditSkill ?? seedSkillWithSummarise;
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] overflow-hidden md:-m-6" data-testid="ai-workspace">
@@ -211,6 +257,8 @@ function AiWorkspace({ matterId }: { matterId: string }) {
               activeArtifactId={openArtifact?.id ?? null}
               onOpenArtifact={setOpenArtifact}
               empty={emptyState}
+              resumingMessageId={chat.resumingMessageId}
+              onResume={(m) => activeThreadId && chat.resume({ matterId, threadId: activeThreadId, message: m })}
             />
 
             <Composer
@@ -218,10 +266,13 @@ function AiWorkspace({ matterId }: { matterId: string }) {
               matterId={matterId}
               sending={chat.sending}
               initialText={seedText}
-              initialSkill={seedSkillWithSummarise}
+              initialSkill={composerSkill}
               initialAttachments={seedAttachments}
               onSend={handleSend}
               onStop={chat.stop}
+              onEditDocument={handleEditDocument}
+              editPickerOpen={editPickerOpen}
+              onEditPickerOpenChange={setEditPickerOpen}
             />
           </div>
         </ResizablePanel>

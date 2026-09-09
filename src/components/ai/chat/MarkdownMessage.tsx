@@ -10,6 +10,9 @@ interface MarkdownMessageProps {
   onOpenArtifact: (artifact: ChatArtifact) => void;
   activeArtifactId?: string | null;
   className?: string;
+  // True only for the reply currently streaming. A stored partial with an
+  // open artifact tag is "cut short", not "being written".
+  inProgress?: boolean;
 }
 
 const ARTIFACT_MARKER = /\[\[artifact:([0-9a-f-]{36})\]\]/g;
@@ -28,7 +31,7 @@ export function artifactIcon(kind: string) {
 // document the model produced shown as a clickable card (the chat function
 // stores those as [[artifact:id]] markers where the block was) rather than
 // inline in the bubble.
-export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className }: MarkdownMessageProps) {
+export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false }: MarkdownMessageProps) {
   const writingDocument = UNTERMINATED_ARTIFACT.test(content);
   const visible = writingDocument ? content.replace(UNTERMINATED_ARTIFACT, "") : content;
 
@@ -59,7 +62,8 @@ export default function MarkdownMessage({ content, artifacts, onOpenArtifact, ac
       )}
       {writingDocument && (
         <div className="flex max-w-md items-center gap-2 rounded-xl border bg-background px-3 py-2.5 text-sm text-muted-foreground">
-          <FileText className="h-4 w-4 animate-pulse" /> Writing document…
+          <FileText className={inProgress ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
+          {inProgress ? "Writing document…" : "Document cut short — not finished yet"}
         </div>
       )}
     </div>
@@ -79,8 +83,10 @@ export function ArtifactCard({
     return <div className="text-xs text-muted-foreground italic">(document no longer available)</div>;
   }
   const Icon = artifactIcon(artifact.kind);
-  const subtitle =
-    artifact.kind === "review"
+  const edit = (artifact.data as any)?.editSource;
+  const subtitle = edit
+    ? `${(artifact.data as any)?.original ? "Original" : "Edited"} · ${edit.title} v${edit.versionNumber}`
+    : artifact.kind === "review"
       ? `Review · ${(artifact.data as any)?.suggestionCount ?? 0} suggestion(s)`
       : artifact.kind === "memo"
         ? "Memo"

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, FolderOpen, Loader2, Paperclip, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
+import { ArrowUp, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { type ActiveSkill, type ChatAttachment, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
+import { type ActiveSkill, type ChatAttachment, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
 import { UPLOAD_ACCEPT } from "@/components/ai/DocumentUploadCard";
 import AddFromMatterDialog from "@/components/ai/chat/AddFromMatterDialog";
+import EditDocumentDialog from "@/components/ai/chat/EditDocumentDialog";
 import SkillsDialog from "@/components/ai/chat/SkillsDialog";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -32,6 +33,11 @@ interface ComposerProps {
   onSend: (input: { message: string; attachments: ChatAttachment[]; skill: ActiveSkill | null }) => Promise<void> | void;
   onStop: () => void;
   onSkillChange?: (skill: ActiveSkill | null) => void;
+  // Edit mode is set up by the page (it opens the document in the panel and
+  // starts the thread), so the picker is controlled from there too.
+  onEditDocument?: (target: EditTarget) => void;
+  editPickerOpen?: boolean;
+  onEditPickerOpenChange?: (open: boolean) => void;
 }
 
 type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string };
@@ -55,6 +61,9 @@ export default function Composer({
   onSend,
   onStop,
   onSkillChange,
+  onEditDocument,
+  editPickerOpen = false,
+  onEditPickerOpenChange,
 }: ComposerProps) {
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
@@ -165,7 +174,14 @@ export default function Composer({
     }
   };
 
-  const SkillIcon = skill ? (BUILT_IN.find((b) => b.key === skill.key)?.Icon ?? Wand2) : Wand2;
+  const SkillIcon = skill
+    ? skill.key === "edit" ? PencilLine : (BUILT_IN.find((b) => b.key === skill.key)?.Icon ?? Wand2)
+    : Wand2;
+  const openEditPicker = () => {
+    setSlashOpen(false);
+    setText((t) => (t.startsWith("/") ? "" : t));
+    onEditPickerOpenChange?.(true);
+  };
 
   return (
     <div className="px-4 pb-4 pt-2 md:px-8">
@@ -244,7 +260,9 @@ export default function Composer({
                     ? "Describe the deal, or just say \"draft it\"…"
                     : skill?.key === "verify"
                       ? "Attach a project document and press send to review it…"
-                      : "Ask about this project, or type / for skills…"
+                      : skill?.key === "edit"
+                        ? "Describe the changes — e.g. \"tighten clause 7 and take the definitions from v2 of the shareholders agreement\"…"
+                        : "Ask about this project, or type / for skills…"
                 }
                 className="max-h-60 min-h-[44px] w-full resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
                 data-testid="composer-input"
@@ -266,6 +284,13 @@ export default function Composer({
                       </div>
                     </CommandItem>
                   ))}
+                  <CommandItem value="Edit" onSelect={openEditPicker}>
+                    <PencilLine className="mr-2 h-4 w-4" />
+                    <div>
+                      <div className="text-sm">Edit</div>
+                      <div className="text-xs text-muted-foreground">Edit a chosen version of a project document</div>
+                    </div>
+                  </CommandItem>
                 </CommandGroup>
                 {!!customSkills?.length && (
                   <CommandGroup heading="Firm skills">
@@ -323,6 +348,9 @@ export default function Composer({
                 <DropdownMenuItem onClick={() => applySkill({ key: "summarise", label: "Summarise" })}>
                   <StickyNote className="mr-2 h-4 w-4" />Summarise
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={openEditPicker}>
+                  <PencilLine className="mr-2 h-4 w-4" />Edit a document
+                </DropdownMenuItem>
                 {!!customSkills?.length && (
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger><Wand2 className="mr-2 h-4 w-4" />Firm skills</DropdownMenuSubTrigger>
@@ -375,6 +403,12 @@ export default function Composer({
         onPick={(a) => setAttachments((prev) => (prev.some((p) => p.path === a.path) ? prev : [...prev, a]))}
       />
       <SkillsDialog open={skillsDialogOpen} onOpenChange={setSkillsDialogOpen} />
+      <EditDocumentDialog
+        matterId={matterId}
+        open={editPickerOpen}
+        onOpenChange={(o) => onEditPickerOpenChange?.(o)}
+        onPick={(target) => onEditDocument?.(target)}
+      />
     </div>
   );
 }

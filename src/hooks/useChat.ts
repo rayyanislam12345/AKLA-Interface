@@ -26,11 +26,14 @@ export interface ChatAttachment {
   chars?: number;
 }
 
-export type SkillKey = "draft" | "verify" | "summarise" | "custom";
+export type SkillKey = "draft" | "verify" | "summarise" | "edit" | "custom";
 export interface ActiveSkill {
   key: SkillKey;
   documentTypeId?: string;
   customSkillId?: string;
+  // edit: the exact version being worked on
+  documentVersionId?: string;
+  matterDocumentId?: string;
   // Display-only, not sent: what the chip shows.
   label: string;
 }
@@ -48,7 +51,10 @@ export interface MessageMetadata {
   attachments?: ChatAttachment[];
   sources?: ChatSource[];
   artifacts?: string[];
-  skill?: { key: SkillKey; documentTypeId?: string; customSkillId?: string } | null;
+  skill?: { key: SkillKey; documentTypeId?: string; customSkillId?: string; documentVersionId?: string; matterDocumentId?: string } | null;
+  // The chat function saved this reply before it was finished (it ran out
+  // of wall clock) and expects to be asked for the rest.
+  incomplete?: boolean;
 }
 
 export function messageMetadata(m: ChatMessage): MessageMetadata {
@@ -206,6 +212,73 @@ export async function uploadChatFile(matterId: string, file: File): Promise<Chat
   return { bucket: "ai-chat-files", path, name: file.name, size: file.size, type: file.type };
 }
 
+// ------------------------------------------------------------------ edit
+
+export interface EditTarget {
+  matterDocumentId: string;
+  documentTypeId: string | null;
+  title: string;
+  versionId: string;
+  versionNumber: number;
+  fileName: string;
+  storagePath: string;
+}
+
+// Opens one specific version of a project document for editing. The text is
+// extracted server-side, a thread is started for the edit, and the document
+// as it stands becomes that thread's first artifact — so the panel can show
+// it the moment the associate picks it, before a word has been typed. Every
+// AI edit that follows is saved as a further artifact with the same
+// editSource, which is what "Save as new version" uses to version the right
+// document.
+export async function openDocumentForEdit(
+  matterId: string,
+  target: EditTarget,
+  userId: string | undefined,
+): Promise<{ threadId: string; artifact: ChatArtifact }> {
+  const { data: extracted, error: extractError } = await supabase.functions.invoke("extract-document-text", {
+    body: { bucket: "matter-documents", storagePath: target.storagePath, fileName: target.fileName },
+  });
+  if (extractError) throw extractError;
+  const text = String(extracted?.text ?? "");
+  if (!text.trim()) throw new Error("No text could be read from that file");
+
+  const editSource = {
+    matterDocumentId: target.matterDocumentId,
+    documentVersionId: target.versionId,
+    versionNumber: target.versionNumber,
+    title: target.title,
+    fileName: target.fileName,
+  };
+  const { data: thread, error: threadError } = await supabase
+    .from("ai_chat_threads")
+    .insert({
+      matter_id: matterId,
+      title: `Edit: ${target.title} (v${target.versionNumber})`,
+      created_by: userId,
+      skill: { key: "edit", documentVersionId: target.versionId, matterDocumentId: target.matterDocumentId },
+    })
+    .select("*")
+    .single();
+  if (threadError || !thread) throw threadError ?? new Error("Could not start the edit");
+
+  const { data: artifact, error: artifactError } = await supabase
+    .from("ai_artifacts")
+    .insert({
+      thread_id: thread.id,
+      matter_id: matterId,
+      kind: "draft",
+      title: `${target.title} (v${target.versionNumber})`,
+      content: text,
+      data: { editSource, original: true, ...(target.documentTypeId ? { documentTypeId: target.documentTypeId } : {}) },
+      created_by: userId,
+    })
+    .select("*")
+    .single();
+  if (artifactError || !artifact) throw artifactError ?? new Error("Could not open the document");
+  return { threadId: thread.id, artifact };
+}
+
 // -------------------------------------------------------------- streaming
 
 export interface StreamingState {
@@ -244,6 +317,10 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const { session } = useAuth();
   const [stream, setStream] = useState<StreamingState>(EMPTY_STREAM);
   const [pending, setPending] = useState<{ content: string; attachments: ChatAttachment[] } | null>(null);
+  // Set while a half-written reply is being picked up again, so the list can
+  // show it as one growing message rather than the stored partial plus a
+  // second bubble underneath.
+  const [resumingMessageId, setResumingMessageId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -339,6 +416,66 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
     [session, queryClient, onThreadCreated, onArtifact],
   );
 
+  // Keeps asking for the rest of a reply until it is genuinely finished. The
+  // text keeps streaming into the same bubble, so this is invisible apart
+  // from a short pause between rounds.
+  const continueUntilDone = useCallback(
+    async (
+      matterId: string,
+      threadId: string,
+      first: { assistantMessageId: string | null; incomplete: boolean; generatedChars: number },
+      skillPayload: Record<string, unknown> | null,
+      signal: AbortSignal,
+    ) => {
+      let round = first;
+      let rounds = 0;
+      while (round.incomplete && round.assistantMessageId && rounds < MAX_CONTINUATION_ROUNDS) {
+        rounds++;
+        round = await runRound(
+          matterId,
+          { matterId, threadId, message: "", attachments: [], skill: skillPayload, continueMessageId: round.assistantMessageId },
+          signal,
+          false,
+        );
+        // A round that wrote nothing will not write anything next time
+        // either — stop rather than burn the whole round budget.
+        if (round.incomplete && round.generatedChars === 0) break;
+      }
+      if (round.incomplete) {
+        setStream((s) => ({
+          ...s,
+          notices: [...s.notices, "This is running unusually long, so it stops here. Press Continue writing to carry on."],
+        }));
+      }
+      return round;
+    },
+    [runRound],
+  );
+
+  const finishTurn = useCallback(
+    async (matterId: string, threadId: string | null) => {
+      const wasStopped = abortRef.current?.signal.aborted ?? false;
+      abortRef.current = null;
+      const refetch = () => {
+        if (!threadId) return Promise.resolve();
+        return Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["chat-messages", threadId] }),
+          queryClient.invalidateQueries({ queryKey: ["chat-artifacts", threadId] }),
+        ]);
+      };
+      await refetch();
+      // After Stop the function is still saving what was written when the
+      // connection closed — this first refetch usually lands before that row
+      // exists. Look again once it has had a moment.
+      if (wasStopped) setTimeout(refetch, 2500);
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+      setPending(null);
+      setResumingMessageId(null);
+      setStream((s) => (s.error ? { ...s, text: "" } : EMPTY_STREAM));
+    },
+    [queryClient],
+  );
+
   const send = useCallback(
     async ({ matterId, threadId, message, attachments, skill }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
@@ -348,7 +485,13 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       setStream({ ...EMPTY_STREAM, threadId });
 
       const skillPayload = skill
-        ? { key: skill.key, documentTypeId: skill.documentTypeId, customSkillId: skill.customSkillId }
+        ? {
+            key: skill.key,
+            documentTypeId: skill.documentTypeId,
+            customSkillId: skill.customSkillId,
+            documentVersionId: skill.documentVersionId,
+            matterDocumentId: skill.matterDocumentId,
+          }
         : null;
       let resolvedThreadId = threadId;
       try {
@@ -360,56 +503,54 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         );
         resolvedThreadId = round.threadId ?? resolvedThreadId;
 
-        // The reply is only half-written because the function ran out of wall
-        // clock. Go straight back for the rest — the text keeps streaming into
-        // the same bubble, so this is invisible apart from a short pause.
-        let rounds = 0;
-        while (round.incomplete && round.assistantMessageId && rounds < MAX_CONTINUATION_ROUNDS) {
-          rounds++;
-          round = await runRound(
-            matterId,
-            {
-              matterId,
-              threadId: resolvedThreadId,
-              message: "",
-              attachments: [],
-              skill: skillPayload,
-              continueMessageId: round.assistantMessageId,
-            },
-            controller.signal,
-            false,
-          );
-          // A round that wrote nothing will not write anything next time
-          // either — stop rather than burn the whole round budget.
-          if (round.incomplete && round.generatedChars === 0) break;
-        }
-        if (round.incomplete) {
-          setStream((s) => ({
-            ...s,
-            notices: [...s.notices, "This is running unusually long, so it stops here. Ask to carry on from the last clause."],
-          }));
+        if (resolvedThreadId) {
+          await continueUntilDone(matterId, resolvedThreadId, round, skillPayload, controller.signal);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setStream((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
         }
       } finally {
-        abortRef.current = null;
-        if (resolvedThreadId) {
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ["chat-messages", resolvedThreadId] }),
-            queryClient.invalidateQueries({ queryKey: ["chat-artifacts", resolvedThreadId] }),
-          ]);
-        }
-        queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
-        setPending(null);
-        setStream((s) => (s.error ? { ...s, text: "" } : EMPTY_STREAM));
+        await finishTurn(matterId, resolvedThreadId);
       }
     },
-    [session, queryClient, runRound],
+    [session, runRound, continueUntilDone, finishTurn],
+  );
+
+  // Picks up a reply that was left half-written — the tab was closed, the
+  // old client never asked for round two, or the round budget ran out — from
+  // exactly where it stopped. The stored partial is what the model resumes
+  // from, so nothing already written is regenerated.
+  const resume = useCallback(
+    async ({ matterId, threadId, message }: { matterId: string; threadId: string; message: ChatMessage }) => {
+      if (!session?.access_token) throw new Error("Not signed in");
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const meta = messageMetadata(message);
+      const skillPayload = meta.skill ?? null;
+      setResumingMessageId(message.id);
+      setPending({ content: "", attachments: [] });
+      setStream({ ...EMPTY_STREAM, threadId, text: message.content });
+      try {
+        await continueUntilDone(
+          matterId,
+          threadId,
+          { assistantMessageId: message.id, incomplete: true, generatedChars: 1 },
+          skillPayload,
+          controller.signal,
+        );
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setStream((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+        }
+      } finally {
+        await finishTurn(matterId, threadId);
+      }
+    },
+    [session, continueUntilDone, finishTurn],
   );
 
   const clearError = useCallback(() => setStream(EMPTY_STREAM), []);
 
-  return { send, stop, stream, pending, sending: pending !== null, clearError };
+  return { send, resume, stop, stream, pending, sending: pending !== null, resumingMessageId, clearError };
 }

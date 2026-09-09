@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronDown, ChevronRight, FileText, Landmark, Paperclip, Scale } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, FileText, Landmark, Paperclip, Play, Scale } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import MarkdownMessage from "@/components/ai/chat/MarkdownMessage";
 import { messageMetadata, type ChatArtifact, type ChatAttachment, type ChatMessage, type ChatSource, type StreamingState } from "@/hooks/useChat";
 import { cn } from "@/lib/utils";
@@ -12,13 +13,16 @@ interface MessageListProps {
   activeArtifactId: string | null;
   onOpenArtifact: (artifact: ChatArtifact) => void;
   empty?: React.ReactNode;
+  // A reply left half-written can be picked up again from where it stopped.
+  onResume?: (message: ChatMessage) => void;
+  resumingMessageId?: string | null;
 }
 
 // The scrolling transcript — persisted messages, then (while a turn is in
 // flight) the lawyer's just-sent message and the assistant's reply as it
 // streams. Layout mirrors claude.ai: user turns as a bubble on the right,
 // assistant turns full-width with no bubble.
-export default function MessageList({ messages, artifacts, stream, pending, activeArtifactId, onOpenArtifact, empty }: MessageListProps) {
+export default function MessageList({ messages, artifacts, stream, pending, activeArtifactId, onOpenArtifact, empty, onResume, resumingMessageId }: MessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -45,9 +49,20 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
     <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 md:px-8" data-testid="message-list">
       <div className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
         {showEmpty && empty}
-        {messages.map((m) => (
-          <MessageRow key={m.id} message={m} artifacts={artifacts} activeArtifactId={activeArtifactId} onOpenArtifact={onOpenArtifact} />
-        ))}
+        {messages
+          // While it is being resumed the partial is shown as the streaming
+          // reply instead, so it grows in place rather than appearing twice.
+          .filter((m) => m.id !== resumingMessageId)
+          .map((m) => (
+            <MessageRow
+              key={m.id}
+              message={m}
+              artifacts={artifacts}
+              activeArtifactId={activeArtifactId}
+              onOpenArtifact={onOpenArtifact}
+              onResume={!pending && onResume ? onResume : undefined}
+            />
+          ))}
         {showPendingBubble && (
           <UserBubble content={pending!.content} attachments={pending!.attachments} />
         )}
@@ -61,6 +76,7 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
                 content={stream.text.replace(/<artifact[\s\S]*$/, "")}
                 artifacts={artifacts}
                 onOpenArtifact={onOpenArtifact}
+                inProgress
               />
             ) : (
               <ThinkingDots />
@@ -93,11 +109,13 @@ function MessageRow({
   artifacts,
   activeArtifactId,
   onOpenArtifact,
+  onResume,
 }: {
   message: ChatMessage;
   artifacts: Map<string, ChatArtifact>;
   activeArtifactId: string | null;
   onOpenArtifact: (artifact: ChatArtifact) => void;
+  onResume?: (message: ChatMessage) => void;
 }) {
   const meta = messageMetadata(message);
   if (message.role === "user") {
@@ -107,6 +125,15 @@ function MessageRow({
     <div className="min-w-0" data-testid="assistant-message">
       <MarkdownMessage content={message.content} artifacts={artifacts} onOpenArtifact={onOpenArtifact} activeArtifactId={activeArtifactId} />
       {!!meta.sources?.length && <SourcesFootnote sources={meta.sources} />}
+      {meta.incomplete && onResume && (
+        <div className="mt-3 flex items-center gap-3">
+          <Button size="sm" variant="secondary" onClick={() => onResume(message)} data-testid="resume-reply">
+            <Play className="mr-2 h-3.5 w-3.5" />
+            Continue writing
+          </Button>
+          <span className="text-xs text-muted-foreground">This reply stopped before it was finished.</span>
+        </div>
+      )}
     </div>
   );
 }

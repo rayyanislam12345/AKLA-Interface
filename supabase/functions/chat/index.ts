@@ -71,10 +71,33 @@ interface Attachment {
 }
 
 interface Skill {
-  key: "draft" | "verify" | "summarise" | "custom";
+  key: "draft" | "verify" | "summarise" | "edit" | "custom";
   documentTypeId?: string;
   customSkillId?: string;
+  // edit: the exact version being worked on
+  documentVersionId?: string;
+  matterDocumentId?: string;
 }
+
+interface ProjectVersion {
+  id: string;
+  version_number: number;
+  file_name: string;
+  storage_path: string;
+}
+interface ProjectDocument {
+  id: string;
+  title: string;
+  document_type_id: string | null;
+  document_type: { name: string } | null;
+  versions: ProjectVersion[];
+}
+
+// The whole of the document being edited goes into the prompt; this is the
+// ceiling before the tail is dropped, well above any agreement the firm has.
+const MAX_EDIT_CHARS = 150_000;
+// How many project documents a single message may pull in by name.
+const MAX_REFERENCED_DOCS = 3;
 
 type Scope = "matter" | "precedent" | "statute";
 interface Match {
@@ -131,6 +154,82 @@ function continueInstruction(partial: string): string {
   ].join("\n");
 }
 
+// Words that carry no identity on their own. "agreement" is deliberately NOT
+// here: alone it identifies nothing, but paired — "services agreement",
+// "concession agreement" — it is exactly how lawyers name a file, and the
+// two-word threshold below is what stops it matching on its own.
+const REFERENCE_STOPWORDS = new Set([
+  "the", "of", "and", "for", "to", "a", "an", "on", "in", "with", "by", "re", "draft", "final", "clean",
+  "version", "doc", "copy", "execution", "signed", "revised", "updated", "latest", "current",
+]);
+
+function normaliseWords(text: string): string[] {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+}
+
+// Which of the project's documents a message is talking about. Associates
+// refer to files the way they speak — "the concession agreement", "v2 of the
+// shareholders agreement", "the EPA" — and the vector search cannot be relied
+// on to surface the right file, let alone the whole of it. So a mention is
+// resolved here and the version's full text is attached for the turn, exactly
+// as if the lawyer had dragged the file in.
+//
+// Matching, most to least certain: the whole title or filename stem appears
+// in the message; enough of the title's distinctive words do; or the message
+// names a document type of which the project has exactly one. "v2" /
+// "version 2" in the message picks that version, otherwise the latest.
+function resolveReferences(message: string, docs: ProjectDocument[], excludeDocId?: string): Array<{ doc: ProjectDocument; version: ProjectVersion }> {
+  const msgWords = normaliseWords(message);
+  const msgSet = new Set(msgWords);
+  const msgNorm = ` ${msgWords.join(" ")} `;
+  const versionAsk = /\b(?:v|version\s*)(\d{1,3})\b/i.exec(message);
+  const pickVersion = (doc: ProjectDocument) => {
+    const sorted = [...doc.versions].sort((a, b) => b.version_number - a.version_number);
+    if (versionAsk) {
+      const want = sorted.find((v) => v.version_number === Number(versionAsk[1]));
+      if (want) return want;
+    }
+    return sorted[0];
+  };
+
+  // Scored, not boolean: an exact title or filename is certain; otherwise it
+  // takes at least two of the title's distinctive words (one if the title has
+  // only one). Titles here run long — "Services Agreement — M6 Motorway
+  // Independent Engineering Review (Execution Version)" — so demanding most
+  // of the title's words would miss the way anyone actually refers to it.
+  // Where several documents match, the strongest matches win the slots.
+  const scored: Array<{ doc: ProjectDocument; version: ProjectVersion; score: number }> = [];
+  for (const doc of docs) {
+    if (!doc.versions?.length || doc.id === excludeDocId) continue;
+    const titleNorm = normaliseWords(doc.title).join(" ");
+    const stem = normaliseWords((doc.versions[0].file_name ?? "").replace(/\.[a-z0-9]+$/i, "")).join(" ");
+    if ((titleNorm.length >= 4 && msgNorm.includes(` ${titleNorm} `)) || (stem.length >= 10 && msgNorm.includes(` ${stem} `))) {
+      scored.push({ doc, version: pickVersion(doc), score: 1000 });
+      continue;
+    }
+    const distinctive = [...new Set(normaliseWords(doc.title).filter((w) => w.length >= 3 && !REFERENCE_STOPWORDS.has(w)))];
+    if (!distinctive.length) continue;
+    const matched = distinctive.filter((w) => msgSet.has(w)).length;
+    if (matched >= Math.min(2, distinctive.length)) scored.push({ doc, version: pickVersion(doc), score: matched });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const hits: Array<{ doc: ProjectDocument; version: ProjectVersion }> = scored.map(({ doc, version }) => ({ doc, version }));
+
+  if (!hits.length) {
+    const byType = new Map<string, ProjectDocument[]>();
+    for (const doc of docs) {
+      const t = doc.document_type?.name;
+      if (t && doc.versions?.length && doc.id !== excludeDocId) byType.set(t, [...(byType.get(t) ?? []), doc]);
+    }
+    for (const [typeName, list] of byType) {
+      if (list.length === 1 && msgNorm.includes(` ${normaliseWords(typeName).join(" ")} `)) {
+        hits.push({ doc: list[0], version: pickVersion(list[0]) });
+      }
+    }
+  }
+  return hits.slice(0, MAX_REFERENCED_DOCS);
+}
+
 function sse(controller: ReadableStreamDefaultController<Uint8Array>, encoder: TextEncoder, event: string, data: unknown) {
   controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
 }
@@ -139,6 +238,7 @@ function deriveTitle(message: string, skill: Skill | null, documentTypeName: str
   if (skill?.key === "draft" && documentTypeName) return `Draft: ${documentTypeName}`;
   if (skill?.key === "verify") return "Review";
   if (skill?.key === "summarise") return "Summary";
+  if (skill?.key === "edit") return "Edit";
   const firstLine = message.trim().split("\n")[0].replace(/\s+/g, " ");
   return firstLine.length > 60 ? firstLine.slice(0, 57).trimEnd() + "…" : firstLine || "New chat";
 }
@@ -163,12 +263,18 @@ async function anthropicStreamOnce(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<{ text: string; stopReason: string | null; aborted: boolean }> {
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, stream: true }),
-    signal,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, stream: true }),
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted || (err as Error)?.name === "AbortError") return { text: "", stopReason: null, aborted: true };
+    throw err;
+  }
   if (!resp.ok || !resp.body) throw new Error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
 
   const reader = resp.body.getReader();
@@ -229,13 +335,14 @@ async function anthropicComplete(
   apiKey: string,
   body: Record<string, unknown>,
   onDelta: (text: string) => void,
-  opts: { initialText?: string; deadlineAt: number; maxContinuations?: number },
-): Promise<{ text: string; generated: string; incomplete: boolean }> {
-  const { initialText = "", deadlineAt, maxContinuations = MAX_CONTINUATIONS } = opts;
+  opts: { initialText?: string; deadlineAt: number; maxContinuations?: number; clientSignal?: AbortSignal },
+): Promise<{ text: string; generated: string; incomplete: boolean; stoppedByClient: boolean }> {
+  const { initialText = "", deadlineAt, maxContinuations = MAX_CONTINUATIONS, clientSignal } = opts;
   const baseMessages = (body.messages ?? []) as Array<{ role: string; content: string }>;
   let accumulated = initialText;
   let generated = "";
   let incomplete = false;
+  let stoppedByClient = false;
 
   for (let attempt = 0; attempt <= maxContinuations; attempt++) {
     const remaining = deadlineAt - Date.now();
@@ -258,15 +365,28 @@ async function anthropicComplete(
         ]
       : baseMessages;
 
-    const result = await anthropicStreamOnce(
-      apiKey,
-      { ...body, messages },
-      onDelta,
-      AbortSignal.timeout(remaining),
-    );
+    // One signal for two reasons to stop: the wall-clock budget, and the
+    // lawyer pressing Stop (the browser closes the connection, req.signal
+    // fires). Without the second, Stop only stopped the *display* — the model
+    // kept writing to the end and the whole turn was billed anyway.
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), remaining);
+    const onClientGone = () => stop.abort();
+    clientSignal?.addEventListener("abort", onClientGone, { once: true });
+    let result;
+    try {
+      result = await anthropicStreamOnce(apiKey, { ...body, messages }, onDelta, stop.signal);
+    } finally {
+      clearTimeout(timer);
+      clientSignal?.removeEventListener("abort", onClientGone);
+    }
     accumulated += result.text;
     generated += result.text;
 
+    if (clientSignal?.aborted) {
+      stoppedByClient = true;
+      break;
+    }
     if (result.aborted) {
       incomplete = true;
       break;
@@ -276,7 +396,79 @@ async function anthropicComplete(
     if (attempt === maxContinuations) incomplete = true;
   }
 
-  return { text: accumulated, generated, incomplete };
+  return { text: accumulated, generated, incomplete, stoppedByClient };
+}
+
+// Turns raw model output into a stored reply: every <artifact> block becomes
+// an ai_artifacts row and is replaced in the text by an [[artifact:id]]
+// marker. Used for a finished turn, and to tidy up a partial reply that was
+// never resumed — in both cases an unterminated block is closed rather than
+// lost, so a half-written draft is still a draft the lawyer can open.
+async function persistReply(supabase: any, p: {
+  threadId: string;
+  matterId: string;
+  userId: string;
+  text: string;
+  messageId: string | null;
+  metadata: Record<string, unknown>;
+  artifactData: Record<string, unknown>;
+  defaultTitle: string;
+  send?: (event: string, data: unknown) => void;
+}): Promise<{ assistantMessageId: string | null; content: string }> {
+  const opened = (p.text.match(/<artifact\s/g) ?? []).length;
+  const closed = (p.text.match(/<\/artifact>/g) ?? []).length;
+  const truncated = opened > closed;
+  const modelText = truncated ? `${p.text}\n</artifact>` : p.text;
+
+  const artifactIds: string[] = [];
+  let content = modelText;
+  const re = /<artifact\s+([^>]*)>([\s\S]*?)<\/artifact>/g;
+  let match: RegExpExecArray | null;
+  const replacements: Array<[string, string]> = [];
+  while ((match = re.exec(modelText)) !== null) {
+    const attrs = match[1];
+    const kind = /kind="([^"]+)"/.exec(attrs)?.[1] === "draft" ? "draft" : "memo";
+    const title = /title="([^"]+)"/.exec(attrs)?.[1] ?? (kind === "draft" ? p.defaultTitle : "Memo");
+    const { data: artifact } = await supabase
+      .from("ai_artifacts")
+      .insert({
+        thread_id: p.threadId,
+        matter_id: p.matterId,
+        kind,
+        title,
+        content: match[2].trim(),
+        data: { ...p.artifactData, ...(truncated ? { truncated: true } : {}) },
+        created_by: p.userId,
+      })
+      .select("*")
+      .single();
+    if (artifact) {
+      artifactIds.push(artifact.id);
+      replacements.push([match[0], `[[artifact:${artifact.id}]]`]);
+      p.send?.("artifact", artifact);
+    }
+  }
+  for (const [from, to] of replacements) content = content.replace(from, to);
+  content = content.trim();
+
+  // `incomplete` must not survive — it is what the client loops on.
+  const { incomplete: _wasIncomplete, ...rest } = p.metadata;
+  const metadata = { ...rest, artifacts: artifactIds };
+  let assistantMessageId = p.messageId;
+  if (assistantMessageId) {
+    await supabase.from("ai_chat_messages").update({ content, metadata }).eq("id", assistantMessageId);
+  } else {
+    const { data } = await supabase
+      .from("ai_chat_messages")
+      .insert({ thread_id: p.threadId, role: "assistant", content, metadata })
+      .select("id")
+      .single();
+    assistantMessageId = data?.id ?? null;
+  }
+  if (assistantMessageId && artifactIds.length) {
+    await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", artifactIds);
+  }
+  return { assistantMessageId, content };
 }
 
 serve(async (req) => {
@@ -333,7 +525,7 @@ serve(async (req) => {
   if (userError || !user) return json(401, { error: "Unauthorized" });
 
   // ---- everything the prompt needs about the matter, in parallel ----
-  const [{ data: matter }, { data: parties }, { data: matterContext }, { data: relevantLaws }, documentTypeResult, customSkillResult] =
+  const [{ data: matter }, { data: parties }, { data: matterContext }, { data: relevantLaws }, documentTypeResult, customSkillResult, projectDocsResult] =
     await Promise.all([
       supabase.from("matters").select("id, name, sector, description, client:clients(name)").eq("id", matterId).single(),
       supabase.from("matter_parties").select("name, role").eq("matter_id", matterId),
@@ -345,8 +537,13 @@ serve(async (req) => {
       skill?.key === "custom" && skill.customSkillId
         ? supabase.from("ai_skills").select("name, instructions, produces_document").eq("id", skill.customSkillId).single()
         : Promise.resolve({ data: null }),
+      supabase
+        .from("matter_documents")
+        .select("id, title, document_type_id, document_type:document_types(name), versions:document_versions(id, version_number, file_name, storage_path)")
+        .eq("matter_id", matterId),
     ]);
-  if (!matter) return json(404, { error: "Matter not found" });
+  if (!matter) return json(404, { error: "Project not found" });
+  const projectDocs = ((projectDocsResult as any).data ?? []) as ProjectDocument[];
   const documentType = documentTypeResult.data as { id: string; name: string; category: string; required_fields: unknown } | null;
   const customSkill = customSkillResult.data as { name: string; instructions: string; produces_document: boolean } | null;
 
@@ -397,6 +594,53 @@ serve(async (req) => {
   // twice in the conversation handed to the model.
   const priorMessages = (history ?? []).reverse().filter((m: any) => m.id !== continueMessageId);
 
+  // ---- edit: the document being worked on ----
+  // The base is the newest draft artifact in this thread — the version as
+  // uploaded on the first turn, the latest AI edit on every turn after — so
+  // a conversation refines one document iteratively. A thread with no
+  // artifact yet (opened by URL, say) reads the version from storage.
+  let editBase: { content: string; editSource: Record<string, unknown>; original: boolean; documentTypeId?: string } | null = null;
+  if (skill?.key === "edit") {
+    const { data: latest } = await supabase
+      .from("ai_artifacts")
+      .select("content, data")
+      .eq("thread_id", threadId)
+      .eq("kind", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const d = (latest?.data ?? {}) as any;
+    if (latest?.content && d.editSource) {
+      editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
+    } else if (skill.documentVersionId) {
+      const { data: v } = await supabase
+        .from("document_versions")
+        .select("id, version_number, file_name, storage_path, matter_document:matter_documents(id, title, document_type_id)")
+        .eq("id", skill.documentVersionId)
+        .maybeSingle();
+      if (v) {
+        const { data: blob } = await supabase.storage.from("matter-documents").download(v.storage_path);
+        if (blob) {
+          const { text } = await extractTextFromFile(blob, v.file_name);
+          const md = (v as any).matter_document;
+          editBase = {
+            content: text,
+            original: true,
+            documentTypeId: md?.document_type_id ?? undefined,
+            editSource: {
+              matterDocumentId: md?.id ?? skill.matterDocumentId,
+              documentVersionId: v.id,
+              versionNumber: v.version_number,
+              title: md?.title ?? v.file_name,
+              fileName: v.file_name,
+            },
+          };
+        }
+      }
+    }
+    if (!editBase) return json(400, { error: "Pick a document version to edit first (+ → Edit a document)." });
+  }
+
   const attachments: Attachment[] = (rawAttachments as Attachment[]).map((a) => ({
     bucket: a.bucket,
     path: a.path,
@@ -406,6 +650,20 @@ serve(async (req) => {
     matterDocumentId: a.matterDocumentId,
     versionId: a.versionId,
   }));
+
+  // Documents the message names are attached for this turn — stored on the
+  // message too, so they show as chips and stay in context afterwards.
+  const referenced = isContinuation ? [] : resolveReferences(message, projectDocs, skill?.key === "edit" ? skill.matterDocumentId : undefined);
+  for (const { doc, version } of referenced) {
+    if (attachments.some((a) => a.versionId === version.id || a.path === version.storage_path)) continue;
+    attachments.push({
+      bucket: "matter-documents",
+      path: version.storage_path,
+      name: `${doc.title} (v${version.version_number}) — ${version.file_name}`,
+      matterDocumentId: doc.id,
+      versionId: version.id,
+    });
+  }
 
   let userMessageId: string | null = null;
   if (!isContinuation) {
@@ -431,6 +689,9 @@ serve(async (req) => {
       (async () => {
         try {
           send("meta", { threadId, userMessageId, title: thread!.title, continuing: isContinuation });
+          for (const { doc, version } of referenced) {
+            send("notice", { text: `Reading ${doc.title} (v${version.version_number}) from the project.` });
+          }
 
           // ---- attachments: read them now, remember the text on the message so
           // the document stays in context for the rest of the conversation ----
@@ -476,7 +737,7 @@ serve(async (req) => {
           if (skill?.key === "verify") {
             const target = attachments.find((a) => a.versionId) ?? contextDocs.find((a) => a.versionId);
             if (!target?.versionId) {
-              throw new Error("Attach one of this matter's documents (Add from matter) to review it.");
+              throw new Error("Attach one of this project's documents (Add from project) to review it.");
             }
             const reviewResp = await fetch(`${supabaseUrl}/functions/v1/suggest-redline`, {
               method: "POST",
@@ -609,19 +870,27 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
           // ---- the system prompt ----
           const clientName = (matter as any).client?.name;
           const partiesLine = (parties ?? []).length
-            ? `\nParties on the matter: ${(parties ?? []).map((p: any) => `${p.name} (${p.role})`).join("; ")}.`
+            ? `\nParties on the project: ${(parties ?? []).map((p: any) => `${p.name} (${p.role})`).join("; ")}.`
             : "";
           const contextBlock = matterContext?.content?.trim()
-            ? `\n\nCONTEXT CARRIED FORWARD ON THIS MATTER (curated by the team):\n${matterContext.content.trim()}`
+            ? `\n\nCONTEXT CARRIED FORWARD ON THIS PROJECT (curated by the team):\n${matterContext.content.trim()}`
+            : "";
+          const docsListBlock = projectDocs.length
+            ? `\n\nDOCUMENTS ON THIS PROJECT (only those attached above are readable to you — if the lawyer refers to one that isn't, name it and ask them to attach it rather than guess its contents):\n` +
+              projectDocs.map((d) => {
+                const vs = [...(d.versions ?? [])].sort((a, b) => a.version_number - b.version_number);
+                const type = d.document_type?.name ? ` (${d.document_type.name})` : "";
+                return `- ${d.title}${type}: ${vs.length ? vs.map((v) => `v${v.version_number} ${v.file_name}`).join(", ") : "no file uploaded yet"}`;
+              }).join("\n")
             : "";
           const docsBlock = contextDocs.length
-            ? `\n\nDOCUMENTS THE LAWYER HAS ATTACHED IN THIS CONVERSATION (read in full; treat as this matter's own material):\n` +
+            ? `\n\nDOCUMENTS THE LAWYER HAS ATTACHED IN THIS CONVERSATION (read in full; treat as this project's own material):\n` +
               contextDocs.map((a) => `<document name="${a.name}"${a.chars && a.chars > (a.text?.length ?? 0) ? ` note="truncated to first ${a.text!.length} of ${a.chars} characters"` : ""}>\n${a.text}\n</document>`).join("\n\n")
             : "";
           const label = (d: Match & { scope: Scope }, i: number) => {
             if (d.scope === "statute") return `[Source ${i + 1}] (statute — ${d.metadata?.act_name ?? "unknown Act"})`;
             const fn = d.metadata?.filename ? ` — ${d.metadata.filename}` : "";
-            return `[Source ${i + 1}] (${d.scope === "matter" ? "this matter's document" : "precedent library"}${fn})`;
+            return `[Source ${i + 1}] (${d.scope === "matter" ? "this project's document" : "precedent library"}${fn})`;
           };
           const sourcesBlock = sources.length
             ? `\n\nRETRIEVED FROM THE FIRM'S LIBRARY FOR THIS MESSAGE (cite by number when you rely on one):\n` +
@@ -636,7 +905,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
             const templateBlock = templateHtml?.trim()
               ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentType.name}. Follow its clause structure as the primary basis; the precedent excerpts above are for phrasing and edge cases:\n${templateHtml}`
               : "";
-            skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS MATTER.${reqFields}${templateBlock}
+            skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT.${reqFields}${templateBlock}
 
 How to work: you are conducting a short intake, then drafting. If the conversation does not yet give you the essentials — parties and roles, term, payment or tariff structure, performance security, governing law, dispute resolution, termination, and anything specific to this document type — ask ONE focused question at a time (short, concrete). Stop asking as soon as you have enough for a solid first version, or the moment the lawyer says to draft now / just draft. Then draft the COMPLETE document: proper drafting conventions (defined terms capitalised on first use, recitals, operative clauses, execution block), and a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] wherever a specific commercial term wasn't given rather than an invented figure. This is a first draft for a lawyer to edit, not a final.
 
@@ -645,6 +914,23 @@ ${COMPLETENESS_RULES}
 ${FIRM_MARKDOWN_RULES}
 
 ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="draft"')}`;
+          } else if (skill?.key === "edit" && editBase) {
+            const src = editBase.editSource as any;
+            skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title}" (from v${src.versionNumber}${editBase.original ? ", the version as uploaded" : ", as last edited in this conversation"}).
+
+CURRENT DOCUMENT — everything the lawyer asks for is applied to this text:
+<document>
+${editBase.content.slice(0, MAX_EDIT_CHARS)}
+</document>
+
+How to work: make exactly the changes asked for and leave everything else as it is — same clauses, same order, same defined terms, the same wording wherever you weren't asked to change it. When the lawyer points at another document or version (attached above), lift the clause, wording or formatting from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. Otherwise output the FULL revised document — never a diff, never "unchanged clauses omitted".
+
+${COMPLETENESS_RULES}
+
+${FIRM_MARKDOWN_RULES}
+The current document may carry typed clause numbers in its headings; drop those (numbering is regenerated on export) but keep every heading's text and level exactly.
+
+${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="draft"')} Title the artifact "${src.title}".`;
           } else if (skill?.key === "summarise") {
             skillBlock = `\n\nSKILL IN FORCE — "NOTES ON …" MEMO. Explain the attached (or discussed) document in plain English for a busy lawyer, as a short memo in the firm's house style: a "# Notes On <document>" title, then "## " sections — What it does; The points that matter (short numbered points via "- " list items, each one idea); What to watch. Tight and selective, not an exhaustive clause list. If nothing was attached and nothing was retrieved, say what you need. Finish the memo — never break off part-way or ask whether to carry on.
 
@@ -658,9 +944,9 @@ ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}`;
             skillBlock = `\n\n${ARTIFACT_RULES}`;
           }
 
-          const systemPrompt = `You are the AI assistant inside AKLA Matter Hub, the internal system of Ali Khan Law Associates, a Pakistani corporate, projects and PPP law firm. You are working with a lawyer on the matter "${matter.name}"${clientName ? ` (client: ${clientName})` : ""}${matter.sector ? `, sector: ${matter.sector}` : ""}.${matter.description ? `\nMatter description: ${matter.description}` : ""}${partiesLine}${contextBlock}
+          const systemPrompt = `You are the AI assistant inside AKLA Project Hub, the internal system of Ali Khan Law Associates, a Pakistani corporate, projects and PPP law firm. You are working with a lawyer on the project "${matter.name}"${clientName ? ` (client: ${clientName})` : ""}${matter.sector ? `, sector: ${matter.sector}` : ""}.${matter.description ? `\nProject description: ${matter.description}` : ""}${partiesLine}${contextBlock}${docsListBlock}
 
-You answer the way a careful senior associate would: precise, conservative, and honest about the limits of what the sources show. Ground every legal statement in the retrieved sources or the attached documents and cite them by number (e.g. [Source 2]); distinguish clearly between what THIS matter's documents say, what the firm's precedent shows, and what the law itself provides — and name the Act and section when you rely on a statute. If the sources don't answer the question, say so rather than guessing. Write in Markdown: headings only when they help, short paragraphs, lists for lists, tables for genuinely tabular comparisons.${docsBlock}${sourcesBlock}${skillBlock}`;
+You answer the way a careful senior associate would: precise, conservative, and honest about the limits of what the sources show. Ground every legal statement in the retrieved sources or the attached documents and cite them by number (e.g. [Source 2]); distinguish clearly between what THIS project's documents say, what the firm's precedent shows, and what the law itself provides — and name the Act and section when you rely on a statute. If the sources don't answer the question, say so rather than guessing. Write in Markdown: headings only when they help, short paragraphs, lists for lists, tables for genuinely tabular comparisons.${docsBlock}${sourcesBlock}${skillBlock}`;
 
           const historyTurns = priorMessages.map((m: any) => ({
             role: m.role,
@@ -672,12 +958,31 @@ You answer the way a careful senior associate would: precise, conservative, and 
             ? historyTurns
             : [...historyTurns, { role: "user", content: message || `(attached ${attachments.map((a) => a.name).join(", ")})` }];
 
-          const { text: fullText, generated, incomplete } = await anthropicComplete(
+          const { text: fullText, generated, incomplete, stoppedByClient } = await anthropicComplete(
             anthropicKey,
             { model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages },
             (d) => send("delta", { text: d }),
-            { initialText: resumeMessage?.content ?? "", deadlineAt: startedAt + GENERATION_BUDGET_MS },
+            { initialText: resumeMessage?.content ?? "", deadlineAt: startedAt + GENERATION_BUDGET_MS, clientSignal: req.signal },
           );
+
+          const artifactData: Record<string, unknown> = {
+            ...(documentType ? { documentTypeId: documentType.id, documentTypeName: documentType.name } : {}),
+            ...(editBase
+              ? { editSource: editBase.editSource, ...(!documentType && editBase.documentTypeId ? { documentTypeId: editBase.documentTypeId } : {}) }
+              : {}),
+          };
+          const defaultTitle = editBase ? String((editBase.editSource as any).title) : `Draft: ${documentType?.name ?? "document"}`;
+
+          // The lawyer pressed Stop. Keep what was written as a finished (if
+          // short) reply — no continuation, they asked it to stop.
+          if (stoppedByClient) {
+            await persistReply(supabase, {
+              threadId, matterId, userId: user.id, text: fullText, messageId: resumeMessage?.id ?? null,
+              metadata: { sources: sourceSummaries, skill: skill ?? null, stopped: true }, artifactData, defaultTitle,
+            });
+            controller.close();
+            return;
+          }
 
           // Out of time, not out of document. Save the partial exactly as
           // written — artifact markup and all, so the next invocation resumes
@@ -704,67 +1009,10 @@ You answer the way a careful senior associate would: precise, conservative, and 
             return;
           }
 
-          // ---- artifacts the model produced ----
-          // A document cut off before its closing tag would otherwise match
-          // nothing below — the draft would be lost and the raw "<artifact …>"
-          // tag dumped into the chat. Close it here instead: a draft the
-          // lawyer can open and finish beats no draft at all.
-          const opened = (fullText.match(/<artifact\s/g) ?? []).length;
-          const closed = (fullText.match(/<\/artifact>/g) ?? []).length;
-          const documentTruncated = opened > closed;
-          const modelText = documentTruncated ? `${fullText}\n</artifact>` : fullText;
-
-          const artifactIds: string[] = [];
-          let content = modelText;
-          const re = /<artifact\s+([^>]*)>([\s\S]*?)<\/artifact>/g;
-          let match: RegExpExecArray | null;
-          const replacements: Array<[string, string]> = [];
-          while ((match = re.exec(modelText)) !== null) {
-            const attrs = match[1];
-            const kindAttr = /kind="([^"]+)"/.exec(attrs)?.[1];
-            const kind = kindAttr === "draft" ? "draft" : "memo";
-            const title = /title="([^"]+)"/.exec(attrs)?.[1] ?? (kind === "draft" ? `Draft: ${documentType?.name ?? "document"}` : "Memo");
-            const body = match[2].trim();
-            const { data: artifact } = await supabase
-              .from("ai_artifacts")
-              .insert({
-                thread_id: threadId,
-                matter_id: matterId,
-                kind,
-                title,
-                content: body,
-                data: {
-                  ...(documentType ? { documentTypeId: documentType.id, documentTypeName: documentType.name } : {}),
-                  ...(documentTruncated ? { truncated: true } : {}),
-                },
-                created_by: user.id,
-              })
-              .select("*")
-              .single();
-            if (artifact) {
-              artifactIds.push(artifact.id);
-              replacements.push([match[0], `[[artifact:${artifact.id}]]`]);
-              send("artifact", artifact);
-            }
-          }
-          for (const [from, to] of replacements) content = content.replace(from, to);
-
-          const finalMetadata = { sources: sourceSummaries, artifacts: artifactIds, skill: skill ?? null };
-          let assistantMessageId = resumeMessage?.id ?? null;
-          if (assistantMessageId) {
-            await supabase.from("ai_chat_messages")
-              .update({ content: content.trim(), metadata: finalMetadata })
-              .eq("id", assistantMessageId);
-          } else {
-            const { data } = await supabase.from("ai_chat_messages")
-              .insert({ thread_id: threadId, role: "assistant", content: content.trim(), metadata: finalMetadata })
-              .select("id")
-              .single();
-            assistantMessageId = data?.id ?? null;
-          }
-          if (assistantMessageId && artifactIds.length) {
-            await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", artifactIds);
-          }
+          const { assistantMessageId } = await persistReply(supabase, {
+            threadId, matterId, userId: user.id, text: fullText, messageId: resumeMessage?.id ?? null,
+            metadata: { sources: sourceSummaries, skill: skill ?? null }, artifactData, defaultTitle, send,
+          });
 
           // ---- a real title once there's something to name ----
           if (!isContinuation && (isNewThread || priorMessages.length === 0)) {

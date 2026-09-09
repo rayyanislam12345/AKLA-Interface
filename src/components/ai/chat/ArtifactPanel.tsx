@@ -27,7 +27,7 @@ interface ArtifactPanelProps {
 
 // The right-hand pane — claude.ai's artifact view. A draft or memo opens in
 // an editable rich-text editor with a Word preview, copy, download and
-// "Save to matter"; a review opens the full three-pass ReviewSession for the
+// "Save to project"; a review opens the full three-pass ReviewSession for the
 // document under review.
 export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdate, onClose }: ArtifactPanelProps) {
   const Icon = artifactIcon(artifact.kind);
@@ -35,7 +35,15 @@ export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdat
     <div className="flex h-full min-w-0 flex-col bg-background" data-testid="artifact-panel">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1 truncate text-sm font-medium" title={artifact.title}>{artifact.title}</div>
+        <div className="min-w-0 flex-1 truncate text-sm" title={artifact.title}>
+          <span className="font-medium">{artifact.title}</span>
+          {(artifact.data as any)?.editSource && (
+            <span className="ml-2 text-xs text-muted-foreground">
+              {(artifact.data as any).original ? "as uploaded" : "edited"} · v{(artifact.data as any).editSource.versionNumber} of{" "}
+              {(artifact.data as any).editSource.title}
+            </span>
+          )}
+        </div>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close panel">
           <X className="h-4 w-4" />
         </Button>
@@ -78,6 +86,10 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const [dirty, setDirty] = useState(false);
 
   const initialDocTypeId = (artifact.data as any)?.documentTypeId as string | undefined;
+  // An edit is saved back onto the document it came from, as its next version.
+  const editSource = (artifact.data as any)?.editSource as
+    | { matterDocumentId: string; versionNumber: number; title: string }
+    | undefined;
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(initialDocTypeId);
   const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
 
@@ -160,7 +172,8 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         documentTypeId,
         documentTypeName,
         blob,
-        title: artifact.kind === "draft" ? undefined : artifact.title,
+        title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
+        matterDocumentId: editSource?.matterDocumentId,
       });
       await updateArtifact.mutateAsync({
         id: artifact.id,
@@ -180,7 +193,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const saved = (artifact.data as any)?.savedMatterDocumentId as string | undefined;
   // Set by the chat function when the model ran out of room even after being
   // continued — worth saying loudly, because saving a half-written agreement
-  // to the matter as a version is exactly the mistake this would cause.
+  // to the project as a version is exactly the mistake this would cause.
   const truncated = !!(artifact.data as any)?.truncated;
   // Content is Markdown from the model or HTML after a manual save.
   const editorContent = artifact.content?.trimStart().startsWith("<") ? artifact.content : html;
@@ -227,7 +240,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         </Select>
         <Button size="sm" className="h-8" onClick={handleSaveToMatter} disabled={saving || !documentTypeId} data-testid="save-to-matter">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Save to matter
+          {editSource ? "Save as new version" : "Save to project"}
         </Button>
         {saved && (
           <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
