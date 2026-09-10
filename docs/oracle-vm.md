@@ -53,6 +53,7 @@ Installed and usable: `node v20.20.2`, `npm 10.8.2`, `python3 3.9.25`,
 | `ocr-service` | `127.0.0.1:8090` | gunicorn, `Restart=always` | OCR + docx/pptx extraction the Edge Functions offload to |
 | `transcription-relay` | `0.0.0.0:8091` | node, `Restart=always` | WebSocket relay holding the Deepgram key so the browser never sees it |
 | `law-monitor` | — | `Type=oneshot` + timer | Daily legal-update sweep, 02:00 UTC (07:00 PKT) |
+| `chat-service` | `127.0.0.1:8092` | node, `Restart=always` | The AI Workspace chat endpoint (`chat-service/`), the first user-facing service here — if it is down, the AI Workspace is down |
 
 Also listening: `sshd` on 22, `caddy` on 80/443 (and its admin API on
 `127.0.0.1:2019`), plus Oracle's own `unified-monitoring-agent`, `pmcd`
@@ -70,6 +71,7 @@ localhost and is published through Caddy.
 ```
 aklaocr.duckdns.org   { reverse_proxy 127.0.0.1:8090 }
 aklarelay.duckdns.org { reverse_proxy 127.0.0.1:8091 }
+aklachat.duckdns.org  { reverse_proxy 127.0.0.1:8092 }
 ```
 
 Caddy gets certificates automatically. DNS is DuckDNS pointed at the
@@ -124,9 +126,10 @@ Names currently in use:
 - `/opt/ocr-service/.env` — `OCR_SHARED_SECRET`, `DOMAIN`
 - `/opt/transcription-relay/.env` — `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `PORT`
 - `/opt/law-monitor/.env` — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SESSION_EMAIL`, `SUPABASE_SESSION_PASSWORD`, `ANTHROPIC_API_KEY`
+- `/opt/chat-service/.env` — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `OCR_SERVICE_URL`, `OCR_SERVICE_SECRET` (same value as ocr-service's `OCR_SHARED_SECRET`), `PORT`
 
-`ANTHROPIC_API_KEY` appears twice, so rotating the Anthropic key means
-updating **both** files and restarting both services — plus the Supabase
+`ANTHROPIC_API_KEY` appears three times, so rotating the Anthropic key means
+updating **all three** files and restarting those services — plus the Supabase
 Edge Function secrets, which are separate again.
 
 ## Calling the existing services
@@ -149,8 +152,8 @@ at `/meeting` authenticated with a Supabase JWT.
 
 ## Rules of the road for a second bot
 
-- **Pick an unused port** and check first: `sudo ss -tlnp`. 8090 and 8091
-  are taken.
+- **Pick an unused port** and check first: `sudo ss -tlnp`. 8090, 8091 and
+  8092 are taken.
 - **Don't restart services you don't own.** `ocr-service` restarting
   mid-request fails a document ingestion in the web app.
 - **Watch the single CPU.** Anything sustained and CPU-bound should be

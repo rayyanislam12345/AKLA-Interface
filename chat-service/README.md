@@ -90,6 +90,8 @@ VITE_CHAT_API_URL=https://aklachat.duckdns.org
 is the rollback, and the reason not to delete anything on Supabase until this
 has run for a couple of weeks.
 
+Cut over on 2026-09-10; the edge function stays deployed as the fallback.
+
 Worth remembering what changes operationally: chat becomes the first
 user-facing service on a single free-tier VM with no redundancy. An outage
 takes the AI Workspace down outright, where an ocr-service failure only
