@@ -33,7 +33,9 @@ export function artifactIcon(kind: string) {
 // inline in the bubble.
 export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false }: MarkdownMessageProps) {
   const writingDocument = UNTERMINATED_ARTIFACT.test(content);
-  const visible = writingDocument ? content.replace(UNTERMINATED_ARTIFACT, "") : content;
+  // A stray closing tag (the model sometimes closes an artifact twice) is
+  // markup, not prose — older stored replies still carry a few.
+  const visible = (writingDocument ? content.replace(UNTERMINATED_ARTIFACT, "") : content).replace(/<\/artifact>/g, "");
 
   const parts: Array<{ type: "md"; text: string } | { type: "artifact"; id: string }> = [];
   let last = 0;

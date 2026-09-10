@@ -449,7 +449,9 @@ async function persistReply(supabase: any, p: {
     }
   }
   for (const [from, to] of replacements) content = content.replace(from, to);
-  content = content.trim();
+  // A stray tag with no partner — the model sometimes closes an artifact
+  // twice — would otherwise sit in the reply as literal text.
+  content = content.replace(/<\/?artifact\b[^>]*>/g, "").trim();
 
   // `incomplete` must not survive — it is what the client loops on.
   const { incomplete: _wasIncomplete, ...rest } = p.metadata;
