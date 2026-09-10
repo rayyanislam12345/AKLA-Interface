@@ -275,6 +275,7 @@ export type Database = {
           created_at: string
           document_type_id: string
           filename: string | null
+          format_rules: string | null
           id: string
           seeded_from_storage_path: string | null
           storage_path: string | null
@@ -286,6 +287,7 @@ export type Database = {
           created_at?: string
           document_type_id: string
           filename?: string | null
+          format_rules?: string | null
           id?: string
           seeded_from_storage_path?: string | null
           storage_path?: string | null
@@ -297,6 +299,7 @@ export type Database = {
           created_at?: string
           document_type_id?: string
           filename?: string | null
+          format_rules?: string | null
           id?: string
           seeded_from_storage_path?: string | null
           storage_path?: string | null

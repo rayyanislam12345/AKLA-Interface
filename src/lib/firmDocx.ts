@@ -109,15 +109,15 @@ function pmListItems(items: PMNode[], level: number, paragraphs: Paragraph[]) {
 // they fall under.
 function editorContentToFirmParagraphs(doc: PMNode): Paragraph[] {
   const paragraphs: Paragraph[] = [];
-  let titleUsed = false;
+  // Every "# " line before any other content is title, not a clause.
+  let inTitleBlock = true;
   let lastHeadingLevel = -1;
 
   for (const node of doc.content ?? []) {
     switch (node.type) {
       case "heading": {
         const depth = node.attrs?.level ?? 1;
-        if (depth === 1 && !titleUsed) {
-          titleUsed = true;
+        if (depth === 1 && inTitleBlock) {
           paragraphs.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,
@@ -126,6 +126,7 @@ function editorContentToFirmParagraphs(doc: PMNode): Paragraph[] {
             })
           );
         } else {
+          inTitleBlock = false;
           const level = Math.min(Math.max(depth - 2, 0), FIRM_NUMBERING_MAX_LEVEL);
           lastHeadingLevel = level;
           paragraphs.push(
@@ -140,6 +141,7 @@ function editorContentToFirmParagraphs(doc: PMNode): Paragraph[] {
         break;
       }
       case "paragraph":
+        inTitleBlock = false;
         paragraphs.push(
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,

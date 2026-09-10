@@ -694,6 +694,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     const retrievalQuery = [effectiveMessage, ...attachments.map((a) => a.name)].join("\n").slice(0, 8000) || documentType?.name || "";
     let sources = [];
     let templateHtml = null;
+    let templateRules = null;
     if (retrievalQuery) {
       const embResp = await fetch("https://api.voyageai.com/v1/embeddings", {
         method: "POST",
@@ -714,7 +715,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
           }),
           supabase.rpc("match_documents", statuteParams),
           documentType
-            ? supabase.from("document_type_templates").select("content_html").eq("document_type_id", documentType.id).maybeSingle()
+            ? supabase.from("document_type_templates").select("content_html, format_rules").eq("document_type_id", documentType.id).maybeSingle()
             : Promise.resolve({ data: null }),
         ]);
         sources = [
@@ -723,6 +724,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
           ...(s.data ?? []).map((x) => ({ ...x, scope: "statute" })),
         ];
         templateHtml = t?.data?.content_html ?? null;
+        templateRules = t?.data?.format_rules ?? null;
       } else {
         console.error(`voyage embeddings ${embResp.status}: ${(await embResp.text()).slice(0, 200)}`);
       }
@@ -769,9 +771,15 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       const reqFields = Array.isArray(documentType.required_fields) && documentType.required_fields.length
         ? `\nThe firm flags these fields as required for this document type: ${JSON.stringify(documentType.required_fields)}.`
         : "";
-      const templateBlock = templateHtml?.trim()
-        ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentType.name}. Follow its clause structure as the primary basis; the precedent excerpts above are for phrasing and edge cases:\n${templateHtml}`
+      // The draft is exported inside the standard's own .docx, so its fonts,
+      // page layout and Word numbering come for free; what the model owes is
+      // the structure that maps onto that numbering.
+      const rulesBlock = templateRules?.trim()
+        ? `\n\nHOW THE STANDARD IS FORMATTED: ${templateRules.trim()}\nThe draft is exported inside that file, so its numbering, fonts and layout are applied automatically. Your Markdown maps onto it: "## " becomes a top-level clause, "### " a sub-clause, "#### " the level below, and "- " items the level below whichever heading they sit under. Match the standard's clause structure and the way it sets out definitions, recitals and the execution block.`
         : "";
+      const templateBlock = templateHtml?.trim()
+        ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentType.name}. Follow its clause structure as the primary basis; the precedent excerpts above are for phrasing and edge cases:\n${templateHtml}${rulesBlock}`
+        : rulesBlock;
       skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT.${reqFields}${templateBlock}
 
 How to work: you are conducting a short intake, then drafting. If the conversation does not yet give you the essentials — parties and roles, term, payment or tariff structure, performance security, governing law, dispute resolution, termination, and anything specific to this document type — ask ONE focused question at a time (short, concrete). Stop asking as soon as you have enough for a solid first version, or the moment the lawyer says to draft now / just draft. Then draft the COMPLETE document: proper drafting conventions (defined terms capitalised on first use, recitals, operative clauses, execution block), and a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] wherever a specific commercial term wasn't given rather than an invented figure. This is a first draft for a lawyer to edit, not a final.

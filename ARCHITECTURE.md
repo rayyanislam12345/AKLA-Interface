@@ -204,3 +204,21 @@ whatsapp-dashboard is a standalone Node.js/Express app (in `whatsapp-dashboard/`
 - **`document_types.required_fields`** exists in the schema (a hint for the drafting interview) but has no editing UI yet — no document type currently has it populated.
 - **No data-residency option in Pakistan.** The Supabase project runs on the nearest available region; there is no AWS/Supabase presence in Pakistan itself. See [SECURITY.md](SECURITY.md).
 - **Onboarding the rest of the firm** (10-11 more lawyers) hasn't happened yet — there's one admin test account.
+
+### Standards drive the exported Word file
+
+A document type's standard (Precedent Library → Standardize) is a real
+`.docx` kept in the `precedent-library` bucket. Since 2026-09-10 it does two
+jobs. `document_type_templates.format_rules` holds a short description of how
+the file is formatted (numbering scheme, heading treatment, body font),
+computed from the file at upload by `src/lib/templateDocx.ts` and put into
+the drafting prompt so the model's Markdown levels map onto the firm's
+numbering. And when a draft of that type is downloaded, previewed or saved
+to a project, `ArtifactPanel` builds the `.docx` *inside the standard's own
+file*: page setup, headers/footers, styles, theme and Word numbering are the
+standard's, only the body is replaced (comments, embedded images and ink
+from the standard are dropped). Each paragraph copies the formatting of an
+exemplar paragraph found in the standard for its role — title, clause level,
+body, enumerated item — which is what makes this survive the direct
+formatting real firm files are full of. Types without a standard still use
+the generic firm format in `src/lib/firmDocx.ts`.

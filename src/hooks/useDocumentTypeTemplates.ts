@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanitizeStorageFilename } from "@/lib/utils";
+import { describeTemplateDocx } from "@/lib/templateDocx";
 
 export interface DocumentTypeTemplateRow {
   document_type_id: string;
@@ -42,7 +43,7 @@ export function useDocumentTypeTemplate(documentTypeId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("document_type_templates")
-        .select("storage_path, filename, updated_at")
+        .select("storage_path, filename, updated_at, format_rules")
         .eq("document_type_id", documentTypeId!)
         .maybeSingle();
       if (error) throw error;
@@ -91,6 +92,16 @@ export function useUploadDocumentTypeTemplate() {
       });
       if (extractError) throw extractError;
 
+      // How the file is formatted — its numbering scheme, heading treatment,
+      // body font — read off the .docx itself. The words go into the drafting
+      // prompt; the file itself is what a draft is later exported inside of.
+      let formatRules: string | null = null;
+      try {
+        formatRules = await describeTemplateDocx(await file.arrayBuffer());
+      } catch (err) {
+        console.warn("Could not analyse the standard's formatting:", err);
+      }
+
       const { data: userData } = await supabase.auth.getUser();
       const { error } = await supabase.from("document_type_templates").upsert(
         {
@@ -98,6 +109,7 @@ export function useUploadDocumentTypeTemplate() {
           content_html: extracted.text,
           storage_path: storagePath,
           filename: file.name,
+          format_rules: formatRules,
           updated_by: userData.user?.id,
           updated_at: new Date().toISOString(),
         },
@@ -110,4 +122,11 @@ export function useUploadDocumentTypeTemplate() {
       queryClient.invalidateQueries({ queryKey: ["document-type-template", variables.documentTypeId] });
     },
   });
+}
+
+// The standard's .docx itself, for building a draft inside it.
+export async function fetchTemplateDocxBytes(storagePath: string): Promise<ArrayBuffer> {
+  const { data, error } = await supabase.storage.from("precedent-library").download(storagePath);
+  if (error || !data) throw new Error(error?.message ?? "Could not download the standard");
+  return data.arrayBuffer();
 }

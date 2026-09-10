@@ -8,8 +8,10 @@ import RichTextEditor from "@/components/editor/RichTextEditor";
 import ReviewSession from "@/components/ai/ReviewSession";
 import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
+import { fetchTemplateDocxBytes, useDocumentTypeTemplate } from "@/hooks/useDocumentTypeTemplates";
 import type { LawUpdate } from "@/hooks/useLawUpdates";
 import { buildFirmDocxBlob, type PMNode } from "@/lib/firmDocx";
+import { buildTemplateDocxBlob } from "@/lib/templateDocx";
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -92,6 +94,10 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
     | undefined;
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(initialDocTypeId);
   const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
+  // The firm's standard .docx for this type, when there is one: the draft is
+  // exported inside that file so its formatting and numbering are kept.
+  const { data: standard } = useDocumentTypeTemplate(documentTypeId);
+  const standardBytes = useRef<{ path: string; bytes: ArrayBuffer } | null>(null);
 
   const html = useMemo(() => (artifact.content ? (marked.parse(artifact.content, { async: false }) as string) : ""), [artifact.content]);
 
@@ -104,6 +110,16 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const buildBlob = async (): Promise<Blob | null> => {
     const editor = editorRef.current;
     if (!editor) return null;
+    if (standard?.storage_path) {
+      try {
+        if (standardBytes.current?.path !== standard.storage_path) {
+          standardBytes.current = { path: standard.storage_path, bytes: await fetchTemplateDocxBytes(standard.storage_path) };
+        }
+        return await buildTemplateDocxBlob(standardBytes.current.bytes, editor.getJSON() as PMNode);
+      } catch (err) {
+        console.warn("Falling back to the firm's generic format:", err);
+      }
+    }
     const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
     const header = `${matterName ?? ""} — ${artifact.kind === "draft" ? documentTypeName : artifact.title} — AKLA — Draft, For Internal Purposes Only — ${date}`;
     return buildFirmDocxBlob(editor.getJSON() as PMNode, header);
@@ -127,7 +143,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   useEffect(() => {
     if (tab === "preview") renderPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, artifact.content]);
+  }, [tab, artifact.content, standard?.storage_path]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(artifact.content ?? "");
@@ -242,6 +258,11 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
           {editSource ? "Save as new version" : "Save to project"}
         </Button>
+        {standard?.filename && (
+          <span className="text-xs text-muted-foreground" title={standard.filename} data-testid="standard-format-note">
+            Formatted as the firm's standard
+          </span>
+        )}
         {saved && (
           <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
             <FileText className="mr-1 h-3.5 w-3.5" />

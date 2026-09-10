@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { FileText, Gavel, Trash2, Upload } from "lucide-react";
+import { Download, FileText, Gavel, Trash2, Upload } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   useDocumentTypeTemplate,
   useUploadDocumentTypeTemplate,
   useDeleteDocumentTypeTemplate,
+  fetchTemplateDocxBytes,
 } from "@/hooks/useDocumentTypeTemplates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -55,6 +56,21 @@ export default function StandardizeDocumentTypePage() {
     }
   };
 
+  const handleDownload = async () => {
+    if (!existingTemplate?.storage_path) return;
+    try {
+      const bytes = await fetchTemplateDocxBytes(existingTemplate.storage_path);
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = existingTemplate.filename ?? "standard.docx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Download failed", description: err.message, variant: "destructive" });
+    }
+  };
+
   if (!documentTypeId) return null;
 
   return (
@@ -65,8 +81,9 @@ export default function StandardizeDocumentTypePage() {
           Standardize: {documentType?.name ?? "Document Type"}
         </h1>
         <p className="text-muted-foreground">
-          The firm's canonical .docx for this document type — "Draft with AI" uses it as its primary
-          structural and formatting jump-off point, ahead of the firm's other precedent of this type.
+          The firm's canonical .docx for this document type. Drafting follows its clause structure ahead of the
+          firm's other precedent, and every draft of this type is exported inside this file — its page setup,
+          headers and footers, fonts and clause numbering are kept, and only the text changes.
         </p>
       </div>
 
@@ -91,6 +108,9 @@ export default function StandardizeDocumentTypePage() {
                   Updated {existingTemplate.updated_at ? new Date(existingTemplate.updated_at).toLocaleDateString() : ""}
                 </p>
               </div>
+              <Button size="icon" variant="ghost" title="Download the standard" onClick={handleDownload}>
+                <Download className="h-4 w-4" />
+              </Button>
               <Button
                 size="icon"
                 variant="ghost"
@@ -103,6 +123,17 @@ export default function StandardizeDocumentTypePage() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">No standard version uploaded yet.</p>
+          )}
+
+          {existingTemplate?.format_rules && (
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="standard-format-rules">
+              <p className="mb-1 font-medium text-foreground">How this file is formatted</p>
+              <p>{existingTemplate.format_rules}</p>
+              <p className="mt-1">
+                Drafts pick this up automatically: clause headings take the file's numbering, body text its font and
+                spacing, and the page keeps its headers and footers.
+              </p>
+            </div>
           )}
 
           <Button
