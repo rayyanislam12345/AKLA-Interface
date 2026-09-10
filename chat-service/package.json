@@ -4,7 +4,7 @@
   "private": true,
   "description": "The AI Workspace's chat endpoint, moved off Supabase Edge Functions so a long draft can be written in one pass.",
   "main": "server.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },

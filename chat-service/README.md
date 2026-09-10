@@ -1,8 +1,9 @@
 # chat-service
 
 The AI Workspace's chat endpoint, moved off Supabase Edge Functions onto the
-Oracle VM. Not yet ported — this directory holds the deployment scaffolding
-so the port itself is the only work left.
+Oracle VM. `server.js` is `supabase/functions/chat/index.ts` ported to Node
+and `extractText.js` is `_shared/extractText.ts`; the two pairs must be kept
+in step until the edge function is retired.
 
 ## Why move it at all
 
@@ -35,39 +36,28 @@ assembles ~130KB prompts and holds streaming connections; it belongs on the
 idle box. ARM is fine here — `mammoth`, `unpdf`, `xlsx` and `fflate` are all
 pure JavaScript. Chromium is the reason WhatsApp stays on x86; keep that split.
 
-## Port checklist
+## What the port changed, and what it kept
 
-Source is `supabase/functions/chat/index.ts` (Deno) plus
-`supabase/functions/_shared/extractText.ts`.
+**Gone** — the wall-clock deadline (`GENERATION_BUDGET_MS`,
+`MIN_USEFUL_SLICE_MS`) and the "save a partial at 115s" branch. A reply is
+written in one pass however long it runs; Node's own 300s `requestTimeout`
+is switched off for the same reason.
 
-**Mechanical**
-- `Deno.env.get("X")` → `process.env.X`
-- `serve()` from deno std → `http.createServer`; SSE is `res.write("event: …\ndata: …\n\n")` rather than enqueuing onto a `ReadableStream`
-- Drop `import "https://deno.land/x/xhr@0.1.0/mod.ts"` — a Deno-only shim
-- esm.sh URLs → the npm dependencies already listed in `package.json`
+**Kept on purpose**
+- `continueMessageId` and the `incomplete` reply shape. Replies the edge
+  function left half-written (the "Continue writing" button) finish here,
+  and the browser client is identical whichever endpoint it points at —
+  which is what makes the rollback a config change.
+- The retry on `stop_reason === "max_tokens"` — that cap is real wherever
+  this runs. `MAX_CONTINUATIONS` is 8 here instead of 3 because there is no
+  clock to respect.
+- Stop: the browser closing the connection aborts the upstream model stream
+  (`res.on("close")`), and what was written is saved with `stopped: true`.
+- The verify skill still calls the `suggest-redline` and `redline-chat` edge
+  functions over the network. Fine at 1.7ms.
 
-**Delete outright** — these exist only because of the edge timeout
-- `GENERATION_BUDGET_MS`, `MIN_USEFUL_SLICE_MS`, `continueInstruction()`
-- the `incomplete` branch that saves a partial and returns early
-- `continueMessageId` / `resumeMessage` handling
-- in `src/hooks/useChat.ts`: `MAX_CONTINUATION_ROUNDS` and the
-  `while (round.incomplete …)` loop in `send`
-
-**Keep**
-- `anthropicComplete`'s retry on `stop_reason === "max_tokens"`. That cap is
-  real and independent of where this runs — only the wall-clock deadline goes.
-- `MarkdownMessage`'s unterminated-`<artifact>` placeholder; harmless, and it
-  still covers a reply cut short for other reasons.
-
-**Copy from `transcription-relay/server.js`**
-- `verifySupabaseToken` — the same JWT check, already proven on this box.
-
-**Note**
-- `extractText`'s large-docx/pptx offload to ocr-service becomes a call to
-  `127.0.0.1:8090` — same machine, so it gets faster.
-- The verify skill calls the `suggest-redline` and `redline-chat` edge
-  functions. Those stay on Supabase and are reached over the network — fine
-  at 1.7ms.
+**Different by being here** — the large-docx/pptx and scanned-PDF offloads go
+to ocr-service on `127.0.0.1:8090` rather than across the internet.
 
 ## Deploying
 
@@ -79,7 +69,12 @@ Port 8092 (8090 is ocr-service, 8091 the relay). `.env` needs
 ./chat-service/deploy.sh            # copies, stamps the commit, restarts
 ```
 
-Then append `Caddyfile` to `/etc/caddy/Caddyfile` and reload Caddy.
+First time only: `aklachat` has to exist as a DuckDNS subdomain pointing at
+`140.245.26.184` before Caddy can get a certificate; then append `Caddyfile`
+to `/etc/caddy/Caddyfile` and `sudo systemctl reload caddy`. The unit file is
+copied to `/etc/systemd/system/` by hand — and a file moved there from `/tmp`
+keeps its `user_tmp_t` SELinux label, which systemd refuses to open
+("Permission denied" in the journal): `sudo restorecon` it.
 
 ## Cutting over, and cutting back
 

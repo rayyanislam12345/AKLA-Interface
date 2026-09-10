@@ -334,7 +334,11 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       signal: AbortSignal,
       isFirstRound: boolean,
     ): Promise<{ threadId: string | null; assistantMessageId: string | null; incomplete: boolean; generatedChars: number }> => {
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+      // The chat endpoint lives on the Oracle VM (chat-service/) when
+      // VITE_CHAT_API_URL is set, and falls back to the Supabase edge function
+      // when it isn't — unsetting the variable is the rollback.
+      const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "") || `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+      const url = `${base}/chat`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys the relay to the Oracle VM.
+# Deploys chat-service to the Oracle VM.
 #
 # This box is NOT a git checkout — it has no .git directory and no git binary
 # — so "cd /opt/chat-service && git pull" fails twice over. Copy the
@@ -20,11 +20,11 @@ printf '{"commit":"%s","committedAt":"%s","deployedAt":"%s"}\n' \
 
 TS=$(date -u +%Y%m%d%H%M)
 echo "Backing up the running copy…"
-ssh -i "$KEY" "$HOST" "sudo cp $DEST/server.js $DEST/server.js.bak-$TS"
+ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
-echo "Copying server.js, package.json and the version stamp…"
-scp -i "$KEY" server.js package.json "$STAMP" "$HOST:/tmp/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/package.json $DEST/ && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/package.json $DEST/DEPLOYED_VERSION"
+echo "Copying server.js, extractText.js, package.json and the version stamp…"
+scp -i "$KEY" server.js extractText.js package.json "$STAMP" "$HOST:/tmp/"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/package.json $DEST/ && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/package.json $DEST/DEPLOYED_VERSION"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every
