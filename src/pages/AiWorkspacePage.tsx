@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote } from "lucide-react";
@@ -19,6 +19,7 @@ import {
   useChatThreads,
   useSendChatMessage,
   useThreadArtifacts,
+  EMPTY_STREAM,
 } from "@/hooks/useChat";
 import ChatSidebar from "@/components/ai/chat/ChatSidebar";
 import MessageList from "@/components/ai/chat/MessageList";
@@ -62,7 +63,13 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const { data: messages } = useChatMessages(activeThreadId ?? undefined);
   const { data: threadArtifacts } = useThreadArtifacts(activeThreadId ?? undefined);
 
-  const [openArtifact, setOpenArtifact] = useState<ChatArtifact | null>(null);
+  const [openArtifactState, setOpenArtifact] = useState<ChatArtifact | null>(null);
+  // The panel belongs to the chat it was opened from: switching chats hides
+  // it, and switching back brings it back.
+  const openArtifact = openArtifactState && openArtifactState.thread_id === activeThreadId ? openArtifactState : null;
+  // For the streaming callbacks, which outlive the render they started in.
+  const activeThreadIdRef = useRef(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editPickerOpen, setEditPickerOpen] = useState(false);
   const [editSkill, setEditSkill] = useState<ActiveSkill | null>(null);
@@ -106,20 +113,28 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const chat = useSendChatMessage(
     (threadId) => {
       // The first message of a new chat gives it a row — reflect it in the URL
-      // (dropping any ?mode/?doc seed) so a refresh lands back on it.
-      setSearchParams(new URLSearchParams({ chat: threadId }), { replace: true });
+      // (dropping any ?mode/?doc seed) so a refresh lands back on it. Unless
+      // the lawyer has already moved to another chat in the meantime: then
+      // the new one keeps writing in the background and stays where it is.
+      if (activeThreadIdRef.current === null) setSearchParams(new URLSearchParams({ chat: threadId }), { replace: true });
     },
-    (artifact) => setOpenArtifact(artifact),
+    (artifact) => {
+      if (artifact.thread_id === activeThreadIdRef.current) setOpenArtifact(artifact);
+    },
   );
+  // This chat's turn in progress, if any. Other chats' turns carry on
+  // unseen until the lawyer switches back to them.
+  const turn = chat.turnFor(activeThreadId);
+  const stream = turn?.stream ?? EMPTY_STREAM;
 
-  // Artifacts by id — the persisted ones for this thread plus anything the
-  // current turn has streamed so far.
+  // Artifacts by id — the persisted ones for this thread plus anything this
+  // chat's current turn has streamed so far.
   const artifactMap = useMemo(() => {
     const map = new Map<string, ChatArtifact>();
     for (const a of threadArtifacts ?? []) map.set(a.id, a);
-    for (const a of chat.stream.artifacts) map.set(a.id, a);
+    for (const a of stream.artifacts) map.set(a.id, a);
     return map;
-  }, [threadArtifacts, chat.stream.artifacts]);
+  }, [threadArtifacts, stream.artifacts]);
 
   // Keep the open panel on the freshest copy of its artifact (after a save).
   useEffect(() => {
@@ -193,6 +208,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
       matterName={matter?.name}
       threads={threads ?? []}
       activeThreadId={activeThreadId}
+      busyThreadIds={chat.busyThreadIds}
       onSelect={selectThread}
     />
   );
@@ -252,24 +268,24 @@ function AiWorkspace({ matterId }: { matterId: string }) {
             <MessageList
               messages={messages ?? []}
               artifacts={artifactMap}
-              stream={chat.stream}
-              pending={chat.pending}
+              stream={stream}
+              pending={turn?.pending ?? null}
               activeArtifactId={openArtifact?.id ?? null}
               onOpenArtifact={setOpenArtifact}
               empty={emptyState}
-              resumingMessageId={chat.resumingMessageId}
+              resumingMessageId={turn?.resumingMessageId ?? null}
               onResume={(m) => activeThreadId && chat.resume({ matterId, threadId: activeThreadId, message: m })}
             />
 
             <Composer
               key={activeThreadId ?? "new"}
               matterId={matterId}
-              sending={chat.sending}
+              sending={!!turn?.inFlight}
               initialText={seedText}
               initialSkill={composerSkill}
               initialAttachments={seedAttachments}
               onSend={handleSend}
-              onStop={chat.stop}
+              onStop={() => chat.stop(activeThreadId)}
               onEditDocument={handleEditDocument}
               editPickerOpen={editPickerOpen}
               onEditPickerOpenChange={setEditPickerOpen}

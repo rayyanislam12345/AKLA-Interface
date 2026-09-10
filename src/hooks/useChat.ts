@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -290,7 +290,31 @@ export interface StreamingState {
   error: string | null;
 }
 
-const EMPTY_STREAM: StreamingState = { threadId: null, text: "", sources: [], notices: [], artifacts: [], error: null };
+export const EMPTY_STREAM: StreamingState = { threadId: null, text: "", sources: [], notices: [], artifacts: [], error: null };
+
+export interface PendingMessage {
+  content: string;
+  attachments: ChatAttachment[];
+}
+
+// One chat's turn in progress. Turns are held per thread, so a reply being
+// written shows only in the chat it belongs to — switching to another chat
+// shows that chat alone, and two chats can be writing at the same time.
+export interface ChatTurn {
+  // The thread id, or NEW_CHAT_KEY until the first round has created the thread.
+  key: string;
+  threadId: string | null;
+  pending: PendingMessage | null;
+  stream: StreamingState;
+  // Set while a half-written reply is being picked up again, so the list can
+  // show it as one growing message rather than the stored partial plus a
+  // second bubble underneath.
+  resumingMessageId: string | null;
+  inFlight: boolean;
+}
+
+export const NEW_CHAT_KEY = "new";
+const turnKey = (threadId: string | null) => threadId ?? NEW_CHAT_KEY;
 
 interface SendInput {
   matterId: string;
@@ -300,40 +324,65 @@ interface SendInput {
   skill: ActiveSkill | null;
 }
 
-// The chat function stops generating before Supabase kills it at ~150s of wall
-// clock, saves what it wrote, and reports the turn unfinished. Asking again
-// with continueMessageId starts a fresh invocation that resumes from exactly
-// where the text stopped, so a long agreement finishes over as many rounds as
-// it needs. This caps the rounds so a pathological loop can't run forever —
-// at roughly two minutes of writing each, it is far more than any real
-// document needs.
+// The edge chat function stops generating before Supabase kills it at ~150s
+// of wall clock, saves what it wrote, and reports the turn unfinished. Asking
+// again with continueMessageId starts a fresh invocation that resumes from
+// exactly where the text stopped, so a long agreement finishes over as many
+// rounds as it needs. (chat-service on the VM has no such limit and never
+// reports a turn unfinished.) This caps the rounds so a pathological loop
+// can't run forever.
 const MAX_CONTINUATION_ROUNDS = 12;
 
-// One turn of the conversation: POST to the chat function, consume its SSE
-// stream, and expose the partial reply as state so the message list can show
-// it typing. On "done" the persisted rows are refetched and take over.
+type RoundResult = { threadId: string | null; assistantMessageId: string | null; incomplete: boolean; generatedChars: number };
+
+// Turns of the conversation: POST to the chat endpoint, consume its SSE
+// stream, and expose the partial reply as per-thread state so the message
+// list can show it typing. On "done" the persisted rows are refetched and
+// take over.
 export function useSendChatMessage(onThreadCreated?: (threadId: string) => void, onArtifact?: (artifact: ChatArtifact) => void) {
   const queryClient = useQueryClient();
   const { session } = useAuth();
-  const [stream, setStream] = useState<StreamingState>(EMPTY_STREAM);
-  const [pending, setPending] = useState<{ content: string; attachments: ChatAttachment[] } | null>(null);
-  // Set while a half-written reply is being picked up again, so the list can
-  // show it as one growing message rather than the stored partial plus a
-  // second bubble underneath.
-  const [resumingMessageId, setResumingMessageId] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [turns, setTurns] = useState<Record<string, ChatTurn>>({});
+  const controllers = useRef(new Map<string, AbortController>());
 
-  const stop = useCallback(() => abortRef.current?.abort(), []);
+  const patch = useCallback((key: string, fn: (t: ChatTurn) => ChatTurn) => {
+    setTurns((all) => (all[key] ? { ...all, [key]: fn(all[key]) } : all));
+  }, []);
+  const patchStream = useCallback(
+    (key: string, fn: (s: StreamingState) => StreamingState) => patch(key, (t) => ({ ...t, stream: fn(t.stream) })),
+    [patch],
+  );
 
-  // One request/response round against the chat function. Streams its events
-  // into `stream` and reports back whether the reply is finished.
+  // A new chat gets its id from the first round's "meta": the turn moves from
+  // the placeholder key to the real one so later events, and the page, find
+  // it under the thread it now belongs to.
+  const adopt = useCallback((from: string, threadId: string) => {
+    setTurns((all) => {
+      const cur = all[from];
+      if (!cur || from === threadId) return all;
+      const { [from]: _moved, ...rest } = all;
+      return { ...rest, [threadId]: { ...cur, key: threadId, threadId, stream: { ...cur.stream, threadId } } };
+    });
+    const c = controllers.current.get(from);
+    if (c) {
+      controllers.current.delete(from);
+      controllers.current.set(threadId, c);
+    }
+  }, []);
+
+  const stop = useCallback((threadId: string | null) => controllers.current.get(turnKey(threadId))?.abort(), []);
+
+  // One request/response round against the chat endpoint. Streams its events
+  // into the turn and reports back whether the reply is finished. `keyRef`
+  // rather than a key: the turn can change key mid-round (see adopt).
   const runRound = useCallback(
     async (
       matterId: string,
+      keyRef: { current: string },
       payload: Record<string, unknown>,
       signal: AbortSignal,
       isFirstRound: boolean,
-    ): Promise<{ threadId: string | null; assistantMessageId: string | null; incomplete: boolean; generatedChars: number }> => {
+    ): Promise<RoundResult> => {
       // The chat endpoint lives on the Oracle VM (chat-service/) when
       // VITE_CHAT_API_URL is set, and falls back to the Supabase edge function
       // when it isn't — unsetting the variable is the rollback.
@@ -363,23 +412,30 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       let generatedChars = 0;
 
       const handle = (event: string, data: any) => {
+        const key = keyRef.current;
         switch (event) {
           case "meta":
             roundThreadId = data.threadId;
-            setStream((s) => ({ ...s, threadId: data.threadId }));
-            if (isFirstRound && data.threadId) onThreadCreated?.(data.threadId);
+            if (data.threadId && key !== data.threadId) {
+              adopt(key, data.threadId);
+              keyRef.current = data.threadId;
+              // The sidebar needs the new row now, not when the turn ends,
+              // so it can show the reply being written there.
+              queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+              if (isFirstRound) onThreadCreated?.(data.threadId);
+            }
             break;
           case "delta":
-            setStream((s) => ({ ...s, text: s.text + data.text }));
+            patchStream(key, (s) => ({ ...s, text: s.text + data.text }));
             break;
           case "sources":
-            setStream((s) => ({ ...s, sources: data }));
+            patchStream(key, (s) => ({ ...s, sources: data }));
             break;
           case "notice":
-            setStream((s) => ({ ...s, notices: [...s.notices, data.text] }));
+            patchStream(key, (s) => ({ ...s, notices: [...s.notices, data.text] }));
             break;
           case "artifact":
-            setStream((s) => ({ ...s, artifacts: [...s.artifacts, data] }));
+            patchStream(key, (s) => ({ ...s, artifacts: [...s.artifacts, data] }));
             onArtifact?.(data);
             break;
           case "title":
@@ -417,7 +473,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       }
       return { threadId: roundThreadId, assistantMessageId, incomplete, generatedChars };
     },
-    [session, queryClient, onThreadCreated, onArtifact],
+    [session, queryClient, onThreadCreated, onArtifact, adopt, patchStream],
   );
 
   // Keeps asking for the rest of a reply until it is genuinely finished. The
@@ -426,8 +482,9 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const continueUntilDone = useCallback(
     async (
       matterId: string,
+      keyRef: { current: string },
       threadId: string,
-      first: { assistantMessageId: string | null; incomplete: boolean; generatedChars: number },
+      first: RoundResult,
       skillPayload: Record<string, unknown> | null,
       signal: AbortSignal,
     ) => {
@@ -437,6 +494,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         rounds++;
         round = await runRound(
           matterId,
+          keyRef,
           { matterId, threadId, message: "", attachments: [], skill: skillPayload, continueMessageId: round.assistantMessageId },
           signal,
           false,
@@ -446,20 +504,22 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         if (round.incomplete && round.generatedChars === 0) break;
       }
       if (round.incomplete) {
-        setStream((s) => ({
+        patchStream(keyRef.current, (s) => ({
           ...s,
           notices: [...s.notices, "This is running unusually long, so it stops here. Press Continue writing to carry on."],
         }));
       }
       return round;
     },
-    [runRound],
+    [runRound, patchStream],
   );
 
   const finishTurn = useCallback(
-    async (matterId: string, threadId: string | null) => {
-      const wasStopped = abortRef.current?.signal.aborted ?? false;
-      abortRef.current = null;
+    async (matterId: string, key: string) => {
+      const controller = controllers.current.get(key);
+      const wasStopped = controller?.signal.aborted ?? false;
+      controllers.current.delete(key);
+      const threadId = key === NEW_CHAT_KEY ? null : key;
       const refetch = () => {
         if (!threadId) return Promise.resolve();
         return Promise.all([
@@ -468,14 +528,22 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         ]);
       };
       await refetch();
-      // After Stop the function is still saving what was written when the
+      // After Stop the endpoint is still saving what was written when the
       // connection closed — this first refetch usually lands before that row
       // exists. Look again once it has had a moment.
       if (wasStopped) setTimeout(refetch, 2500);
       queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
-      setPending(null);
-      setResumingMessageId(null);
-      setStream((s) => (s.error ? { ...s, text: "" } : EMPTY_STREAM));
+      // The turn is over: drop it, unless it failed — the error stays visible
+      // in that chat until dismissed.
+      setTurns((all) => {
+        const t = all[key];
+        if (!t) return all;
+        if (t.stream.error) {
+          return { ...all, [key]: { ...t, inFlight: false, pending: null, resumingMessageId: null, stream: { ...t.stream, text: "" } } };
+        }
+        const { [key]: _done, ...rest } = all;
+        return rest;
+      });
     },
     [queryClient],
   );
@@ -483,10 +551,15 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const send = useCallback(
     async ({ matterId, threadId, message, attachments, skill }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
+      const key = turnKey(threadId);
+      if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
-      abortRef.current = controller;
-      setPending({ content: message, attachments });
-      setStream({ ...EMPTY_STREAM, threadId });
+      controllers.current.set(key, controller);
+      const keyRef = { current: key };
+      setTurns((all) => ({
+        ...all,
+        [key]: { key, threadId, pending: { content: message, attachments }, stream: { ...EMPTY_STREAM, threadId }, resumingMessageId: null, inFlight: true },
+      }));
 
       const skillPayload = skill
         ? {
@@ -497,28 +570,27 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             matterDocumentId: skill.matterDocumentId,
           }
         : null;
-      let resolvedThreadId = threadId;
       try {
-        let round = await runRound(
+        const round = await runRound(
           matterId,
+          keyRef,
           { matterId, threadId, message, attachments, skill: skillPayload },
           controller.signal,
           !threadId,
         );
-        resolvedThreadId = round.threadId ?? resolvedThreadId;
-
+        const resolvedThreadId = round.threadId ?? threadId;
         if (resolvedThreadId) {
-          await continueUntilDone(matterId, resolvedThreadId, round, skillPayload, controller.signal);
+          await continueUntilDone(matterId, keyRef, resolvedThreadId, round, skillPayload, controller.signal);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          setStream((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+          patchStream(keyRef.current, (s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
         }
       } finally {
-        await finishTurn(matterId, resolvedThreadId);
+        await finishTurn(matterId, keyRef.current);
       }
     },
-    [session, runRound, continueUntilDone, finishTurn],
+    [session, runRound, continueUntilDone, finishTurn, patchStream],
   );
 
   // Picks up a reply that was left half-written — the tab was closed, the
@@ -528,33 +600,59 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const resume = useCallback(
     async ({ matterId, threadId, message }: { matterId: string; threadId: string; message: ChatMessage }) => {
       if (!session?.access_token) throw new Error("Not signed in");
+      const key = turnKey(threadId);
+      if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
-      abortRef.current = controller;
+      controllers.current.set(key, controller);
+      const keyRef = { current: key };
       const meta = messageMetadata(message);
       const skillPayload = meta.skill ?? null;
-      setResumingMessageId(message.id);
-      setPending({ content: "", attachments: [] });
-      setStream({ ...EMPTY_STREAM, threadId, text: message.content });
+      setTurns((all) => ({
+        ...all,
+        [key]: {
+          key,
+          threadId,
+          pending: { content: "", attachments: [] },
+          stream: { ...EMPTY_STREAM, threadId, text: message.content },
+          resumingMessageId: message.id,
+          inFlight: true,
+        },
+      }));
       try {
         await continueUntilDone(
           matterId,
+          keyRef,
           threadId,
-          { assistantMessageId: message.id, incomplete: true, generatedChars: 1 },
+          { threadId, assistantMessageId: message.id, incomplete: true, generatedChars: 1 },
           skillPayload,
           controller.signal,
         );
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          setStream((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+          patchStream(keyRef.current, (s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
         }
       } finally {
-        await finishTurn(matterId, threadId);
+        await finishTurn(matterId, keyRef.current);
       }
     },
-    [session, continueUntilDone, finishTurn],
+    [session, continueUntilDone, finishTurn, patchStream],
   );
 
-  const clearError = useCallback(() => setStream(EMPTY_STREAM), []);
+  const clearError = useCallback((threadId: string | null) => {
+    const key = turnKey(threadId);
+    setTurns((all) => {
+      if (!all[key] || all[key].inFlight) return all;
+      const { [key]: _cleared, ...rest } = all;
+      return rest;
+    });
+  }, []);
 
-  return { send, resume, stop, stream, pending, sending: pending !== null, resumingMessageId, clearError };
+  const turnFor = useCallback((threadId: string | null): ChatTurn | undefined => turns[turnKey(threadId)], [turns]);
+  // Threads with a reply being written right now — for the sidebar.
+  const busyThreadIds = useMemo(
+    () => new Set(Object.values(turns).filter((t) => t.inFlight && t.threadId).map((t) => t.threadId!)),
+    [turns],
+  );
+
+  return { send, resume, stop, clearError, turnFor, busyThreadIds };
 }

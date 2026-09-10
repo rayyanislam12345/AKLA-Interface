@@ -27,6 +27,8 @@ interface ChatSidebarProps {
   matterName?: string;
   threads: ChatThread[];
   activeThreadId: string | null;
+  // Chats with a reply being written right now, whichever chat is open.
+  busyThreadIds?: Set<string>;
   onSelect: (threadId: string | null) => void;
 }
 
@@ -43,7 +45,7 @@ function relativeDay(iso: string | null) {
 // The left pane: every conversation on this matter, pinned ones first, with
 // rename / pin / archive / delete. "New chat" doesn't create a row — the
 // thread appears once the first message is sent, like claude.ai.
-export default function ChatSidebar({ matterId, matterName, threads, activeThreadId, onSelect }: ChatSidebarProps) {
+export default function ChatSidebar({ matterId, matterName, threads, activeThreadId, busyThreadIds, onSelect }: ChatSidebarProps) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renaming, setRenaming] = useState<ChatThread | null>(null);
@@ -76,6 +78,7 @@ export default function ChatSidebar({ matterId, matterName, threads, activeThrea
             key={t.id}
             thread={t}
             active={t.id === activeThreadId}
+            busy={!!busyThreadIds?.has(t.id)}
             onSelect={() => onSelect(t.id)}
             onRename={() => {
               setRenaming(t);
@@ -177,6 +180,7 @@ export default function ChatSidebar({ matterId, matterName, threads, activeThrea
 function ThreadRow({
   thread,
   active,
+  busy,
   onSelect,
   onRename,
   onPin,
@@ -185,6 +189,7 @@ function ThreadRow({
 }: {
   thread: ChatThread;
   active: boolean;
+  busy: boolean;
   onSelect: () => void;
   onRename: () => void;
   onPin: () => void;
@@ -202,6 +207,7 @@ function ThreadRow({
         <div className="flex items-center gap-1.5">
           {thread.pinned && <Pin className="h-3 w-3 shrink-0 text-muted-foreground" />}
           <span className="truncate text-sm">{thread.title || "New chat"}</span>
+          {busy && <WritingDots />}
         </div>
         <div className="text-[11px] text-muted-foreground">{relativeDay(thread.last_message_at ?? thread.created_at)}</div>
       </button>
@@ -226,5 +232,17 @@ function ThreadRow({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+}
+
+// The same three dots the transcript shows while a reply is being written,
+// small enough for a sidebar row — only on chats that are writing right now.
+function WritingDots() {
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-1" aria-label="Writing a reply" data-testid="thread-busy">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70" />
+    </span>
   );
 }
