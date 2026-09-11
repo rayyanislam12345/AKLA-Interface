@@ -2,6 +2,11 @@
 // supabase/functions/_shared/extractText.ts to Node. Same formats, same
 // output shapes, same fallbacks; the only difference is that the "offload to
 // ocr-service" paths now talk to a process on the same machine.
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { unzipSync } from "fflate";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -39,6 +44,35 @@ async function ocrService(path, contentType, bytes) {
 async function ocrPdfFallback(pdfBytes) {
   const data = await ocrService("/ocr/pdf", "application/pdf", pdfBytes);
   return data?.text ?? null;
+}
+
+// unpdf is pdf.js in a worker, and it gives up on some perfectly ordinary
+// PDFs — a 186-page ADB transaction report failed on it with "Unable to
+// deserialize cloned data" in 174ms, though the file has a clean text layer
+// and poppler reads it in under a second. poppler's pdftotext is installed
+// on this box, so a PDF unpdf cannot read is not a PDF this cannot read.
+const execFileAsync = promisify(execFile);
+const PDFTOTEXT_TIMEOUT_MS = 120_000;
+
+async function pdftotext(pdfBytes) {
+  let dir;
+  try {
+    dir = await mkdtemp(join(tmpdir(), "pdf-"));
+    const input = join(dir, "in.pdf");
+    const output = join(dir, "out.txt");
+    await writeFile(input, pdfBytes);
+    // -layout keeps columns and tables readable rather than interleaving them.
+    await execFileAsync("pdftotext", ["-layout", "-enc", "UTF-8", input, output], {
+      timeout: PDFTOTEXT_TIMEOUT_MS,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return await readFile(output, "utf8");
+  } catch (err) {
+    console.error("pdftotext failed:", err?.message ?? err);
+    return null;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 // mammoth holds the whole unzipped document.xml in memory. Not the hard
@@ -143,14 +177,30 @@ export async function extractTextFromFile(fileData, fileName) {
 
   if (fileExtension === "pdf") {
     const bytes = new Uint8Array(await fileData.arrayBuffer());
-    const documentProxy = await getDocumentProxy(bytes);
-    const numPages = documentProxy.numPages;
-    const { text } = await unpdfExtractText(bytes, { mergePages: true });
+    let numPages = null;
+    let text = "";
+    // pdf.js transfers the array it is handed to its worker, which detaches
+    // it — anything that reads the file afterwards gets an empty buffer. Each
+    // call gets its own copy so the original survives for the fallbacks.
+    try {
+      numPages = (await getDocumentProxy(bytes.slice())).numPages;
+    } catch { /* the page count is not worth failing over */ }
+    try {
+      text = (await unpdfExtractText(bytes.slice(), { mergePages: true })).text ?? "";
+    } catch (err) {
+      console.error("unpdf could not read this PDF:", err?.message ?? err);
+    }
     if (text.trim().length < 20) {
+      const popplerText = await pdftotext(bytes);
+      if (popplerText && popplerText.trim().length >= 20) {
+        return { text: popplerText, metadata: { page_count: numPages, original_format: "pdf", extractor: "pdftotext" } };
+      }
+      // Neither could find text: it is a scan, and OCR is the last resort.
       const ocrText = await ocrPdfFallback(bytes);
       if (ocrText && ocrText.trim().length >= 20) {
         return { text: ocrText, metadata: { page_count: numPages, original_format: "pdf", ocr: true } };
       }
+      if (!text.trim()) throw new Error("No text could be read from this PDF");
     }
     return { text, metadata: { page_count: numPages, original_format: "pdf" } };
   }
