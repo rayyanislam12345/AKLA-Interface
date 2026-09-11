@@ -21,7 +21,10 @@ serve(async (req) => {
   }
 
   try {
-    const { documentVersionId, threadId = null, instruction } = await req.json();
+    // `context` carries other project documents the lawyer named — "check
+    // this against the concession agreement". It is read for this answer but
+    // never stored on the thread, which holds what the lawyer actually typed.
+    const { documentVersionId, threadId = null, instruction, context = "" } = await req.json();
 
     if (!documentVersionId || !instruction) {
       return new Response(JSON.stringify({ error: 'documentVersionId and instruction are required' }), {
@@ -152,7 +155,11 @@ serve(async (req) => {
           .join('\n')}`
       : '';
 
-    const systemPrompt = `You are a legal drafting reviewer continuing a review of a "${documentTypeName}". The lawyer has a follow-up question or request about this review.${matterContextSection}${templateSection}${precedentSection}${statuteSection}${existingSuggestionsSection}
+    const contextSection = String(context).trim()
+      ? `\n\nOTHER DOCUMENTS ON THIS PROJECT THE LAWYER REFERRED TO — read them; they are what this document is to be checked against:\n${String(context).slice(0, 60_000)}`
+      : '';
+
+    const systemPrompt = `You are a legal drafting reviewer continuing a review of a "${documentTypeName}". The lawyer has a follow-up question or request about this review.${matterContextSection}${templateSection}${precedentSection}${statuteSection}${contextSection}${existingSuggestionsSection}
 
 DOCUMENT BEING REVIEWED:
 ${fullText}

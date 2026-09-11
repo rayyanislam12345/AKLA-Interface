@@ -672,11 +672,18 @@ async function handleChat(req, res) {
 
       let instructionReply = "";
       if (message.trim()) {
+        // redline-chat is only given the document under review, so any other
+        // project document the lawyer named — "check this against the
+        // concession agreement" — travels with the instruction itself.
+        const comparisons = contextDocs.filter((a) => a.text && a.versionId !== target.versionId);
+        const comparisonBlock = comparisons
+          .map((a) => `<document name="${a.name}">\n${a.text.slice(0, 30_000)}\n</document>`)
+          .join("\n\n");
         try {
           const rcResp = await fetch(`${SUPABASE_URL}/functions/v1/redline-chat`, {
             method: "POST",
             headers: { Authorization: authHeader, apikey: SERVICE_KEY, "Content-Type": "application/json" },
-            body: JSON.stringify({ documentVersionId: target.versionId, instruction: message }),
+            body: JSON.stringify({ documentVersionId: target.versionId, instruction: message, context: comparisonBlock }),
           });
           if (rcResp.ok) {
             const rc = await rcResp.json();
