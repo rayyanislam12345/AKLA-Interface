@@ -115,3 +115,35 @@ The central workflow should be: project facts + pinned standard → evidence res
 - No live provider calls, production writes, deployments, or authenticated browser checks were performed.
 
 Before release, assemble firm-approved reference documents and lawyer-labelled cases covering long contracts, tables, multiple sections, header/footer placeholders, repeated terms, mixed run formatting, existing tracked changes, Urdu/RTL where needed, amendments, missing law, and conflicting project versions. Require supported format checks to pass, zero unexplained edits outside the requested scope, no silent failures, exact version provenance, and correct detection of all seeded critical defects. Measure legal finding precision/recall and citation support against lawyer-reviewed answers; define those thresholds with the firm. Test concurrency and stale-version scenarios as well as model behavior.
+
+## Deployment note, 11 September 2026 (evening)
+
+Everything above was applied and deployed: the `ai_quality` migration, the
+three review edge functions, the chat service on the Oracle VM, and the
+frontend.
+
+Verifying it against a real firm document found that a full review does not
+fit in a Supabase edge function at all. On the M6 term sheet (58,000
+characters of extracted text) each arrangement fails a different limit:
+
+| Arrangement | Outcome |
+|---|---|
+| Three passes at once | `WORKER_RESOURCE_LIMIT` — out of memory |
+| Three passes in sequence | `IDLE_TIMEOUT` — past the 150-second ceiling |
+
+Three contributing sizes were cut along the way and are worth keeping
+whatever happens next: the standard template was being sent whole (526,000
+characters for a Concession Agreement, about 130,000 input tokens a pass) and
+is now capped at 40,000; retrieved excerpts were uncapped, and precedent rows
+in this database average 54,000 characters with the largest at 11MB, so they
+are now capped at 8,000 each as the chat endpoint already does; and a pass
+may now return at most 20 findings with 16,000 output tokens, since 12,000
+truncated the pass and a truncated pass is correctly failed rather than
+reported clean.
+
+Even with all three, the document does not fit. The review has to move to the
+Oracle VM the way the chat endpoint did, where there is no isolate memory
+ceiling and no 150-second wall clock. Until then, reviews complete on short
+documents and fail honestly on long ones — which is the intended behaviour of
+finding 1, but it means the feature is unavailable for the firm's real
+agreements.

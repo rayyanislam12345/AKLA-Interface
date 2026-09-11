@@ -13,6 +13,21 @@ const corsHeaders = {
 
 type ReviewType = 'legal_clauses' | 'formatting' | 'content_conflicts';
 
+// The firm's standard for a Concession Agreement is 526,000 characters. Two
+// of the three passes quote the standard, so sending it whole put half a
+// megabyte into each prompt and killed the function on its memory limit —
+// and cost about 130,000 input tokens a pass for material no reviewer needs
+// in full. An excerpt establishes the convention; the pass is told it is one.
+const MAX_TEMPLATE_CHARS = 40_000;
+
+// Retrieved chunks are not small: precedent rows in this database average
+// 54,000 characters and the largest is 11MB, a whole document in one row.
+// Five of those in a prompt is what exhausts the function's memory. The chat
+// endpoint has capped its sources at 8,000 characters for this reason; the
+// review passes now do the same.
+const MAX_EXCERPT_CHARS = 8_000;
+const excerpt = (text: string) => String(text ?? '').slice(0, MAX_EXCERPT_CHARS);
+
 interface RawSuggestion {
   clause_reference: string;
   original_text: string;
@@ -27,7 +42,7 @@ Rules:
 - "original_text" MUST be an exact, verbatim substring copied from the draft above (so it can be located and replaced) — do not paraphrase it.
 - "clause_reference" is a short human label for where this is (e.g. "Section 4.2" or "Governing Law clause").
 - Only flag genuine, material issues within this pass's scope — not stylistic nitpicks, and not issues that belong to one of the other passes described above. If nothing in scope is wrong, return fewer suggestions rather than padding the list.
-- Return material suggestions ordered by importance. Do not claim this is an exhaustive legal clearance.
+- Return material suggestions ordered by importance, at most 20. Do not claim this is an exhaustive legal clearance.
 - If there is nothing worth flagging, return an empty array [].`;
 
 function buildLegalClausesPrompt(
@@ -107,7 +122,12 @@ async function runReviewPass(
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5',
-      max_tokens: 12000,
+      // A real agreement yields long, verbatim-quoting suggestions: 12k of
+      // output truncated the pass on a 58k-character term sheet, and a
+      // truncated pass is failed rather than reported clean, so the review
+      // could not complete at all. Room for the whole pass, and a cap on how
+      // many findings it may return so the ceiling is not reached again.
+      max_tokens: 16000,
       system: systemPrompt,
       messages: [{ role: 'user', content: `Run the ${reviewType.replace('_', ' ')} pass over the ${documentTypeName} now.` }],
     }),
@@ -250,28 +270,33 @@ serve(async (req) => {
 
     if (template?.storage_path) await supabase.from('ai_review_runs').update({ template_path: template.storage_path }).eq('id', runId);
     const hasTemplate = Boolean(template?.content_html?.trim());
+    const templateText = template?.content_html ?? '';
     const templateSection = hasTemplate
-      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}. Flag divergences from this, not just from the precedent excerpts below:\n${template!.content_html}\nFormatting specification: ${template?.format_rules ?? "No formatting profile available"}`
+      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}${templateText.length > MAX_TEMPLATE_CHARS ? `, the opening ${MAX_TEMPLATE_CHARS} characters of it` : ''}. Flag divergences from this, not just from the precedent excerpts below:\n${templateText.slice(0, MAX_TEMPLATE_CHARS)}\nFormatting specification: ${template?.format_rules ?? "No formatting profile available"}`
       : '';
 
     const precedentSection = precedents.length > 0
       ? `\n\nPRECEDENT — excerpts from the firm's past ${documentTypeName} agreements, retrieved for relevance to this document, for comparison:\n${precedents
-          .map((p, i) => `[Precedent ${i + 1}]\n${p.content}`)
+          .map((p, i) => `[Precedent ${i + 1}]\n${excerpt(p.content)}`)
           .join('\n\n---\n\n')}`
       : '\n\nNo precedent documents of this type are in the firm\'s library yet — flag divergences from standard market practice instead.';
 
     const statuteSection = statutes.length > 0
       ? `\n\nRELEVANT PAKISTANI LAW — excerpts from actual statute text, retrieved for relevance to this document. Flag anything in the draft that appears to conflict with these, or that asserts compliance with these without a correct citation:\n${statutes
-          .map((s, i) => `[${(s.metadata as any)?.act_name ?? `Statute ${i + 1}`}]\n${s.content}`)
+          .map((s, i) => `[${(s.metadata as any)?.act_name ?? `Statute ${i + 1}`}]\n${excerpt(s.content)}`)
           .join('\n\n---\n\n')}`
       : '';
 
     const matterDocumentsSection = matterDocuments.length > 0
       ? `\n\nOTHER DOCUMENTS ALREADY ON THIS MATTER — excerpts from other files on this same matter, for checking internal consistency (dates, figures, defined terms, party names, obligations):\n${matterDocuments
-          .map((d, i) => `[${(d.metadata as any)?.filename ?? `Document ${i + 1}`}]\n${d.content}`)
+          .map((d, i) => `[${(d.metadata as any)?.filename ?? `Document ${i + 1}`}]\n${excerpt(d.content)}`)
           .join('\n\n---\n\n')}`
       : '\n\nNo other documents are on this matter yet, so there is nothing to cross-check for conflicts.';
 
+    // Together, not one after another: three passes in sequence over a real
+    // agreement exceed the function's 150-second limit. They fit in memory
+    // now that the template and every retrieved excerpt are capped, which is
+    // what made running them at once fail before.
     const [legalClausesSuggestions, formattingSuggestions, contentConflictsSuggestions] = await Promise.all([
       runReviewPass(
         anthropicKey,
