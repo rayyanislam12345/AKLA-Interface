@@ -1,4 +1,4 @@
-import { fetchOfficial, sourceIdentityMatches } from "../../../chat-service/sourcePolicy.js";
+import { fetchOfficial, sourceIdentityMatches } from "./sourcePolicy.js";
 import { extractTextFromFile } from "./extractText.ts";
 
 // Ported from scripts/law_library/scrape.py's search_act() — same site,

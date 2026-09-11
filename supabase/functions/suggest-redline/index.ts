@@ -5,7 +5,7 @@ import { extractTextFromFile } from "../_shared/extractText.ts";
 import { fetchGroundedContext } from "../_shared/retrieval.ts";
 
 import { unzipSync } from "https://esm.sh/fflate@0.8.3";
-import { inspectPackage, compareFormat } from "../../../chat-service/docxChecks.js";
+import { inspectPackage, compareFormat } from "../_shared/docxChecks.js";
 import { parseSuggestions } from "../_shared/reviewValidation.js";
 
 const corsHeaders = {
