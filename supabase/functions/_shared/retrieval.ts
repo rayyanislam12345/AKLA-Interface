@@ -31,7 +31,8 @@ export async function fetchGroundedContext(
   // default since draft-document/redline-chat don't need it.
   includeMatterDocuments = false,
   excludeStoragePath: string | null = null,
-  matterDocumentCount = 8
+  matterDocumentCount = 8,
+  extraActNames: string[] = []
 ): Promise<GroundedContext> {
   const [embeddingResult, relevantActNames] = await Promise.all([
     fetch('https://api.voyageai.com/v1/embeddings', {
@@ -71,9 +72,8 @@ export async function fetchGroundedContext(
 
   if (relevantActNames.error) throw new Error('Could not load relevant laws');
   const relevantActList = relevantActNames.data as { act_name: string }[] | null;
-  const filterActNames = relevantActList && relevantActList.length > 0
-    ? relevantActList.map((r) => r.act_name)
-    : null;
+  const names = [...new Set([...(relevantActList ?? []).map(r => r.act_name), ...extraActNames])];
+  const filterActNames = names.length ? names : null;
 
   const [{ data: precedentMatches, error: precedentError }, { data: statuteMatches, error: statuteError }, matterDocumentMatches] = await Promise.all([
     supabase.rpc('match_documents', {

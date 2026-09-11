@@ -4,6 +4,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { extractTextFromFile } from "../_shared/extractText.ts";
 import { fetchGroundedContext } from "../_shared/retrieval.ts";
 
+import { unzipSync } from "https://esm.sh/fflate@0.8.3";
+import { inspectPackage, compareFormat } from "../../../chat-service/docxChecks.js";
 import { parseSuggestions } from "../_shared/reviewValidation.js";
 
 const corsHeaders = {
@@ -155,7 +157,7 @@ serve(async (req) => {
   let runId: string | null = null;
   let reviewDb: any = null;
   try {
-    const { documentVersionId } = await req.json();
+    const { documentVersionId, researchRunId = null } = await req.json();
 
     if (!documentVersionId) {
       return new Response(JSON.stringify({ error: 'documentVersionId is required' }), {
@@ -244,6 +246,14 @@ serve(async (req) => {
       throw new Error('No text content could be extracted from the document');
     }
 
+    let researchNames: string[] = [];
+    let researchLimits: unknown = null;
+    if (researchRunId) {
+      const { data: research } = await supabase.from('ai_research_runs').select('*').eq('id', researchRunId).eq('matter_id', matterId).maybeSingle();
+      if (!research) throw new Error('Research does not belong to this project');
+      researchNames = (research.sources ?? []).map((s: any) => s.metadata?.act_name).filter(Boolean);
+      researchLimits = { status: research.status, unresolved: research.unresolved };
+    }
     const [{ precedents, statutes, matterDocuments }, { data: template }, { data: matterContext }] = await Promise.all([
       fetchGroundedContext(
         supabase,
@@ -252,9 +262,11 @@ serve(async (req) => {
         documentTypeId ?? null,
         matterId ?? null,
         5,
-        3,
+        9,
         true,
-        version.storage_path
+        version.storage_path,
+        12,
+        researchNames
       ),
       documentTypeId
         ? supabase.from('document_type_templates').select('content_html, format_rules, storage_path').eq('document_type_id', documentTypeId).maybeSingle()
@@ -263,6 +275,21 @@ serve(async (req) => {
         ? supabase.from('matter_context').select('content').eq('matter_id', matterId).maybeSingle()
         : Promise.resolve({ data: null }),
     ]);
+
+    let formatCheck: any = { status: 'not_checked', findings: [], limitation: 'An approved standard DOCX and a DOCX source are required for structural formatting comparison.' };
+    let placeholders: any[] = [];
+    if (/\.docx$/i.test(fileName)) {
+      const decode = (blob: Uint8Array) => Object.fromEntries(Object.entries(unzipSync(blob)).filter(([p]) => p.endsWith('.xml')).map(([p,b]) => [p, new TextDecoder().decode(b)]));
+      const sourceParts = decode(new Uint8Array(await fileData.arrayBuffer()));
+      const inspection = inspectPackage(sourceParts);
+      if (inspection.errors.length) throw new Error(inspection.errors.join('; '));
+      placeholders = inspection.placeholders;
+      if (template?.storage_path) {
+        const { data: standardFile, error } = await supabase.storage.from('precedent-library').download(template.storage_path);
+        if (error || !standardFile) throw new Error('Could not load the approved standard for formatting checks');
+        formatCheck = compareFormat(sourceParts, decode(new Uint8Array(await standardFile.arrayBuffer())));
+      }
+    }
 
     const matterContextSection = matterContext?.content?.trim()
       ? `\n\nCONTEXT CARRIED FORWARD ON THIS MATTER (curated by the team from prior work):\n${matterContext.content.trim()}`
@@ -291,7 +318,7 @@ serve(async (req) => {
       ? `\n\nOTHER DOCUMENTS ALREADY ON THIS MATTER — excerpts from other files on this same matter, for checking internal consistency (dates, figures, defined terms, party names, obligations):\n${matterDocuments
           .map((d, i) => `[${(d.metadata as any)?.filename ?? `Document ${i + 1}`}]\n${excerpt(d.content)}`)
           .join('\n\n---\n\n')}`
-      : '\n\nNo other documents are on this matter yet, so there is nothing to cross-check for conflicts.';
+      : '\n\nNo relevant excerpts from other project documents were retrieved. Cross-document consistency cannot be established.';
 
     // Together, not one after another: three passes in sequence over a real
     // agreement exceed the function's 150-second limit. They fit in memory
@@ -329,10 +356,10 @@ serve(async (req) => {
 
     const passes = {
       legal_clauses: { status: statutes.length ? 'reviewed' : 'insufficient_evidence', findings: legalClausesSuggestions.length },
-      formatting: { status: 'partial', findings: formattingSuggestions.length, note: 'Text structure reviewed. Visual formatting requires DOCX comparison; this is not a layout clearance.' },
+      formatting: { status: formatCheck.status, findings: formattingSuggestions.length + formatCheck.findings.length, note: formatCheck.limitation, comparison: formatCheck },
       content_conflicts: { status: matterDocuments.length ? 'partial' : 'insufficient_evidence', findings: contentConflictsSuggestions.length, note: 'Compared retrieved excerpts, not every project document.' },
     };
-    const coverage = { documentCharacters: fullText.length, statuteExcerpts: statutes.length, precedentExcerpts: precedents.length, projectExcerpts: matterDocuments.length, exhaustive: false };
+    const coverage = { documentCharacters: fullText.length, statuteExcerpts: statutes.length, precedentExcerpts: precedents.length, projectExcerpts: matterDocuments.length, placeholders, research: researchLimits, exhaustive: false };
     const { data: inserted, error: commitError } = await supabase.rpc('complete_ai_review', { p_run_id: runId, p_suggestions: taggedSuggestions, p_passes: passes, p_coverage: coverage });
     if (commitError) throw commitError;
     return new Response(JSON.stringify({

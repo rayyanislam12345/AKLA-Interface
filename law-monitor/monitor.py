@@ -252,13 +252,31 @@ def fetch_document(url: str, allowed_domains: list[str]) -> tuple[str | None, st
         return None, f"domain not allowlisted ({host or 'no host'})"
 
     try:
-        resp = requests.get(
-            url,
-            timeout=90,
-            allow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible) AKLA-law-monitor"},
-        )
-        resp.raise_for_status()
+        from urllib.parse import urljoin
+        for _ in range(6):
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+            if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None, 443) or not any(host == d or host.endswith("." + d) for d in allowed_domains):
+                return None, "redirect source is not an approved HTTPS authority"
+            resp = requests.get(url, timeout=45, allow_redirects=False, stream=True,
+                                headers={"User-Agent": "Mozilla/5.0 (compatible) AKLA-law-monitor"})
+            if resp.status_code in (301, 302, 303, 307, 308):
+                url = urljoin(url, resp.headers.get("Location", ""))
+                resp.close()
+                continue
+            resp.raise_for_status()
+            chunks, size = [], 0
+            for chunk in resp.iter_content(65536):
+                size += len(chunk)
+                if size > 20 * 1024 * 1024:
+                    resp.close()
+                    return None, "source exceeds 20 MB"
+                chunks.append(chunk)
+            resp._content = b"".join(chunks)
+            resp.close()
+            break
+        else:
+            return None, "too many source redirects"
     except requests.exceptions.RequestException as err:
         return None, f"fetch failed ({err})"
 

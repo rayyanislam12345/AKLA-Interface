@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "qa": "bun qa-bot/run.ts",
     "qa:headless": "QA_HEADLESS=true bun qa-bot/run.ts",
-    "qa:prod": "QA_URL=https://factoriq.app QA_HEADLESS=true bun qa-bot/run.ts"
+    "qa:prod": "QA_URL=https://factoriq.app QA_HEADLESS=true bun qa-bot/run.ts",
+    "test:ai": "node --test tests/*.test.js chat-service/tests/*.test.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -1,0 +1,18 @@
+<!doctype html><html><body><div id="editor"></div><script type="module">
+import { Editor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { TableNode, TableRowNode, TableCellNode, TableHeaderNode } from '/src/components/editor/TableNodes.ts';
+import { buildFirmDocxBlob } from '/src/lib/firmDocx.ts';
+import { acceptTrackedChanges } from '/src/lib/docxAccept.ts';
+import JSZip from 'jszip';
+window.checkExport = async () => {
+  const editor = new Editor({ element: document.querySelector('#editor'), extensions: [StarterKit, TableNode, TableRowNode, TableCellNode, TableHeaderNode], content: '<h1>Agreement</h1><table><tr><th>Party</th><th>Amount</th></tr><tr><td>Alpha</td><td>100</td></tr></table><p>Execution block</p>' });
+  const json = editor.getJSON();
+  const blob = await buildFirmDocxBlob(json, 'Test');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const xml = await zip.file('word/document.xml').async('string');
+  const result = { tableNodes: json.content.filter(n => n.type === 'table').length, rows: (xml.match(/<w:tr[ >]/g) ?? []).length, table: xml.includes('<w:tbl>'), values: xml.includes('Alpha') && xml.includes('100') && xml.includes('Execution block') };
+  editor.destroy();
+  return result;
+};
+</script></body></html>

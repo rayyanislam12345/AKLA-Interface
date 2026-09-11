@@ -20,11 +20,13 @@ interface DocxArtifactData {
   documentTypeId?: string | null;
   standard?: boolean;
   original?: boolean;
+  validation?: { placeholders?: Array<{ part: string; paragraph: number; text: string }>; format?: { status: string; findings: Array<{ detail: string; part: string }>; limitation: string } };
   changes?: Array<{ op: string; paragraph: number; status: string; summary: string; reason?: string }>;
   applied?: number;
   skipped?: number;
   savedMatterDocumentId?: string;
   savedVersion?: number;
+  savedVersionId?: string;
 }
 
 function download(blob: Blob, name: string) {
@@ -63,10 +65,13 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
   useEffect(() => {
     if (!blob || !previewRef.current) return;
     previewRef.current.innerHTML = "";
-    renderAsync(blob, previewRef.current, previewRef.current, { renderChanges: true, inWrapper: true }).catch((err) => {
+    let cancelled = false;
+    const render = async () => { const file = form === "clean" ? await acceptTrackedChanges(blob) : blob; if (!cancelled && previewRef.current) await renderAsync(file, previewRef.current, previewRef.current, { renderChanges: form !== "clean", inWrapper: true }); };
+    render().catch((err) => {
       toast({ title: "Couldn't render the Word file", description: String(err?.message ?? err), variant: "destructive" });
     });
-  }, [blob, toast]);
+    return () => { cancelled = true; };
+  }, [blob, form, toast]);
 
   const fileFor = async (): Promise<Blob> => {
     if (!blob) throw new Error("The file hasn't loaded yet");
@@ -97,13 +102,14 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
         documentTypeName,
         blob: file,
         title: src?.standard ? undefined : src?.title ?? baseName,
-        matterDocumentId: src?.matterDocumentId,
+        matterDocumentId: data.savedMatterDocumentId ?? src?.matterDocumentId,
+        expectedVersionId: data.savedVersionId ?? src?.documentVersionId,
       });
       await updateArtifact.mutateAsync({
         id: artifact.id,
-        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber },
+        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
       });
-      toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.fileName });
+      toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess this document before relying on it in Ask AI.` });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
     } finally {
@@ -170,6 +176,15 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
         </div>
       )}
 
+      {data.validation && (
+        <div className="border-b p-3 text-xs space-y-1" data-testid="docx-validation">
+          <p className="font-medium">Document checks: {data.validation.format?.status === "checked" ? "source formatting preserved in checked properties" : "formatting needs review"}</p>
+          <p>{data.validation.placeholders?.length ?? 0} unresolved placeholder occurrence(s).</p>
+          {data.validation.placeholders?.slice(0, 12).map((p, i) => <p key={i}>{p.part}, paragraph {p.paragraph}: {p.text}</p>)}
+          {data.validation.format?.findings.map((f, i) => <p key={i}>{f.part}: {f.detail}</p>)}
+          <p className="text-muted-foreground">{data.validation.format?.limitation}</p>
+        </div>
+      )}
       {changes.length > 0 && (
         <div className="border-b px-3 py-2 text-xs">
           <button type="button" className="flex items-center gap-1 font-medium" onClick={() => setChangesOpen((o) => !o)}>

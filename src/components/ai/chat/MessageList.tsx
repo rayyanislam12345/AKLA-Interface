@@ -193,7 +193,7 @@ export function SourcesFootnote({ sources }: { sources: ChatSource[] }) {
         className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {sources.length} source{sources.length === 1 ? "" : "s"} from the library
+        {sources.length} source{sources.length === 1 ? "" : "s"} used for this answer
       </button>
       {open && (
         <ol className="mt-2 space-y-1.5">
@@ -205,7 +205,9 @@ export function SourcesFootnote({ sources }: { sources: ChatSource[] }) {
                 <Icon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="min-w-0">
                   <span className={cn("font-medium", s.scope === "statute" && "text-amber-800 dark:text-amber-300")}>{label}</span>
-                  <span className="ml-1 text-muted-foreground">({Math.round(s.similarity * 100)}%)</span>
+                  {s.url && /^https:\/\//.test(s.url) && <a className="ml-2 underline" href={s.url} target="_blank" rel="noopener noreferrer">Open source</a>}
+                  {s.fetchedAt && <span className="block text-muted-foreground">Retrieved {new Date(s.fetchedAt).toLocaleDateString()}</span>}
+                  {s.applicability === "candidate" && <span className="block text-muted-foreground">Potentially relevant — applicability needs review</span>}
                   <span className="block truncate text-muted-foreground">{s.content}</span>
                 </span>
               </li>

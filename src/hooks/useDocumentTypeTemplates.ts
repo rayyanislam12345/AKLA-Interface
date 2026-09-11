@@ -56,9 +56,7 @@ export function useDeleteDocumentTypeTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ documentTypeId, storagePath }: { documentTypeId: string; storagePath: string | null }) => {
-      if (storagePath) {
-        await supabase.storage.from("precedent-library").remove([storagePath]);
-      }
+      // Retain immutable files referenced by historical AI drafts and template snapshots.
       const { error } = await supabase
         .from("document_type_templates")
         .delete()

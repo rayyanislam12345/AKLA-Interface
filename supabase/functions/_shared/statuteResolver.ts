@@ -1,3 +1,4 @@
+import { fetchOfficial, sourceIdentityMatches } from "../../../chat-service/sourcePolicy.js";
 import { extractTextFromFile } from "./extractText.ts";
 
 // Ported from scripts/law_library/scrape.py's search_act() — same site,
@@ -60,7 +61,7 @@ async function searchAct(name: string): Promise<StatuteSearchMatch | null> {
     if (!pdfMatch) continue;
 
     const titleLower = (title ?? "").toLowerCase();
-    if (title && nameWords.every((w) => titleLower.includes(w))) {
+    if (title && nameWords.every((w) => titleLower.includes(w)) && (name.match(/\b(?:18|19|20)\d{2}\b/g) ?? []).every(year => title.includes(year))) {
       return { title, pageUrl: link, pdfUrl: pdfMatch[1] };
     }
   }
@@ -154,9 +155,11 @@ export async function resolveStatute(actName: string, anthropicKey?: string): Pr
 
   let text: string;
   try {
-    const pdfResp = await fetch(match.pdfUrl, { headers: HEADERS });
-    if (!pdfResp.ok) return { found: false };
-    const blob = await pdfResp.blob();
+    const downloaded = await fetchOfficial(match.pdfUrl);
+    match.pdfUrl = downloaded.url;
+    const blob = downloaded.blob;
+    const magic = new TextDecoder().decode(new Uint8Array(await blob.slice(0, 5).arrayBuffer()));
+    if (magic !== '%PDF-') return { found: false };
     const extracted = await extractTextFromFile(blob, "statute.pdf");
     text = extracted.text;
   } catch (err) {
@@ -164,7 +167,7 @@ export async function resolveStatute(actName: string, anthropicKey?: string): Pr
     return { found: false };
   }
 
-  if (!text || text.trim().length < MIN_TEXT_LENGTH) return { found: false };
+  if (!text || !sourceIdentityMatches(match.title, text) || !sourceIdentityMatches(actName, text)) return { found: false };
 
   return { found: true, title: match.title, pageUrl: match.pageUrl, pdfUrl: match.pdfUrl, text, viaWebSearch };
 }

@@ -10,6 +10,10 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
 } from "docx";
 
 // Matches AKLA's own drafting convention (sampled from firm precedent/memo
@@ -83,7 +87,7 @@ function pmInlineRuns(nodes: PMNode[] | undefined, style: InlineRunStyle = {}): 
   return runs;
 }
 
-function pmListItems(items: PMNode[], level: number, paragraphs: Paragraph[]) {
+function pmListItems(items: PMNode[], level: number, paragraphs: (Paragraph | Table)[]) {
   for (const item of items) {
     const nestedList = item.content?.find((n) => n.type === "bulletList" || n.type === "orderedList");
     const ownContent = (item.content ?? []).filter((n) => n.type !== "bulletList" && n.type !== "orderedList");
@@ -107,8 +111,8 @@ function pmListItems(items: PMNode[], level: number, paragraphs: Paragraph[]) {
 // are justified body text (including blank ones, to preserve the lawyer's
 // spacing), and lists nest one numbering level below whichever heading
 // they fall under.
-function editorContentToFirmParagraphs(doc: PMNode): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
+function editorContentToFirmParagraphs(doc: PMNode): (Paragraph | Table)[] {
+  const paragraphs: (Paragraph | Table)[] = [];
   // Every "# " line before any other content is title, not a clause.
   let inTitleBlock = true;
   let lastHeadingLevel = -1;
@@ -153,6 +157,16 @@ function editorContentToFirmParagraphs(doc: PMNode): Paragraph[] {
       case "bulletList":
       case "orderedList":
         pmListItems(node.content ?? [], Math.min(lastHeadingLevel + 1, FIRM_NUMBERING_MAX_LEVEL), paragraphs);
+        break;
+      case "table":
+        paragraphs.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: (node.content ?? []).map(row => new TableRow({ children: (row.content ?? []).map(cell => new TableCell({
+            columnSpan: cell.attrs?.colspan ?? 1,
+            rowSpan: cell.attrs?.rowspan ?? 1,
+            children: editorContentToFirmParagraphs({ type: "doc", content: cell.content?.length ? cell.content : [{ type: "paragraph" }] }),
+          })) })),
+        }));
         break;
       case "horizontalRule":
         paragraphs.push(

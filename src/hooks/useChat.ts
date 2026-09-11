@@ -39,6 +39,9 @@ export interface ActiveSkill {
 }
 
 export interface ChatSource {
+  url?: string | null;
+  fetchedAt?: string | null;
+  applicability?: string | null;
   id: string;
   scope: "matter" | "precedent" | "statute";
   similarity: number;
@@ -424,6 +427,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       let incomplete = false;
       let generatedChars = 0;
 
+      let receivedDone = false;
       const handle = (event: string, data: any) => {
         const key = keyRef.current;
         switch (event) {
@@ -455,6 +459,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
             break;
           case "done":
+            receivedDone = true;
             assistantMessageId = data.assistantMessageId ?? null;
             incomplete = !!data.incomplete;
             generatedChars = data.generatedChars ?? 0;
@@ -484,6 +489,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
           handle(event, JSON.parse(dataLine));
         }
       }
+      if (!receivedDone) throw new Error("The connection ended before the reply was saved. Reopen the conversation to check its status.");
       return { threadId: roundThreadId, assistantMessageId, incomplete, generatedChars };
     },
     [session, queryClient, onThreadCreated, onArtifact, adopt, patchStream],

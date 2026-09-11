@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { cn, sanitizeStorageFilename } from "@/lib/utils";
 
 // The three-pass AI review of one matter document — suggestions grouped by
@@ -278,52 +279,10 @@ export default function ReviewSession({
     if (!previewBlob) return;
     setSaving(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const { count } = await supabase
-        .from("document_versions")
-        .select("id", { count: "exact", head: true })
-        .eq("matter_document_id", matterDocumentId);
-      const nextVersion = (count ?? 0) + 1;
-
-      const title = matterDocument?.title ?? "document";
-      const fileName = `${title.replace(/\s+/g, "-")}-v${nextVersion}-redlined.docx`;
-      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersion}-${sanitizeStorageFilename(fileName)}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("matter-documents")
-        .upload(storagePath, previewBlob, {
-          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-      if (uploadError) throw uploadError;
-
-      const { error: versionError } = await supabase.from("document_versions").insert({
-        matter_document_id: matterDocumentId,
-        version_number: nextVersion,
-        storage_path: storagePath,
-        file_name: fileName,
-        is_ai_generated: true,
-        uploaded_by: userData.user?.id,
-      });
-      if (versionError) throw versionError;
-
-      // Same RAG ingestion + statute auto-detection every other uploaded
-      // document version gets — a redlined save shouldn't be invisible to
-      // matter chat or skip Relevant Laws detection just because it didn't
-      // come from the file picker.
-      const { error: processError } = await supabase.functions.invoke("process-document", {
-        body: {
-          filePath: storagePath,
-          fileName,
-          fileType: previewBlob.type,
-          bucket: "matter-documents",
-          matterId,
-          documentTypeId: matterDocument?.document_type_id ?? null,
-          isPrecedent: false,
-        },
-      });
-      if (processError) console.error("Redlined draft saved but RAG ingestion failed:", processError);
-
-      toast({ title: "Redlined draft saved as a new document version" });
+      if (!matterDocument?.document_type_id || !version) throw new Error("Document type and source version are required");
+      const result = await saveDraftToMatter({ matterId, documentTypeId: matterDocument.document_type_id, documentTypeName: matterDocument.title, blob: previewBlob,
+        matterDocumentId, title: matterDocument.title, expectedVersionId: version.id });
+      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? result.fileName : "Saved, but search indexing failed. Reprocess the document before using it in Ask AI." });
       navigate(`/matters/${matterId}`);
     } catch (err: any) {
       toast({ title: "Failed to save version", description: err.message, variant: "destructive" });

@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { TableNode, TableRowNode, TableCellNode, TableHeaderNode } from "./TableNodes";
 import StarterKit from "@tiptap/starter-kit";
 
 interface RichTextEditorProps {
@@ -16,7 +17,7 @@ interface RichTextEditorProps {
 const RichTextEditor = forwardRef<Editor | null, RichTextEditorProps>(
   ({ content, onChange, editable = true, className }, ref) => {
     const editor = useEditor({
-      extensions: [StarterKit],
+      extensions: [StarterKit, TableNode, TableRowNode, TableCellNode, TableHeaderNode],
       content,
       editable,
       onUpdate: ({ editor }) => onChange?.(editor.getHTML()),

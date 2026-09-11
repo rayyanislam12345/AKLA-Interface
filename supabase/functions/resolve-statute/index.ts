@@ -21,7 +21,7 @@ serve(async (req) => {
   try {
     const { actName, matterId, source = 'manual_typed' } = await req.json();
 
-    if (!actName || !matterId) {
+    if (typeof actName !== "string" || !actName.trim() || actName.length > 300 || /[%_]/.test(actName) || !matterId || !["manual_typed", "auto_detected"].includes(source)) {
       return new Response(JSON.stringify({ error: 'actName and matterId are required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -58,6 +58,9 @@ serve(async (req) => {
       });
     }
 
+    const { data: matter } = await supabase.from('matters').select('id').eq('id', matterId).maybeSingle();
+    if (!matter) throw new Error('Project not found');
+
     // Already in the shared library under this or a close-enough name?
     const { data: existingDocs } = await supabase
       .from('documents')
@@ -85,6 +88,8 @@ serve(async (req) => {
               source_url: result.pageUrl,
               pdf_url: result.pdfUrl,
               scraped_at: new Date().toISOString(),
+              applicability: "candidate",
+              identity_checked: true,
             },
             isStatute: true,
           },
@@ -106,15 +111,17 @@ serve(async (req) => {
       .maybeSingle();
 
     if (existingRow) {
-      await supabase.from('matter_relevant_laws').update({ status }).eq('id', existingRow.id);
+      const { error } = await supabase.from('matter_relevant_laws').update({ status }).eq('id', existingRow.id);
+      if (error) throw error;
     } else {
-      await supabase.from('matter_relevant_laws').insert({
+      const { error } = await supabase.from('matter_relevant_laws').insert({
         matter_id: matterId,
         act_name: canonicalActName,
         status,
         source,
         added_by: user.id,
       });
+      if (error) throw error;
     }
 
     return new Response(JSON.stringify({ actName: canonicalActName, status }), {

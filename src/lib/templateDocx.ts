@@ -404,6 +404,16 @@ function paragraphsXml(doc: PMNode, profile: TemplateProfile, numId: string, max
       case "orderedList":
         listItems(node.content ?? [], lastHeadingLevel + 1);
         break;
+      case "table": {
+        const rows = (node.content ?? []).map(row => `<w:tr>${(row.content ?? []).map(cell => {
+          if ((cell.attrs?.rowspan ?? 1) > 1) throw new Error("Merged table rows require the native Word editor.");
+          const span = cell.attrs?.colspan ?? 1;
+          return `<w:tc><w:tcPr>${span > 1 ? `<w:gridSpan w:val="${span}"/>` : ""}</w:tcPr>${paragraphsXml({ type: "doc", content: cell.content?.length ? cell.content : [{ type: "paragraph" }] }, profile, numId, maxLevel)}</w:tc>`;
+        }).join("")}</w:tr>`).join("");
+        const columns = Math.max(1, ...(node.content ?? []).map(row => (row.content ?? []).reduce((n,cell) => n + (cell.attrs?.colspan ?? 1), 0)));
+        out.push(`<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol/>').join("")}</w:tblGrid>${rows}</w:tbl>`);
+        break;
+      }
       case "horizontalRule":
         para(`<w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="999999"/></w:pBdr></w:pPr>`, "");
         break;
@@ -481,6 +491,9 @@ export async function openTemplateDocx(templateBytes: ArrayBuffer | Uint8Array):
       out.file("word/numbering.xml", numberingXml);
     }
 
+    if (/<w:tbl(?:\s|>)/.test(documentXml) || (documentXml.match(/<w:sectPr(?:\s|>)/g) ?? []).length > 1) {
+      throw new Error("This standard contains tables or multiple sections. Use Draft with the selected standard so the original Word file is preserved.");
+    }
     // Body: everything between <w:body> and the section properties goes;
     // the *first* section's properties are kept (a standard often ends in a
     // landscape schedule, and the last section's setup would make the whole

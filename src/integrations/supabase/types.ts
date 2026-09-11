@@ -1520,6 +1520,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      save_ai_document: {
+        Args: { p_matter_id: string; p_document_type_id: string; p_document_id: string; p_create_new: boolean; p_expected_version_id: string | null; p_title: string; p_storage_path: string; p_file_stem: string }
+        Returns: Json
+      }
+
       can_access_whatsapp_document: {
         Args: { _path: string }
         Returns: boolean

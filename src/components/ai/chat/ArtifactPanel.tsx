@@ -93,7 +93,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const initialDocTypeId = (artifact.data as any)?.documentTypeId as string | undefined;
   // An edit is saved back onto the document it came from, as its next version.
   const editSource = (artifact.data as any)?.editSource as
-    | { matterDocumentId: string; versionNumber: number; title: string }
+    | { matterDocumentId: string; documentVersionId?: string; versionNumber: number; title: string }
     | undefined;
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(initialDocTypeId);
   const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
@@ -113,10 +113,11 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const buildBlob = async (): Promise<Blob | null> => {
     const editor = editorRef.current;
     if (!editor) return null;
-    if (standard?.storage_path) {
+    const pinnedPath = (artifact.data as any)?.templatePath ?? standard?.storage_path;
+    if (pinnedPath) {
       try {
-        if (standardBytes.current?.path !== standard.storage_path) {
-          standardBytes.current = { path: standard.storage_path, bytes: await fetchTemplateDocxBytes(standard.storage_path) };
+        if (standardBytes.current?.path !== pinnedPath) {
+          standardBytes.current = { path: pinnedPath, bytes: await fetchTemplateDocxBytes(pinnedPath) };
         }
         return await buildTemplateDocxBlob(standardBytes.current.bytes, editor.getJSON() as PMNode);
       } catch (err) {
@@ -194,15 +195,16 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         documentTypeName,
         blob,
         title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
-        matterDocumentId: editSource?.matterDocumentId,
+        matterDocumentId: (artifact.data as any)?.savedMatterDocumentId ?? editSource?.matterDocumentId,
+        expectedVersionId: (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
       });
       await updateArtifact.mutateAsync({
         id: artifact.id,
-        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber },
+        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
       });
       toast({
         title: `Saved to the project as v${result.versionNumber}`,
-        description: result.fileName,
+        description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess before relying on it in Ask AI.`,
       });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
