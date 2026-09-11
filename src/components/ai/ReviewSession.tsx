@@ -9,6 +9,7 @@ import {
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
   useRedlineChat,
+  useReviewRun,
   useRedlinePreviewFile,
   useRedlineSuggestions,
   useRunRedlineReview,
@@ -128,9 +129,13 @@ export default function ReviewSession({
   matterDocumentId,
   lawUpdate,
   onChangeDocument,
+  documentVersionId,
+  reviewRunId,
 }: {
   matterId: string;
   matterDocumentId: string;
+  documentVersionId?: string;
+  reviewRunId?: string;
   lawUpdate: LawUpdate | null;
   // Absent when hosted in the AI Workspace's document panel, where the chat
   // decides which document is under review.
@@ -152,8 +157,11 @@ export default function ReviewSession({
     },
   });
 
-  const { data: version, isLoading: versionLoading } = useLatestDocumentVersion(matterDocumentId);
-  const { data: suggestions } = useRedlineSuggestions(version?.id);
+  const { data: version, isLoading: versionLoading } = useLatestDocumentVersion(matterDocumentId, documentVersionId);
+  const { data: latestVersion } = useLatestDocumentVersion(matterDocumentId);
+  const [selectedRunId, setSelectedRunId] = useState(reviewRunId);
+  const { data: reviewRun } = useReviewRun(version?.id, selectedRunId);
+  const { data: suggestions } = useRedlineSuggestions(version?.id, reviewRun?.id);
   const runReview = useRunRedlineReview();
   const setStatus = useSetSuggestionStatus();
   const redlineChat = useRedlineChat();
@@ -174,16 +182,23 @@ export default function ReviewSession({
   const [chatThreadId, setChatThreadId] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
-  const regeneratePreview = async (documentVersionId: string) => {
+  const regeneratePreview = async (documentVersionId: string, runId = reviewRun?.id) => {
     if (!canPreview) return;
     try {
-      const result = await applyPreview.mutateAsync(documentVersionId);
+      const result = await applyPreview.mutateAsync({ documentVersionId, reviewRunId: runId });
       setPreviewStoragePath(result.previewStoragePath);
       setApplySummary({ appliedCount: result.appliedCount, skippedCount: result.skippedCount });
     } catch (err: any) {
       toast({ title: "Failed to build tracked-changes preview", description: err.message, variant: "destructive" });
     }
   };
+
+  useEffect(() => {
+    setPreviewStoragePath(undefined);
+    setApplySummary(null);
+    setChatMessages([]);
+    setChatThreadId(undefined);
+  }, [version?.id, reviewRun?.id]);
 
   // Rebuild the preview automatically once suggestions exist and nothing's
   // been generated yet this visit — apply-redlines-to-docx re-downloads the
@@ -194,7 +209,7 @@ export default function ReviewSession({
       regeneratePreview(version.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version?.id, suggestions, canPreview]);
+  }, [version?.id, reviewRun?.id, suggestions, canPreview]);
 
   useEffect(() => {
     if (previewBlob && previewRef.current) {
@@ -208,8 +223,10 @@ export default function ReviewSession({
   const handleRunReview = async () => {
     if (!version?.id) return;
     try {
-      await runReview.mutateAsync(version.id);
-      await regeneratePreview(version.id);
+      const result = await runReview.mutateAsync(version.id);
+      setSelectedRunId(result.reviewRunId);
+      setPreviewStoragePath(undefined);
+      await regeneratePreview(version.id, result.reviewRunId);
     } catch (err: any) {
       toast({ title: "Review failed", description: err.message, variant: "destructive" });
     }
@@ -222,6 +239,7 @@ export default function ReviewSession({
       const result = await redlineChat.mutateAsync({
         documentVersionId: version.id,
         threadId: chatThreadId,
+        reviewRunId: reviewRun?.id,
         instruction: text,
       });
       setChatThreadId(result.threadId);
@@ -382,6 +400,19 @@ export default function ReviewSession({
         )}
       </div>
 
+      {documentVersionId && latestVersion && latestVersion.id !== documentVersionId && (
+        <p className="rounded border border-amber-400 p-3 text-sm">This review is pinned to v{version?.version_number}. The project now has v{latestVersion.version_number}; that newer version has not been checked by this review.</p>
+      )}
+      {reviewRun && (
+        <div className="rounded border p-3 text-sm space-y-1" data-testid="review-status">
+          <p className="font-medium">Review {reviewRun.status === "complete" ? "checks finished — lawyer review required" : reviewRun.status}</p>
+          {reviewRun.error && <p className="text-destructive">{reviewRun.error}</p>}
+          {Object.entries((reviewRun.passes ?? {}) as Record<string, { status: string; note?: string }>).map(([key, pass]) => (
+            <p key={key}>{REVIEW_TYPE_LABELS[key as RedlineReviewType] ?? key}: {pass.status.replace(/_/g, " ")}{pass.note ? ` — ${pass.note}` : ""}</p>
+          ))}
+          <p className="text-muted-foreground">Results apply to this file and the retrieved evidence. An empty list is not a legal clearance.</p>
+        </div>
+      )}
       {lawUpdate && (
         <Card className="border-amber-400/60 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/20">
           <CardContent className="pt-6">

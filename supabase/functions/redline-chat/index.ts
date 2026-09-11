@@ -4,6 +4,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { extractTextFromFile } from "../_shared/extractText.ts";
 import { fetchGroundedContext } from "../_shared/retrieval.ts";
 
+import { parseSuggestions } from "../_shared/reviewValidation.js";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -24,7 +26,7 @@ serve(async (req) => {
     // `context` carries other project documents the lawyer named — "check
     // this against the concession agreement". It is read for this answer but
     // never stored on the thread, which holds what the lawyer actually typed.
-    const { documentVersionId, threadId = null, instruction, context = "" } = await req.json();
+    const { documentVersionId, reviewRunId = null, threadId = null, instruction, context = "" } = await req.json();
 
     if (!documentVersionId || !instruction) {
       return new Response(JSON.stringify({ error: 'documentVersionId and instruction are required' }), {
@@ -117,6 +119,14 @@ serve(async (req) => {
         .eq('document_version_id', documentVersionId),
     ]);
 
+    if (reviewRunId) {
+      const { data: run } = await supabase.from('ai_review_runs').select('id').eq('id', reviewRunId).eq('document_version_id', documentVersionId).eq('status', 'complete').maybeSingle();
+      if (!run) throw new Error('The review does not belong to this document version or did not finish.');
+    }
+    if (threadId) {
+      const { data: thread } = await supabase.from('ai_chat_threads').select('id').eq('id', threadId).eq('document_version_id', documentVersionId).eq('matter_id', matterId).maybeSingle();
+      if (!thread) throw new Error('The conversation does not belong to this document version.');
+    }
     // Lazily create the thread on the first follow-up message — mirrors
     // drafting-interview/rag-query's threadId-continuation pattern.
     let activeThreadId = threadId;
@@ -203,14 +213,9 @@ SUGGESTIONS: <a JSON array of {"clause_reference": string, "original_text": stri
     const replyMatch = rawText.match(/REPLY:\s*([\s\S]*?)(?=\n?SUGGESTIONS:)/);
     const reply = replyMatch ? replyMatch[1].trim() : rawText.trim();
 
-    let newSuggestionsRaw: Array<{ clause_reference: string; original_text: string; suggested_text: string; rationale: string }> = [];
-    try {
-      const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-      if (jsonMatch) newSuggestionsRaw = JSON.parse(jsonMatch[0]);
-      if (!Array.isArray(newSuggestionsRaw)) newSuggestionsRaw = [];
-    } catch {
-      newSuggestionsRaw = [];
-    }
+    if (!replyMatch) throw new Error('Review instruction failed: invalid response structure.');
+    const suggestionText = rawText.slice(rawText.indexOf('SUGGESTIONS:') + 'SUGGESTIONS:'.length).trim();
+    const newSuggestionsRaw = parseSuggestions(suggestionText, aiData.stop_reason, fullText);
 
     await supabase.from('ai_chat_messages').insert({ thread_id: activeThreadId, role: 'assistant', content: reply });
 
@@ -221,6 +226,7 @@ SUGGESTIONS: <a JSON array of {"clause_reference": string, "original_text": stri
         .insert(
           newSuggestionsRaw.map((s) => ({
             document_version_id: documentVersionId,
+            review_run_id: reviewRunId,
             clause_reference: s.clause_reference,
             original_text: s.original_text,
             suggested_text: s.suggested_text,

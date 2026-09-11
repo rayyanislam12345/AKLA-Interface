@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_review_runs: {
+        Row: { id: string; document_version_id: string; status: string; passes: Json; coverage: Json; source_hash: string | null; template_path: string | null; error: string | null; created_by: string | null; created_at: string }
+        Insert: { id?: string; document_version_id: string; status?: string; passes?: Json; coverage?: Json; source_hash?: string | null; template_path?: string | null; error?: string | null; created_by?: string | null; created_at?: string }
+        Update: { status?: string; passes?: Json; coverage?: Json; error?: string | null }
+        Relationships: []
+      }
       ai_artifacts: {
         Row: {
           content: string | null
@@ -1257,6 +1263,7 @@ export type Database = {
         Row: {
           clause_reference: string | null
           created_at: string
+          review_run_id: string | null
           document_version_id: string
           id: string
           original_text: string | null
@@ -1266,6 +1273,7 @@ export type Database = {
           suggested_text: string | null
         }
         Insert: {
+          review_run_id?: string | null
           clause_reference?: string | null
           created_at?: string
           document_version_id: string
@@ -1277,6 +1285,7 @@ export type Database = {
           suggested_text?: string | null
         }
         Update: {
+          review_run_id?: string | null
           clause_reference?: string | null
           created_at?: string
           document_version_id?: string

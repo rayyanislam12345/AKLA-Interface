@@ -16,16 +16,17 @@ export interface RedlineSuggestion {
   review_type: RedlineReviewType;
 }
 
-export function useLatestDocumentVersion(matterDocumentId: string | undefined) {
+export function useLatestDocumentVersion(matterDocumentId: string | undefined, documentVersionId?: string) {
   return useQuery({
-    queryKey: ["latest-document-version", matterDocumentId],
+    queryKey: ["latest-document-version", matterDocumentId, documentVersionId],
     enabled: !!matterDocumentId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("document_versions")
         .select("*")
         .eq("matter_document_id", matterDocumentId!)
-        .order("version_number", { ascending: false })
+      if (documentVersionId) query = query.eq("id", documentVersionId);
+      const { data, error } = await query.order("version_number", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (error) throw error;
@@ -34,16 +35,34 @@ export function useLatestDocumentVersion(matterDocumentId: string | undefined) {
   });
 }
 
-export function useRedlineSuggestions(documentVersionId: string | undefined) {
+export function useRedlineSuggestions(documentVersionId: string | undefined, reviewRunId?: string | null) {
   return useQuery({
-    queryKey: ["redline-suggestions", documentVersionId],
+    queryKey: ["redline-suggestions", documentVersionId, reviewRunId],
     enabled: !!documentVersionId,
     queryFn: async (): Promise<RedlineSuggestion[]> => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("redline_suggestions")
         .select("*")
-        .eq("document_version_id", documentVersionId!)
-        .order("created_at");
+        .eq("document_version_id", documentVersionId!);
+      if (reviewRunId) query = query.eq("review_run_id", reviewRunId);
+      else query = query.is("review_run_id", null);
+      const { data, error } = await query.order("created_at");
+      if (error) throw error;
+      return data.map(row => {
+        if (!["legal_clauses", "formatting", "content_conflicts", "chat"].includes(row.review_type)) throw new Error("Unknown review type");
+        return { ...row, review_type: row.review_type as RedlineReviewType };
+      });
+    },
+  });
+}
+
+export function useReviewRun(documentVersionId?: string, reviewRunId?: string | null) {
+  return useQuery({
+    queryKey: ["review-run", documentVersionId, reviewRunId], enabled: !!documentVersionId,
+    queryFn: async () => {
+      let query = supabase.from("ai_review_runs").select("*").eq("document_version_id", documentVersionId!);
+      if (reviewRunId) query = query.eq("id", reviewRunId);
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -58,10 +77,11 @@ export function useRunRedlineReview() {
         body: { documentVersionId },
       });
       if (error) throw error;
-      return data as { fullText: string; suggestions: RedlineSuggestion[] };
+      return data as { fullText: string; reviewRunId: string; passes: Record<string, { status: string; note?: string }>; suggestions: RedlineSuggestion[] };
     },
     onSuccess: (_data, documentVersionId) => {
       queryClient.invalidateQueries({ queryKey: ["redline-suggestions", documentVersionId] });
+      queryClient.invalidateQueries({ queryKey: ["review-run", documentVersionId] });
     },
   });
 }
@@ -69,7 +89,7 @@ export function useRunRedlineReview() {
 export function useRedlineChat() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { documentVersionId: string; threadId?: string; instruction: string }) => {
+    mutationFn: async (input: { documentVersionId: string; threadId?: string; reviewRunId?: string; instruction: string }) => {
       const { data, error } = await supabase.functions.invoke("redline-chat", { body: input });
       if (error) throw error;
       return data as { threadId: string; reply: string; newSuggestions: RedlineSuggestion[] };
@@ -95,7 +115,7 @@ export function useSetSuggestionStatus() {
       const { error } = await supabase
         .from("redline_suggestions")
         .update({ status })
-        .eq("id", suggestionId);
+        .eq("id", suggestionId).eq("document_version_id", documentVersionId);
       if (error) throw error;
       return documentVersionId;
     },
@@ -119,14 +139,14 @@ export interface ApplyRedlinesResult {
 export function useApplyRedlinesPreview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (documentVersionId: string) => {
+    mutationFn: async ({ documentVersionId, reviewRunId }: { documentVersionId: string; reviewRunId?: string }) => {
       const { data, error } = await supabase.functions.invoke("apply-redlines-to-docx", {
-        body: { documentVersionId },
+        body: { documentVersionId, reviewRunId },
       });
       if (error) throw error;
       return data as ApplyRedlinesResult;
     },
-    onSuccess: (_data, documentVersionId) => {
+    onSuccess: (_data, { documentVersionId }) => {
       queryClient.invalidateQueries({ queryKey: ["redline-preview", documentVersionId] });
     },
   });

@@ -27,7 +27,7 @@ serve(async (req) => {
   }
 
   try {
-    const { documentVersionId } = await req.json();
+    const { documentVersionId, reviewRunId = null } = await req.json();
 
     if (!documentVersionId) {
       return new Response(JSON.stringify({ error: 'documentVersionId is required' }), {
@@ -90,11 +90,17 @@ serve(async (req) => {
       .download(version.storage_path);
     if (downloadError) throw new Error(`Failed to download file: ${downloadError.message}`);
 
-    const { data: suggestions, error: suggestionsError } = await supabase
+    if (reviewRunId) {
+      const { data: run } = await supabase.from('ai_review_runs').select('id').eq('id', reviewRunId).eq('document_version_id', documentVersionId).eq('status', 'complete').maybeSingle();
+      if (!run) throw new Error('Review run does not match this version or has not completed');
+    }
+    let suggestionsQuery = supabase
       .from('redline_suggestions')
       .select('id, clause_reference, original_text, suggested_text, status')
       .eq('document_version_id', documentVersionId)
       .neq('status', 'rejected');
+    suggestionsQuery = reviewRunId ? suggestionsQuery.eq('review_run_id', reviewRunId) : suggestionsQuery.is('review_run_id', null);
+    const { data: suggestions, error: suggestionsError } = await suggestionsQuery;
     if (suggestionsError) throw suggestionsError;
 
     const originalBytes = new Uint8Array(await fileData.arrayBuffer());
@@ -146,7 +152,7 @@ serve(async (req) => {
     zipEntries['word/document.xml'] = encoder.encode(oxml);
     const patchedZip = zipSync(zipEntries);
 
-    const previewStoragePath = `${matterId}/${matterDocumentId}/redline-preview.docx`;
+    const previewStoragePath = `${matterId}/${matterDocumentId}/${documentVersionId}/${reviewRunId ?? "legacy"}/preview-${crypto.randomUUID()}.docx`;
     const { error: uploadError } = await supabase.storage
       .from('matter-documents')
       .upload(previewStoragePath, patchedZip, {

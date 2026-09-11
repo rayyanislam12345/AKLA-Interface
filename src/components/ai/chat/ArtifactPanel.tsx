@@ -71,7 +71,7 @@ function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; a
   }
   return (
     <div className="p-4">
-      <ReviewSession matterId={matterId} matterDocumentId={matterDocumentId} lawUpdate={lawUpdate} />
+      <ReviewSession key={artifact.id} matterId={matterId} matterDocumentId={matterDocumentId} documentVersionId={(artifact.data as any)?.documentVersionId} reviewRunId={(artifact.data as any)?.reviewRunId} lawUpdate={lawUpdate} />
     </div>
   );
 }
@@ -120,7 +120,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         }
         return await buildTemplateDocxBlob(standardBytes.current.bytes, editor.getJSON() as PMNode);
       } catch (err) {
-        console.warn("Falling back to the firm's generic format:", err);
+        throw new Error(`The firm standard could not be applied. Export stopped: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -155,6 +155,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   };
 
   const handleDownload = async () => {
+    try {
     const blob = await buildBlob();
     if (!blob) return;
     const url = URL.createObjectURL(blob);
@@ -163,6 +164,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
     a.download = `${artifact.title.replace(/[^\w.-]+/g, "-")}.docx`;
     a.click();
     URL.revokeObjectURL(url);
+    } catch (err) { toast({ title: "Export failed", description: String(err instanceof Error ? err.message : err), variant: "destructive" }); }
   };
 
   // Manual edits live in the editor until the lawyer saves them back; the
@@ -263,7 +265,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         </Button>
         {standard?.filename && (
           <span className="text-xs text-muted-foreground" title={standard.filename} data-testid="standard-format-note">
-            Formatted as the firm's standard
+            Uses firm standard · layout not verified
           </span>
         )}
         {saved && (

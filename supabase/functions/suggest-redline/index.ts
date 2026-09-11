@@ -4,6 +4,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { extractTextFromFile } from "../_shared/extractText.ts";
 import { fetchGroundedContext } from "../_shared/retrieval.ts";
 
+import { parseSuggestions } from "../_shared/reviewValidation.js";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -25,7 +27,7 @@ Rules:
 - "original_text" MUST be an exact, verbatim substring copied from the draft above (so it can be located and replaced) — do not paraphrase it.
 - "clause_reference" is a short human label for where this is (e.g. "Section 4.2" or "Governing Law clause").
 - Only flag genuine, material issues within this pass's scope — not stylistic nitpicks, and not issues that belong to one of the other passes described above. If nothing in scope is wrong, return fewer suggestions rather than padding the list.
-- Return at most 8 suggestions, ordered by importance.
+- Return material suggestions ordered by importance. Do not claim this is an exhaustive legal clearance.
 - If there is nothing worth flagging, return an empty array [].`;
 
 function buildLegalClausesPrompt(
@@ -58,7 +60,7 @@ function buildFormattingPrompt(
 ) {
   return `You are a legal drafting reviewer running ONE specific pass over a draft ${documentTypeName}: formatting and structural consistency against the firm's own convention. Two other passes (legal clause correctness/citations, and content conflicts) run separately — stay within your lane.
 
-Your scope: compare ONLY the document's formatting and structural conventions against the standard template and precedent below — clause/section numbering scheme, heading and sub-heading structure, defined-term capitalization consistency (is a defined term capitalized the same way every time it recurs?), recitals structure, execution block format, cross-reference style (e.g. "Section 4.2" vs "Clause 4.2" used inconsistently), and consistent use of bold/italics for defined terms or emphasis.
+Your scope: compare ONLY the document's formatting and structural conventions against the standard template and precedent below — clause/section numbering scheme, heading and sub-heading structure, defined-term capitalization consistency (is a defined term capitalized the same way every time it recurs?), recitals structure, execution block format, cross-reference style (e.g. "Section 4.2" vs "Clause 4.2" used inconsistently), and textual defined-term conventions. You receive extracted text, not rendered Word formatting: do not claim to have checked bold, italics, fonts, margins, spacing, or headers/footers.
 
 Explicitly OUT OF SCOPE for this pass — do not flag: whether a clause is legally correct or complete, missing legal citations, or conflicts with other documents on this matter (separate passes cover those). Do not comment on what a clause says — only on how it is structured or formatted. If the document's formatting already matches precedent/template, say so by returning an empty array rather than inventing nitpicks.${templateSection}${precedentSection}
 
@@ -93,7 +95,8 @@ async function runReviewPass(
   anthropicKey: string,
   reviewType: ReviewType,
   systemPrompt: string,
-  documentTypeName: string
+  documentTypeName: string,
+  fullText: string
 ): Promise<RawSuggestion[]> {
   const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -104,7 +107,7 @@ async function runReviewPass(
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5',
-      max_tokens: 4096,
+      max_tokens: 12000,
       system: systemPrompt,
       messages: [{ role: 'user', content: `Run the ${reviewType.replace('_', ' ')} pass over the ${documentTypeName} now.` }],
     }),
@@ -121,13 +124,7 @@ async function runReviewPass(
   // thinking) — content[0] isn't reliably the text block, so find it explicitly.
   const rawText: string = aiData.content?.find((block: any) => block.type === 'text')?.text ?? '[]';
 
-  try {
-    const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return parseSuggestions(rawText, aiData.stop_reason, fullText);
 }
 
 serve(async (req) => {
@@ -135,6 +132,8 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let runId: string | null = null;
+  let reviewDb: any = null;
   try {
     const { documentVersionId } = await req.json();
 
@@ -176,6 +175,7 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
+    reviewDb = supabase;
     const { data: { user }, error: userError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
     );
@@ -214,6 +214,11 @@ serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError.message}`);
     }
 
+    const digest = await crypto.subtle.digest('SHA-256', await fileData.arrayBuffer());
+    const sourceHash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+    const { data: run, error: runError } = await supabase.from('ai_review_runs').insert({ document_version_id: documentVersionId, source_hash: sourceHash, created_by: user.id }).select('id').single();
+    if (runError) throw runError;
+    runId = run.id;
     const { text: fullText } = await extractTextFromFile(fileData, fileName);
     if (!fullText || fullText.trim().length === 0) {
       throw new Error('No text content could be extracted from the document');
@@ -232,7 +237,7 @@ serve(async (req) => {
         version.storage_path
       ),
       documentTypeId
-        ? supabase.from('document_type_templates').select('content_html').eq('document_type_id', documentTypeId).maybeSingle()
+        ? supabase.from('document_type_templates').select('content_html, format_rules, storage_path').eq('document_type_id', documentTypeId).maybeSingle()
         : Promise.resolve({ data: null }),
       matterId
         ? supabase.from('matter_context').select('content').eq('matter_id', matterId).maybeSingle()
@@ -243,9 +248,10 @@ serve(async (req) => {
       ? `\n\nCONTEXT CARRIED FORWARD ON THIS MATTER (curated by the team from prior work):\n${matterContext.content.trim()}`
       : '';
 
+    if (template?.storage_path) await supabase.from('ai_review_runs').update({ template_path: template.storage_path }).eq('id', runId);
     const hasTemplate = Boolean(template?.content_html?.trim());
     const templateSection = hasTemplate
-      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}. Flag divergences from this, not just from the precedent excerpts below:\n${template!.content_html}`
+      ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}. Flag divergences from this, not just from the precedent excerpts below:\n${template!.content_html}\nFormatting specification: ${template?.format_rules ?? "No formatting profile available"}`
       : '';
 
     const precedentSection = precedents.length > 0
@@ -271,19 +277,22 @@ serve(async (req) => {
         anthropicKey,
         'legal_clauses',
         buildLegalClausesPrompt(documentTypeName, fullText, matterContextSection, templateSection, precedentSection, statuteSection),
-        documentTypeName
+        documentTypeName,
+        fullText
       ),
       runReviewPass(
         anthropicKey,
         'formatting',
         buildFormattingPrompt(documentTypeName, fullText, templateSection, precedentSection),
-        documentTypeName
+        documentTypeName,
+        fullText
       ),
       runReviewPass(
         anthropicKey,
         'content_conflicts',
         buildContentConflictsPrompt(documentTypeName, fullText, matterContextSection, precedentSection, matterDocumentsSection),
-        documentTypeName
+        documentTypeName,
+        fullText
       ),
     ]);
 
@@ -293,43 +302,26 @@ serve(async (req) => {
       ...contentConflictsSuggestions.map((s) => ({ ...s, review_type: 'content_conflicts' as const })),
     ];
 
-    // Clear stale pending suggestions from a prior run (all review types)
-    // so re-reviewing doesn't pile up duplicates; accepted/rejected history
-    // is left alone.
-    await supabase
-      .from('redline_suggestions')
-      .delete()
-      .eq('document_version_id', documentVersionId)
-      .eq('status', 'pending');
-
-    let inserted: any[] = [];
-    if (taggedSuggestions.length > 0) {
-      const { data: insertedRows, error: insertError } = await supabase
-        .from('redline_suggestions')
-        .insert(
-          taggedSuggestions.map((s) => ({
-            document_version_id: documentVersionId,
-            clause_reference: s.clause_reference,
-            original_text: s.original_text,
-            suggested_text: s.suggested_text,
-            rationale: s.rationale,
-            review_type: s.review_type,
-            status: 'pending',
-          }))
-        )
-        .select();
-      if (insertError) throw insertError;
-      inserted = insertedRows;
-    }
-
+    const passes = {
+      legal_clauses: { status: statutes.length ? 'reviewed' : 'insufficient_evidence', findings: legalClausesSuggestions.length },
+      formatting: { status: 'partial', findings: formattingSuggestions.length, note: 'Text structure reviewed. Visual formatting requires DOCX comparison; this is not a layout clearance.' },
+      content_conflicts: { status: matterDocuments.length ? 'partial' : 'insufficient_evidence', findings: contentConflictsSuggestions.length, note: 'Compared retrieved excerpts, not every project document.' },
+    };
+    const coverage = { documentCharacters: fullText.length, statuteExcerpts: statutes.length, precedentExcerpts: precedents.length, projectExcerpts: matterDocuments.length, exhaustive: false };
+    const { data: inserted, error: commitError } = await supabase.rpc('complete_ai_review', { p_run_id: runId, p_suggestions: taggedSuggestions, p_passes: passes, p_coverage: coverage });
+    if (commitError) throw commitError;
     return new Response(JSON.stringify({
       fullText,
+      reviewRunId: runId,
+      passes,
+      coverage,
       suggestions: inserted,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
+    if (runId && reviewDb) await reviewDb.from('ai_review_runs').update({ status: 'failed', error: error instanceof Error ? error.message : 'Review failed' }).eq('id', runId);
     console.error('Error in suggest-redline:', error);
     return new Response(JSON.stringify({
       error: error instanceof Error ? error.message : 'Unknown error',

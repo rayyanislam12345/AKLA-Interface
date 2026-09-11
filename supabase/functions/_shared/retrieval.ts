@@ -63,12 +63,13 @@ export async function fetchGroundedContext(
   if (!embeddingResult.ok) {
     const error = await embeddingResult.text();
     console.error('Error generating retrieval query embedding:', error);
-    return { precedents: [], statutes: [], matterDocuments: [] };
+    throw new Error('Source retrieval failed; the review cannot establish its evidence.');
   }
 
   const embeddingData = await embeddingResult.json();
   const queryEmbedding = embeddingData.data[0].embedding;
 
+  if (relevantActNames.error) throw new Error('Could not load relevant laws');
   const relevantActList = relevantActNames.data as { act_name: string }[] | null;
   const filterActNames = relevantActList && relevantActList.length > 0
     ? relevantActList.map((r) => r.act_name)
@@ -98,9 +99,9 @@ export async function fetchGroundedContext(
       : Promise.resolve({ data: [] as GroundedMatch[], error: null }),
   ]);
 
-  if (precedentError) console.error('Error matching precedents:', precedentError);
-  if (statuteError) console.error('Error matching statutes:', statuteError);
-  if (matterDocumentMatches.error) console.error('Error matching matter documents:', matterDocumentMatches.error);
+  if (precedentError) throw new Error('Precedent retrieval failed');
+  if (statuteError) throw new Error('Statute retrieval failed');
+  if (matterDocumentMatches.error) throw new Error('Project document retrieval failed');
 
   const matterDocuments = ((matterDocumentMatches.data ?? []) as GroundedMatch[])
     .filter((m) => !excludeStoragePath || (m.metadata as any)?.storage_path !== excludeStoragePath)

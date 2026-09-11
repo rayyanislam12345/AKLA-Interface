@@ -21,7 +21,11 @@ export function useMatterRelevantLaws(matterId: string | undefined) {
         .eq("matter_id", matterId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data;
+      return data.map(row => {
+        if (row.status !== "available" && row.status !== "needs_upload") throw new Error("Unknown relevant-law status");
+        if (!["manual_selected", "manual_typed", "auto_detected"].includes(row.source)) throw new Error("Unknown relevant-law source");
+        return { ...row, status: row.status, source: row.source as MatterRelevantLaw["source"] };
+      });
     },
   });
 }
