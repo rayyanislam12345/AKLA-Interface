@@ -9,7 +9,9 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@ansonlai/docx-redline-js": "^0.5.4",
     "@supabase/supabase-js": "2.57.4",
+    "@xmldom/xmldom": "^0.9.8",
     "dotenv": "^16.4.5",
     "fflate": "^0.8.3",
     "mammoth": "^1.6.0",

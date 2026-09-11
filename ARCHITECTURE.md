@@ -222,3 +222,25 @@ exemplar paragraph found in the standard for its role — title, clause level,
 body, enumerated item — which is what makes this survive the direct
 formatting real firm files are full of. Types without a standard still use
 the generic firm format in `src/lib/firmDocx.ts`.
+
+### Word files are edited as Word files
+
+Since 2026-09-11 the AI Workspace works on a `.docx` without ever converting
+it to text and back. `chat-service/docxAgent.js` lists the file's paragraphs
+to the model as `¶n`, takes back a small set of operations, and writes them
+into the same file as Word tracked changes. The artifact row is kind `docx`
+(`data.storagePath` in the `ai-chat-files` bucket, plus the list of changes
+made and any that could not be); `src/components/ai/chat/DocxArtifact.tsx`
+previews that file with `docx-preview`, offers it tracked or clean
+(`src/lib/docxAccept.ts`), and saves it onto the project as the next version.
+
+Drafting a document type that has a standard `.docx` is the same mechanism:
+the standard is opened and its blanks are filled in place, so the draft is
+the firm's own file rather than a rebuild of it. Only a source that is not a
+Word file still goes through text extraction and comes back as Markdown for
+`src/lib/templateDocx.ts` to export.
+
+Every skill can pull a project document into a turn by name — the chat, a
+draft, an edit, a review instruction — through `resolveReferences`. A
+document merely named is marked `auto` so that a review still runs on the
+document the lawyer actually chose.

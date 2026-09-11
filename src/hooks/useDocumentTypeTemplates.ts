@@ -130,3 +130,17 @@ export async function fetchTemplateDocxBytes(storagePath: string): Promise<Array
   if (error || !data) throw new Error(error?.message ?? "Could not download the standard");
   return data.arrayBuffer();
 }
+
+// A file the chat produced or is working on, from whichever bucket holds it.
+export function useChatFile(bucket: string | undefined, storagePath: string | undefined) {
+  return useQuery({
+    queryKey: ["chat-file", bucket, storagePath],
+    enabled: !!bucket && !!storagePath,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const { data, error } = await supabase.storage.from(bucket!).download(storagePath!);
+      if (error || !data) throw new Error(error?.message ?? "Could not download the file");
+      return data;
+    },
+  });
+}

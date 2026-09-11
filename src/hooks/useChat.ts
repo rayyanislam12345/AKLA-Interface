@@ -236,12 +236,20 @@ export async function openDocumentForEdit(
   target: EditTarget,
   userId: string | undefined,
 ): Promise<{ threadId: string; artifact: ChatArtifact }> {
-  const { data: extracted, error: extractError } = await supabase.functions.invoke("extract-document-text", {
-    body: { bucket: "matter-documents", storagePath: target.storagePath, fileName: target.fileName },
-  });
-  if (extractError) throw extractError;
-  const text = String(extracted?.text ?? "");
-  if (!text.trim()) throw new Error("No text could be read from that file");
+  // A Word file is edited as a Word file: the chat works on the .docx itself
+  // and every change lands in it as a tracked change, so nothing is
+  // extracted and rebuilt. Anything else (PDF, slides) has to go through
+  // text, and comes back as a Markdown draft to export.
+  const isDocx = /\.docx$/i.test(target.fileName);
+  let text = "";
+  if (!isDocx) {
+    const { data: extracted, error: extractError } = await supabase.functions.invoke("extract-document-text", {
+      body: { bucket: "matter-documents", storagePath: target.storagePath, fileName: target.fileName },
+    });
+    if (extractError) throw extractError;
+    text = String(extracted?.text ?? "");
+    if (!text.trim()) throw new Error("No text could be read from that file");
+  }
 
   const editSource = {
     matterDocumentId: target.matterDocumentId,
@@ -267,10 +275,15 @@ export async function openDocumentForEdit(
     .insert({
       thread_id: thread.id,
       matter_id: matterId,
-      kind: "draft",
+      kind: isDocx ? "docx" : "draft",
       title: `${target.title} (v${target.versionNumber})`,
-      content: text,
-      data: { editSource, original: true, ...(target.documentTypeId ? { documentTypeId: target.documentTypeId } : {}) },
+      content: isDocx ? "" : text,
+      data: {
+        editSource,
+        original: true,
+        ...(isDocx ? { bucket: "matter-documents", storagePath: target.storagePath, fileName: target.fileName, changes: [] } : {}),
+        ...(target.documentTypeId ? { documentTypeId: target.documentTypeId } : {}),
+      },
       created_by: userId,
     })
     .select("*")

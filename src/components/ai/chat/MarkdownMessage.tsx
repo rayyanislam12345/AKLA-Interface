@@ -86,7 +86,12 @@ export function ArtifactCard({
   }
   const Icon = artifactIcon(artifact.kind);
   const edit = (artifact.data as any)?.editSource;
-  const subtitle = edit
+  const docxData = artifact.kind === "docx" ? (artifact.data as any) : null;
+  const subtitle = docxData
+    ? docxData.original
+      ? `Word file · ${edit?.title ?? docxData.fileName} v${edit?.versionNumber ?? ""}`.trim()
+      : `Word file · ${docxData.applied ?? 0} tracked change${docxData.applied === 1 ? "" : "s"}${edit?.versionNumber ? ` · from v${edit.versionNumber}` : docxData.standard ? " · from the firm's standard" : ""}`
+    : edit
     ? `${(artifact.data as any)?.original ? "Original" : "Edited"} · ${edit.title} v${edit.versionNumber}`
     : artifact.kind === "review"
       ? `Review · ${(artifact.data as any)?.suggestionCount ?? 0} suggestion(s)`

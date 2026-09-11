@@ -59,6 +59,36 @@ is switched off for the same reason.
 **Different by being here** — the large-docx/pptx and scanned-PDF offloads go
 to ocr-service on `127.0.0.1:8090` rather than across the internet.
 
+## Working on Word files
+
+`docxAgent.js` is the part that makes this more than a chat. When a turn is
+about a `.docx` — a project document opened with **Edit**, or the firm's
+standard for a document type being drafted — the file itself is the subject:
+its paragraphs are listed to the model as `¶n`, the model answers with
+`replace` / `insert_after` / `delete` operations against those numbers, and
+those are written into that same file as Word tracked changes. Nothing is
+extracted to text and rebuilt, so styles, numbering, tables, headers and
+footers, fonts and every untouched paragraph come out exactly as they went
+in. The result is stored in `ai-chat-files` and shown in an `ai_artifacts`
+row of kind `docx`; the lawyer sees the redline in the panel and can download
+it with the changes tracked or accepted, or save it onto the project as the
+next version.
+
+The changes are made in the XML directly. `@ansonlai/docx-redline-js` is a
+fallback for the rare paragraph whose markup cannot be accounted for safely:
+it re-parses and re-serialises the whole document per operation, which on the
+firm's standard Concession Agreement (4,101 paragraphs) took ten minutes for
+thirteen changes against 145ms now.
+
+A document too long to show whole is shown where the turn is about: the
+paragraphs carrying blanks when filling in a standard, the ones matching the
+lawyer's message when editing, with the gaps marked so the model can ask for
+more. A source that is not a Word file (a PDF, a deck) still goes through
+text and comes back as a Markdown draft.
+
+**The edge function cannot do any of this** — it has no `docxAgent` — so the
+rollback below is a real downgrade, not just a change of host.
+
 ## Deploying
 
 Port 8092 (8090 is ocr-service, 8091 the relay). `.env` needs

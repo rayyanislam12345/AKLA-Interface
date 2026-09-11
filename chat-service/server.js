@@ -18,6 +18,9 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
+import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL } from "./docxAgent.js";
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const PORT = Number(process.env.PORT ?? 8092);
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -427,6 +430,12 @@ async function handleChat(req, res) {
   const projectDocs = projectDocsResult.data ?? [];
   const documentType = documentTypeResult.data;
   const customSkill = customSkillResult.data;
+  // The firm's standard for this document type, if there is one: its text
+  // and formatting notes for the prompt, and the .docx itself when a draft
+  // is to be made by filling it in.
+  const { data: templateRow } = documentType
+    ? await supabase.from("document_type_templates").select("content_html, format_rules, storage_path, filename").eq("document_type_id", documentType.id).maybeSingle()
+    : { data: null };
 
   // ---- thread + the lawyer's message, before any streaming so a failure is visible ----
   let thread = null;
@@ -468,50 +477,70 @@ async function handleChat(req, res) {
     .limit(MAX_HISTORY);
   const priorMessages = (history ?? []).reverse().filter((m) => m.id !== continueMessageId);
 
-  // ---- edit: the document being worked on ----
-  // The newest draft artifact in this thread — the version as uploaded on the
-  // first turn, the latest AI edit after — so a conversation refines one
-  // document iteratively. A thread with no artifact reads the version itself.
+  // ---- edit / draft: the document being worked on ----
+  // A Word file is worked on as a Word file (docxBase): the base is the
+  // newest Word artifact in this thread — the version as uploaded, or the
+  // firm's standard, on the first turn; the latest AI-edited copy on every
+  // turn after — so a conversation refines one file iteratively, and every
+  // change is a tracked change in that file. Only a source that is not a
+  // Word file (a PDF, a deck) goes through text (editBase) and comes back as
+  // a Markdown draft.
   let editBase = null;
-  if (skill?.key === "edit") {
+  let docxBase = null;
+  if (skill?.key === "edit" || skill?.key === "draft") {
     const { data: latest } = await supabase
       .from("ai_artifacts")
-      .select("content, data")
+      .select("kind, content, data")
       .eq("thread_id", threadId)
-      .eq("kind", "draft")
+      .in("kind", ["docx", "draft"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     const d = latest?.data ?? {};
-    if (latest?.content && d.editSource) {
-      editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
-    } else if (skill.documentVersionId) {
-      const { data: v } = await supabase
-        .from("document_versions")
-        .select("id, version_number, file_name, storage_path, matter_document:matter_documents(id, title, document_type_id)")
-        .eq("id", skill.documentVersionId)
-        .maybeSingle();
-      if (v) {
-        const { data: blob } = await supabase.storage.from("matter-documents").download(v.storage_path);
-        if (blob) {
-          const { text } = await extractTextFromFile(blob, v.file_name);
+    if (latest?.kind === "docx" && d.storagePath) {
+      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard };
+    } else if (skill.key === "edit") {
+      if (latest?.content && d.editSource) {
+        editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
+      } else if (skill.documentVersionId) {
+        const { data: v } = await supabase
+          .from("document_versions")
+          .select("id, version_number, file_name, storage_path, matter_document:matter_documents(id, title, document_type_id)")
+          .eq("id", skill.documentVersionId)
+          .maybeSingle();
+        if (v) {
           const md = v.matter_document;
-          editBase = {
-            content: text,
-            original: true,
-            documentTypeId: md?.document_type_id ?? undefined,
-            editSource: {
-              matterDocumentId: md?.id ?? skill.matterDocumentId,
-              documentVersionId: v.id,
-              versionNumber: v.version_number,
-              title: md?.title ?? v.file_name,
-              fileName: v.file_name,
-            },
+          const editSource = {
+            matterDocumentId: md?.id ?? skill.matterDocumentId,
+            documentVersionId: v.id,
+            versionNumber: v.version_number,
+            title: md?.title ?? v.file_name,
+            fileName: v.file_name,
           };
+          if (/\.docx$/i.test(v.file_name)) {
+            docxBase = { bucket: "matter-documents", storagePath: v.storage_path, fileName: v.file_name, editSource, documentTypeId: md?.document_type_id ?? null, standard: false };
+          } else {
+            const { data: blob } = await supabase.storage.from("matter-documents").download(v.storage_path);
+            if (blob) {
+              const { text } = await extractTextFromFile(blob, v.file_name);
+              editBase = { content: text, original: true, documentTypeId: md?.document_type_id ?? undefined, editSource };
+            }
+          }
         }
       }
+      if (!editBase && !docxBase) return json(400, { error: "Pick a document version to edit first (+ → Edit a document)." });
+    } else if (documentType && /\.docx$/i.test(templateRow?.storage_path ?? "")) {
+      // Drafting a type the firm has a standard for is a fill-in job on the
+      // standard's own file.
+      docxBase = {
+        bucket: "precedent-library",
+        storagePath: templateRow.storage_path,
+        fileName: templateRow.filename ?? `${documentType.name}.docx`,
+        editSource: { title: documentType.name, standard: true },
+        documentTypeId: documentType.id,
+        standard: true,
+      };
     }
-    if (!editBase) return json(400, { error: "Pick a document version to edit first (+ → Edit a document)." });
   }
 
   const attachments = rawAttachments.map((a) => ({
@@ -530,6 +559,8 @@ async function handleChat(req, res) {
       name: `${doc.title} (v${version.version_number}) — ${version.file_name}`,
       matterDocumentId: doc.id,
       versionId: version.id,
+      // Pulled in because the lawyer named it, not because they picked it.
+      auto: true,
     });
   }
 
@@ -612,7 +643,14 @@ async function handleChat(req, res) {
 
     // ---- verify: the existing three-pass engine, still on Supabase ----
     if (skill?.key === "verify") {
-      const target = attachments.find((a) => a.versionId) ?? contextDocs.find((a) => a.versionId);
+      // The document under review is the one the lawyer chose. A document
+      // they merely mentioned is context for the instruction, never the
+      // subject of the review.
+      const target =
+        attachments.find((a) => a.versionId && !a.auto) ??
+        contextDocs.find((a) => a.versionId && !a.auto) ??
+        attachments.find((a) => a.versionId) ??
+        contextDocs.find((a) => a.versionId);
       if (!target?.versionId) throw new Error("Attach one of this project's documents (Add from project) to review it.");
       const reviewResp = await fetch(`${SUPABASE_URL}/functions/v1/suggest-redline`, {
         method: "POST",
@@ -690,6 +728,18 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       return;
     }
 
+    // ---- the Word file being worked on: read its paragraphs for the prompt ----
+    if (docxBase) {
+      const { data: blob, error } = await supabase.storage.from(docxBase.bucket).download(docxBase.storagePath);
+      if (error || !blob) throw new Error(`Couldn't read ${docxBase.fileName}: ${error?.message ?? "download failed"}`);
+      docxBase.bytes = new Uint8Array(await blob.arrayBuffer());
+      // A document too long to show whole is shown where it matters: the
+      // blanks when filling in a standard, the clauses the lawyer's message
+      // is about when editing.
+      docxBase.inspection = inspectDocx(docxBase.bytes, docxBase.standard ? { placeholders: true } : { query: message });
+      send("notice", { text: `Working on ${docxBase.fileName} (${docxBase.inspection.paragraphCount} paragraphs).` });
+    }
+
     // ---- retrieval: the same three searches rag-query runs ----
     const lastUserMessage = [...priorMessages].reverse().find((m) => m.role === "user")?.content ?? "";
     const effectiveMessage = message || lastUserMessage;
@@ -716,9 +766,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
             ...(documentType ? { filter_document_type_id: documentType.id } : {}),
           }),
           supabase.rpc("match_documents", statuteParams),
-          documentType
-            ? supabase.from("document_type_templates").select("content_html, format_rules").eq("document_type_id", documentType.id).maybeSingle()
-            : Promise.resolve({ data: null }),
+          Promise.resolve({ data: templateRow }),
         ]);
         sources = [
           ...(m.data ?? []).map((x) => ({ ...x, scope: "matter" })),
@@ -747,7 +795,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       ? `\n\nCONTEXT CARRIED FORWARD ON THIS PROJECT (curated by the team):\n${matterContext.content.trim()}`
       : "";
     const docsListBlock = projectDocs.length
-      ? `\n\nDOCUMENTS ON THIS PROJECT (only those attached above are readable to you — if the lawyer refers to one that isn't, name it and ask them to attach it rather than guess its contents):\n` +
+      ? `\n\nDOCUMENTS ON THIS PROJECT. Naming one of these in a message attaches it: any the lawyer named this turn are already among the attached documents above, and you can read those in full. For one that is not attached, ask the lawyer to name the version they mean rather than guessing at its contents:\n` +
         projectDocs.map((d) => {
           const vs = [...(d.versions ?? [])].sort((a, b) => a.version_number - b.version_number);
           const type = d.document_type?.name ? ` (${d.document_type.name})` : "";
@@ -765,11 +813,19 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     };
     const sourcesBlock = sources.length
       ? `\n\nRETRIEVED FROM THE FIRM'S LIBRARY FOR THIS MESSAGE (cite by number when you rely on one):\n` +
-        sources.map((d, i) => `${label(d, i)}\n${String(d.content ?? "").slice(0, MAX_SOURCE_CHARS)}`).join("\n\n---\n\n")
+        sources.map((d, i) => `${label(d, i)}\n${String(d.content ?? "").slice(0, docxBase ? 2_000 : MAX_SOURCE_CHARS)}`).join("\n\n---\n\n")
       : "\n\nNothing relevant was retrieved from the firm's library for this message.";
 
     let skillBlock = "";
-    if (skill?.key === "draft" && documentType) {
+    if (docxBase && (skill?.key === "edit" || skill?.key === "draft")) {
+      const src = docxBase.editSource ?? {};
+      const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, say which part of the document you need to see and stop there` : ""}:\n${docxBase.inspection.listing}`;
+      if (docxBase.standard) {
+        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. If the essentials are missing (parties, term, key amounts, governing law, disputes), ask ONE focused question at a time; the moment the lawyer says to draft now, do it with what you have.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}`;
+      } else {
+        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess.\n\n${OPS_PROTOCOL}`;
+      }
+    } else if (skill?.key === "draft" && documentType) {
       const reqFields = Array.isArray(documentType.required_fields) && documentType.required_fields.length
         ? `\nThe firm flags these fields as required for this document type: ${JSON.stringify(documentType.required_fields)}.`
         : "";
@@ -833,9 +889,29 @@ You answer the way a careful senior associate would: precise, conservative, and 
       ? historyTurns
       : [...historyTurns, { role: "user", content: message || `(attached ${attachments.map((a) => a.name).join(", ")})` }];
 
+    // On a Word file the reply ends with the change list as JSON; the lawyer
+    // sees the prose stream and then the file update, not the JSON.
+    let acc = "";
+    let sent = 0;
+    let gated = false;
+    const onDelta = (d) => {
+      if (!docxBase) return send("delta", { text: d });
+      acc += d;
+      if (gated) return;
+      const fence = acc.indexOf("```");
+      const safe = fence >= 0 ? fence : Math.max(sent, acc.length - 4);
+      if (safe > sent) {
+        send("delta", { text: acc.slice(sent, safe) });
+        sent = safe;
+      }
+      if (fence >= 0) {
+        gated = true;
+        send("notice", { text: "Preparing the changes to the Word file…" });
+      }
+    };
     const { text: fullText, generated, incomplete, stoppedByClient } = await anthropicComplete(
       { model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages },
-      (d) => send("delta", { text: d }),
+      onDelta,
       { initialText: resumeMessage?.content ?? "", clientSignal: clientGone.signal },
     );
 
@@ -850,7 +926,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
 
     if (stoppedByClient) {
       await persistReply(supabase, {
-        threadId, matterId, userId: user.id, text: fullText, messageId: resumeMessage?.id ?? null,
+        threadId, matterId, userId: user.id, text: docxBase ? extractOps(fullText).prose : fullText, messageId: resumeMessage?.id ?? null,
         metadata: { sources: sourceSummaries, skill: skill ?? null, stopped: true }, artifactData, defaultTitle,
       });
       console.log(`chat thread=${threadId} skill=${skill?.key ?? "-"} stopped by client after ${elapsed}s, ${generated.length} chars`);
@@ -879,10 +955,82 @@ You answer the way a careful senior associate would: precise, conservative, and 
       return;
     }
 
-    const { assistantMessageId } = await persistReply(supabase, {
-      threadId, matterId, userId: user.id, text: fullText, messageId: resumeMessage?.id ?? null,
-      metadata: { sources: sourceSummaries, skill: skill ?? null }, artifactData, defaultTitle, send,
-    });
+    let assistantMessageId = null;
+    if (docxBase) {
+      // The reply's change list is applied to the file itself; what is
+      // stored is the prose, the new copy of the file, and a note of any
+      // change that could not be made.
+      const { prose, ops, parseError } = extractOps(fullText);
+      let content = prose;
+      const metadata = { sources: sourceSummaries, skill: skill ?? null };
+      if (ops?.length) {
+        send("notice", { text: "Applying the changes to the Word file…" });
+        const out = await applyDocxOps(docxBase.bytes, ops, docxBase.inspection.byRef);
+        const changes = describeResults(out.results);
+        const skipped = changes.filter((c) => c.status !== "applied");
+        if (out.applied > 0) {
+          const safeName = String(docxBase.fileName).replace(/[^\w.-]+/g, "-");
+          const storagePath = `${matterId}/${threadId}/${Date.now()}-${safeName}`;
+          const { error: upErr } = await supabase.storage.from("ai-chat-files").upload(storagePath, out.bytes, { contentType: DOCX_MIME });
+          if (upErr) throw new Error(`Couldn't save the edited file: ${upErr.message}`);
+          const src = docxBase.editSource ?? {};
+          const title = docxBase.standard
+            ? `Draft: ${documentType?.name ?? "document"}`
+            : `${src.title ?? docxBase.fileName}${src.versionNumber ? ` (v${src.versionNumber})` : ""}`;
+          const { data: artifact } = await supabase
+            .from("ai_artifacts")
+            .insert({
+              thread_id: threadId,
+              matter_id: matterId,
+              kind: "docx",
+              title,
+              content: prose,
+              data: {
+                bucket: "ai-chat-files",
+                storagePath,
+                fileName: docxBase.fileName,
+                editSource: docxBase.editSource,
+                documentTypeId: docxBase.documentTypeId ?? documentType?.id ?? null,
+                standard: docxBase.standard,
+                changes,
+                applied: out.applied,
+                skipped: skipped.length,
+                tracked: true,
+                sourceStoragePath: docxBase.storagePath,
+              },
+              created_by: user.id,
+            })
+            .select("*")
+            .single();
+          if (artifact) {
+            content += `\n\n[[artifact:${artifact.id}]]`;
+            metadata.artifacts = [artifact.id];
+            send("artifact", artifact);
+          }
+        }
+        if (skipped.length) {
+          content += `\n\n${out.applied ? "Not applied" : "Nothing could be applied"}:\n${skipped.map((c) => `- ${c.summary}${c.reason ? ` — ${c.reason}` : ""}`).join("\n")}`;
+        }
+        console.log(`docx thread=${threadId} ${docxBase.fileName}: ${out.applied} applied, ${skipped.length} skipped`);
+      } else if (parseError) {
+        content += "\n\n(The change list could not be read, so nothing was changed. Ask again.)";
+      }
+      const { data: msg } = await supabase
+        .from("ai_chat_messages")
+        .insert({ thread_id: threadId, role: "assistant", content: content.trim(), metadata })
+        .select("id")
+        .single();
+      assistantMessageId = msg?.id ?? null;
+      if (metadata.artifacts && assistantMessageId) {
+        await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", metadata.artifacts);
+      }
+    } else {
+      const r = await persistReply(supabase, {
+        threadId, matterId, userId: user.id, text: fullText, messageId: resumeMessage?.id ?? null,
+        metadata: { sources: sourceSummaries, skill: skill ?? null }, artifactData, defaultTitle, send,
+      });
+      assistantMessageId = r.assistantMessageId;
+    }
 
     if (!isContinuation && (isNewThread || priorMessages.length === 0)) {
       try {
