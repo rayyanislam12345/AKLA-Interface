@@ -34,6 +34,27 @@ for (const [name, value] of Object.entries({ SUPABASE_URL, SUPABASE_SERVICE_ROLE
   if (!value) console.error(`chat-service: ${name} is not set`);
 }
 
+// A review of a real agreement takes minutes, and a browser access token
+// lasts an hour — so a token that was nearly spent when the request arrived
+// expires while the work is still running, and every write after that point
+// is refused. That is what lost a review of the M6 term sheet partway
+// through. The database work therefore runs under the service role, and the
+// caller's own token is used for what it is for: proving who they are, and
+// calling the edge functions that require a user token. Every policy on the
+// tables this service touches grants access to any firm member, so the
+// membership check below is the same gate, applied once and explicitly.
+const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+async function authorize(authHeader) {
+  const token = authHeader.replace("Bearer ", "");
+  const { data: { user } = {}, error } = await db.auth.getUser(token);
+  if (error || !user) return { error: { status: 401, body: { error: "Unauthorized" } } };
+  const { data: isMember, error: memberError } = await db.rpc("is_firm_member", { _user_id: user.id });
+  if (memberError) return { error: { status: 500, body: { error: "Could not check your firm membership" } } };
+  if (!isMember) return { error: { status: 403, body: { error: "Your account is not an active member of this firm workspace." } } };
+  return { user };
+}
+
 let deployedVersion = {};
 try {
   deployedVersion = JSON.parse(readFileSync(new URL("./DEPLOYED_VERSION", import.meta.url), "utf8"));
@@ -412,12 +433,9 @@ async function handleChat(req, res) {
   if (!ANTHROPIC_KEY) return json(500, { error: "Anthropic API key not configured" });
   if (!VOYAGE_KEY) return json(500, { error: "Voyage API key not configured" });
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user } = {}, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
-  if (userError || !user) return json(401, { error: "Unauthorized" });
+  const supabase = db;
+  const { user, error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
 
   let existingThread = null;
   if (requestedThreadId) {
@@ -697,7 +715,7 @@ async function handleChat(req, res) {
         attachments.find((a) => a.text) ??
         contextDocs.find((a) => a.text);
       try {
-        research = await researchLaw({ supabase, anthropicJson, matter, message, documentExcerpt: subjectDoc?.text ?? "", signal: clientGone.signal, notice: text => send("notice", { text }) });
+        research = await researchLaw({ supabase, authHeader, userId: user.id, anthropicJson, matter, message, documentExcerpt: subjectDoc?.text ?? "", signal: clientGone.signal, notice: text => send("notice", { text }) });
         send("notice", { text: `Research: ${research.sources.length} official source(s) checked.${research.unresolved.length ? ` Open items: ${research.unresolved.join("; ")}` : " Applicability still requires review."}` });
       } catch (err) {
         if (clientGone.signal.aborted) throw err;
@@ -1207,12 +1225,9 @@ async function handleReview(req, res) {
   if (!ANTHROPIC_KEY) return json(500, { error: "Anthropic API key not configured" });
   if (!VOYAGE_KEY) return json(500, { error: "Voyage API key not configured" });
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user } = {}, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
-  if (userError || !user) return json(401, { error: "Unauthorized" });
+  const supabase = db;
+  const { user, error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
 
   try {
     const result = await runReview({

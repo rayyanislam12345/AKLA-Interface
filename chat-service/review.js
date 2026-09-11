@@ -263,7 +263,10 @@ export async function runReview({ supabase, anthropicKey, voyageKey, documentVer
       ? `\n\nCONTEXT CARRIED FORWARD ON THIS MATTER (curated by the team from prior work):\n${matterContext.content.trim()}`
       : "";
 
-    if (template?.storage_path) await supabase.from("ai_review_runs").update({ template_path: template.storage_path }).eq("id", runId);
+    if (template?.storage_path) {
+      const { error: stampError } = await supabase.from("ai_review_runs").update({ template_path: template.storage_path }).eq("id", runId);
+      if (stampError) throw new Error(`Could not record which standard the review compared against: ${stampError.message}`);
+    }
     const templateText = template?.content_html ?? "";
     const templateSection = templateText.trim()
       ? `\n\nSTANDARD TEMPLATE FOR THIS DOCUMENT TYPE — the firm's canonical structure and formatting for a ${documentTypeName}${templateText.length > MAX_TEMPLATE_CHARS ? `, the opening ${MAX_TEMPLATE_CHARS} characters of it` : ""}. Flag divergences from this, not just from the precedent excerpts below:\n${templateText.slice(0, MAX_TEMPLATE_CHARS)}\nFormatting specification: ${template?.format_rules ?? "No formatting profile available"}`
@@ -304,7 +307,7 @@ export async function runReview({ supabase, anthropicKey, voyageKey, documentVer
       ]);
       [legal, formatting, conflicts].forEach((all, pass) => { for (const row of results[pass]) if (!all.some(s => s.original_text === row.original_text && s.suggested_text === row.suggested_text)) all.push(row); });
       const { error: progressError } = await supabase.from('ai_review_runs').update({ coverage: { documentCharacters: fullText.length, sectionsCompleted: index+1, sectionsTotal: segments.length, exhaustive: false } }).eq('id', runId);
-      if (progressError) throw new Error('Could not record review progress');
+      if (progressError) throw new Error(`Could not record review progress: ${progressError.message}`);
     }
 
     const tagged = [

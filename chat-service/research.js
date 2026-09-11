@@ -37,8 +37,8 @@ export function readPlan(text) {
 
 // Each turn's research is durable and independently auditable. A partial run
 // remains partial; finding a source never establishes its applicability.
-export async function researchLaw({ supabase, anthropicJson, matter, message, documentExcerpt = '', signal, notice }) {
-  const { data: run, error } = await supabase.from('ai_research_runs').insert({ matter_id: matter.id, question: message, status: 'running' }).select('id').single();
+export async function researchLaw({ supabase, authHeader, userId = null, anthropicJson, matter, message, documentExcerpt = '', signal, notice }) {
+  const { data: run, error } = await supabase.from('ai_research_runs').insert({ matter_id: matter.id, question: message, status: 'running', created_by: userId }).select('id').single();
   if (error) throw new Error(`Could not start legal research: ${error.message}`);
   const sources = []; const unresolved = [];
   try {
@@ -77,7 +77,7 @@ export async function researchLaw({ supabase, anthropicJson, matter, message, do
         const { data: existing, error: lookupError } = await supabase.from('documents').select('id').eq('is_statute', true).eq('metadata->>source_hash', hash).limit(1);
         if (lookupError) throw lookupError;
         if (!existing?.length) {
-          const { error: ingestError } = await supabase.functions.invoke('ingest-documents', { body: { content: extracted.text, metadata, isStatute: true } });
+          const { error: ingestError } = await supabase.functions.invoke('ingest-documents', { body: { content: extracted.text, metadata, isStatute: true }, headers: authHeader ? { Authorization: authHeader } : undefined });
           if (ingestError) throw new Error(`Source found but indexing failed: ${ingestError.message}`);
         }
         sources.push({ id: hash, scope: 'statute', similarity: 1, content: extracted.text, metadata, reason: String(candidate.reason ?? '') });
