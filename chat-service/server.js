@@ -687,8 +687,17 @@ async function handleChat(req, res) {
 
     let research = null;
     if (!isContinuation && needsResearch(message, skill)) {
+      // Research the document the lawyer is working on, not just the sentence
+      // they typed: "review it" names no legal issue on its own. Same
+      // preference as the review target below — a document they chose beats
+      // one that was picked up from an earlier turn.
+      const subjectDoc =
+        attachments.find((a) => a.versionId && !a.auto && a.text) ??
+        contextDocs.find((a) => a.versionId && !a.auto && a.text) ??
+        attachments.find((a) => a.text) ??
+        contextDocs.find((a) => a.text);
       try {
-        research = await researchLaw({ supabase, anthropicJson, matter, message, signal: clientGone.signal, notice: text => send("notice", { text }) });
+        research = await researchLaw({ supabase, anthropicJson, matter, message, documentExcerpt: subjectDoc?.text ?? "", signal: clientGone.signal, notice: text => send("notice", { text }) });
         send("notice", { text: `Research: ${research.sources.length} official source(s) checked.${research.unresolved.length ? ` Open items: ${research.unresolved.join("; ")}` : " Applicability still requires review."}` });
       } catch (err) {
         if (clientGone.signal.aborted) throw err;

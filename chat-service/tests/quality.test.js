@@ -49,6 +49,23 @@ test('research rejects nonofficial URLs, credentials and wrong years', () => {
   assert.equal(sourceIdentityMatches('Contract Act 1872', ('Contract Act 2020 text. ').repeat(30)), false);
   assert.equal(sourceIdentityMatches('Contract Act 1872', ('Contract Act 1872 text. ').repeat(30)), true);
 });
+test('a narrated research answer still yields its plan, and prose yields an honest failure', async () => {
+  const { readPlan } = await import('../research.js');
+  const narrated = [
+    "I'll search for the applicable law now.",
+    'Here is what I found:',
+    '```json',
+    '{"jurisdiction":"Pakistan","uncertainties":["Effective date unconfirmed"],"sources":[{"title":"Contract Act, 1872","url":"https://na.gov.pk/a.pdf","reason":"Governs the term sheet","kind":"act","amendsAct":null}]}',
+    '```',
+  ].join('\n');
+  const plan = readPlan(narrated);
+  assert.equal(plan.sources[0].title, 'Contract Act, 1872');
+  assert.equal(plan.jurisdiction, 'Pakistan');
+  // A brace inside a string, and an earlier non-plan object, must not confuse it.
+  assert.deepEqual(readPlan('{"note":"ignore {this}"}\n{"jurisdiction":"unknown","uncertainties":[],"sources":[]}').sources, []);
+  assert.throws(() => readPlan("I appreciate the request, but I need the document first."), /prose/);
+});
+
 test('official downloads validate redirects before following and enforce streamed size limits', async () => {
   let calls = 0;
   await assert.rejects(fetchOfficial('https://na.gov.pk/a', { fetcher: async () => { calls++; return new Response(null, { status:302, headers:{location:'https://127.0.0.1/private'} }); } }));
