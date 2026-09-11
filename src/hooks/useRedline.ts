@@ -69,15 +69,42 @@ export function useReviewRun(documentVersionId?: string, reviewRunId?: string | 
   });
 }
 
+export interface ReviewResult {
+  fullText: string;
+  reviewRunId: string;
+  passes: Record<string, { status: string; note?: string; findings?: number }>;
+  coverage?: Record<string, unknown>;
+  suggestions: RedlineSuggestion[];
+}
+
+// A full review does not fit in a Supabase edge function: on a 58,000
+// character term sheet the three passes exhaust its memory together and
+// exceed its 150-second limit apart. It runs on the Oracle VM alongside the
+// chat, where there is neither ceiling. Unsetting VITE_CHAT_API_URL falls
+// back to the edge function, which still works on short documents.
 export function useRunRedlineReview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (documentVersionId: string) => {
+    mutationFn: async (documentVersionId: string): Promise<ReviewResult> => {
+      const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
+      if (base) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("Not signed in");
+        const resp = await fetch(`${base}/review`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ documentVersionId }),
+        });
+        const payload = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(payload.error ?? `Review failed (${resp.status})`);
+        return payload as ReviewResult;
+      }
       const { data, error } = await supabase.functions.invoke("suggest-redline", {
         body: { documentVersionId },
       });
       if (error) throw error;
-      return data as { fullText: string; reviewRunId: string; passes: Record<string, { status: string; note?: string }>; suggestions: RedlineSuggestion[] };
+      return data as ReviewResult;
     },
     onSuccess: (_data, documentVersionId) => {
       queryClient.invalidateQueries({ queryKey: ["redline-suggestions", documentVersionId] });

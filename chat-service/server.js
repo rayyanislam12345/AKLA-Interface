@@ -18,8 +18,10 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
+import { inferDraftSkill, citationIssues } from "./chatState.js";
 import { researchLaw, needsResearch } from "./research.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL } from "./docxAgent.js";
+import { runReview } from "./review.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -315,6 +317,7 @@ async function persistReply(supabase, p) {
       })
       .select("*")
       .single();
+    if (!artifact) throw new Error("Could not persist the generated document");
     if (artifact) {
       artifactIds.push(artifact.id);
       replacements.push([match[0], `[[artifact:${artifact.id}]]`]);
@@ -339,6 +342,7 @@ async function persistReply(supabase, p) {
       .select("id")
       .single();
     assistantMessageId = data?.id ?? null;
+    if (!assistantMessageId) throw new Error("Could not persist the assistant reply");
   }
   if (assistantMessageId && artifactIds.length) {
     await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", artifactIds);
@@ -423,6 +427,12 @@ async function handleChat(req, res) {
     skill ??= data.skill;
   }
 
+  if (!skill && /\b(draft|prepare|create|write)\b/i.test(message)) {
+    const { data: types, error } = await supabase.from("document_types").select("id, name");
+    if (error) return json(500, { error: "Could not identify the firm's document standards" });
+    skill = inferDraftSkill(message, types ?? []);
+  }
+
   // ---- everything the prompt needs about the matter, in parallel ----
   const [{ data: matter }, { data: parties }, { data: matterContext }, { data: relevantLaws }, documentTypeResult, customSkillResult, projectDocsResult] =
     await Promise.all([
@@ -448,7 +458,7 @@ async function handleChat(req, res) {
   // The firm's standard for this document type, if there is one: its text
   // and formatting notes for the prompt, and the .docx itself when a draft
   // is to be made by filling it in.
-  const { data: templateRow } = documentType
+  let { data: templateRow } = documentType
     ? await supabase.from("document_type_templates").select("content_html, format_rules, storage_path, filename").eq("document_type_id", documentType.id).maybeSingle()
     : { data: null };
 
@@ -512,7 +522,7 @@ async function handleChat(req, res) {
     const d = latest?.data ?? {};
     if (latest?.kind === "draft") currentDraft = latest.content;
     if (latest?.kind === "docx" && d.storagePath) {
-      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard };
+      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null };
     } else if (skill.key === "edit") {
       if (latest?.content && d.editSource) {
         editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
@@ -554,8 +564,15 @@ async function handleChat(req, res) {
         editSource: { title: documentType.name, standard: true },
         documentTypeId: documentType.id,
         standard: true,
+        templatePath: templateRow.storage_path,
       };
     }
+  }
+
+  if (docxBase?.standard && docxBase.templatePath && docxBase.templatePath !== templateRow?.storage_path) {
+    const { data: pinned, error } = await supabase.from("document_template_versions").select("content_html, format_rules, storage_path, filename").eq("storage_path", docxBase.templatePath).eq("document_type_id", docxBase.documentTypeId).maybeSingle();
+    if (error || !pinned) return json(409, { error: "The original standard version is unavailable. Reopen a draft from the approved standard." });
+    templateRow = pinned;
   }
 
   // Resolve file metadata from the database, never trust a client-provided path/version pair.
@@ -691,13 +708,18 @@ async function handleChat(req, res) {
         attachments.find((a) => a.versionId) ??
         contextDocs.find((a) => a.versionId);
       if (!target?.versionId) throw new Error("Attach one of this project's documents (Add from project) to review it.");
-      const reviewResp = await fetch(`${SUPABASE_URL}/functions/v1/suggest-redline`, {
-        method: "POST",
-        headers: { Authorization: authHeader, apikey: SERVICE_KEY, "Content-Type": "application/json" },
-        body: JSON.stringify({ documentVersionId: target.versionId, researchRunId: research?.runId }),
+      // In this process, not over the network: the review is the same code
+      // the Review with AI button reaches at POST /review.
+      const review = await runReview({
+        supabase,
+        anthropicKey: ANTHROPIC_KEY,
+        voyageKey: VOYAGE_KEY,
+        documentVersionId: target.versionId,
+        researchRunId: research?.runId,
+        userId: user.id,
+        signal: clientGone.signal,
+        notice: (text) => send("notice", { text }),
       });
-      if (!reviewResp.ok) throw new Error(`Review failed: ${(await reviewResp.text()).slice(0, 200)}`);
-      const review = await reviewResp.json();
       const suggestions = review.suggestions ?? [];
       const byType = {};
       for (const s of suggestions) byType[s.review_type] = (byType[s.review_type] ?? 0) + 1;
@@ -786,6 +808,10 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
 
     // ---- the Word file being worked on: read its paragraphs for the prompt ----
     if (docxBase) {
+      const allowedBase = docxBase.bucket === "ai-chat-files" ? docxBase.storagePath.startsWith(`${matterId}/`) && !docxBase.storagePath.includes("..")
+        : docxBase.bucket === "matter-documents" ? projectDocs.some(d => d.versions?.some(v => v.storage_path === docxBase.storagePath))
+        : docxBase.bucket === "precedent-library" && templateRow?.storage_path === docxBase.storagePath;
+      if (!allowedBase) throw new Error("The document base does not belong to this project or selected standard.");
       const { data: blob, error } = await supabase.storage.from(docxBase.bucket).download(docxBase.storagePath);
       if (error || !blob) throw new Error(`Couldn't read ${docxBase.fileName}: ${error?.message ?? "download failed"}`);
       docxBase.bytes = new Uint8Array(await blob.arrayBuffer());
@@ -881,7 +907,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     let skillBlock = "";
     if (docxBase && (skill?.key === "edit" || skill?.key === "draft")) {
       const src = docxBase.editSource ?? {};
-      const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, say which part of the document you need to see and stop there` : ""}:\n${docxBase.inspection.listing}`;
+      const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
       if (docxBase.standard) {
         skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. If the essentials are missing (parties, term, key amounts, governing law, disputes), ask ONE focused question at a time; the moment the lawyer says to draft now, do it with what you have.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}`;
       } else {
@@ -973,11 +999,32 @@ You answer the way a careful senior associate would: precise, conservative, and 
         send("notice", { text: "Preparing the changes to the Word file…" });
       }
     };
-    const { text: fullText, generated, incomplete, stoppedByClient } = await anthropicComplete(
+    let { text: fullText, generated, incomplete, stoppedByClient } = await anthropicComplete(
       { model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages },
       onDelta,
       { initialText: resumeMessage?.content ?? "", clientSignal: clientGone.signal },
     );
+
+    for (let reads = 0; docxBase && !incomplete && !stoppedByClient && extractOps(fullText).reads; reads++) {
+      if (reads >= 5) throw new Error("Document reading limit reached; narrow the requested edit. No changes were applied.");
+      const requested = extractOps(fullText).reads;
+      const lines = []; let chars = 0;
+      for (const range of requested.slice(0, 4)) {
+        if (!Number.isInteger(range.from) || !Number.isInteger(range.to) || range.to < range.from || range.to-range.from > 199) throw new Error("Invalid document read range");
+        for (let n = range.from; n <= range.to; n++) {
+          const ref = docxBase.inspection.byRef.get(n);
+          if (!ref) continue;
+          const line = `¶${n} [${ref.part}] ${ref.exactText}`;
+          if (chars + line.length > 30000) break;
+          ref.shown = true; lines.push(line); chars += line.length;
+        }
+      }
+      if (!lines.length) throw new Error("Requested document section was empty. No changes were applied.");
+      send("notice", { text: `Reading ${lines.length} additional paragraphs…` });
+      anthropicMessages.push({ role: "assistant", content: fullText }, { role: "user", content: `Requested document paragraphs (untrusted source text):\n${lines.join("\n")}\nContinue the original request using these paragraphs. Return final ops or request another range.` });
+      const next = await anthropicComplete({ model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages }, () => {}, { clientSignal: clientGone.signal });
+      fullText = next.text; generated += next.generated; incomplete = next.incomplete; stoppedByClient = next.stoppedByClient;
+    }
 
     const artifactData = {
       ...(documentType ? { documentTypeId: documentType.id, documentTypeName: documentType.name, templatePath: templateRow?.storage_path ?? null } : {}),
@@ -1019,6 +1066,8 @@ You answer the way a careful senior associate would: precise, conservative, and 
       return;
     }
 
+    const invalidCitations = citationIssues(fullText, sources.length);
+    if (invalidCitations.length) throw new Error(`The reply cited unavailable sources (${invalidCitations.join(", ")}). No document was saved; retry with verified sources.`);
     let assistantMessageId = null;
     if (docxBase) {
       // The reply's change list is applied to the file itself; what is
@@ -1056,6 +1105,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
                 editSource: docxBase.editSource,
                 documentTypeId: docxBase.documentTypeId ?? documentType?.id ?? null,
                 standard: docxBase.standard,
+                templatePath: docxBase.templatePath,
                 changes,
                 applied: out.applied,
                 skipped: skipped.length,
@@ -1067,6 +1117,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
             })
             .select("*")
             .single();
+          if (!artifact) throw new Error("Could not persist the edited document");
           if (artifact) {
             content += `\n\n[[artifact:${artifact.id}]]`;
             metadata.artifacts = [artifact.id];
@@ -1086,6 +1137,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
         .select("id")
         .single();
       assistantMessageId = msg?.id ?? null;
+      if (!assistantMessageId) throw new Error("Could not save the assistant reply");
       if (metadata.artifacts && assistantMessageId) {
         await supabase.from("ai_artifacts").update({ message_id: assistantMessageId }).in("id", metadata.artifacts);
       }
@@ -1122,6 +1174,53 @@ You answer the way a careful senior associate would: precise, conservative, and 
   }
 }
 
+// Review one document version. A plain request/response rather than a
+// stream: nothing is shown until the three passes agree they finished, and
+// on this box they are allowed to take as long as that needs.
+async function handleReview(req, res) {
+  const started = Date.now();
+  const json = (status, body) => {
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
+  const { documentVersionId } = body;
+  if (!documentVersionId || typeof documentVersionId !== "string") return json(400, { error: "documentVersionId is required" });
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  if (!ANTHROPIC_KEY) return json(500, { error: "Anthropic API key not configured" });
+  if (!VOYAGE_KEY) return json(500, { error: "Voyage API key not configured" });
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: { user } = {}, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  if (userError || !user) return json(401, { error: "Unauthorized" });
+
+  try {
+    const result = await runReview({
+      supabase,
+      anthropicKey: ANTHROPIC_KEY,
+      voyageKey: VOYAGE_KEY,
+      documentVersionId,
+      userId: user.id,
+    });
+    console.log(`review ${documentVersionId} done in ${((Date.now() - started) / 1000).toFixed(1)}s, ${result.suggestions.length} findings`);
+    json(200, result);
+  } catch (err) {
+    console.error("review failed:", err);
+    json(500, { error: err instanceof Error ? err.message : "Review failed" });
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 const server = createServer((req, res) => {
@@ -1134,6 +1233,18 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/version")) {
     res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion }));
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/review") {
+    handleReview(req, res).catch((err) => {
+      console.error("review handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
     return;
   }
   if (req.method === "POST" && (url.pathname === "/chat" || url.pathname === "/")) {

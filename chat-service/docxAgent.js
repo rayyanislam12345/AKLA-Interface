@@ -20,6 +20,9 @@
 // The model speaks a small protocol (OPS_PROTOCOL): every paragraph is shown
 // as "¶<n>" — its position in the file — and it answers with operations
 // against those numbers.
+import { DOMParser } from "@xmldom/xmldom";
+import { createHash } from "node:crypto";
+import { inspectPackage, compareFormat } from "./docxChecks.js";
 import { unzipSync, zipSync } from "fflate";
 import { openDocx } from "@ansonlai/docx-redline-js/node";
 
@@ -31,12 +34,14 @@ export const MAX_LISTING_CHARS = 120_000;
 export const OPS_PROTOCOL = `HOW TO CHANGE THE DOCUMENT. The document is a real Word file and every change you make is applied to that file as a tracked change; nothing is retyped or reformatted. Each paragraph above is numbered ¶n. When you are ready to change it, end your reply with ONE fenced block:
 \`\`\`json
 {"ops": [
-  {"op": "replace", "p": 12, "text": "The full new text of paragraph ¶12."},
-  {"op": "insert_after", "p": 12, "text": "One new paragraph, placed after ¶12."},
-  {"op": "delete", "p": 14}
+  {"op": "replace", "p": 12, "expected": "Exact current paragraph text", "text": "The full new text of paragraph ¶12."},
+  {"op": "insert_after", "p": 12, "expected": "Exact current anchor text", "text": "One new paragraph, placed after ¶12."},
+  {"op": "delete", "p": 14, "expected": "Exact current paragraph text"}
 ]}
 \`\`\`
 Rules:
+- If you need a section hidden by a gap, emit {"read":[{"from":100,"to":140}]} in the JSON block instead of ops. The document reader will return those paragraphs and you can continue. Request at most 200 paragraphs at once.
+- Every operation must include "expected": the exact current text of that paragraph, without the ¶ label. Never operate on a paragraph that was not shown.
 - "replace" gives the COMPLETE new text of that one paragraph, copied from above with your change made in it. Word shows only the words that differ, so keep everything you are not changing exactly as it is — same wording, same spacing, same defined terms. One paragraph per op; never merge or split paragraphs.
 - "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead.
 - Never type clause numbers — Word numbers headings and list items itself.
@@ -153,7 +158,7 @@ function focusParagraphs(paras, { placeholders, query, budget }) {
  * what its operations resolve against — always every paragraph, even when
  * the listing shows only part of the document.
  */
-export function inspectDocx(bytes, opts = {}) {
+function inspectPart(bytes, opts = {}) {
   const entries = readZip(bytes);
   const documentXml = dec.decode(entries["word/document.xml"]);
   const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
@@ -176,7 +181,7 @@ export function inspectDocx(bytes, opts = {}) {
   let chars = 0;
   paras.forEach((p, i) => {
     if (!p.text.trim()) return;
-    if ((focused && !focused.has(i)) || chars > budget) {
+    if ((focused && !focused.has(i)) || chars + p.text.length + 40 > budget) {
       hidden++;
       return;
     }
@@ -187,6 +192,7 @@ export function inspectDocx(bytes, opts = {}) {
     const line = `¶${p.index}${p.headingLevel ? ` [H${p.headingLevel}]` : ""}${p.inTable ? " [table]" : ""} ${p.text}`;
     lines.push(line);
     chars += line.length + 1;
+    byRef.get(p.index).shown = true;
     shown++;
   });
   if (hidden) lines.push(`   … ${hidden} paragraph${hidden === 1 ? "" : "s"} not shown …`);
@@ -206,8 +212,9 @@ export function extractOps(reply) {
   } catch {
     return { prose: reply.replace(last[0], "").trim(), ops: null, parseError: true };
   }
-  const ops = Array.isArray(parsed?.ops) ? parsed.ops : Array.isArray(parsed) ? parsed : [];
-  return { prose: reply.replace(last[0], "").trim(), ops };
+  const ops = Array.isArray(parsed?.ops) ? parsed.ops : Array.isArray(parsed) ? parsed : null;
+  const reads = Array.isArray(parsed?.read) ? parsed.read : null;
+  return { prose: reply.replace(last[0], "").trim(), ops, reads, parseError: !ops && !reads };
 }
 
 // ---------------------------------------------------------------- markup
@@ -413,7 +420,7 @@ function replaceParagraph(pXml, newText, stamp) {
     const last = runs[runs.length - 1];
     rewritten.push({ kind: "raw", xml: insXml(inserted, last?.run.rPr ?? "", false) });
   }
-  return `<w:p>${pPr}${serialize(rewritten)}</w:p>`;
+  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}${serialize(rewritten)}</w:p>`;
 }
 
 // Strikes the whole paragraph through, its paragraph mark included.
@@ -427,7 +434,7 @@ function deleteParagraph(pXml, stamp) {
       if (it.kind !== "run") return [it];
       return [{ kind: "raw", xml: strikeRun(it.xml, stamp) }];
     });
-  return `<w:p>${markParagraphMark(pPr, "del", stamp)}${serialize(strike(items))}</w:p>`;
+  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${markParagraphMark(pPr, "del", stamp)}${serialize(strike(items))}</w:p>`;
 }
 
 // A new paragraph after `anchor`, formatted like it (or as a heading of the
@@ -462,7 +469,64 @@ function isOwnInsertion(pXml) {
 function rewriteOwnInsertion(pXml, text, stamp) {
   const baseRPr = /<w:r(?:\s[^>]*)?>(<w:rPr>[\s\S]*?<\/w:rPr>)?(?:(?!<\/w:r>)[\s\S])*?<w:t/.exec(pXml)?.[1] ?? "";
   const pPr = child(pXml, "w:pPr") ?? "";
-  return `<w:p>${pPr}<w:ins ${stamp()}>${runsFor(text.trim(), baseRPr)}</w:ins></w:p>`;
+  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}<w:ins ${stamp()}>${runsFor(text.trim(), baseRPr)}</w:ins></w:p>`;
+}
+
+// Global paragraph references span the body, headers, footers and notes.
+const STORY_PART = /^word\/(document|header\d+|footer\d+|footnotes|endnotes)\.xml$/;
+const xmlParts = entries => Object.fromEntries(Object.entries(entries).filter(([p]) => p.endsWith('.xml')).map(([p,b]) => [p, dec.decode(b)]));
+function validateXml(entries) {
+  for (const [part, bytes] of Object.entries(entries)) {
+    if (!part.endsWith('.xml') && !part.endsWith('.rels')) continue;
+    const xml = dec.decode(bytes);
+    if (/<!DOCTYPE/i.test(xml)) throw new Error(`Unsupported document declaration in ${part}`);
+    new DOMParser({ onError: (level, message) => { if (level !== 'warning') throw new Error(`${part}: ${message}`); } }).parseFromString(xml, 'application/xml');
+  }
+}
+export function inspectDocx(bytes, opts = {}) {
+  const entries = readZip(bytes);
+  validateXml(entries);
+  const byRef = new Map(); const lines = [];
+  let count = 0; let shown = 0; let remaining = opts.budget ?? MAX_LISTING_CHARS;
+  for (const part of Object.keys(entries).filter(p => STORY_PART.test(p)).sort((a,b) => a === 'word/document.xml' ? -1 : b === 'word/document.xml' ? 1 : a.localeCompare(b))) {
+    const view = inspectPart(writeZip({ ...entries, 'word/document.xml': entries[part] }), { ...opts, budget: Math.max(0, remaining) });
+    const offset = count;
+    for (const [local, ref] of view.byRef) {
+      const id = offset + local;
+      byRef.set(id, { ...ref, index: id, localIndex: local, part });
+    }
+    count = Math.max(count, ...[...byRef.keys()]);
+    const listing = view.listing.replace(/¶(\d+)/g, (_, n) => `¶${offset + Number(n)}`);
+    if (view.shown) lines.push(`PART: ${part}\n${listing}`);
+    remaining -= listing.length + part.length + 10;
+    shown += view.shown;
+  }
+  return { listing: lines.join('\n\n'), byRef, paragraphCount: byRef.size, shown, partial: shown < byRef.size, hash: createHash('sha256').update(bytes).digest('hex'), quality: inspectPackage(xmlParts(entries)) };
+}
+
+export async function applyDocxOps(bytes, ops, byRef) {
+  const entries = readZip(bytes); const original = xmlParts(entries);
+  const groups = new Map(); const results = []; let applied = 0;
+  for (let i = 0; i < ops.length; i++) {
+    const raw = ops[i]; const ref = byRef.get(Number(raw?.p));
+    const reject = reason => results.push({ i, kind: raw?.op, p: raw?.p, text: raw?.text, status: 'skipped', reason });
+    if (!ref || !ref.shown) { reject('Paragraph was not supplied to this turn; request that section first.'); continue; }
+    if (typeof raw.expected !== 'string' || raw.expected !== ref.exactText) { reject('Expected paragraph text does not match the source; no change was made.'); continue; }
+    const list = groups.get(ref.part) ?? [];
+    list.push({ raw: { ...raw, p: ref.localIndex }, ref, i }); groups.set(ref.part, list);
+  }
+  for (const [part, work] of groups) {
+    const refs = new Map(work.map(w => [w.ref.localIndex, w.ref]));
+    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs);
+    entries[part] = readZip(output.bytes)['word/document.xml'];
+    for (const result of output.results) { const w = work[result.i]; results.push({ ...result, i: w.i, p: w.ref.index, part }); }
+    applied += output.applied;
+  }
+  validateXml(entries);
+  const quality = inspectPackage(xmlParts(entries));
+  if (quality.errors.length) throw new Error(`Edited file failed structural checks: ${quality.errors.join('; ')}`);
+  const format = compareFormat(xmlParts(entries), original);
+  return { bytes: writeZip(entries), applied, results: results.sort((a,b) => a.i-b.i), validation: { ...quality, format, sourceHash: createHash('sha256').update(bytes).digest('hex'), outputHash: createHash('sha256').update(writeZip(entries)).digest('hex') } };
 }
 
 // ---------------------------------------------------------------- applying
@@ -472,7 +536,7 @@ function rewriteOwnInsertion(pXml, text, stamp) {
  * back — applied, or why not — so the lawyer is told about the ones that
  * could not be made rather than left to find the gap themselves.
  */
-export async function applyDocxOps(bytes, ops, byRef) {
+async function applyPartOps(bytes, ops, byRef) {
   const results = [];
   const parsed = [];
   ops.forEach((raw, i) => {
@@ -560,7 +624,7 @@ export async function applyDocxOps(bytes, ops, byRef) {
   let out = applied ? writeZip(entries) : bytes;
   if (fallback.length) {
     const res = await openDocx(out).applyOperations(fallback.map((x) => x.lib), {
-      author: DOCX_AUTHOR, atomic: false, validate: false, strictTargets: true, continueOnError: true,
+      author: DOCX_AUTHOR, atomic: false, validate: true, strictTargets: true, continueOnError: true,
     });
     fallback.forEach(({ op }, k) => {
       const r = (res.results ?? [])[k];
@@ -583,7 +647,9 @@ export async function applyDocxOps(bytes, ops, byRef) {
 // The same file with every tracked change accepted — a clean copy.
 export function acceptAllChanges(bytes) {
   const entries = readZip(bytes);
-  let xml = dec.decode(entries["word/document.xml"]);
+  for (const part of Object.keys(entries).filter(p => STORY_PART.test(p))) {
+  let xml = dec.decode(entries[part]);
+  if (/<w:(?:moveFrom|moveTo|pPrChange|rPrChange|tblPrChange|sectPrChange)\b/.test(xml)) throw new Error("This file contains revision types that must be accepted in Word.");
   // A struck-through paragraph mark joins the paragraph to the next one;
   // dropping the paragraph is what Word shows and what the lawyer means.
   // The mark is the w:del inside the paragraph properties' own w:rPr — a
@@ -591,13 +657,20 @@ export function acceptAllChanges(bytes) {
   xml = xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, (p) => {
     const pPr = child(p, "w:pPr");
     const rPr = pPr && child(pPr, "w:rPr");
-    return rPr && /<w:del[\s/>]/.test(rPr) ? "" : p;
+    if (rPr && /<w:del[\s/>]/.test(rPr)) {
+      if (/<w:t(?:\s[^>]*)?>[^<]/.test(p.replace(/<w:del\b[\s\S]*?<\/w:del>/g, ""))) throw new Error("Paragraph merge must be accepted in Word.");
+      return "";
+    }
+    return p;
   });
   xml = xml
     .replace(/<w:del\b[\s\S]*?<\/w:del>/g, "")
     .replace(/<w:ins\s[^>]*\/>/g, "")
     .replace(/<w:ins\s[^>]*>([\s\S]*?)<\/w:ins>/g, "$1");
-  entries["word/document.xml"] = enc.encode(xml);
+  xml = xml.replace(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g, cell => /<w:p(?:\s|>|\/)/.test(cell) ? cell : cell.replace('</w:tc>', '<w:p/></w:tc>'));
+  entries[part] = enc.encode(xml);
+  }
+  validateXml(entries);
   return writeZip(entries);
 }
 
