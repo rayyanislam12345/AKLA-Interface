@@ -32,10 +32,10 @@ const queryClient = new QueryClient();
 // Ask AI, Draft with AI and Review with AI used to be three pages; they're
 // now tabs of the AI Workspace. Old URLs (bookmarks, in-flight sessions)
 // land on the right tab — and, for a review, the right document.
-function RedirectToAiWorkspace({ mode }: { mode: "ask" | "draft" | "verify" }) {
+function RedirectToAiWorkspace({ mode }: { mode: "ask" | "draft" | "review" }) {
   const { matterId, matterDocumentId } = useParams<{ matterId: string; matterDocumentId?: string }>();
   const params = new URLSearchParams({ mode });
-  if (mode === "verify" && matterDocumentId) params.set("doc", matterDocumentId);
+  if (mode === "review" && matterDocumentId) params.set("doc", matterDocumentId);
   return <Navigate to={`/matters/${matterId}/ai?${params.toString()}`} replace />;
 }
 
@@ -98,7 +98,7 @@ const App = () => {
                   <Route path="/matters/:matterId/draft" element={<RedirectToAiWorkspace mode="draft" />} />
                   <Route
                     path="/matters/:matterId/documents/:matterDocumentId/review"
-                    element={<RedirectToAiWorkspace mode="verify" />}
+                    element={<RedirectToAiWorkspace mode="review" />}
                   />
                   <Route
                     path="/timesheet"

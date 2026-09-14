@@ -44,7 +44,7 @@ type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string 
 
 const BUILT_IN = [
   { key: "draft" as const, label: "Draft", description: "Interview, then draft a document of a chosen type", Icon: Sparkles },
-  { key: "verify" as const, label: "Verify", description: "Three-pass review of a project document (legal, formatting, conflicts)", Icon: ScanSearch },
+  { key: "review" as const, label: "Review", description: "Law lookup, then a three-pass review of a project document (legal, formatting, conflicts)", Icon: ScanSearch },
   { key: "summarise" as const, label: "Summarise", description: "A short \"Notes On …\" memo about the attached document", Icon: StickyNote },
 ];
 
@@ -258,7 +258,7 @@ export default function Composer({
                 placeholder={
                   skill?.key === "draft"
                     ? "Describe the deal, or just say \"draft it\"…"
-                    : skill?.key === "verify"
+                    : skill?.key === "review" || skill?.key === "verify"
                       ? "Attach a project document and press send to review it…"
                       : skill?.key === "edit"
                         ? "Describe the changes — e.g. \"tighten clause 7 and take the definitions from v2 of the shareholders agreement\"…"
@@ -342,8 +342,8 @@ export default function Composer({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                <DropdownMenuItem onClick={() => applySkill({ key: "verify", label: "Verify" })}>
-                  <ScanSearch className="mr-2 h-4 w-4" />Verify a document
+                <DropdownMenuItem onClick={() => applySkill({ key: "review", label: "Review" })}>
+                  <ScanSearch className="mr-2 h-4 w-4" />Review a document
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => applySkill({ key: "summarise", label: "Summarise" })}>
                   <StickyNote className="mr-2 h-4 w-4" />Summarise

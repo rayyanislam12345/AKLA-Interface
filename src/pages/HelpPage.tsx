@@ -117,7 +117,7 @@ const HelpPage = () => {
             "Stages (the checklist), Documents (every document on the project with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
           bullets: [
             "Stages — click to advance not started → in progress → complete.",
-            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Verify with AI).",
+            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Review with AI).",
             "Parties — add a name and role for each counterparty on the deal.",
             "Tasks — add a task; check it off when done.",
             "Notes — free-text notes, newest first.",
@@ -161,7 +161,7 @@ const HelpPage = () => {
         {
           question: "What happens to a file after I upload it?",
           answer:
-            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Verify on that project.",
+            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Review on that project.",
         },
         {
           question: "What document types are available?",
@@ -220,7 +220,7 @@ const HelpPage = () => {
             "It drafts from standard market practice instead, and the note above the draft will say so.",
         },
         {
-          question: "Will I lose my interview if I switch to the Ask or Verify tab?",
+          question: "Will I lose my interview if I switch to the Ask or Review tab?",
           answer:
             "No — the tabs keep their state while you stay on the page, so you can hop over to Ask to check something and come back. Leaving the page (or reloading) does start fresh.",
         },
@@ -235,7 +235,7 @@ const HelpPage = () => {
         {
           question: "How do I get redline suggestions on a draft?",
           answer:
-            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with the Verify skill in force and the document attached; press send. Or in any chat, type / and choose Verify, then use the + menu → Add from project to attach the document. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
+            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with Review in force and the document attached; press send. Or in any chat, type / and choose Review, then use the + menu → Add from project to attach the document. A review first looks up the law that may apply on official sources, then runs its three passes. Follow-up messages in the same chat are checked against that review rather than starting a new one; attach a different document or say “re-run the review” for a fresh one. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
         },
         {
           question: "What does the review actually check?",
@@ -285,7 +285,7 @@ const HelpPage = () => {
         {
           question: "Where do I find it?",
           answer:
-            "Open a project's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this project are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the project's documents, and type / to put a skill in force (Draft, Verify, Summarise, or one of the firm's own). Every answer is grounded in this project's documents, the precedent library and the law library, with the sources listed under the reply.",
+            "Open a project's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this project are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the project's documents, and type / to put a skill in force (Draft, Review, Summarise, or one of the firm's own). Every answer is grounded in this project's documents, the precedent library and the law library, with the sources listed under the reply.",
         },
         {
           question: "Can I add a document from here?",

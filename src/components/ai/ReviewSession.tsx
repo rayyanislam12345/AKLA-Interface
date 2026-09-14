@@ -519,6 +519,16 @@ export default function ReviewSession({
         <div className="rounded border p-3 text-sm space-y-1" data-testid="review-status">
           <p className="font-medium">Review {reviewRun.status === "complete" ? "checks finished — lawyer review required" : reviewRun.status}</p>
           {reviewRun.error && <p className="text-destructive">{reviewRun.error}</p>}
+          {(() => {
+            const research = (reviewRun.coverage as { research?: { status: string; unresolved?: string[]; sourcesChecked?: number } | null } | null)?.research;
+            if (!research) return <p className="text-muted-foreground">Law lookup: not run for this review.</p>;
+            return (
+              <p>
+                Law lookup: {research.status === "failed" ? "could not finish" : `${research.sourcesChecked ?? 0} official source${research.sourcesChecked === 1 ? "" : "s"} checked (${research.status})`}
+                {research.unresolved?.length ? ` — ${research.unresolved.slice(0, 3).join("; ")}` : ""}
+              </p>
+            );
+          })()}
           {Object.entries((reviewRun.passes ?? {}) as Record<string, { status: string; note?: string }>).map(([key, pass]) => (
             <p key={key}>{REVIEW_TYPE_LABELS[key as RedlineReviewType] ?? key}: {pass.status.replace(/_/g, " ")}{pass.note ? ` — ${pass.note}` : ""}</p>
           ))}
@@ -591,7 +601,7 @@ export default function ReviewSession({
           {(runReview.isPending || applyPreview.isPending) && (
             <p className="text-muted-foreground">
               {runReview.isPending
-                ? "Running three review passes — legal clauses, formatting, and content — this can take a moment…"
+                ? "Looking up the law that applies on official sources, then running three review passes — legal clauses, formatting, and content. This takes a few minutes…"
                 : "Building tracked-changes preview…"}
             </p>
           )}

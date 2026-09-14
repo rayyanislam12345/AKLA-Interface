@@ -14,3 +14,16 @@ export function inferDraftSkill(message, types) {
 export function citationIssues(text, sourceCount) {
   return [...new Set([...text.matchAll(/\[Source\s+(\d+)\]/gi)].map(m => Number(m[1])).filter(n => n < 1 || n > sourceCount))];
 }
+
+// A message that only asks for the review to run ("review it", "please check
+// this") carries no instruction of its own to check.
+export function isBareReviewRequest(message) {
+  if (!String(message ?? '').trim()) return true;
+  return /^\s*(please\s+)?(can you\s+)?(review|verify|check)(\s+(it|this|that|the document|this document|the attached( document)?))?\s*(for me)?\s*(please)?[\s.!?]*$/i.test(String(message ?? ''));
+}
+
+// A review costs a law lookup and three passes, so a chat that already has
+// one runs another only when the lawyer asks for it in so many words.
+export function asksForReviewRerun(message) {
+  return /\b(re-?run|run (the |a )?(new |fresh )?review( again)?|review (it |this |the document )?again|fresh review|new review|start (the review )?over)\b/i.test(String(message ?? ''));
+}

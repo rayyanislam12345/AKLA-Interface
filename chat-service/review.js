@@ -228,7 +228,11 @@ export function splitReviewSegments(text, size = 30000) {
   return segments;
 }
 
-export async function runReview({ supabase, anthropicKey, voyageKey, documentVersionId, userId, signal, notice, researchRunId = null }) {
+// `lookUpLaw`, when given, runs the live search of official sources once the
+// document's text is known, so the law researched is the law this document
+// raises. It must not throw: a lookup that could not finish is recorded as a
+// limitation of the review, not a failure of it.
+export async function runReview({ supabase, anthropicKey, voyageKey, documentVersionId, userId, signal, notice, researchRunId = null, lookUpLaw = null }) {
   const { data: version, error: versionError } = await supabase
     .from("document_versions")
     .select("id, storage_path, matter_document:matter_documents(id, title, matter_id, document_type_id, document_type:document_types(name))")
@@ -261,11 +265,16 @@ export async function runReview({ supabase, anthropicKey, voyageKey, documentVer
     notice?.(`Reviewing ${md?.title ?? fileName} (${fullText.length.toLocaleString("en-GB")} characters).`);
 
     let researchNames = []; let researchLimits = null;
+    if (!researchRunId && lookUpLaw) {
+      const looked = await lookUpLaw({ fullText, matterId });
+      if (looked?.runId) researchRunId = looked.runId;
+      else if (looked) researchLimits = { status: looked.status ?? "failed", unresolved: looked.unresolved ?? [], sourcesChecked: 0 };
+    }
     if (researchRunId) {
       const { data: research } = await supabase.from("ai_research_runs").select("*").eq("id", researchRunId).eq("matter_id", matterId).maybeSingle();
       if (!research) throw new Error("Research does not belong to this project");
       researchNames = (research.sources ?? []).map(s => s.metadata?.act_name).filter(Boolean);
-      researchLimits = { status: research.status, unresolved: research.unresolved };
+      researchLimits = { status: research.status, unresolved: research.unresolved, sourcesChecked: (research.sources ?? []).length };
     }
     const [{ precedents, statutes, matterDocuments }, { data: template }, { data: matterContext }] = await Promise.all([
       fetchGroundedContext(supabase, voyageKey, fullText, documentTypeId, matterId, version.storage_path, researchNames),

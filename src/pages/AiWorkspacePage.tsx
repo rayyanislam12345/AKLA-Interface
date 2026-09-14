@@ -39,8 +39,8 @@ import type { ImperativePanelGroupHandle } from "react-resizable-panels";
 // URL contract (the matter page and Revise links depend on it):
 //   ?chat=<threadId>                 open that conversation
 //   ?mode=draft                      start with the Draft skill in force
-//   ?mode=verify&doc=<matterDocId>   start with Verify + that document attached
-//   ?update=<lawUpdateId>            a Revise link — Verify, the affected
+//   ?mode=review&doc=<matterDocId>   start with Review + that document attached (mode=verify still works)
+//   ?update=<lawUpdateId>            a Revise link — Review, the affected
 //                                    document attached, the prompt pre-filled
 export default function AiWorkspacePage() {
   const { matterId } = useParams<{ matterId: string }>();
@@ -153,7 +153,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
     }
   }, [artifactMap, openArtifact]);
 
-  // ---- seeds from the URL: Draft / Verify buttons and Revise links ----
+  // ---- seeds from the URL: Draft / Review buttons and Revise links ----
   const { data: lawUpdate } = useLawUpdate(lawUpdateId);
   const { data: citingDocs } = useDocumentsCitingAct(matterId, lawUpdate?.act_name);
   const { data: matterDocuments } = useMatterDocuments(matterId);
@@ -183,7 +183,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
 
   const seedSkill = useMemo<ActiveSkill | null | undefined>(() => {
     if (mode === "draft") return { key: "draft", label: "Draft" };
-    if (mode === "verify" || lawUpdateId) return { key: "verify", label: "Verify" };
+    if (mode === "review" || mode === "verify" || lawUpdateId) return { key: "review", label: "Review" };
     return undefined;
   }, [mode, lawUpdateId]);
 
@@ -232,7 +232,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
       </div>
       <div className="flex flex-wrap justify-center gap-2">
         <SuggestionChip Icon={Sparkles} label="Draft a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "draft" }), { replace: true })} />
-        <SuggestionChip Icon={ScanSearch} label="Verify a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "verify" }), { replace: true })} />
+        <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "review" }), { replace: true })} />
         <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
         <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => setEditPickerOpen(true)} />
       </div>

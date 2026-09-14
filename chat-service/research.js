@@ -3,7 +3,7 @@ import { fetchOfficial, sourceIdentityMatches } from './sourcePolicy.js';
 import { extractTextFromFile } from './extractText.js';
 
 export function needsResearch(message, skill) {
-  return ['verify', 'draft'].includes(skill?.key) || /\b(law|laws|legal|statut|ordinance|regulat|amend|compli|govern|enforce|liab|tax|duty|duties|court|research|applicab|section|act\b)/i.test(message);
+  return ['review', 'verify', 'draft'].includes(skill?.key) || /\b(law|laws|legal|statut|ordinance|regulat|amend|compli|govern|enforce|liab|tax|duty|duties|court|research|applicab|section|act\b)/i.test(message);
 }
 
 const MAX_DOCUMENT_CHARS = 12000;

@@ -26,7 +26,8 @@ export interface ChatAttachment {
   chars?: number;
 }
 
-export type SkillKey = "draft" | "verify" | "summarise" | "edit" | "custom";
+// "verify" is kept for chats saved before Verify was merged into Review.
+export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "custom";
 export interface ActiveSkill {
   key: SkillKey;
   documentTypeId?: string;

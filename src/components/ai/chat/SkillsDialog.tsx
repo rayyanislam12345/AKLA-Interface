@@ -115,7 +115,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
         <DialogHeader>
           <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Draft, Verify and Summarise are built in. Add the firm's own: write a set of instructions here, or upload a
+            Draft, Review and Summarise are built in. Add the firm's own: write a set of instructions here, or upload a
             Claude skill as a .zip. An uploaded skill runs its own scripts and templates and hands back the files it builds.
             Put either in force with "/" in the composer.
           </DialogDescription>

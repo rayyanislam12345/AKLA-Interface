@@ -254,3 +254,11 @@ test('a generated document is rendered in AKLA house format, remarks as Word com
   assert.ok(!doc.includes('AKLA Comments</w:t>'), 'the emptied end section is dropped');
   assert.equal(aklaFileName('Notes: On/The "Deal"', 'September 14, 2026'), 'Notes On The Deal [AKLA][September 14, 2026].docx');
 });
+
+test('a review chat runs a new review only when asked, and "review it" is not an instruction', async () => {
+  const { isBareReviewRequest, asksForReviewRerun } = await import('../chatState.js');
+  for (const m of ['review it', 'Review this.', 'please review the attached document', 'can you check this for me?', 'verify', '']) assert.equal(isBareReviewRequest(m), true, m);
+  for (const m of ['review it against the concession agreement', 'check the indemnity clause', 'What does suggestion 3 mean?']) assert.equal(isBareReviewRequest(m), false, m);
+  for (const m of ['re-run the review', 'Rerun', 'please review it again', 'run a fresh review', 'start over']) assert.equal(asksForReviewRerun(m), true, m);
+  for (const m of ['why is clause 23 flagged?', 'check the tolling clause', 'review it']) assert.equal(asksForReviewRerun(m), false, m);
+});

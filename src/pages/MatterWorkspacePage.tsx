@@ -420,7 +420,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                         size="sm"
                         className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
                         onClick={() =>
-                          navigate(`/matters/${matterId}/ai?mode=verify&update=${update.id}`)
+                          navigate(`/matters/${matterId}/ai?mode=review&update=${update.id}`)
                         }
                       >
                         <Wand2 className="h-4 w-4 mr-1.5" />
@@ -986,7 +986,7 @@ export default function MatterWorkspacePage() {
                         variant="outline"
                         title="Review with AI"
                         disabled={!(doc as any).versions?.length}
-                        onClick={() => navigate(`/matters/${matterId}/ai?mode=verify&doc=${doc.id}`)}
+                        onClick={() => navigate(`/matters/${matterId}/ai?mode=review&doc=${doc.id}`)}
                       >
                         <ScanSearch className="h-4 w-4" />
                       </Button>
