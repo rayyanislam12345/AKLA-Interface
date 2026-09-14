@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { renderAsync } from "docx-preview";
 import { acceptTrackedChanges } from "@/lib/docxAccept";
@@ -45,6 +46,7 @@ function download(blob: Blob, name: string) {
 export default function DocxArtifact({ matterId, artifact }: { matterId: string; artifact: ChatArtifact }) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const data = (artifact.data ?? {}) as unknown as DocxArtifactData;
   const { data: blob, isLoading, error } = useChatFile(data.bucket, data.storagePath);
   const { data: documentTypes } = useDocumentTypes();
@@ -53,6 +55,8 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(data.documentTypeId ?? undefined);
   const [form, setForm] = useState<"tracked" | "clean">("tracked");
   const [saving, setSaving] = useState(false);
+  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId: string } | null>(null);
+  const [saveMode, setSaveMode] = useState<"new" | "version">(data.savedMatterDocumentId || data.editSource?.matterDocumentId ? "version" : "new");
   const [changesOpen, setChangesOpen] = useState(true);
 
   const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
@@ -102,13 +106,17 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
         documentTypeName,
         blob: file,
         title: src?.standard ? undefined : src?.title ?? baseName,
-        matterDocumentId: data.savedMatterDocumentId ?? src?.matterDocumentId,
-        expectedVersionId: data.savedVersionId ?? src?.documentVersionId,
+        matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? data.savedMatterDocumentId ?? src?.matterDocumentId,
+        expectedVersionId: lastSave?.versionId ?? data.savedVersionId ?? src?.documentVersionId,
       });
+      setLastSave({ ...result, documentTypeId });
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
         data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
-      });
+      }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
+      setSaveMode("version");
       toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess this document before relying on it in Ask AI.` });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
@@ -148,7 +156,7 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
 
       {!data.original && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-          <Select value={documentTypeId} onValueChange={setDocumentTypeId}>
+          <Select value={documentTypeId} onValueChange={setDocumentTypeId} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? data.documentTypeId)}>
             <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
               <SelectValue placeholder="Document type (for saving)" />
             </SelectTrigger>
@@ -163,14 +171,15 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
               ))}
             </SelectContent>
           </Select>
+          <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? data.documentTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !data.savedMatterDocumentId && !data.editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
           <Button size="sm" className="h-8" onClick={handleSave} disabled={saving || !documentTypeId || !blob} data-testid="save-to-matter">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {data.editSource?.matterDocumentId ? "Save as new version" : "Save to project"}
+            {saveMode === "version" ? "Save new version" : "Create document"}
           </Button>
-          {data.savedMatterDocumentId && (
+          {(lastSave || data.savedMatterDocumentId) && (
             <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
               <FileText className="mr-1 h-3.5 w-3.5" />
-              Saved as v{data.savedVersion} · open project
+              Saved as v{lastSave?.versionNumber ?? data.savedVersion} · open project
             </Button>
           )}
         </div>

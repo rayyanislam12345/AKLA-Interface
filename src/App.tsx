@@ -13,6 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
+import ProjectSearchPage from "./pages/ProjectSearchPage";
 import AiWorkspacePage from "./pages/AiWorkspacePage";
 import RecordMeetingPage from "./pages/RecordMeetingPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
@@ -62,6 +63,7 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route path="/search" element={<ProtectedRoute><AppLayout><ProjectSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route
                     path="/matters"
                     element={

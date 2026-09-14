@@ -361,6 +361,7 @@ export type Database = {
       }
       document_versions: {
         Row: {
+          indexing_status: string
           created_at: string
           file_name: string | null
           id: string
@@ -372,6 +373,7 @@ export type Database = {
           version_number: number
         }
         Insert: {
+          indexing_status?: string
           created_at?: string
           file_name?: string | null
           id?: string
@@ -383,6 +385,7 @@ export type Database = {
           version_number: number
         }
         Update: {
+          indexing_status?: string
           created_at?: string
           file_name?: string | null
           id?: string
@@ -1522,6 +1525,15 @@ export type Database = {
     Functions: {
       save_ai_document: {
         Args: { p_matter_id: string; p_document_type_id: string; p_document_id: string; p_create_new: boolean; p_expected_version_id: string | null; p_title: string; p_storage_path: string; p_file_stem: string }
+        Returns: Json
+      }
+      search_project_content: {
+        Args: { p_query: string; p_matter_id?: string | null; p_kind?: string; p_all_versions?: boolean; p_limit?: number; p_offset?: number }
+        Returns: { kind: string; item_id: string; matter_id: string; matter_name: string; title: string; snippet: string; document_id: string | null; version_id: string | null; version_number: number | null; storage_path: string | null; file_name: string | null; created_at: string; rank: number; total_count: number; matched_in: string }[]
+      }
+
+      save_document_version: {
+        Args: { p_matter_id: string; p_document_type_id: string | null; p_document_id: string; p_create_new: boolean; p_expected_version_id: string | null; p_title: string; p_storage_path: string; p_file_stem: string; p_is_ai_generated?: boolean; p_extension?: string }
         Returns: Json
       }
 

@@ -1,3 +1,4 @@
+import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
 import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, ScanSearch, Save } from "lucide-react";
@@ -375,57 +376,10 @@ export default function RecordMeetingPage() {
     if (!uploadMatterId || !documentTypeId) return;
     setUploadingFormat(format);
     try {
-      const { data: userData } = await supabase.auth.getUser();
       const title = OUTPUT_LABELS[format];
-
-      const { data: matterDocument, error: createError } = await supabase
-        .from("matter_documents")
-        .insert({
-          matter_id: uploadMatterId,
-          document_type_id: documentTypeId,
-          title,
-          status: "drafting",
-          created_by: userData.user?.id,
-        })
-        .select("id")
-        .single();
-      if (createError) throw createError;
-
       const blob = await buildAklaDocxBlob(text, title);
-      const fileName = `${title.replace(/\s+/g, "-")}.docx`;
-      const storagePath = `${uploadMatterId}/${matterDocument.id}/v1-${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("matter-documents")
-        .upload(storagePath, blob, {
-          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-      if (uploadError) throw uploadError;
-
-      const { error: versionError } = await supabase.from("document_versions").insert({
-        matter_document_id: matterDocument.id,
-        version_number: 1,
-        storage_path: storagePath,
-        file_name: fileName,
-        is_ai_generated: true,
-        uploaded_by: userData.user?.id,
-      });
-      if (versionError) throw versionError;
-
-      const { error: processError } = await supabase.functions.invoke("process-document", {
-        body: {
-          filePath: storagePath,
-          fileName,
-          fileType: blob.type,
-          bucket: "matter-documents",
-          matterId: uploadMatterId,
-          documentTypeId,
-          isPrecedent: false,
-        },
-      });
-      if (processError) console.error("Document uploaded but RAG ingestion failed:", processError);
-
-      toast({ title: `${title} uploaded to project` });
+      const result = await saveDraftToMatter({ matterId: uploadMatterId, documentTypeId, documentTypeName: title, title, blob });
+      toast({ title: `${title} saved to project`, description: result.indexed ? "Ready for search" : "Text indexing is incomplete; the file is saved." });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     } finally {

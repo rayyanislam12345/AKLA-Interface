@@ -70,14 +70,14 @@ export default function DocumentUploadCard({ matterId, onUploaded, hint }: Docum
         title: title.trim(),
         document_type_id: documentTypeId,
       });
-      await uploadVersion.mutateAsync({
+      const result = await uploadVersion.mutateAsync({
         matterId,
         matterDocumentId: created.id,
         documentTypeId,
         file,
-        nextVersionNumber: 1,
+        expectedVersionId: null,
       });
-      toast({ title: "Document uploaded and indexed" });
+      toast({ title: result.indexed ? "Document uploaded and indexed" : "Document saved; text indexing is incomplete" });
       setFile(null);
       setTitle("");
       setDocumentTypeId("");

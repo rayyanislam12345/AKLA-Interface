@@ -76,15 +76,21 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let indexDb: any = null;
+  let indexVersionId: string | null = null;
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const authHeader = req.headers.get('Authorization')!;
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       global: { headers: { Authorization: authHeader } },
     });
 
+    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
+    if (authError || !user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    indexDb = supabase;
     const {
       filePath,
       fileName,
@@ -97,6 +103,13 @@ serve(async (req) => {
       actName = null,
     } = await req.json();
 
+    if (bucket === 'matter-documents') {
+      const { data: version, error } = await supabase.from('document_versions').select('id, matter_document:matter_documents(matter_id)').eq('storage_path', filePath).maybeSingle();
+      if (error || !version || (version as any).matter_document?.matter_id !== matterId) throw new Error('Document version does not belong to this project');
+      indexVersionId = version.id;
+      const { error: stateError } = await supabase.from('document_versions').update({ indexing_status: 'pending' }).eq('id', version.id);
+      if (stateError) throw stateError;
+    }
     console.log('Processing document:', { filePath, fileName, fileType, bucket });
 
     // Download file from storage
@@ -132,6 +145,20 @@ serve(async (req) => {
       throw new Error('No text content could be extracted from the document');
     }
 
+    // Keep the previous index until replacement ingestion succeeds. A retry
+    // must not accumulate duplicate chunks from earlier partial attempts.
+    const previousSourceIds: string[] = [];
+    if (indexVersionId) {
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error } = await supabase.from('documents').select('id')
+          .eq('matter_id', matterId).eq('metadata->>storage_path', filePath)
+          .order('id').range(offset, offset + 999);
+        if (error) throw error;
+        previousSourceIds.push(...(data ?? []).map(row => row.id));
+        if (!data || data.length < 1000) break;
+      }
+    }
+
     // Call ingest-documents function with extracted text
     const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
       'ingest-documents',
@@ -152,6 +179,14 @@ serve(async (req) => {
       throw new Error(`Failed to ingest document: ${ingestError.message}`);
     }
 
+    if (indexVersionId) {
+      for (let offset = 0; offset < previousSourceIds.length; offset += 100) {
+        const { error } = await supabase.from('documents').delete().in('id', previousSourceIds.slice(offset, offset + 100));
+        if (error) throw error;
+      }
+      const { error } = await supabase.from('document_versions').update({ indexing_status: 'indexed' }).eq('id', indexVersionId);
+      if (error) throw error;
+    }
     console.log('Document processed successfully:', ingestData);
 
     // Best-effort: scan genuine matter documents (not precedent/statute
@@ -180,6 +215,7 @@ serve(async (req) => {
     );
 
   } catch (error: any) {
+    if (indexDb && indexVersionId) await indexDb.from('document_versions').update({ indexing_status: 'failed' }).eq('id', indexVersionId);
     console.error('Error in process-document function:', error);
     return new Response(
       JSON.stringify({

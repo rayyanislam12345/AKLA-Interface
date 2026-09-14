@@ -1,5 +1,6 @@
+import { indexStoredVersion } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Pencil, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { useMatter, useMatterStages, useSetStageStatus, useDeleteMatter } from "@/hooks/useMatters";
@@ -575,6 +576,9 @@ function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matter
 }
 
 export default function MatterWorkspacePage() {
+  const queryClient = useQueryClient();
+  const location = useLocation();
+  const scrolledTo = useRef("");
   const { matterId } = useParams<{ matterId: string }>();
   const navigate = useNavigate();
   const { data: matter, isLoading } = useMatter(matterId);
@@ -618,13 +622,24 @@ export default function MatterWorkspacePage() {
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocTypeId, setNewDocTypeId] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadTargetRef = useRef<{ matterDocumentId: string; documentTypeId: string | null; nextVersion: number } | null>(null);
+  const uploadTargetRef = useRef<{ matterDocumentId: string; documentTypeId: string | null; expectedVersionId: string | null } | null>(null);
+  const [retryingIndex, setRetryingIndex] = useState<string | null>(null);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+  useEffect(() => {
+    const documentId = new URLSearchParams(location.search).get("document");
+    if (documentId) setExpandedDocId(documentId);
+  }, [location.search]);
+  useEffect(() => {
+    const key = `${location.key}:${location.hash}`;
+    if (!location.hash || scrolledTo.current === key) return;
+    const target = document.getElementById(location.hash.slice(1));
+    if (target) { target.scrollIntoView({ block: "center" }); scrolledTo.current = key; }
+  }, [location.key, location.hash, matterDocuments, tasks, notes, expandedDocId]);
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [editingLabelDraft, setEditingLabelDraft] = useState("");
 
-  const triggerUpload = (matterDocumentId: string, documentTypeId: string | null, versionCount: number) => {
-    uploadTargetRef.current = { matterDocumentId, documentTypeId, nextVersion: versionCount + 1 };
+  const triggerUpload = (matterDocumentId: string, documentTypeId: string | null, expectedVersionId: string | null) => {
+    uploadTargetRef.current = { matterDocumentId, documentTypeId, expectedVersionId };
     fileInputRef.current?.click();
   };
 
@@ -634,17 +649,29 @@ export default function MatterWorkspacePage() {
     e.target.value = "";
     if (!file || !target || !matterId) return;
     try {
-      await uploadVersion.mutateAsync({
+      const result = await uploadVersion.mutateAsync({
         matterId,
         matterDocumentId: target.matterDocumentId,
         documentTypeId: target.documentTypeId,
         file,
-        nextVersionNumber: target.nextVersion,
+        expectedVersionId: target.expectedVersionId,
       });
-      toast({ title: "Document version uploaded" });
+      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? "Ready for search and Ask AI" : "Saved, but text indexing has not completed. The file remains available for download." });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     }
+  };
+
+  const retryIndex = async (version: { id: string; storage_path: string; file_name: string | null }, documentTypeId: string | null) => {
+    if (!matterId) return;
+    setRetryingIndex(version.id);
+    try {
+      const indexed = await indexStoredVersion({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document' });
+      toast({ title: indexed ? "Document ready for search" : "Indexing failed", description: indexed ? undefined : "The original file remains saved. Try again or upload a supported document.", variant: indexed ? "default" : "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
+    } catch (err) { toast({ title: "Indexing failed", description: String(err instanceof Error ? err.message : err), variant: "destructive" }); }
+    finally { setRetryingIndex(null); }
   };
 
   const handleDeleteDocument = async (matterDocumentId: string, title: string) => {
@@ -815,6 +842,7 @@ export default function MatterWorkspacePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => navigate(`/search?matter=${matterId}`)}><Search className="mr-2 h-4 w-4"/>Search project</Button>
           <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=ask`)}>
             <MessageSquare className="h-4 w-4 mr-2" />
             Ask AI
@@ -874,11 +902,13 @@ export default function MatterWorkspacePage() {
                     file_name: string | null;
                     label: string | null;
                     is_ai_generated: boolean;
+                    indexing_status: string;
                   }>;
                   const isExpanded = expandedDocId === doc.id;
                   return (
                   <div
                     key={doc.id}
+                    id={`document-${doc.id}`}
                     className="border rounded-md px-3 py-2"
                   >
                   <div
@@ -946,7 +976,7 @@ export default function MatterWorkspacePage() {
                         variant="outline"
                         title="Upload a new version"
                         onClick={() =>
-                          triggerUpload(doc.id, doc.document_type_id, (doc as any).versions?.length || 0)
+                          triggerUpload(doc.id, doc.document_type_id, [...versions].sort((a,b) => b.version_number-a.version_number)[0]?.id ?? null)
                         }
                       >
                         <Upload className="h-4 w-4" />
@@ -981,7 +1011,8 @@ export default function MatterWorkspacePage() {
                           .map((v) => (
                             <div
                               key={v.id}
-                              className="flex items-center gap-2 flex-wrap text-sm bg-muted/40 rounded-md px-2 py-1.5"
+                              id={`version-${v.id}`}
+                              className="flex items-center gap-2 flex-wrap text-sm bg-muted/40 rounded-md px-2 py-1.5 target:ring-2 target:ring-primary scroll-mt-20"
                             >
                               <span
                                 className="text-xs font-medium truncate flex-1 min-w-[8rem]"
@@ -989,6 +1020,8 @@ export default function MatterWorkspacePage() {
                               >
                                 {v.file_name || `Version ${v.version_number}`}
                               </span>
+                              <Badge variant="outline" className="text-[10px]">v{v.version_number} · {v.indexing_status === "indexed" ? "Search ready" : v.indexing_status === "failed" ? "Indexing failed" : v.indexing_status === "pending" ? "Indexing" : v.indexing_status === "unsupported" ? "Text search unavailable" : "Text indexing unconfirmed"}</Badge>
+                              {v.indexing_status !== "indexed" && v.indexing_status !== "unsupported" && (v.indexing_status !== "pending" || Date.now()-new Date(v.created_at).getTime()>120000) && <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={!!retryingIndex} onClick={() => retryIndex(v, doc.document_type_id)}>{retryingIndex === v.id ? "Indexing…" : "Retry indexing"}</Button>}
                               {editingVersionId === v.id ? (
                                 <>
                                   <Input
@@ -1160,7 +1193,7 @@ export default function MatterWorkspacePage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {tasks?.map((task) => (
-              <div key={task.id} className="flex items-center gap-3 text-sm">
+              <div key={task.id} id={`task-${task.id}`} className="flex items-center gap-3 text-sm target:ring-2 target:ring-primary scroll-mt-20">
                 <Checkbox
                   checked={task.status === "done"}
                   onCheckedChange={(checked) =>
@@ -1244,7 +1277,7 @@ export default function MatterWorkspacePage() {
             </div>
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {notes?.map((note) => (
-                <div key={note.id} className="text-sm border-b pb-2 last:border-0">
+                <div key={note.id} id={`note-${note.id}`} className="text-sm border-b pb-2 last:border-0 target:ring-2 target:ring-primary scroll-mt-20">
                   <p>{note.content}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {(note as any).author?.full_name || "Unknown"} ·{" "}

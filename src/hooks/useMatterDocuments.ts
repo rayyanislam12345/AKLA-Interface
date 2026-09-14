@@ -1,7 +1,7 @@
+import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Enums } from "@/integrations/supabase/types";
-import { sanitizeStorageFilename } from "@/lib/utils";
 
 export type DocumentStatus = Enums<"document_status">;
 
@@ -73,7 +73,7 @@ export function useMatterDocuments(matterId: string | undefined) {
       const { data, error } = await supabase
         .from("matter_documents")
         .select(
-          "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by)"
+          "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by, indexing_status)"
         )
         .eq("matter_id", matterId!)
         .order("created_at", { ascending: false })
@@ -129,6 +129,7 @@ export function useSetMatterDocumentStatus() {
     },
     onSuccess: (matterId) => {
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
 }
@@ -136,62 +137,17 @@ export function useSetMatterDocumentStatus() {
 export function useUploadDocumentVersion() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({
-      matterId,
-      matterDocumentId,
-      documentTypeId,
-      file,
-      nextVersionNumber,
-    }: {
-      matterId: string;
-      matterDocumentId: string;
-      documentTypeId: string | null;
-      file: File;
-      nextVersionNumber: number;
+    mutationFn: async ({ matterId, matterDocumentId, documentTypeId, file, expectedVersionId }: {
+      matterId: string; matterDocumentId: string; documentTypeId: string | null; file: File; expectedVersionId: string | null;
     }) => {
-      const { data: userData } = await supabase.auth.getUser();
-      const storagePath = `${matterId}/${matterDocumentId}/v${nextVersionNumber}-${sanitizeStorageFilename(file.name)}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("matter-documents")
-        .upload(storagePath, file);
-      if (uploadError) throw uploadError;
-
-      const { error: versionError } = await supabase.from("document_versions").insert({
-        matter_document_id: matterDocumentId,
-        version_number: nextVersionNumber,
-        storage_path: storagePath,
-        file_name: file.name,
-        is_ai_generated: false,
-        uploaded_by: userData.user?.id,
-      });
-      if (versionError) throw versionError;
-
-      // Extract text + embed for the precedent/matter RAG index. Best-effort:
-      // unsupported file types (e.g. plain .txt) or extraction failures shouldn't
-      // block the upload itself, since the version is already saved.
-      const extension = file.name.toLowerCase().split(".").pop();
-      if (["pdf", "docx", "xlsx", "xls", "pptx"].includes(extension || "")) {
-        const { error: processError } = await supabase.functions.invoke("process-document", {
-          body: {
-            filePath: storagePath,
-            fileName: file.name,
-            fileType: file.type,
-            bucket: "matter-documents",
-            matterId,
-            documentTypeId,
-            isPrecedent: false,
-          },
-        });
-        if (processError) {
-          console.error("Document uploaded but RAG ingestion failed:", processError);
-        }
-      }
-
-      return { matterId, matterDocumentId };
+      const extension = file.name.split(".").pop()?.toLowerCase() || "bin";
+      const result = await saveDraftToMatter({ matterId, matterDocumentId, documentTypeId, documentTypeName: file.name,
+        title: file.name.replace(/\.[^.]+$/, ""), blob: file, expectedVersionId, isAiGenerated: false, extension });
+      return { matterId, ...result };
     },
     onSuccess: ({ matterId }) => {
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
 }
@@ -221,6 +177,7 @@ export function useDeleteMatterDocument() {
     },
     onSuccess: (matterId) => {
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
 }
@@ -247,6 +204,7 @@ export function useDeleteDocumentVersion() {
     },
     onSuccess: (matterId) => {
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
 }
@@ -272,6 +230,7 @@ export function useUpdateVersionLabel() {
     },
     onSuccess: (matterId) => {
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
 }

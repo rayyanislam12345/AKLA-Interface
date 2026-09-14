@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { marked } from "marked";
 import { renderAsync } from "docx-preview";
@@ -82,6 +83,7 @@ function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; a
 function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string; matterName?: string; artifact: ChatArtifact }) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: documentTypes } = useDocumentTypes();
   const updateArtifact = useUpdateArtifact(artifact.thread_id);
 
@@ -90,6 +92,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [buildingPreview, setBuildingPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -98,6 +101,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   const editSource = (artifact.data as any)?.editSource as
     | { matterDocumentId: string; documentVersionId?: string; versionNumber: number; title: string }
     | undefined;
+  const [saveMode, setSaveMode] = useState<"new" | "version">((artifact.data as any)?.savedMatterDocumentId || editSource?.matterDocumentId ? "version" : "new");
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(initialDocTypeId);
   const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
   // The firm's standard .docx for this type, when there is one: the draft is
@@ -198,13 +202,17 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         documentTypeName,
         blob,
         title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
-        matterDocumentId: (artifact.data as any)?.savedMatterDocumentId ?? editSource?.matterDocumentId,
-        expectedVersionId: (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
+        matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? (artifact.data as any)?.savedMatterDocumentId ?? editSource?.matterDocumentId,
+        expectedVersionId: lastSave?.versionId ?? (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
       });
+      setLastSave({ ...result, documentTypeId });
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
         data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
-      });
+      }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
+      setSaveMode("version");
       toast({
         title: `Saved to the project as v${result.versionNumber}`,
         description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess before relying on it in Ask AI.`,
@@ -216,7 +224,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
     }
   };
 
-  const saved = (artifact.data as any)?.savedMatterDocumentId as string | undefined;
+  const saved = lastSave?.matterDocumentId ?? (artifact.data as any)?.savedMatterDocumentId as string | undefined;
   // Set by the chat function when the model ran out of room even after being
   // continued — worth saying loudly, because saving a half-written agreement
   // to the project as a version is exactly the mistake this would cause.
@@ -249,7 +257,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-        <Select value={documentTypeId} onValueChange={setDocumentTypeId}>
+        <Select value={documentTypeId} onValueChange={setDocumentTypeId} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? initialDocTypeId)}>
           <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
             <SelectValue placeholder="Document type (for saving)" />
           </SelectTrigger>
@@ -264,9 +272,10 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
             ))}
           </SelectContent>
         </Select>
+        <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? initialDocTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !(artifact.data as any)?.savedMatterDocumentId && !editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
         <Button size="sm" className="h-8" onClick={handleSaveToMatter} disabled={saving || !documentTypeId} data-testid="save-to-matter">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          {editSource ? "Save as new version" : "Save to project"}
+          {saveMode === "version" ? "Save new version" : "Create document"}
         </Button>
         {standard?.filename && (
           <span className="text-xs text-muted-foreground" title={standard.filename} data-testid="standard-format-note">
@@ -276,7 +285,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
         {saved && (
           <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
             <FileText className="mr-1 h-3.5 w-3.5" />
-            Saved as v{(artifact.data as any)?.savedVersion} · open matter
+            Saved as v{lastSave?.versionNumber ?? (artifact.data as any)?.savedVersion} · open matter
           </Button>
         )}
       </div>

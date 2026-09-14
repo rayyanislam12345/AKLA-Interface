@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Search } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -21,6 +21,7 @@ import aklaMonogram from "@/assets/akla-monogram.png";
 
 const NAV_ITEMS = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Search", url: "/search", icon: Search },
   { title: "Projects", url: "/matters", icon: FolderKanban },
   { title: "Clients", url: "/clients", icon: Building2 },
   { title: "Team", url: "/team", icon: Users },
