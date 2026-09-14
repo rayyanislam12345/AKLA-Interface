@@ -338,6 +338,21 @@ async function storeAklaWord(supabase, { markdown, title, matterId, threadId }) 
   };
 }
 
+// A document stored as text before documents were delivered as Word becomes
+// a Word file in place: same row, same links from the chat, kind now "docx".
+async function convertArtifactToWord(supabase, artifact, { matterId, threadId }) {
+  const word = await storeAklaWord(supabase, { markdown: artifact.content, title: artifact.title, matterId, threadId });
+  const { data, error } = await supabase
+    .from("ai_artifacts")
+    .update({ kind: "docx", data: { ...(artifact.data ?? {}), ...word, sourceKind: artifact.kind } })
+    .eq("id", artifact.id)
+    .eq("kind", artifact.kind)
+    .select("*")
+    .single();
+  if (error || !data) throw new Error(`Couldn't record the Word file: ${error?.message ?? "the document changed meanwhile"}`);
+  return data;
+}
+
 // Turns raw model output into a stored reply: every <artifact> block becomes
 // an ai_artifacts row and an [[artifact:id]] marker in the text. An
 // unterminated block is closed rather than lost. A finished document is
@@ -359,14 +374,15 @@ async function persistReply(supabase, p) {
     const kind = /kind="([^"]+)"/.exec(attrs)?.[1] === "draft" ? "draft" : "memo";
     const title = /title="([^"]+)"/.exec(attrs)?.[1] ?? (kind === "draft" ? p.defaultTitle : "Memo");
     const markdown = match[2].trim();
+    // Stopped part-way or not, the document is a Word file from the moment
+    // it exists; an unfinished one says so. Only if the renderer fails twice
+    // are the words kept as text, and they become Word when next opened.
     let word = null;
-    if (!truncated && !p.metadata?.incomplete) {
+    for (let attempt = 0; attempt < 2 && !word; attempt++) {
       try {
         word = await storeAklaWord(supabase, { markdown, title, matterId: p.matterId, threadId: p.threadId });
       } catch (err) {
-        // The words are not lost: the Markdown is kept and the next turn
-        // converts it again.
-        console.error("AKLA Word render failed:", err);
+        console.error(`AKLA Word render failed (attempt ${attempt + 1}):`, err);
       }
     }
     const { data: artifact } = await supabase
@@ -591,12 +607,7 @@ async function handleChat(req, res) {
     const rendered = d.rendered === "akla";
     if (latest && latest.kind !== "docx" && !d.editSource && latest.content?.trim() && !isContinuation) {
       try {
-        const word = await storeAklaWord(supabase, { markdown: latest.content, title: latest.title, matterId, threadId });
-        const { data: converted } = await supabase
-          .from("ai_artifacts")
-          .insert({ thread_id: threadId, matter_id: matterId, kind: "docx", title: latest.title, content: latest.content, data: { ...d, ...word, sourceKind: latest.kind, convertedFrom: latest.id }, created_by: user.id })
-          .select("id, kind, title, content, data")
-          .single();
+        const converted = await convertArtifactToWord(supabase, latest, { matterId, threadId });
         if (converted) {
           latest.kind = "docx";
           d = converted.data;
