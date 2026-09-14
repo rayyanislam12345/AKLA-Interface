@@ -23,8 +23,8 @@ echo "Backing up the running copy…"
 ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
 echo "Copying the service files and the version stamp…"
-scp -i "$KEY" server.js extractText.js docxAgent.js research.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION"
+scp -i "$KEY" server.js extractText.js docxAgent.js research.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every

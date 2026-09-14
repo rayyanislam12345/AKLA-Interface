@@ -152,3 +152,33 @@ test('suggestions that change the same words are merged into one', async () => {
   assert.equal(fallback.suggestions[0].suggested_text, 'forty (40) days after');
   assert.ok(fallback.suggestions[0].rationale.includes('"sixty (60) days following"'));
 });
+
+test('a Claude skill zip is read from its folder, with its front matter checked', async () => {
+  const { parseSkillZip, readFrontMatter, outputFileIds } = await import('../claudeSkills.js');
+  const skillMd = `---\nname: rfp-volume-i\ndescription: >\n  Draft Volume I of an RFP\n  from the firm's master.\n---\n\n# Drafting\nRun the scripts.`;
+  const zip = zipSync({
+    'rfp-volume-i/SKILL.md': strToU8(skillMd),
+    'rfp-volume-i/scripts/build.py': strToU8('print(1)'),
+    'rfp-volume-i/assets/Master [AKLA].docx': new Uint8Array([80, 75, 3, 4]),
+    '__MACOSX/rfp-volume-i/._SKILL.md': strToU8('junk'),
+    'rfp-volume-i/.DS_Store': strToU8('junk'),
+  });
+  const parsed = parseSkillZip(zip);
+  assert.equal(parsed.name, 'rfp-volume-i');
+  assert.equal(parsed.description, "Draft Volume I of an RFP from the firm's master.");
+  assert.equal(parsed.instructions, '# Drafting\nRun the scripts.');
+  assert.deepEqual(parsed.files.map((f) => f.path).sort(), ['rfp-volume-i/SKILL.md', 'rfp-volume-i/assets/Master [AKLA].docx', 'rfp-volume-i/scripts/build.py']);
+
+  // Files at the top of the zip are placed under a folder named for the skill.
+  const flat = parseSkillZip(zipSync({ 'SKILL.md': strToU8('---\nname: "legal-summary"\ndescription: Plain English memo.\n---\nBody'), 'scripts/x.py': strToU8('') }));
+  assert.deepEqual(flat.files.map((f) => f.path).sort(), ['legal-summary/SKILL.md', 'legal-summary/scripts/x.py']);
+
+  assert.throws(() => parseSkillZip(zipSync({ 'a/readme.md': strToU8('x') })), /No SKILL\.md/);
+  assert.throws(() => parseSkillZip(zipSync({ 'SKILL.md': strToU8('---\nname: Bad Name\ndescription: d\n---') })), /lowercase/);
+  assert.throws(() => parseSkillZip(zipSync({ 'a/SKILL.md': strToU8('---\nname: a\ndescription: d\n---'), 'b/other.md': strToU8('x') })), /skill's folder/);
+  assert.throws(() => parseSkillZip(strToU8('not a zip')), /not a readable/);
+  assert.equal(readFrontMatter('no front matter').body, 'no front matter');
+
+  const content = [{ type: 'bash_code_execution_tool_result', content: { type: 'bash_code_execution_result', content: [{ type: 'bash_code_execution_output', file_id: 'file_1' }] } }, { type: 'text', text: 'done' }];
+  assert.deepEqual(outputFileIds(content), ['file_1']);
+});
