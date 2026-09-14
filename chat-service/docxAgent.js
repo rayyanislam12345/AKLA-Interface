@@ -223,7 +223,7 @@ function revisionStamps(documentXml) {
   let max = 9000;
   for (const m of documentXml.matchAll(/<w:(?:ins|del|moveFrom|moveTo)\s[^>]*w:id="(\d+)"/g)) max = Math.max(max, Number(m[1]));
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  return () => `w:id="${++max}" w:author="${DOCX_AUTHOR}" w:date="${date}"`;
+  return (author = DOCX_AUTHOR) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${date}"`;
 }
 
 // The children of a paragraph, in order: its runs (with their formatting and
@@ -672,6 +672,219 @@ export function acceptAllChanges(bytes) {
   }
   validateXml(entries);
   return writeZip(entries);
+}
+
+// ------------------------------------------------------- review suggestions
+
+// A review suggestion quotes the document as mammoth read it: HTML, with a
+// footnote marker written as <sup>[9]</sup> and paragraphs as <p>. The Word
+// file has no text for the marker and a paragraph break for each <p>, so
+// both are put into those terms before anything is looked for.
+function suggestionParagraphs(html) {
+  return String(html ?? "")
+    .replace(/<sup\b[\s\S]*?<\/sup>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|td|th|tr|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// Finds needle in hay with runs of whitespace treated as one space, and
+// returns where it sits in hay itself, so the replacement lands on the
+// document's own characters.
+function findLoose(hay, needle, from = 0) {
+  const map = [];
+  let loose = "";
+  let space = false;
+  for (let i = 0; i < hay.length; i++) {
+    if (/\s/.test(hay[i])) {
+      if (!space) { loose += " "; map.push(i); }
+      space = true;
+    } else {
+      loose += hay[i]; map.push(i); space = false;
+    }
+  }
+  const want = needle.replace(/\s+/g, " ").trim();
+  if (!want) return null;
+  const at = loose.indexOf(want, from);
+  if (at < 0) return null;
+  const endLoose = at + want.length - 1;
+  let end = map[endLoose] + 1;
+  return { start: map[at], end };
+}
+
+const REVIEW_ACCEPTED_AUTHOR = "AKLA AI (accepted)";
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The places two versions of a paragraph differ, word by word. Changing a
+// figure at the start of a clause and a party at the end should strike two
+// words and insert two, not strike and retype the whole sentence between.
+function wordHunks(oldText, newText) {
+  const a = oldText.match(/\s+|\S+/g) ?? [];
+  const b = newText.match(/\s+|\S+/g) ?? [];
+  // Very long paragraphs fall back to one change rather than a huge table.
+  if (a.length * b.length > 4_000_000) {
+    const { start, end, inserted } = diffRange(oldText, newText);
+    return [{ start, end, inserted }];
+  }
+  const lcs = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const hunks = [];
+  let i = 0, j = 0, pos = 0, open = null;
+  const close = () => { if (open) { hunks.push(open); open = null; } };
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      close(); pos += a[i].length; i++; j++;
+    } else if (j < b.length && (i === a.length || lcs[i][j + 1] >= lcs[i + 1][j])) {
+      open ??= { start: pos, end: pos, inserted: "" };
+      open.inserted += b[j]; j++;
+    } else {
+      open ??= { start: pos, end: pos, inserted: "" };
+      pos += a[i].length; open.end = pos; i++;
+    }
+  }
+  close();
+  // A lone space kept between two changes reads as noise; join them.
+  const merged = [];
+  for (const h of hunks) {
+    const prev = merged[merged.length - 1];
+    const gap = prev ? oldText.slice(prev.end, h.start) : null;
+    if (prev && gap !== null && /^\s*$/.test(gap)) {
+      prev.inserted += gap + h.inserted;
+      prev.end = h.end;
+    } else merged.push({ ...h });
+  }
+  return merged;
+}
+
+function locateQuote(paras, before) {
+  for (let k = 0; k < paras.length; k++) {
+    const first = findLoose(paras[k].text, before[0]);
+    if (!first) continue;
+    if (before.length === 1) return [{ para: paras[k], ...first }];
+    if (paras[k].text.slice(first.end).trim()) continue;
+    const list = [{ para: paras[k], ...first }];
+    let q = k;
+    let ok = true;
+    for (let j = 1; j < before.length; j++) {
+      // Empty paragraphs between the quoted ones are not in the quote.
+      q++;
+      while (paras[q] && !paras[q].text.trim()) q++;
+      const para = paras[q];
+      const hit = para && findLoose(para.text, before[j]);
+      const whole = para && para.text.trim().replace(/\s+/g, " ") === before[j].replace(/\s+/g, " ");
+      const lastStartsHere = hit && j === before.length - 1 && !para.text.slice(0, hit.start).trim();
+      if (!hit || !(whole || lastStartsHere)) { ok = false; break; }
+      list.push({ para, ...hit });
+    }
+    if (ok) return list;
+  }
+  return null;
+}
+
+/**
+ * Writes review suggestions into the Word file. A pending suggestion becomes
+ * a tracked change; an accepted one is written in and its revision accepted,
+ * so the page shows the new wording plainly. Revisions already in the file
+ * are left as they are — the lawyer's own redline stays visible alongside.
+ *
+ * changes: [{ id, original, suggested, accepted }]
+ */
+export function applyReviewSuggestions(bytes, changes) {
+  const entries = readZip(bytes);
+  const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
+  // The body first, then notes, headers and footers: a suggestion about a
+  // footnote quotes the footnote.
+  const partNames = Object.keys(entries)
+    .filter((name) => STORY_PART.test(name))
+    .sort((x, y) => (x === "word/document.xml" ? -1 : y === "word/document.xml" ? 1 : x.localeCompare(y)));
+  const parts = new Map(partNames.map((name) => [name, dec.decode(entries[name])]));
+  const pristine = new Map([...parts].map(([name, xml]) => [name, enumerateParagraphs(xml, headings)]));
+  let maxId = 9000;
+  for (const xml of parts.values()) for (const m of xml.matchAll(/<w:(?:ins|del|moveFrom|moveTo)\s[^>]*w:id="(\d+)"/g)) maxId = Math.max(maxId, Number(m[1]));
+  const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const stampAs = (author) => () => `w:id="${++maxId}" w:author="${escapeXml(author)}" w:date="${date}"`;
+  const results = [];
+
+  for (const change of changes) {
+    const skip = (reason) => results.push({ id: change.id, status: "skipped", reason });
+    let before = suggestionParagraphs(change.original);
+    let after = suggestionParagraphs(change.suggested);
+    if (!before.length) { skip("missing_text"); continue; }
+    if (before.length !== after.length) {
+      if (after.length <= 1) {
+        // Several paragraphs rewritten as one: the new wording goes where the
+        // quote begins and the rest of the quoted paragraphs are struck out.
+        after = [after[0] ?? "", ...before.slice(1).map(() => "")];
+      } else if (before.length === 1) {
+        after = [after.join(" ")];
+      } else { skip("paragraph_structure"); continue; }
+    }
+    if (before.join("\n").replace(/\s+/g, " ") === after.join("\n").replace(/\s+/g, " ")) { skip("formatting_only"); continue; }
+
+    let found = null;
+    for (const [name, xml] of parts) {
+      const edits = locateQuote(enumerateParagraphs(xml, headings), before);
+      if (edits) { found = { name, edits }; break; }
+    }
+    if (!found) {
+      // Present in the file as it arrived, gone now: an earlier suggestion
+      // already rewrote these words.
+      const overlaps = [...pristine.values()].some((paras) => locateQuote(paras, before));
+      skip(overlaps ? "overlaps_another_suggestion" : "not_found");
+      continue;
+    }
+
+    const stamp = change.accepted ? stampAs(REVIEW_ACCEPTED_AUTHOR) : stampAs(DOCX_AUTHOR);
+    let xml = parts.get(found.name);
+    const rewrites = [];
+    let failed = false;
+    found.edits.forEach((e, n) => {
+      if (failed) return;
+      const newText = e.para.text.slice(0, e.start) + (after[n] ?? "") + e.para.text.slice(e.end);
+      if (newText === e.para.text) return;
+      let pXml = xml.slice(e.para.start, e.para.end);
+      if (isOwnInsertion(pXml)) {
+        pXml = rewriteOwnInsertion(pXml, newText, stamp);
+      } else {
+        // Right to left, so each change leaves the offsets of the ones
+        // before it where they were.
+        for (const h of wordHunks(e.para.text, newText).reverse()) {
+          const current = visibleText(pXml);
+          const next = replaceParagraph(pXml, current.slice(0, h.start) + h.inserted + current.slice(h.end), stamp);
+          if (next === null) { failed = true; return; }
+          pXml = next;
+        }
+      }
+      rewrites.push({ para: e.para, out: pXml });
+    });
+    if (failed) { skip("formatting"); continue; }
+    if (!rewrites.length) { skip("no_change"); continue; }
+    for (const r of rewrites.sort((x, y) => y.para.start - x.para.start)) {
+      xml = xml.slice(0, r.para.start) + r.out + xml.slice(r.para.end);
+    }
+    parts.set(found.name, xml);
+    results.push({ id: change.id, status: "applied" });
+  }
+
+  // Accepted suggestions: keep the new words, drop the old, no markup.
+  const author = escapeRegExp(escapeXml(REVIEW_ACCEPTED_AUTHOR));
+  for (const [name, xml] of parts) {
+    const clean = xml
+      .replace(new RegExp(`<w:del\\b[^>]*w:author="${author}"[^>]*>[\\s\\S]*?<\\/w:del>`, "g"), "")
+      .replace(new RegExp(`<w:ins\\b[^>]*w:author="${author}"[^>]*>([\\s\\S]*?)<\\/w:ins>`, "g"), "$1");
+    entries[name] = enc.encode(clean);
+  }
+  validateXml(entries);
+  const quality = inspectPackage(xmlParts(entries));
+  if (quality.errors.length) throw new Error(`Redlined file failed structural checks: ${quality.errors.join("; ")}`);
+  return { bytes: writeZip(entries), results };
 }
 
 // One line per operation, for the reply and the artifact's change list.

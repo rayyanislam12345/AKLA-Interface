@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
-import { inspectDocx, applyDocxOps, acceptAllChanges } from '../docxAgent.js';
+import { inspectDocx, applyDocxOps, acceptAllChanges, applyReviewSuggestions } from '../docxAgent.js';
 import { fetchOfficial, sourceIdentityMatches, officialUrl } from '../sourcePolicy.js';
 import { compareFormat, inspectPackage } from '../docxChecks.js';
 const ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"';
@@ -36,6 +36,30 @@ test('stale and hidden paragraph edits are refused', async () => {
   assert.equal(hidden.applied, 0);
   const stale = await applyDocxOps(bytes, [{op:'replace',p:1,expected:'Wrong text',text:'Changed'}], inspectDocx(bytes).byRef);
   assert.equal(stale.applied, 0);
+});
+test('review suggestions redline a file that already has tracked changes', () => {
+  const body = `<w:p><w:r><w:t xml:space="preserve">The fee is thirty (30) days payable by Party Alpha.</w:t></w:r></w:p>`
+    + `<w:p><w:r><w:t xml:space="preserve">Existing </w:t></w:r><w:ins w:id="1" w:author="Counsel" w:date="2026-09-01T00:00:00Z"><w:r><w:t>redline</w:t></w:r></w:ins><w:r><w:t xml:space="preserve"> stays.</w:t></w:r></w:p>`
+    + `<w:p><w:r><w:t xml:space="preserve">Accepted wording here.</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r></w:p>`;
+  const bytes = zipSync({ 'word/document.xml': strToU8(`<w:document ${ns}><w:body>${body}<w:sectPr/></w:body></w:document>`) });
+  const { bytes: out, results } = applyReviewSuggestions(bytes, [
+    { id: 'a', original: 'thirty (30) days payable by Party Alpha', suggested: 'forty (40) days payable by Party Beta', accepted: false },
+    { id: 'b', original: 'Accepted wording<sup><a href="#f">[2]</a></sup> here.', suggested: 'Final wording here.', accepted: true },
+    { id: 'c', original: 'Not in this file at all', suggested: 'Anything', accepted: false },
+  ]);
+  const xml = strFromU8(unzipSync(out)['word/document.xml']);
+  assert.deepEqual(results.map(r => r.status), ['applied', 'applied', 'skipped']);
+  assert.equal(results[2].reason, 'not_found');
+  // Two separate word changes, not one struck-out stretch between them.
+  assert.equal((xml.match(/<w:del [^>]*w:author="AKLA AI"/g) ?? []).length, 2);
+  assert.ok(xml.includes('<w:delText xml:space="preserve">thirty (30)</w:delText>'));
+  assert.ok(xml.includes('<w:r><w:t xml:space="preserve"> days payable by Party </w:t></w:r>'));
+  // The lawyer's own revision is untouched; the accepted one leaves no markup.
+  assert.ok(xml.includes('w:author="Counsel"'));
+  assert.ok(!xml.includes('(accepted)'));
+  assert.ok(xml.includes('<w:t xml:space="preserve">Final</w:t>'));
+  assert.ok(xml.includes('<w:footnoteReference w:id="2"/>'));
+  assert.ok(strFromU8(unzipSync(acceptAllChanges(out))['word/document.xml']).includes('forty (40)'));
 });
 test('format comparison detects changed margins and placeholders', () => {
   const parts = Object.fromEntries(Object.entries(unzipSync(file())).map(([p,b]) => [p,strFromU8(b)]));

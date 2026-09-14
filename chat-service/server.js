@@ -16,11 +16,12 @@
 import "dotenv/config";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
 import { inferDraftSkill, citationIssues } from "./chatState.js";
 import { researchLaw, needsResearch } from "./research.js";
-import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL } from "./docxAgent.js";
+import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions } from "./docxAgent.js";
 import { runReview } from "./review.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -1245,6 +1246,82 @@ async function handleReview(req, res) {
   }
 }
 
+// The Word file a review is read in: its suggestions written into the
+// lawyer's document. Pending ones are tracked changes, accepted ones are
+// written in plainly, rejected ones are left out. This replaces the edge
+// function for the job because that function's redline library refuses any
+// document that already carries tracked changes — which is most documents a
+// lawyer asks to have reviewed, the M6 term sheet among them.
+async function handleReviewPreview(req, res) {
+  const json = (status, body) => {
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
+  const { documentVersionId, reviewRunId = null } = body;
+  if (!documentVersionId || typeof documentVersionId !== "string") return json(400, { error: "documentVersionId is required" });
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  const { error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
+
+  const { data: version, error: versionError } = await db
+    .from("document_versions")
+    .select("id, storage_path, matter_document:matter_documents(id, matter_id)")
+    .eq("id", documentVersionId)
+    .maybeSingle();
+  if (versionError || !version) return json(404, { error: "Document version not found" });
+  if (!/\.docx$/i.test(version.storage_path)) return json(400, { error: "Tracked changes can only be shown for Word (.docx) files" });
+
+  if (reviewRunId) {
+    const { data: run } = await db.from("ai_review_runs").select("id").eq("id", reviewRunId).eq("document_version_id", documentVersionId).eq("status", "complete").maybeSingle();
+    if (!run) return json(409, { error: "This review does not belong to this version, or has not finished" });
+  }
+  let query = db
+    .from("redline_suggestions")
+    .select("id, clause_reference, original_text, suggested_text, status, created_at")
+    .eq("document_version_id", documentVersionId)
+    .neq("status", "rejected")
+    .order("created_at", { ascending: true });
+  query = reviewRunId ? query.eq("review_run_id", reviewRunId) : query.is("review_run_id", null);
+  const { data: suggestions, error: suggestionsError } = await query;
+  if (suggestionsError) return json(500, { error: `Could not load the suggestions: ${suggestionsError.message}` });
+
+  const { data: file, error: downloadError } = await db.storage.from("matter-documents").download(version.storage_path);
+  if (downloadError || !file) return json(500, { error: `Could not download the document: ${downloadError?.message ?? "no file"}` });
+
+  let output;
+  try {
+    output = applyReviewSuggestions(
+      new Uint8Array(await file.arrayBuffer()),
+      (suggestions ?? []).map((s) => ({ id: s.id, original: s.original_text, suggested: s.suggested_text, accepted: s.status === "accepted" })),
+    );
+  } catch (err) {
+    console.error("review preview failed:", err);
+    return json(422, { error: err instanceof Error ? err.message : "The redlined document could not be built" });
+  }
+
+  const md = version.matter_document;
+  const previewStoragePath = `${md?.matter_id}/${md?.id}/${documentVersionId}/${reviewRunId ?? "legacy"}/preview-${randomUUID()}.docx`;
+  const { error: uploadError } = await db.storage.from("matter-documents").upload(previewStoragePath, output.bytes, {
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    upsert: true,
+  });
+  if (uploadError) return json(500, { error: `Could not store the redlined document: ${uploadError.message}` });
+
+  const byId = new Map((suggestions ?? []).map((s) => [s.id, s]));
+  const skipped = output.results
+    .filter((r) => r.status !== "applied")
+    .map((r) => ({ suggestionId: r.id, clauseReference: byId.get(r.id)?.clause_reference ?? null, reason: r.reason }));
+  json(200, { previewStoragePath, appliedCount: output.results.length - skipped.length, skippedCount: skipped.length, skipped });
+}
+
 // ---------------------------------------------------------------------------
 
 const server = createServer((req, res) => {
@@ -1257,6 +1334,18 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/version")) {
     res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion }));
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/review/preview") {
+    handleReviewPreview(req, res).catch((err) => {
+      console.error("review preview handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
     return;
   }
   if (req.method === "POST" && url.pathname === "/review") {
