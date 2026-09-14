@@ -1252,7 +1252,7 @@ async function handleReview(req, res) {
 // function for the job because that function's redline library refuses any
 // document that already carries tracked changes — which is most documents a
 // lawyer asks to have reviewed, the M6 term sheet among them.
-async function handleReviewPreview(req, res) {
+async function handleReviewPreview(req, res, { download = false } = {}) {
   const json = (status, body) => {
     res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
@@ -1298,13 +1298,30 @@ async function handleReviewPreview(req, res) {
 
   let output;
   try {
+    // The download is for Word, where the lawyer or the other side decides
+    // each change: every suggestion not rejected goes in as a tracked change,
+    // including the ones accepted here. The preview writes accepted ones in.
     output = applyReviewSuggestions(
       new Uint8Array(await file.arrayBuffer()),
-      (suggestions ?? []).map((s) => ({ id: s.id, original: s.original_text, suggested: s.suggested_text, accepted: s.status === "accepted" })),
+      (suggestions ?? []).map((s) => ({ id: s.id, original: s.original_text, suggested: s.suggested_text, accepted: !download && s.status === "accepted" })),
     );
   } catch (err) {
     console.error("review preview failed:", err);
     return json(422, { error: err instanceof Error ? err.message : "The redlined document could not be built" });
+  }
+
+  if (download) {
+    const applied = output.results.filter((r) => r.status === "applied").length;
+    res.writeHead(200, {
+      ...corsHeaders,
+      "Access-Control-Expose-Headers": "X-Changes-Tracked, X-Changes-Not-Tracked",
+      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Length": output.bytes.length,
+      "X-Changes-Tracked": String(applied),
+      "X-Changes-Not-Tracked": String(output.results.length - applied),
+    });
+    res.end(Buffer.from(output.bytes));
+    return;
   }
 
   const md = version.matter_document;
@@ -1336,8 +1353,8 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion }));
     return;
   }
-  if (req.method === "POST" && url.pathname === "/review/preview") {
-    handleReviewPreview(req, res).catch((err) => {
+  if (req.method === "POST" && (url.pathname === "/review/preview" || url.pathname === "/review/download")) {
+    handleReviewPreview(req, res, { download: url.pathname === "/review/download" }).catch((err) => {
       console.error("review preview handler crashed:", err);
       if (!res.headersSent) {
         res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
