@@ -167,12 +167,24 @@ test('a Claude skill zip is read from its folder, with its front matter checked'
   assert.equal(parsed.name, 'rfp-volume-i');
   assert.equal(parsed.description, "Draft Volume I of an RFP from the firm's master.");
   assert.equal(parsed.instructions, '# Drafting\nRun the scripts.');
-  assert.deepEqual(parsed.files.map((f) => f.path).sort(), ['rfp-volume-i/SKILL.md', 'rfp-volume-i/assets/Master [AKLA].docx', 'rfp-volume-i/scripts/build.py']);
+  assert.deepEqual(parsed.files.map((f) => f.path).sort(), ['rfp-volume-i/SKILL.md', 'rfp-volume-i/assets/Master-AKLA.docx', 'rfp-volume-i/scripts/build.py']);
 
   // Files at the top of the zip are placed under a folder named for the skill.
   const flat = parseSkillZip(zipSync({ 'SKILL.md': strToU8('---\nname: "legal-summary"\ndescription: Plain English memo.\n---\nBody'), 'scripts/x.py': strToU8('') }));
   assert.deepEqual(flat.files.map((f) => f.path).sort(), ['legal-summary/SKILL.md', 'legal-summary/scripts/x.py']);
 
+  // A template named with spaces and brackets is renamed, and the skill's text follows it.
+  assert.deepEqual(parsed.renamed, [{ from: 'assets/Master [AKLA].docx', to: 'assets/Master-AKLA.docx' }]);
+  const withRefs = parseSkillZip(zipSync({
+    'ca/SKILL.md': strToU8('---\nname: ca\ndescription: Fill the master.\n---\npython3 scripts/fill.py "assets/Standard Concession Agreement [AKLA].docx"\nThe master, Standard Concession Agreement [AKLA], is blank.'),
+    'ca/scripts/fill.py': strToU8('TEMPLATE = "Standard Concession Agreement [AKLA].docx"'),
+    'ca/assets/Standard Concession Agreement [AKLA].docx': new Uint8Array([80, 75, 3, 4]),
+  }));
+  const fileText = (path) => new TextDecoder().decode(withRefs.files.find((f) => f.path === path).bytes);
+  assert.ok(withRefs.files.some((f) => f.path === 'ca/assets/Standard-Concession-Agreement-AKLA.docx'));
+  assert.ok(fileText('ca/SKILL.md').includes('"assets/Standard-Concession-Agreement-AKLA.docx"'));
+  assert.ok(fileText('ca/SKILL.md').includes('The master, Standard Concession Agreement [AKLA], is blank.'));
+  assert.equal(fileText('ca/scripts/fill.py'), 'TEMPLATE = "Standard-Concession-Agreement-AKLA.docx"');
   assert.throws(() => parseSkillZip(zipSync({ 'a/readme.md': strToU8('x') })), /No SKILL\.md/);
   assert.throws(() => parseSkillZip(zipSync({ 'SKILL.md': strToU8('---\nname: Bad Name\ndescription: d\n---') })), /lowercase/);
   assert.throws(() => parseSkillZip(zipSync({ 'a/SKILL.md': strToU8('---\nname: a\ndescription: d\n---'), 'b/other.md': strToU8('x') })), /skill's folder/);

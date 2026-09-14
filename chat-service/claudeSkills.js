@@ -12,6 +12,9 @@ const MAX_SKILL_FILES = 500;
 export const CODE_EXECUTION_TOOL = { type: "code_execution_20260521", name: "code_execution" };
 
 const JUNK = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|\.git)(\/|$)/;
+const TEXT_FILE = /\.(md|markdown|txt|py|sh|js|mjs|ts|json|ya?ml|toml|cfg|ini|csv|html?|xml)$/i;
+// Letters, digits, dot, underscore and hyphen; anything else becomes a hyphen.
+const safeSegment = (segment) => segment.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-{2,}/g, "-").replace(/-(\.[^.]+)$/, "$1").replace(/^-+|-+$/g, "") || "file";
 
 // The YAML front matter a SKILL.md opens with. Only what a skill needs is
 // read — name and description — including a description folded over lines.
@@ -76,8 +79,45 @@ export function parseSkillZip(bytes) {
   if (/anthropic|claude/.test(name)) throw new Error("A skill name cannot contain \"anthropic\" or \"claude\".");
   if (!description || description.length > 1024) throw new Error("SKILL.md needs a description of up to 1024 characters.");
 
-  const files = paths.map((p) => ({ path: `${name}/${p.slice(root.length)}`, bytes: entries[p] }));
-  return { name, description, instructions: body.trim(), files, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0) };
+  // Anthropic refuses paths with spaces or brackets, and firm templates are
+  // named "Standard Concession Agreement [AKLA].docx". Such files are
+  // renamed, and every mention of the old name in the skill's own text —
+  // SKILL.md, its references, its scripts — is changed to match, so the
+  // skill still finds its template.
+  const renamed = [];
+  const relative = paths.map((p) => {
+    const from = p.slice(root.length);
+    const to = from.split("/").map(safeSegment).join("/");
+    if (to !== from) renamed.push({ from, to });
+    return { source: p, path: to };
+  });
+  const taken = new Set();
+  for (const r of relative) {
+    if (taken.has(r.path)) throw new Error(`Two files in the skill would share the name ${r.path} once spaces and symbols are removed.`);
+    taken.add(r.path);
+  }
+  const swaps = renamed
+    .flatMap(({ from, to }) => [[from, to], [from.split("/").pop(), to.split("/").pop()]])
+    .filter(([a, b], i, all) => a !== b && all.findIndex(([x]) => x === a) === i)
+    .sort((a, b) => b[0].length - a[0].length);
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const files = relative.map(({ source, path }) => {
+    let bytes = entries[source];
+    if (swaps.length && TEXT_FILE.test(path)) {
+      try {
+        let text = decoder.decode(bytes);
+        let changed = false;
+        for (const [a, b] of swaps) {
+          if (text.includes(a)) { text = text.split(a).join(b); changed = true; }
+        }
+        if (changed) bytes = new TextEncoder().encode(text);
+      } catch { /* not UTF-8 text after all; left as it is */ }
+    }
+    return { path: `${name}/${path}`, bytes };
+  });
+  const skillBody = files.find((f) => f.path === `${name}/SKILL.md`);
+  const instructions = readFrontMatter(new TextDecoder().decode(skillBody.bytes)).body.trim();
+  return { name, description, instructions, files, renamed, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0) };
 }
 
 async function api(key, path, init = {}) {

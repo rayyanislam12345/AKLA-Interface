@@ -1543,7 +1543,7 @@ async function handleSkillUpload(req, res) {
     : await db.from("ai_skills").insert({ ...fields, created_by: user.id }).select("*").single();
   if (error) return json(500, { error: `The skill was stored with Anthropic but not recorded here: ${error.message}` });
   console.log(`skill ${parsed.name} ${targetId ? "updated" : "added"}: ${parsed.files.length} files, ${parsed.totalBytes} bytes`);
-  json(200, { skill: row, replaced: !!targetId });
+  json(200, { skill: row, replaced: !!targetId, renamed: parsed.renamed });
 }
 
 async function handleSkillDelete(req, res) {
