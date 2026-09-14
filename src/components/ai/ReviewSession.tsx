@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
-import { clearOutline, outlineSuggestion } from "@/lib/locateInPreview";
+import { clearOutline, outlineSuggestion, suggestionAtPoint } from "@/lib/locateInPreview";
 import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/useLawUpdates";
@@ -97,6 +97,7 @@ function SuggestionListItem({
 
   return (
     <div
+      data-suggestion-id={suggestion.id}
       role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
       aria-pressed={onSelect ? selected : undefined}
@@ -135,7 +136,7 @@ function SuggestionListItem({
           )}
         </div>
       )}
-      {suggestion.rationale && <div className="text-xs text-muted-foreground">{suggestion.rationale}</div>}
+      {suggestion.rationale && <div className="whitespace-pre-line text-xs text-muted-foreground">{suggestion.rationale}</div>}
       {isPending ? (
         <div className="flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="outline" onClick={onAccept} disabled={disabled}>
@@ -270,6 +271,31 @@ export default function ReviewSession({
         title: "Couldn't find this passage in the document",
         description: "It may not have been applied to the preview. Its wording is on the review record.",
       });
+    }
+  };
+
+  // Clicking a change in the page opens its suggestion on the right.
+  const listRef = useRef<HTMLDivElement>(null);
+  const handlePreviewClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const frame = previewRef.current;
+    if (!frame || !suggestions?.length) return;
+    if (window.getSelection()?.toString()) return; // selecting text to copy
+    const open = suggestions.filter((item) => item.status !== "rejected");
+    const hit = suggestionAtPoint(frame, event.target as Node, event.clientX, event.clientY, open);
+    if (!hit) return;
+    setSelectedId(hit.id);
+    selectedRef.current = hit;
+    outlineSuggestion(frame, hit.original_text, hit.suggested_text, { scroll: false, accepted: hit.status === "accepted" });
+    const card = listRef.current?.querySelector<HTMLElement>(`[data-suggestion-id="${hit.id}"]`);
+    const list = listRef.current;
+    if (!card || !list) return;
+    if (list.scrollHeight > list.clientHeight + 1) {
+      // Beside the page: scroll the list alone, so the page stays put.
+      // A card taller than the list is shown from its heading down.
+      const top = card.offsetHeight > list.clientHeight - 16 ? card.offsetTop - 8 : card.offsetTop - list.clientHeight / 2 + card.offsetHeight / 2;
+      list.scrollTo({ top, behavior: "smooth" });
+    } else {
+      card.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   };
 
@@ -551,11 +577,12 @@ export default function ReviewSession({
                   <CardContent className="p-3">
                     <div
                       ref={previewRef}
-                      className="relative max-h-[80vh] overflow-y-auto overflow-x-hidden [&_del]:text-[#c00000] [&_del]:line-through [&_ins]:text-[#c00000] [&_ins]:underline"
+                      onClick={handlePreviewClick}
+                      className="relative max-h-[80vh] overflow-y-auto overflow-x-hidden [&_del]:cursor-pointer [&_del]:text-[#c00000] [&_del]:line-through [&_ins]:cursor-pointer [&_ins]:text-[#c00000] [&_ins]:underline"
                     />
                   </CardContent>
                 </Card>
-                <div className="min-w-[260px] flex-[0_1_340px] lg:max-h-[80vh] lg:overflow-y-auto lg:pr-1">{suggestionGroups}</div>
+                <div ref={listRef} className="relative min-w-[260px] flex-[0_1_340px] lg:max-h-[80vh] lg:overflow-y-auto lg:pr-1">{suggestionGroups}</div>
               </div>
             ) : (
               <div className="max-w-3xl">{suggestionGroups}</div>

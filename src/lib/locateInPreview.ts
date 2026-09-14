@@ -57,9 +57,12 @@ function indexText(root: HTMLElement, skip: "ins" | "del"): CharIndex {
 }
 
 function findRange(root: HTMLElement, wanted: string, skip: "ins" | "del", allowPrefix: boolean): Range | null {
+  return rangeIn(indexText(root, skip), wanted, allowPrefix);
+}
+
+function rangeIn(index: CharIndex, wanted: string, allowPrefix: boolean): Range | null {
   const needle = squash(plainText(wanted));
   if (needle.length < 3) return null;
-  const index = indexText(root, skip);
   let start = index.text.indexOf(needle);
   let length = needle.length;
   // A long quote can differ from the page by one character somewhere; its
@@ -131,4 +134,50 @@ export function outlineSuggestion(
   frame.appendChild(box);
   if (scroll) box.scrollIntoView({ block: "center", behavior: "smooth" });
   return true;
+}
+
+interface Locatable {
+  id: string;
+  original_text: string | null;
+  suggested_text: string | null;
+}
+
+function caretAt(x: number, y: number): { node: Node; offset: number } | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const position = doc.caretPositionFromPoint?.(x, y);
+  if (position) return { node: position.offsetNode, offset: position.offset };
+  const range = doc.caretRangeFromPoint?.(x, y);
+  return range ? { node: range.startContainer, offset: range.startOffset } : null;
+}
+
+/**
+ * The suggestion whose words were clicked in the preview, if any. Both
+ * readings are checked, so a click on struck-out old words and a click on
+ * underlined new ones both find it. Where passages nest, the smallest wins.
+ */
+export function suggestionAtPoint<T extends Locatable>(frame: HTMLElement, target: Node, x: number, y: number, suggestions: T[]): T | null {
+  const withoutInserted = indexText(frame, "ins");
+  const withoutDeleted = indexText(frame, "del");
+  const caret = caretAt(x, y);
+  const useCaret = caret && frame.contains(caret.node) && caret.node.nodeType === Node.TEXT_NODE;
+  let best: { suggestion: T; length: number } | null = null;
+  for (const suggestion of suggestions) {
+    for (const allowPrefix of [false, true]) {
+      const ranges = [
+        suggestion.original_text ? rangeIn(withoutInserted, suggestion.original_text, allowPrefix) : null,
+        suggestion.suggested_text ? rangeIn(withoutDeleted, suggestion.suggested_text, allowPrefix) : null,
+      ].filter((r): r is Range => r !== null);
+      if (!ranges.length) continue;
+      const hit = ranges.find((r) => (useCaret ? r.comparePoint(caret.node, caret.offset) === 0 : r.intersectsNode(target)));
+      if (hit) {
+        const length = hit.toString().length;
+        if (!best || length < best.length) best = { suggestion, length };
+      }
+      break;
+    }
+  }
+  return best?.suggestion ?? null;
 }
