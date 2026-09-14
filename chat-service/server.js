@@ -1792,8 +1792,25 @@ async function handleSkillDelete(req, res) {
 
 // ---------------------------------------------------------------------------
 
+// Requests still being answered. A restart in the middle of one cuts a
+// lawyer's draft off with nothing saved, so the deploy script waits for this
+// to reach zero before restarting.
+let inFlight = 0;
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
+  if (req.method === "POST") {
+    inFlight++;
+    let counted = true;
+    const done = () => {
+      if (counted) {
+        counted = false;
+        inFlight--;
+      }
+    };
+    res.on("close", done);
+    res.on("finish", done);
+  }
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders);
     res.end();
@@ -1801,7 +1818,7 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/version")) {
     res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion }));
+    res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion, inFlight }));
     return;
   }
   if (req.method === "POST" && (url.pathname === "/skills/upload" || url.pathname === "/skills/delete")) {

@@ -38,6 +38,26 @@ ssh -i "$KEY" "$HOST" "cd $DEST && npm install --omit=dev --no-audit --no-fund >
 echo "Checking the Word renderer's Python…"
 ssh -i "$KEY" "$HOST" "cd $DEST && (test -x .akla-venv/bin/python || sudo -u opc python3 -m venv .akla-venv) && sudo -u opc .akla-venv/bin/pip install -q -r akla/requirements.txt && echo '  renderer ok'"
 
+# A restart cuts off any reply still being written, and the lawyer is left
+# with "Load failed" and nothing saved. Wait until nothing is in progress.
+# FORCE=1 skips the wait.
+if [ "${FORCE:-0}" != "1" ]; then
+  echo "Waiting for requests in progress to finish…"
+  for i in $(seq 1 180); do
+    busy=$(ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8092/health" | sed -n 's/.*"inFlight":\([0-9]*\).*/\1/p')
+    # A service from before this check reports no count; treat it as unknown
+    # and wait a short while for anything running on it.
+    if [ -z "$busy" ]; then
+      [ "$i" -ge 3 ] && break
+    elif [ "$busy" = "0" ]; then
+      break
+    else
+      [ $((i % 6)) -eq 1 ] && echo "  $busy request(s) still running…"
+    fi
+    sleep 10
+  done
+fi
+
 echo "Restarting…"
 ssh -i "$KEY" "$HOST" "sudo systemctl restart chat-service && sleep 2 && systemctl is-active chat-service"
 
