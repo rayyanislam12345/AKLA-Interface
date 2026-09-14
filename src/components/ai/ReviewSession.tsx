@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
@@ -212,14 +212,37 @@ export default function ReviewSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version?.id, reviewRun?.id, suggestions, canPreview]);
 
+  // A Word page renders at its real width, about 800 pixels for A4, which is
+  // wider than the column beside the suggestions on most screens — so the
+  // right-hand side of every page was cut off. Scale the pages down to fit
+  // the column instead, and follow the column as the panel is resized.
+  const pageWidth = useRef(0);
+  const fitPreview = useCallback(() => {
+    const frame = previewRef.current;
+    const wrapper = frame?.querySelector<HTMLElement>(".docx-wrapper");
+    if (!frame || !wrapper || !pageWidth.current) return;
+    wrapper.style.setProperty("zoom", String(Math.min(1, frame.clientWidth / pageWidth.current)));
+  }, []);
+
   useEffect(() => {
-    if (previewBlob && previewRef.current) {
-      renderAsync(previewBlob, previewRef.current, previewRef.current, {
-        renderChanges: true,
-        inWrapper: true,
-      });
-    }
-  }, [previewBlob]);
+    if (!previewBlob || !previewRef.current) return;
+    const frame = previewRef.current;
+    let cancelled = false;
+    renderAsync(previewBlob, frame, frame, { renderChanges: true, inWrapper: true }).then(() => {
+      const wrapper = frame.querySelector<HTMLElement>(".docx-wrapper");
+      if (cancelled || !wrapper) return;
+      const pages = [...wrapper.querySelectorAll<HTMLElement>("section.docx")];
+      const padding = parseFloat(getComputedStyle(wrapper).paddingLeft) + parseFloat(getComputedStyle(wrapper).paddingRight);
+      pageWidth.current = Math.max(0, ...pages.map((page) => page.offsetWidth)) + padding;
+      fitPreview();
+    });
+    const observer = new ResizeObserver(fitPreview);
+    observer.observe(frame);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [previewBlob, fitPreview]);
 
   const handleRunReview = async () => {
     if (!version?.id) return;
@@ -453,13 +476,16 @@ export default function ReviewSession({
 
           {suggestions && suggestions.length > 0 && (
             canPreview ? (
-              <div className="grid xl:grid-cols-[1fr_320px] gap-6 items-start">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div ref={previewRef} className="max-h-[75vh] overflow-y-auto overflow-x-auto" />
+              // Sized by the space the panel actually has, not the screen: the
+              // suggestions sit beside the page when both fit, and drop below
+              // it when they do not.
+              <div className="flex flex-wrap items-start gap-6">
+                <Card className="min-w-0 flex-[1_1_560px]">
+                  <CardContent className="p-3">
+                    <div ref={previewRef} className="max-h-[80vh] overflow-y-auto overflow-x-hidden" />
                   </CardContent>
                 </Card>
-                {suggestionGroups}
+                <div className="min-w-[260px] flex-[0_1_340px] lg:max-h-[80vh] lg:overflow-y-auto lg:pr-1">{suggestionGroups}</div>
               </div>
             ) : (
               <div className="max-w-3xl">{suggestionGroups}</div>

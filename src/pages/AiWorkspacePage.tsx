@@ -28,6 +28,7 @@ import ArtifactPanel from "@/components/ai/chat/ArtifactPanel";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import type { ImperativePanelGroupHandle } from "react-resizable-panels";
 
 // The AI Workspace: a claude.ai-shaped chat per matter. Conversations on the
 // left, the transcript and composer in the middle, and any document the
@@ -67,6 +68,14 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   // The panel belongs to the chat it was opened from: switching chats hides
   // it, and switching back brings it back.
   const openArtifact = openArtifactState && openArtifactState.thread_id === activeThreadId ? openArtifactState : null;
+  // A review puts a Word page beside its suggestions, and a page needs far
+  // more width than a reply does. While one is open the document takes most
+  // of the screen and the chat list steps aside; it is one click away.
+  const reviewing = openArtifact?.kind === "review" && !isMobile;
+  const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
+  useEffect(() => {
+    if (openArtifact) panelGroupRef.current?.setLayout(reviewing ? [24, 76] : [45, 55]);
+  }, [openArtifact?.id, reviewing]);
   // For the streaming callbacks, which outlive the render they started in.
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
@@ -235,7 +244,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] overflow-hidden md:-m-6" data-testid="ai-workspace">
-      {isMobile ? (
+      {isMobile || reviewing ? (
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <SheetContent side="left" className="w-80 p-0">{sidebar}</SheetContent>
         </Sheet>
@@ -243,11 +252,11 @@ function AiWorkspace({ matterId }: { matterId: string }) {
         <div className="hidden w-64 shrink-0 md:block lg:w-72">{sidebar}</div>
       )}
 
-      <ResizablePanelGroup direction="horizontal" className="min-w-0 flex-1">
-        <ResizablePanel defaultSize={openArtifact ? 45 : 100} minSize={30}>
+      <ResizablePanelGroup ref={panelGroupRef} direction="horizontal" className="min-w-0 flex-1">
+        <ResizablePanel id="chat" order={1} defaultSize={openArtifact ? (reviewing ? 24 : 45) : 100} minSize={reviewing ? 20 : 30}>
           <div className="flex h-full min-w-0 flex-col">
             <div className="flex h-11 items-center gap-2 border-b px-3">
-              {isMobile && (
+              {(isMobile || reviewing) && (
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSidebarOpen(true)} aria-label="Open chats">
                   <Menu className="h-4 w-4" />
                 </Button>
@@ -296,7 +305,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
         {openArtifact && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={55} minSize={30}>
+            <ResizablePanel id="artifact" order={2} defaultSize={reviewing ? 76 : 55} minSize={30}>
               <ArtifactPanel
                 matterId={matterId}
                 matterName={matter?.name}
