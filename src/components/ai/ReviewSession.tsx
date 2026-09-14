@@ -372,16 +372,52 @@ export default function ReviewSession({
     }
   };
 
-  const handleDownload = () => {
-    if (!previewBlob) return;
-    const url = URL.createObjectURL(previewBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(matterDocument?.title ?? "document").replace(/\s+/g, "-")}-redlined.docx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  // The download is for deciding changes in Word, so every suggestion that
+  // has not been rejected arrives as a tracked change, accepted ones too.
+  // The page shows accepted ones written in; that copy is not what Word needs.
+  const [downloading, setDownloading] = useState(false);
+  const handleDownload = async () => {
+    if (!previewBlob || !version?.id) return;
+    setDownloading(true);
+    try {
+      let blob: Blob = previewBlob;
+      let untracked = 0;
+      const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
+      if (base) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("Not signed in");
+        const resp = await fetch(`${base}/review/download`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ documentVersionId: version.id, reviewRunId: reviewRun?.id }),
+        });
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => ({}));
+          throw new Error(payload.error ?? `Could not build the Word file (${resp.status})`);
+        }
+        blob = await resp.blob();
+        untracked = Number(resp.headers.get("X-Changes-Not-Tracked") ?? 0);
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(matterDocument?.title ?? "document").replace(/\s+/g, "-")}-redlined.docx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      if (untracked > 0) {
+        toast({
+          title: "Downloaded with tracked changes",
+          description: `${untracked} suggestion${untracked === 1 ? "" : "s"} could not be written as tracked changes. Their cards say why.`,
+        });
+      }
+    } catch (err: any) {
+      toast({ title: "Download failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
   };
 
   // Saves the current tracked-changes preview into the matter's own version
@@ -533,9 +569,9 @@ export default function ReviewSession({
             </Button>
             {previewBlob && (
               <>
-                <Button variant="outline" onClick={handleDownload}>
+                <Button variant="outline" onClick={handleDownload} disabled={downloading}>
                   <Download className="h-4 w-4 mr-2" />
-                  Download .docx
+                  {downloading ? "Preparing…" : "Download .docx with tracked changes"}
                 </Button>
                 <Button variant="outline" onClick={handleSaveAsVersion} disabled={saving}>
                   <Save className="h-4 w-4 mr-2" />
