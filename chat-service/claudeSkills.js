@@ -170,11 +170,68 @@ export function outputFileIds(content) {
   return [...new Set(ids)];
 }
 
+// Reads one streamed response back into the message it describes. A skill
+// run can go many minutes before its last word, and a request that waits for
+// the whole answer is cut off after five by Node's own header timeout.
+async function streamMessage(resp, onText) {
+  const message = { content: [], stop_reason: null, container: null, usage: { input_tokens: 0, output_tokens: 0 } };
+  const partialJson = new Map();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const handle = (event) => {
+    switch (event.type) {
+      case "message_start":
+        message.container = event.message?.container ?? null;
+        message.usage.input_tokens = event.message?.usage?.input_tokens ?? 0;
+        break;
+      case "content_block_start":
+        message.content[event.index] = structuredClone(event.content_block);
+        if (event.content_block.type === "text") message.content[event.index].text = event.content_block.text ?? "";
+        break;
+      case "content_block_delta": {
+        const block = message.content[event.index];
+        const d = event.delta;
+        if (d.type === "text_delta") { block.text += d.text; onText?.(d.text); }
+        else if (d.type === "input_json_delta") partialJson.set(event.index, (partialJson.get(event.index) ?? "") + d.partial_json);
+        else if (d.type === "thinking_delta") block.thinking = (block.thinking ?? "") + d.thinking;
+        else if (d.type === "signature_delta") block.signature = d.signature;
+        else if (d.type === "citations_delta") (block.citations ??= []).push(d.citation);
+        break;
+      }
+      case "content_block_stop":
+        if (partialJson.has(event.index)) {
+          try { message.content[event.index].input = JSON.parse(partialJson.get(event.index) || "{}"); } catch { /* left as sent */ }
+          partialJson.delete(event.index);
+        }
+        break;
+      case "message_delta":
+        message.stop_reason = event.delta?.stop_reason ?? message.stop_reason;
+        if (event.delta?.container) message.container = event.delta.container;
+        if (event.usage?.output_tokens != null) message.usage.output_tokens = event.usage.output_tokens;
+        break;
+      case "error":
+        throw new Error(`Anthropic stream error: ${event.error?.message ?? "unknown"}`);
+    }
+  };
+  for await (const chunk of resp.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let cut;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      const raw = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      const data = raw.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("");
+      if (data) handle(JSON.parse(data));
+    }
+  }
+  message.content = message.content.filter(Boolean);
+  return message;
+}
+
 /**
  * One turn with the skill in force. Long runs come back paused; they are
  * resumed in the same container until the skill finishes.
  */
-export async function runSkillTurn({ key, model, skillRefs, system, messages, containerId, signal, onProgress, maxContinuations = 20 }) {
+export async function runSkillTurn({ key, model, skillRefs, system, messages, containerId, signal, onProgress, onText, maxContinuations = 20 }) {
   let conversation = [...messages];
   let container = containerId ? { id: containerId, skills: skillRefs } : { skills: skillRefs };
   const content = [];
@@ -184,13 +241,13 @@ export async function runSkillTurn({ key, model, skillRefs, system, messages, co
     const resp = await api(key, "/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 32000, system, container, tools: [CODE_EXECUTION_TOOL], messages: conversation }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15 * 60_000)]) : AbortSignal.timeout(15 * 60_000),
+      body: JSON.stringify({ model, max_tokens: 32000, stream: true, system, container, tools: [CODE_EXECUTION_TOOL], messages: conversation }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30 * 60_000)]) : AbortSignal.timeout(30 * 60_000),
     });
-    data = await resp.json();
-    usage.input_tokens += data.usage?.input_tokens ?? 0;
-    usage.output_tokens += data.usage?.output_tokens ?? 0;
-    content.push(...(data.content ?? []));
+    data = await streamMessage(resp, onText);
+    usage.input_tokens += data.usage.input_tokens;
+    usage.output_tokens += data.usage.output_tokens;
+    content.push(...data.content);
     if (data.container?.id) container = { id: data.container.id, skills: skillRefs };
     onProgress?.(data);
     if (data.stop_reason !== "pause_turn") break;
@@ -201,7 +258,7 @@ export async function runSkillTurn({ key, model, skillRefs, system, messages, co
     text,
     content,
     stopReason: data?.stop_reason ?? null,
-    container: data?.container ? { id: data.container.id, expiresAt: data.container.expires_at } : null,
+    container: data?.container?.id ? { id: data.container.id, expiresAt: data.container.expires_at } : null,
     fileIds: outputFileIds(content),
     usage,
   };
