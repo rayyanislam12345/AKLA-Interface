@@ -102,6 +102,10 @@ test('draft intent resolves an unambiguous firm document type and rejects invent
   const types = [{id:'a',name:'Concession Agreement'},{id:'b',name:'Lease Agreement'}];
   assert.deepEqual(inferDraftSkill('Please draft a concession agreement.', types), {key:'draft',documentTypeId:'a'});
   assert.equal(inferDraftSkill('Draft a concession agreement and lease agreement', types), null);
+  // The type is what is to be drafted, not the documents named as its sources.
+  const firm = [{ id: 'dd', name: 'Due Diligence Report' }, { id: 'tsr', name: 'Transaction Structure Report' }];
+  assert.equal(inferDraftSkill('can you draft me a project proposal using the transaction structure report and the term sheet and the due diligence report', firm), null);
+  assert.deepEqual(inferDraftSkill('Prepare a due diligence report based on the term sheet', firm), { key: 'draft', documentTypeId: 'dd' });
   assert.equal(inferDraftSkill('Explain this concession agreement', types), null);
   assert.deepEqual(citationIssues('Text [Source 1] and [Source 9]', 2), [9]);
 });
@@ -193,4 +197,60 @@ test('a Claude skill zip is read from its folder, with its front matter checked'
 
   const content = [{ type: 'bash_code_execution_tool_result', content: { type: 'bash_code_execution_result', content: [{ type: 'bash_code_execution_output', file_id: 'file_1' }] } }, { type: 'text', text: 'done' }];
   assert.deepEqual(outputFileIds(content), ['file_1']);
+});
+
+test('comments land in the margin as AKLA Comments, alongside a tracked change', async () => {
+  const bytes = zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'),
+    'word/document.xml': strToU8(`<w:document ${ns}><w:body><w:p><w:pPr><w:pStyle w:val="Normal"/></w:pPr><w:r><w:t>The concession period is [●] years.</w:t></w:r></w:p><w:p/><w:sectPr/></w:body></w:document>`),
+  });
+  const view = inspectDocx(bytes);
+  const [p, ref] = [...view.byRef].find(([, r]) => r.exactText.startsWith('The concession'));
+  const out = await applyDocxOps(bytes, [
+    { op: 'replace', p, expected: ref.exactText, text: 'The concession period is thirty (30) years.' },
+    { op: 'comment', p, expected: ref.exactText, text: 'The Firm notes that the period is taken from the Term Sheet & is to be confirmed.' },
+    { op: 'comment', p, expected: ref.exactText, text: 'Second remark.' },
+  ], view.byRef);
+  const files = unzipSync(out.bytes);
+  const doc = strFromU8(files['word/document.xml']);
+  const comments = strFromU8(files['word/comments.xml']);
+  assert.equal(out.applied, 3);
+  assert.equal((comments.match(/<w:comment /g) ?? []).length, 2);
+  assert.ok(comments.includes('w:author="AKLA Comments"') && comments.includes('Term Sheet &amp; is'));
+  assert.ok(!doc.includes('@@AKLA_COMMENT'));
+  assert.equal((doc.match(/<w:commentRangeStart w:id="\d+"\/>/g) ?? []).length, 2);
+  assert.ok(doc.includes('<w:ins ') && doc.includes('<w:pStyle w:val="Normal"/></w:pPr><w:commentRangeStart'));
+  assert.ok(strFromU8(files['[Content_Types].xml']).includes('/word/comments.xml'));
+  assert.ok(strFromU8(files['word/_rels/document.xml.rels']).includes('relationships/comments'));
+  // A comment is not a change to the words: accepting everything keeps it.
+  assert.ok(strFromU8(unzipSync(acceptAllChanges(out.bytes))['word/document.xml']).includes('commentReference'));
+});
+
+test('a generated document is rendered in AKLA house format, remarks as Word comments', async () => {
+  const { renderAklaDocx, aklaFileName } = await import('../aklaRender.js');
+  const markdown = [
+    '# Project Proposal',
+    '**Client:** National Highway Authority',
+    '## Transaction Structure',
+    'The concession is granted for [●] years.[^1] [[AKLA Comment: The Firm notes the toll rate is PKR [●]]]',
+    '### Tolling',
+    '- Electronic collection.',
+    '| Item | Figure |',
+    '|---|---|',
+    '| Concession period | [●] |',
+    '## AKLA Comments',
+    '[^1]: **AKLA Comment 1.** The period is not fixed in the Term Sheet.',
+  ].join('\n');
+  const { bytes, check } = await renderAklaDocx({ markdown, title: 'Project Proposal', date: 'September 14, 2026' });
+  assert.deepEqual(check.findings, []);
+  assert.equal(check.status, 'checked');
+  assert.equal(check.comments, 2);
+  const files = unzipSync(bytes);
+  const doc = strFromU8(files['word/document.xml']);
+  const comments = strFromU8(files['word/comments.xml']);
+  assert.ok(comments.includes('The period is not fixed in the Term Sheet.') && !comments.includes('**'));
+  assert.ok(comments.includes('toll rate is PKR [●]'), 'a comment ending on a placeholder keeps its bracket');
+  assert.ok(!doc.includes('AKLA Comments</w:t>'), 'the emptied end section is dropped');
+  assert.equal(aklaFileName('Notes: On/The "Deal"', 'September 14, 2026'), 'Notes On The Deal [AKLA][September 14, 2026].docx');
 });

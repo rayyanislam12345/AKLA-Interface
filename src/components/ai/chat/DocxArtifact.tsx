@@ -132,7 +132,15 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <span className="text-xs text-muted-foreground" data-testid="docx-artifact-note">
-          {data.original ? "As uploaded" : (data as { generatedBy?: string }).generatedBy ? `Produced by /${(data as { generatedBy?: string }).generatedBy}` : data.standard ? "Filled in from the firm's standard" : `${data.applied ?? 0} tracked change${data.applied === 1 ? "" : "s"}`}
+          {data.original
+            ? "As uploaded"
+            : (data as { generatedBy?: string }).generatedBy
+              ? `Produced by /${(data as { generatedBy?: string }).generatedBy}`
+              : data.standard
+                ? "Filled in from the firm's standard"
+                : (data as { rendered?: string }).rendered === "akla" && !data.applied
+                  ? "AKLA house format"
+                  : `${data.applied ?? 0} tracked change${data.applied === 1 ? "" : "s"}`}
           {" · "}
           {data.fileName}
         </span>
@@ -185,6 +193,12 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
         </div>
       )}
 
+      {(data as { akla?: { status: string; findings: string[] } }).akla?.status === "needs_review" && (
+        <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <p className="font-medium">House format check: needs review</p>
+          {(data as { akla?: { findings: string[] } }).akla?.findings.map((f, i) => <p key={i}>{f}</p>)}
+        </div>
+      )}
       {data.validation && (
         <div className="border-b p-3 text-xs space-y-1" data-testid="docx-validation">
           <p className="font-medium">Document checks: {data.validation.format?.status === "checked" ? "source formatting preserved in checked properties" : "formatting needs review"}</p>

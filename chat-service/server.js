@@ -23,6 +23,7 @@ import { inferDraftSkill, citationIssues } from "./chatState.js";
 import { researchLaw, needsResearch } from "./research.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions } from "./docxAgent.js";
 import { runReview } from "./review.js";
+import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { parseSkillZip, publishSkill, unpublishSkill, uploadInputFile, downloadOutputFile, runSkillTurn, MAX_SKILL_BYTES } from "./claudeSkills.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -86,13 +87,17 @@ const MAX_EDIT_CHARS = 150_000;
 const MAX_REFERENCED_DOCS = 3;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-const FIRM_MARKDOWN_RULES = `Format the document as Markdown matching the firm's clause-numbering convention exactly:
+const FIRM_MARKDOWN_RULES = `The document is delivered as a Word file in the firm's house format, generated from your Markdown: Arial, the title on a navy banner, each "## " section on a navy bar with gold small caps, a real 1. / 1.1. / 1.1.1. / (a) outline, the running header and page numbers. You do not style anything; you give it the right structure. Format the document as Markdown matching the firm's clause-numbering convention exactly:
 - Exactly one "# " heading, for the document title only (e.g. "# CONCESSION AGREEMENT").
 - "## " for each top-level clause/section — heading text only. Do NOT type the clause number yourself; numbering is generated on export, so a typed "1. " would duplicate it.
 - "### " for a sub-clause, "#### " one level deeper if genuinely needed — same rule, no typed numbers.
 - Ordinary paragraphs for recitals and body text that isn't itself a numbered sub-item.
 - A Markdown list ("- " per item) for enumerated sub-items within a clause — don't type the letter/number yourself.
-- A blank line between clauses and before/after the execution block.`;
+- A blank line between clauses and before/after the execution block.
+- "> " for quoted or reproduced text (set in italics, indented); "::: " for a key figure that must not be missed (a shaded box); a pipe table for genuinely tabular content.
+- Lines before the first "## " heading (parties, date, status) are front matter and are not numbered.
+- Remarks for the reader — outstanding matters, gaps in the sources, figures to confirm, the Firm's observations — are AKLA comments, never document text: end the paragraph they concern with [[AKLA Comment: The Firm notes that …]]. Each becomes a Word margin comment titled "AKLA Comments". Do not use footnotes and do not collect them in an end section.
+- Do not add bold labels, colours or other styling beyond **defined terms**; the house format supplies them.`;
 
 const COMPLETENESS_RULES = `The document must be COMPLETE and ready to edit — this is the single most important requirement:
 - Write every clause in full, from the title through to the execution block. Never stop part-way.
@@ -309,9 +314,35 @@ async function anthropicComplete(body, onDelta, { initialText = "", clientSignal
   return { text: accumulated, generated, incomplete, stoppedByClient };
 }
 
+// A document written as Markdown, delivered as a Word file in AKLA house
+// format. Returns the stored file's details, or throws.
+async function storeAklaWord(supabase, { markdown, title, matterId, threadId }) {
+  const fileName = aklaFileName(title);
+  const rendered = await renderAklaDocx({ markdown, title });
+  const storagePath = `${matterId}/${threadId}/${Date.now()}-${fileName.replace(/[^\w.-]+/g, "-").replace(/-{2,}/g, "-")}`;
+  const { error } = await supabase.storage.from("ai-chat-files").upload(storagePath, rendered.bytes, { contentType: DOCX_MIME });
+  if (error) throw new Error(`Couldn't store the Word file: ${error.message}`);
+  if (rendered.check.status !== "checked") console.error(`akla format check on ${fileName}:`, rendered.check.findings);
+  return {
+    bucket: "ai-chat-files",
+    storagePath,
+    fileName,
+    rendered: "akla",
+    akla: rendered.check,
+    standard: false,
+    original: false,
+    applied: 0,
+    changes: [],
+    tracked: false,
+    editSource: null,
+  };
+}
+
 // Turns raw model output into a stored reply: every <artifact> block becomes
 // an ai_artifacts row and an [[artifact:id]] marker in the text. An
-// unterminated block is closed rather than lost.
+// unterminated block is closed rather than lost. A finished document is
+// stored as a Word file in AKLA house format, so it is edited from then on
+// as a Word file; only an unfinished one stays Markdown until it is complete.
 async function persistReply(supabase, p) {
   const opened = (p.text.match(/<artifact\s/g) ?? []).length;
   const closed = (p.text.match(/<\/artifact>/g) ?? []).length;
@@ -327,15 +358,26 @@ async function persistReply(supabase, p) {
     const attrs = match[1];
     const kind = /kind="([^"]+)"/.exec(attrs)?.[1] === "draft" ? "draft" : "memo";
     const title = /title="([^"]+)"/.exec(attrs)?.[1] ?? (kind === "draft" ? p.defaultTitle : "Memo");
+    const markdown = match[2].trim();
+    let word = null;
+    if (!truncated && !p.metadata?.incomplete) {
+      try {
+        word = await storeAklaWord(supabase, { markdown, title, matterId: p.matterId, threadId: p.threadId });
+      } catch (err) {
+        // The words are not lost: the Markdown is kept and the next turn
+        // converts it again.
+        console.error("AKLA Word render failed:", err);
+      }
+    }
     const { data: artifact } = await supabase
       .from("ai_artifacts")
       .insert({
         thread_id: p.threadId,
         matter_id: p.matterId,
-        kind,
+        kind: word ? "docx" : kind,
         title,
-        content: match[2].trim(),
-        data: { ...p.artifactData, ...(truncated ? { truncated: true } : {}) },
+        content: markdown,
+        data: { ...p.artifactData, ...(word ? { ...word, sourceKind: kind } : {}), ...(truncated ? { truncated: true } : {}) },
         created_by: p.userId,
       })
       .select("*")
@@ -530,20 +572,44 @@ async function handleChat(req, res) {
   let editBase = null;
   let docxBase = null;
   let currentDraft = null;
-  if (skill?.key === "edit" || skill?.key === "draft") {
+  let convertedArtifact = null;
+  // A document produced in this conversation is the document the next turn
+  // works on — in a plain chat too, since "format it" or "add comments" is
+  // asked there as often as in Draft or Edit. It is always worked on as a
+  // Word file: a Markdown draft from before documents were delivered as
+  // Word is converted to one first.
+  if (!skill || skill?.key === "edit" || skill?.key === "draft") {
     const { data: latest } = await supabase
       .from("ai_artifacts")
-      .select("kind, content, data")
+      .select("id, kind, title, content, data")
       .eq("thread_id", threadId)
-      .in("kind", ["docx", "draft"])
+      .in("kind", ["docx", "draft", "memo"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const d = latest?.data ?? {};
-    if (latest?.kind === "draft") currentDraft = latest.content;
+    let d = latest?.data ?? {};
+    const rendered = d.rendered === "akla";
+    if (latest && latest.kind !== "docx" && !d.editSource && latest.content?.trim() && !isContinuation) {
+      try {
+        const word = await storeAklaWord(supabase, { markdown: latest.content, title: latest.title, matterId, threadId });
+        const { data: converted } = await supabase
+          .from("ai_artifacts")
+          .insert({ thread_id: threadId, matter_id: matterId, kind: "docx", title: latest.title, content: latest.content, data: { ...d, ...word, sourceKind: latest.kind, convertedFrom: latest.id }, created_by: user.id })
+          .select("id, kind, title, content, data")
+          .single();
+        if (converted) {
+          latest.kind = "docx";
+          d = converted.data;
+          convertedArtifact = converted;
+        }
+      } catch (err) {
+        console.error("Converting the draft to Word failed:", err);
+      }
+    }
+    if (latest?.kind === "draft" && skill) currentDraft = latest.content;
     if (latest?.kind === "docx" && d.storagePath) {
-      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null };
-    } else if (skill.key === "edit") {
+      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered };
+    } else if (skill?.key === "edit") {
       if (latest?.content && d.editSource) {
         editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
       } else if (skill.documentVersionId) {
@@ -663,6 +729,10 @@ async function handleChat(req, res) {
 
   try {
     send("meta", { threadId, userMessageId, title: thread.title, continuing: isContinuation });
+    if (convertedArtifact) {
+      send("notice", { text: `${convertedArtifact.title} is now a Word file in AKLA house format; this turn works on that file.` });
+      send("artifact", convertedArtifact);
+    }
     for (const { doc, version } of referenced) {
       send("notice", { text: `Reading ${doc.title} (v${version.version_number}) from the project.` });
     }
@@ -1066,13 +1136,13 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       : "\n\nNothing relevant was retrieved from the firm's library for this message.";
 
     let skillBlock = "";
-    if (docxBase && (skill?.key === "edit" || skill?.key === "draft")) {
+    if (docxBase && (!skill || skill?.key === "edit" || skill?.key === "draft")) {
       const src = docxBase.editSource ?? {};
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
       if (docxBase.standard) {
         skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. If the essentials are missing (parties, term, key amounts, governing law, disputes), ask ONE focused question at a time; the moment the lawyer says to draft now, do it with what you have.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}`;
       } else {
-        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess.\n\n${OPS_PROTOCOL}`;
+        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy and gold section bars, the numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}\n\n${OPS_PROTOCOL}`;
       }
     } else if (skill?.key === "draft" && documentType) {
       const reqFields = Array.isArray(documentType.required_fields) && documentType.required_fields.length
@@ -1273,6 +1343,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
                 tracked: true,
                 validation: out.validation,
                 sourceStoragePath: docxBase.storagePath,
+                ...(docxBase.rendered ? { rendered: "akla" } : {}),
               },
               created_by: user.id,
             })

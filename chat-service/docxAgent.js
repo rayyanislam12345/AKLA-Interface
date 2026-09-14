@@ -27,6 +27,8 @@ import { unzipSync, zipSync } from "fflate";
 import { openDocx } from "@ansonlai/docx-redline-js/node";
 
 export const DOCX_AUTHOR = "AKLA AI";
+// Remarks for the reader go in the margin under this name, never in the text.
+export const COMMENT_AUTHOR = "AKLA Comments";
 // How much of a document is shown at once. Beyond this the listing is
 // focused on what the turn is actually about (see focusParagraphs).
 export const MAX_LISTING_CHARS = 120_000;
@@ -36,7 +38,8 @@ export const OPS_PROTOCOL = `HOW TO CHANGE THE DOCUMENT. The document is a real 
 {"ops": [
   {"op": "replace", "p": 12, "expected": "Exact current paragraph text", "text": "The full new text of paragraph ¶12."},
   {"op": "insert_after", "p": 12, "expected": "Exact current anchor text", "text": "One new paragraph, placed after ¶12."},
-  {"op": "delete", "p": 14, "expected": "Exact current paragraph text"}
+  {"op": "delete", "p": 14, "expected": "Exact current paragraph text"},
+  {"op": "comment", "p": 15, "expected": "Exact current paragraph text", "text": "The Firm notes that the concession period is not yet fixed."}
 ]}
 \`\`\`
 Rules:
@@ -45,6 +48,7 @@ Rules:
 - "replace" gives the COMPLETE new text of that one paragraph, copied from above with your change made in it. Word shows only the words that differ, so keep everything you are not changing exactly as it is — same wording, same spacing, same defined terms. One paragraph per op; never merge or split paragraphs.
 - "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead.
 - Never type clause numbers — Word numbers headings and list items itself.
+- "comment" puts a Word margin comment, titled "AKLA Comments", on that paragraph and leaves its text as it is. Outstanding matters, gaps, figures to confirm and remarks for the reader go in comments — never into the document's text, and never as footnotes or an end section. A paragraph may take a change and a comment in the same turn.
 - **bold** marks a defined term; use no other markup.
 - Change only what the instruction requires. Everything not listed stays exactly as it is.
 - Before the block, write two or three sentences for the lawyer saying what you changed and anything you could not do. If you need more information first, ask, and send no block.`;
@@ -512,6 +516,7 @@ export async function applyDocxOps(bytes, ops, byRef) {
     const reject = reason => results.push({ i, kind: raw?.op, p: raw?.p, text: raw?.text, status: 'skipped', reason });
     if (!ref || !ref.shown) { reject('Paragraph was not supplied to this turn; request that section first.'); continue; }
     if (typeof raw.expected !== 'string' || raw.expected !== ref.exactText) { reject('Expected paragraph text does not match the source; no change was made.'); continue; }
+    if (String(raw.op).toLowerCase() === 'comment' && ref.part !== 'word/document.xml') { reject('Word does not allow comments in headers, footers or notes.'); continue; }
     const list = groups.get(ref.part) ?? [];
     list.push({ raw: { ...raw, p: ref.localIndex }, ref, i }); groups.set(ref.part, list);
   }
@@ -519,6 +524,7 @@ export async function applyDocxOps(bytes, ops, byRef) {
     const refs = new Map(work.map(w => [w.ref.localIndex, w.ref]));
     const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs);
     entries[part] = readZip(output.bytes)['word/document.xml'];
+    if (part === 'word/document.xml') writeComments(entries, output.comments ?? []);
     for (const result of output.results) { const w = work[result.i]; results.push({ ...result, i: w.i, p: w.ref.index, part }); }
     applied += output.applied;
   }
@@ -555,6 +561,8 @@ async function applyPartOps(bytes, ops, byRef) {
       if (op.modified === ref.exactText) return results.push({ ...op, status: "skipped", reason: "no change" });
     } else if (op.kind === "insert_after") {
       if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "insert_after needs text" });
+    } else if (op.kind === "comment") {
+      if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "comment needs text" });
     } else if (op.kind !== "delete") {
       return results.push({ ...op, status: "skipped", reason: `unknown op "${raw?.op}"` });
     }
@@ -564,6 +572,7 @@ async function applyPartOps(bytes, ops, byRef) {
   const entries = readZip(bytes);
   let applied = 0;
   const fallback = [];
+  const comments = [];
 
   if (parsed.length) {
     let documentXml = dec.decode(entries["word/document.xml"]);
@@ -585,7 +594,8 @@ async function applyPartOps(bytes, ops, byRef) {
       const paraXml = documentXml.slice(para.start, para.end);
       const own = isOwnInsertion(paraXml);
       const additions = group.filter((op) => op.kind === "insert_after");
-      const edits = group.filter((op) => op.kind !== "insert_after");
+      const notes = group.filter((op) => op.kind === "comment");
+      const edits = group.filter((op) => op.kind !== "insert_after" && op.kind !== "comment");
       const edit = edits[0];
       // One paragraph, one change to it: a second would be written against
       // text the first has already changed. Say so rather than drop it.
@@ -609,6 +619,21 @@ async function applyPartOps(bytes, ops, byRef) {
       } else if (edit) {
         results.push({ ...edit, status: "applied" });
         applied++;
+      }
+
+      // A comment spans the paragraph as it now stands. Its id is a
+      // placeholder here; the package allocates the real one.
+      if (notes.length && replacement && /^<w:p[\s>]/.test(replacement) && replacement.endsWith("</w:p>")) {
+        for (const op of notes) {
+          const key = `@@AKLA_COMMENT_${comments.length}@@`;
+          comments.push({ key, text: op.text.trim() });
+          const open = /^<w:p(?:\s[^>]*)?>(?:<w:pPr>[\s\S]*?<\/w:pPr>)?/.exec(replacement)[0];
+          replacement = `${open}<w:commentRangeStart w:id="${key}"/>${replacement.slice(open.length, -"</w:p>".length)}<w:commentRangeEnd w:id="${key}"/><w:r><w:commentReference w:id="${key}"/></w:r></w:p>`;
+          results.push({ ...op, status: "applied" });
+          applied++;
+        }
+      } else {
+        notes.forEach((op) => results.push({ ...op, status: "skipped", reason: replacement ? `¶${index} has no text to comment on` : `¶${index} was removed, so it cannot take a comment` }));
       }
 
       const added = additions.map((op) => insertAfter(paraXml, op.text, headings, stamp)).join("");
@@ -641,7 +666,46 @@ async function applyPartOps(bytes, ops, byRef) {
   }
 
   results.sort((a, b) => a.i - b.i);
-  return { bytes: out, results, applied };
+  return { bytes: out, results, applied, comments };
+}
+
+const COMMENTS_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
+const COMMENTS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+// Writes comments into the package's comments part, creating the part, its
+// content type and its relationship when the document has none yet, and puts
+// the real ids in place of the placeholders in the body.
+function writeComments(entries, pending) {
+  if (!pending.length) return;
+  let body = dec.decode(entries["word/document.xml"]);
+  let part = entries["word/comments.xml"] ? dec.decode(entries["word/comments.xml"]) : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments xmlns:w="${W_NS}"></w:comments>`;
+  let next = 0;
+  for (const m of `${part}${body}`.matchAll(/<w:(?:comment|commentRangeStart|commentRangeEnd|commentReference)\b[^>]*w:id="(\d+)"/g)) next = Math.max(next, Number(m[1]) + 1);
+  const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  let xml = "";
+  for (const c of pending) {
+    const id = next++;
+    body = body.split(c.key).join(String(id));
+    const paragraphs = c.text.split(/\n+/).map((line) => `<w:p><w:r><w:annotationRef/></w:r><w:r>${pieces(line, "w:t")}</w:r></w:p>`).join("");
+    xml += `<w:comment w:id="${id}" w:author="${escapeXml(COMMENT_AUTHOR)}" w:date="${date}" w:initials="AKLA">${paragraphs}</w:comment>`;
+  }
+  part = part.replace(/<\/w:comments>\s*$/, `${xml}</w:comments>`);
+  entries["word/document.xml"] = enc.encode(body);
+  const existed = !!entries["word/comments.xml"];
+  entries["word/comments.xml"] = enc.encode(part);
+  if (existed) return;
+  const types = dec.decode(entries["[Content_Types].xml"]);
+  if (!types.includes('PartName="/word/comments.xml"')) {
+    entries["[Content_Types].xml"] = enc.encode(types.replace("</Types>", `<Override PartName="/word/comments.xml" ContentType="${COMMENTS_TYPE}"/></Types>`));
+  }
+  const relsPath = "word/_rels/document.xml.rels";
+  const rels = entries[relsPath] ? dec.decode(entries[relsPath]) : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+  if (!rels.includes(COMMENTS_REL)) {
+    let rid = 1;
+    while (rels.includes(`Id="rIdAklaComments${rid}"`)) rid++;
+    entries[relsPath] = enc.encode(rels.replace("</Relationships>", `<Relationship Id="rIdAklaComments${rid}" Type="${COMMENTS_REL}" Target="comments.xml"/></Relationships>`));
+  }
 }
 
 // The same file with every tracked change accepted — a clean copy.
@@ -889,7 +953,7 @@ export function applyReviewSuggestions(bytes, changes) {
 
 // One line per operation, for the reply and the artifact's change list.
 export function describeResults(results) {
-  const verb = { replace: "Changed", insert_after: "Added after", delete: "Deleted" };
+  const verb = { replace: "Changed", insert_after: "Added after", delete: "Deleted", comment: "Commented on" };
   return results.map((r) => ({
     op: r.kind,
     paragraph: r.p,
