@@ -116,3 +116,39 @@ test('long review sections reach the execution block and preserve neighboring co
   assert.ok(segments.every((s,i) => !i || s.start === segments[i-1].end));
   assert.throws(() => parseSuggestions('[]', 'max_tokens', text));
 });
+
+test('suggestions that change the same words are merged into one', async () => {
+  const { mergeOverlapping } = await import('../suggestionMerge.js');
+  const text = '<p>The Concessionaire shall pay thirty (30) days after invoice to NHA.</p><p>Separate clause stays.</p>';
+  const rows = [
+    { review_type: 'formatting', clause_reference: 'Item 4', original_text: 'shall pay thirty (30) days after invoice', suggested_text: 'shall pay forty (40) days after invoice', rationale: 'Period too short.' },
+    { review_type: 'legal_clauses', clause_reference: 'Item 4 payee', original_text: 'days after invoice to NHA.', suggested_text: 'days after a valid invoice to NHA.', rationale: 'Invoice must be valid.' },
+    { review_type: 'content_conflicts', clause_reference: 'Other', original_text: 'Separate clause stays.', suggested_text: 'Separate clause changes.', rationale: 'Unrelated.' },
+  ];
+  // Different words: combined without asking the model.
+  let asked = 0;
+  const { suggestions, groupsMerged } = await mergeOverlapping(rows, text, { combine: async () => { asked++; return null; } });
+  assert.equal(groupsMerged, 1);
+  assert.equal(asked, 0);
+  assert.equal(suggestions.length, 2);
+  const merged = suggestions.find((s) => s.clause_reference.includes('Item 4'));
+  assert.equal(merged.original_text, 'shall pay thirty (30) days after invoice to NHA.');
+  assert.equal(merged.suggested_text, 'shall pay forty (40) days after a valid invoice to NHA.');
+  assert.equal(merged.review_type, 'legal_clauses');
+  assert.ok(merged.rationale.includes('Period too short.') && merged.rationale.includes('Invoice must be valid.'));
+  assert.ok(text.includes(merged.original_text));
+
+  // The same words rewritten two ways: the model is asked for one wording.
+  const clash = [
+    { review_type: 'legal_clauses', clause_reference: 'A', original_text: 'thirty (30) days', suggested_text: 'forty (40) days', rationale: 'r1' },
+    { review_type: 'formatting', clause_reference: 'B', original_text: 'thirty (30) days after', suggested_text: 'sixty (60) days following', rationale: 'r2' },
+  ];
+  const combined = await mergeOverlapping(clash, text, { combine: async (span) => { asked++; return span.replace('thirty (30) days after', 'forty (40) days following'); } });
+  assert.equal(asked, 1);
+  assert.equal(combined.suggestions[0].suggested_text, 'forty (40) days following');
+
+  // No wording from the model: the lead change stands and the other is shown, not lost.
+  const fallback = await mergeOverlapping(clash, text, { combine: async () => null });
+  assert.equal(fallback.suggestions[0].suggested_text, 'forty (40) days after');
+  assert.ok(fallback.suggestions[0].rationale.includes('"sixty (60) days following"'));
+});
