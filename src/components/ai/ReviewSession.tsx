@@ -62,6 +62,18 @@ const REVIEW_TYPE_DESCRIPTIONS: Record<RedlineReviewType, string> = {
 // reference, rationale and status. For anything else (PDF, Excel,
 // PowerPoint) there's no preview to show it in, so `showText` puts the
 // original → suggested text on the item itself.
+// Why a suggestion is on the list but not marked in the document, in the
+// lawyer's terms. Keys are the reasons the redline builder reports.
+const NOT_IN_DOCUMENT: Record<string, string> = {
+  overlaps_another_suggestion: "Not marked in the document: another suggestion changes the same words.",
+  formatting_only: "Not marked in the document: it changes formatting, not wording.",
+  paragraph_structure: "Not marked in the document: it restructures paragraphs or table cells.",
+  not_found: "Not marked in the document: its quoted text could not be found in the file.",
+  formatting: "Not marked in the document: this passage's formatting cannot be edited safely.",
+  missing_text: "Not marked in the document: it has no proposed wording.",
+  no_change: "Not marked in the document: the proposed wording is the same as the original.",
+};
+
 function SuggestionListItem({
   suggestion,
   onAccept,
@@ -70,6 +82,7 @@ function SuggestionListItem({
   showText,
   selected,
   onSelect,
+  notInDocument,
 }: {
   suggestion: RedlineSuggestion;
   onAccept: () => void;
@@ -78,6 +91,7 @@ function SuggestionListItem({
   showText: boolean;
   selected: boolean;
   onSelect?: () => void;
+  notInDocument?: string;
 }) {
   const isPending = suggestion.status === "pending";
 
@@ -106,7 +120,8 @@ function SuggestionListItem({
       {suggestion.clause_reference && (
         <div className="text-xs font-medium text-muted-foreground mb-1">{suggestion.clause_reference}</div>
       )}
-      {showText && (suggestion.original_text || suggestion.suggested_text) && (
+      {notInDocument && <p className="mb-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">{notInDocument}</p>}
+      {(showText || notInDocument) && (suggestion.original_text || suggestion.suggested_text) && (
         <div className="space-y-1 mb-2">
           {suggestion.original_text && (
             <p className="text-xs whitespace-pre-wrap line-through text-red-700/80 dark:text-red-400/80">
@@ -192,7 +207,7 @@ export default function ReviewSession({
   const canPreview = !!version && version.storage_path.toLowerCase().endsWith(".docx");
 
   const [previewStoragePath, setPreviewStoragePath] = useState<string | undefined>();
-  const [applySummary, setApplySummary] = useState<{ appliedCount: number; skippedCount: number } | null>(null);
+  const [applySummary, setApplySummary] = useState<{ appliedCount: number; skippedCount: number; skipped: Map<string, string> } | null>(null);
   const { data: previewBlob } = useRedlinePreviewFile(previewStoragePath);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -205,7 +220,11 @@ export default function ReviewSession({
     try {
       const result = await applyPreview.mutateAsync({ documentVersionId, reviewRunId: runId });
       setPreviewStoragePath(result.previewStoragePath);
-      setApplySummary({ appliedCount: result.appliedCount, skippedCount: result.skippedCount });
+      setApplySummary({
+        appliedCount: result.appliedCount,
+        skippedCount: result.skippedCount,
+        skipped: new Map((result.skipped ?? []).map((item) => [item.suggestionId, item.reason])),
+      });
     } catch (err: any) {
       toast({ title: "Failed to build tracked-changes preview", description: err.message, variant: "destructive" });
     }
@@ -235,12 +254,17 @@ export default function ReviewSession({
   // the column instead, and follow the column as the panel is resized.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedRef = useRef<RedlineSuggestion | null>(null);
+  // Accepting changes the suggestion's status after it was clicked; the
+  // outline redrawn on the rebuilt page has to know which wording it now shows.
+  useEffect(() => {
+    if (selectedId) selectedRef.current = suggestions?.find((item) => item.id === selectedId) ?? selectedRef.current;
+  }, [suggestions, selectedId]);
   const handleSelect = (suggestion: RedlineSuggestion) => {
     const frame = previewRef.current;
     setSelectedId(suggestion.id);
     selectedRef.current = suggestion;
     if (!frame) return;
-    if (!outlineSuggestion(frame, suggestion.original_text, suggestion.suggested_text)) {
+    if (!outlineSuggestion(frame, suggestion.original_text, suggestion.suggested_text, { accepted: suggestion.status === "accepted" })) {
       clearOutline(frame);
       toast({
         title: "Couldn't find this passage in the document",
@@ -256,7 +280,7 @@ export default function ReviewSession({
     if (!frame || !wrapper || !pageWidth.current) return;
     wrapper.style.setProperty("zoom", String(Math.min(1, frame.clientWidth / pageWidth.current)));
     const selected = selectedRef.current;
-    if (selected && frame.querySelector(".review-locate-outline")) outlineSuggestion(frame, selected.original_text, selected.suggested_text, { scroll: false });
+    if (selected && frame.querySelector(".review-locate-outline")) outlineSuggestion(frame, selected.original_text, selected.suggested_text, { scroll: false, accepted: selected.status === "accepted" });
   }, []);
 
   useEffect(() => {
@@ -272,7 +296,7 @@ export default function ReviewSession({
       fitPreview();
       // Accepting or rejecting rebuilds the page; keep the clicked item marked.
       const selected = selectedRef.current;
-      if (selected) outlineSuggestion(frame, selected.original_text, selected.suggested_text);
+      if (selected) outlineSuggestion(frame, selected.original_text, selected.suggested_text, { accepted: selected.status === "accepted" });
     });
     const observer = new ResizeObserver(fitPreview);
     observer.observe(frame);
@@ -375,6 +399,7 @@ export default function ReviewSession({
                   showText={!canPreview}
                   selected={selectedId === s.id}
                   onSelect={canPreview ? () => handleSelect(s) : undefined}
+                  notInDocument={canPreview && s.status !== "rejected" && applySummary?.skipped.has(s.id) ? NOT_IN_DOCUMENT[applySummary.skipped.get(s.id)!] ?? "Not marked in the document." : undefined}
                   disabled={setStatus.isPending || applyPreview.isPending}
                   onAccept={() => handleSetStatus(s.id, "accepted")}
                   onReject={() => handleSetStatus(s.id, "rejected")}
@@ -398,6 +423,7 @@ export default function ReviewSession({
                 showText={!canPreview}
                 selected={selectedId === s.id}
                 onSelect={canPreview ? () => handleSelect(s) : undefined}
+                  notInDocument={canPreview && s.status !== "rejected" && applySummary?.skipped.has(s.id) ? NOT_IN_DOCUMENT[applySummary.skipped.get(s.id)!] ?? "Not marked in the document." : undefined}
                 disabled={setStatus.isPending || applyPreview.isPending}
                 onAccept={() => handleSetStatus(s.id, "accepted")}
                 onReject={() => handleSetStatus(s.id, "rejected")}
@@ -510,9 +536,8 @@ export default function ReviewSession({
 
           {applySummary && applySummary.skippedCount > 0 && (
             <p className="text-xs text-muted-foreground">
-              {applySummary.appliedCount} of {applySummary.appliedCount + applySummary.skippedCount} suggestions
-              applied to the document preview — {applySummary.skippedCount} couldn't be precisely located in the
-              real file and are only shown in the list below.
+              {applySummary.appliedCount} of {applySummary.appliedCount + applySummary.skippedCount} open suggestions
+              are marked in the document. Each of the others says on its card why it is not, and shows its wording there.
             </p>
           )}
 
@@ -524,7 +549,10 @@ export default function ReviewSession({
               <div className="flex flex-wrap items-start gap-6">
                 <Card className="min-w-0 flex-[1_1_560px]">
                   <CardContent className="p-3">
-                    <div ref={previewRef} className="relative max-h-[80vh] overflow-y-auto overflow-x-hidden" />
+                    <div
+                      ref={previewRef}
+                      className="relative max-h-[80vh] overflow-y-auto overflow-x-hidden [&_del]:text-[#c00000] [&_del]:line-through [&_ins]:text-[#c00000] [&_ins]:underline"
+                    />
                   </CardContent>
                 </Card>
                 <div className="min-w-[260px] flex-[0_1_340px] lg:max-h-[80vh] lg:overflow-y-auto lg:pr-1">{suggestionGroups}</div>

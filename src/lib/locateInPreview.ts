@@ -56,7 +56,7 @@ function indexText(root: HTMLElement, skip: "ins" | "del"): CharIndex {
   return { text, nodes, offsets };
 }
 
-function findRange(root: HTMLElement, wanted: string, skip: "ins" | "del"): Range | null {
+function findRange(root: HTMLElement, wanted: string, skip: "ins" | "del", allowPrefix: boolean): Range | null {
   const needle = squash(plainText(wanted));
   if (needle.length < 3) return null;
   const index = indexText(root, skip);
@@ -64,7 +64,7 @@ function findRange(root: HTMLElement, wanted: string, skip: "ins" | "del"): Rang
   let length = needle.length;
   // A long quote can differ from the page by one character somewhere; its
   // opening words are still enough to find the clause.
-  if (start < 0 && needle.length > 80) {
+  if (start < 0 && allowPrefix && needle.length > 80) {
     start = index.text.indexOf(needle.slice(0, 80));
     length = Math.min(needle.length, index.text.length - start);
   }
@@ -85,13 +85,22 @@ export function outlineSuggestion(
   frame: HTMLElement,
   originalText: string | null,
   suggestedText: string | null,
-  { scroll = true }: { scroll?: boolean } = {},
+  { scroll = true, accepted = false }: { scroll?: boolean; accepted?: boolean } = {},
 ): boolean {
   clearOutline(frame);
-  const range =
-    (originalText && findRange(frame, originalText, "ins")) ||
-    (suggestedText && findRange(frame, suggestedText, "del")) ||
-    null;
+  // An accepted suggestion's new wording is what the page now shows, so it
+  // is looked for first. Exact matches are all tried before the looser
+  // opening-words match, which would otherwise find the old wording's first
+  // line and box a stretch the length of the old wording.
+  const readings: Array<[string | null, "ins" | "del"]> = accepted
+    ? [[suggestedText, "del"], [originalText, "ins"]]
+    : [[originalText, "ins"], [suggestedText, "del"]];
+  let range: Range | null = null;
+  for (const allowPrefix of [false, true]) {
+    for (const [text, skip] of readings) {
+      if (!range && text) range = findRange(frame, text, skip, allowPrefix);
+    }
+  }
   if (!range) return false;
 
   const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);

@@ -167,6 +167,23 @@ export function useApplyRedlinesPreview() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ documentVersionId, reviewRunId }: { documentVersionId: string; reviewRunId?: string }) => {
+      // The chat service writes the redline itself. The edge function's
+      // redline library refuses any document that already has tracked
+      // changes in it, and showed such a document unchanged.
+      const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
+      if (base) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("Not signed in");
+        const resp = await fetch(`${base}/review/preview`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ documentVersionId, reviewRunId }),
+        });
+        const payload = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(payload.error ?? `Could not build the redlined document (${resp.status})`);
+        return payload as ApplyRedlinesResult;
+      }
       const { data, error } = await supabase.functions.invoke("apply-redlines-to-docx", {
         body: { documentVersionId, reviewRunId },
       });
