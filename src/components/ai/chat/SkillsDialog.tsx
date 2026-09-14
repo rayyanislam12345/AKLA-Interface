@@ -1,6 +1,9 @@
-import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Loader2, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { type CustomSkill, useCustomSkills, useDeleteCustomSkill, useSaveCustomSkill } from "@/hooks/useChat";
+import { supabase } from "@/integrations/supabase/client";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -14,6 +17,22 @@ interface SkillsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// A skill uploaded as a Claude skill .zip, as opposed to one written here.
+type UploadedSkill = CustomSkill & { kind?: string; skill_files?: Array<{ path: string; size: number }> };
+const isUploaded = (s: CustomSkill) => (s as UploadedSkill).kind === "claude_skill";
+
+async function callSkillsService(path: string, init: RequestInit) {
+  const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
+  if (!base) throw new Error("Uploading skills needs the AI chat service, which is not configured here.");
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not signed in");
+  const resp = await fetch(`${base}${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(payload.error ?? `Request failed (${resp.status})`);
+  return payload;
+}
+
 // Create and edit the firm's custom skills — reusable instruction sets that
 // any associate can put in force on a chat with "/". Kept simple on
 // purpose: a name, a one-line description for the palette, the
@@ -23,6 +42,48 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
   const save = useSaveCustomSkill();
   const remove = useDeleteCustomSkill();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const uploadZip = async (file: File | undefined) => {
+    if (!file) return;
+    if (!/\.zip$/i.test(file.name)) {
+      toast({ title: "Choose a .zip file", description: "A Claude skill is uploaded as the zip of its folder, with SKILL.md inside.", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const { skill, replaced, renamed } = await callSkillsService("/skills/upload", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
+      await queryClient.invalidateQueries({ queryKey: ["ai-skills"] });
+      const renames = (renamed ?? []) as Array<{ from: string; to: string }>;
+      toast({
+        title: replaced ? `Updated /${skill.name}` : `Added /${skill.name}`,
+        description:
+          `${skill.skill_files?.length ?? 0} files. Put it in force with "/" in the composer.` +
+          (renames.length ? ` ${renames.length} file name${renames.length === 1 ? " was" : "s were"} simplified for upload (${renames.map((r) => r.to.split("/").pop()).join(", ")}), and the skill's references to ${renames.length === 1 ? "it" : "them"} updated.` : ""),
+      });
+    } catch (err: any) {
+      toast({ title: "Couldn't upload the skill", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
+
+  const deleteSkill = async (skill: CustomSkill) => {
+    if (!isUploaded(skill)) return remove.mutate(skill.id);
+    setDeletingId(skill.id);
+    try {
+      await callSkillsService("/skills/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: skill.id }) });
+      await queryClient.invalidateQueries({ queryKey: ["ai-skills"] });
+    } catch (err: any) {
+      toast({ title: "Couldn't remove the skill", description: err.message, variant: "destructive" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const [editing, setEditing] = useState<Partial<CustomSkill> | null>(null);
 
@@ -54,8 +115,9 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
         <DialogHeader>
           <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Draft, Verify and Summarise are built in. Add the firm's own — a set of instructions the assistant follows when
-            you put the skill in force with "/" in the composer.
+            Draft, Verify and Summarise are built in. Add the firm's own: write a set of instructions here, or upload a
+            Claude skill as a .zip. An uploaded skill runs its own scripts and templates and hands back the files it builds.
+            Put either in force with "/" in the composer.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,28 +160,46 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
               {skills?.map((s) => (
                 <li key={s.id} className="flex items-start gap-3 p-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">/{s.name}</div>
-                    <div className="text-xs text-muted-foreground">{s.description || s.instructions.slice(0, 120)}</div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      /{s.name}
+                      {isUploaded(s) && (
+                        <Badge variant="secondary" className="text-[10px] font-normal">
+                          Uploaded skill · {(s as UploadedSkill).skill_files?.length ?? 0} files
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="line-clamp-3 text-xs text-muted-foreground">{s.description || s.instructions.slice(0, 120)}</div>
                   </div>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Edit skill" onClick={() => setEditing(s)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
+                  {!isUploaded(s) && (
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Edit skill" onClick={() => setEditing(s)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive"
                     aria-label="Delete skill"
-                    onClick={() => remove.mutate(s.id)}
+                    disabled={deletingId === s.id}
+                    onClick={() => deleteSkill(s)}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                   </Button>
                 </li>
               ))}
             </ul>
-            <Button variant="outline" onClick={startNew} data-testid="new-skill">
-              <Plus className="mr-2 h-4 w-4" />
-              New skill
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={startNew} data-testid="new-skill">
+                <Plus className="mr-2 h-4 w-4" />
+                New skill
+              </Button>
+              <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={uploading} data-testid="upload-skill">
+                {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                {uploading ? "Uploading…" : "Upload skill (.zip)"}
+              </Button>
+              <input ref={fileInput} type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => uploadZip(e.target.files?.[0])} />
+            </div>
+            <p className="text-xs text-muted-foreground">Uploading a skill with the same name as one already here replaces it with the new version.</p>
           </div>
         )}
       </DialogContent>

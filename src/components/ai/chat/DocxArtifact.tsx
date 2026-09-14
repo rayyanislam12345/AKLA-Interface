@@ -124,7 +124,7 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <span className="text-xs text-muted-foreground" data-testid="docx-artifact-note">
-          {data.original ? "As uploaded" : data.standard ? "Filled in from the firm's standard" : `${data.applied ?? 0} tracked change${data.applied === 1 ? "" : "s"}`}
+          {data.original ? "As uploaded" : (data as { generatedBy?: string }).generatedBy ? `Produced by /${(data as { generatedBy?: string }).generatedBy}` : data.standard ? "Filled in from the firm's standard" : `${data.applied ?? 0} tracked change${data.applied === 1 ? "" : "s"}`}
           {" · "}
           {data.fileName}
         </span>

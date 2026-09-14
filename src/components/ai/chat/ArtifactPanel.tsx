@@ -6,6 +6,7 @@ import type { Editor } from "@tiptap/react";
 import { AlertTriangle, Check, Copy, Download, FileText, Loader2, Save, X } from "lucide-react";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import ReviewSession from "@/components/ai/ReviewSession";
+import FileArtifact from "@/components/ai/chat/FileArtifact";
 import DocxArtifact from "@/components/ai/chat/DocxArtifact";
 import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
@@ -56,6 +57,8 @@ export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdat
           <ReviewArtifact matterId={matterId} artifact={artifact} lawUpdate={lawUpdate ?? null} />
         ) : artifact.kind === "docx" ? (
           <DocxArtifact key={artifact.id} matterId={matterId} artifact={artifact} />
+        ) : artifact.kind === "file" ? (
+          <FileArtifact key={artifact.id} artifact={artifact} />
         ) : (
           <DocumentArtifact key={artifact.id} matterId={matterId} matterName={matterName} artifact={artifact} />
         )}
