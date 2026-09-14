@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
+import { clearOutline, outlineSuggestion } from "@/lib/locateInPreview";
 import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/useLawUpdates";
@@ -67,19 +68,35 @@ function SuggestionListItem({
   onReject,
   disabled,
   showText,
+  selected,
+  onSelect,
 }: {
   suggestion: RedlineSuggestion;
   onAccept: () => void;
   onReject: () => void;
   disabled: boolean;
   showText: boolean;
+  selected: boolean;
+  onSelect?: () => void;
 }) {
   const isPending = suggestion.status === "pending";
 
   return (
     <div
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-pressed={onSelect ? selected : undefined}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (onSelect && (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       className={cn(
         "rounded-md border px-3 py-2 text-sm",
+        onSelect && "cursor-pointer transition-shadow hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        selected && "ring-2 ring-red-600",
         isPending && "border-amber-300/60 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20",
         suggestion.status === "accepted" &&
           "border-emerald-300/60 bg-emerald-50 dark:border-emerald-800/50 dark:bg-emerald-950/20",
@@ -105,7 +122,7 @@ function SuggestionListItem({
       )}
       {suggestion.rationale && <div className="text-xs text-muted-foreground">{suggestion.rationale}</div>}
       {isPending ? (
-        <div className="flex gap-2 mt-2">
+        <div className="flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="outline" onClick={onAccept} disabled={disabled}>
             <Check className="h-3.5 w-3.5 mr-1" />
             Accept
@@ -216,12 +233,30 @@ export default function ReviewSession({
   // wider than the column beside the suggestions on most screens — so the
   // right-hand side of every page was cut off. Scale the pages down to fit
   // the column instead, and follow the column as the panel is resized.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedRef = useRef<RedlineSuggestion | null>(null);
+  const handleSelect = (suggestion: RedlineSuggestion) => {
+    const frame = previewRef.current;
+    setSelectedId(suggestion.id);
+    selectedRef.current = suggestion;
+    if (!frame) return;
+    if (!outlineSuggestion(frame, suggestion.original_text, suggestion.suggested_text)) {
+      clearOutline(frame);
+      toast({
+        title: "Couldn't find this passage in the document",
+        description: "It may not have been applied to the preview. Its wording is on the review record.",
+      });
+    }
+  };
+
   const pageWidth = useRef(0);
   const fitPreview = useCallback(() => {
     const frame = previewRef.current;
     const wrapper = frame?.querySelector<HTMLElement>(".docx-wrapper");
     if (!frame || !wrapper || !pageWidth.current) return;
     wrapper.style.setProperty("zoom", String(Math.min(1, frame.clientWidth / pageWidth.current)));
+    const selected = selectedRef.current;
+    if (selected && frame.querySelector(".review-locate-outline")) outlineSuggestion(frame, selected.original_text, selected.suggested_text, { scroll: false });
   }, []);
 
   useEffect(() => {
@@ -235,6 +270,9 @@ export default function ReviewSession({
       const padding = parseFloat(getComputedStyle(wrapper).paddingLeft) + parseFloat(getComputedStyle(wrapper).paddingRight);
       pageWidth.current = Math.max(0, ...pages.map((page) => page.offsetWidth)) + padding;
       fitPreview();
+      // Accepting or rejecting rebuilds the page; keep the clicked item marked.
+      const selected = selectedRef.current;
+      if (selected) outlineSuggestion(frame, selected.original_text, selected.suggested_text);
     });
     const observer = new ResizeObserver(fitPreview);
     observer.observe(frame);
@@ -335,6 +373,8 @@ export default function ReviewSession({
                   key={s.id}
                   suggestion={s}
                   showText={!canPreview}
+                  selected={selectedId === s.id}
+                  onSelect={canPreview ? () => handleSelect(s) : undefined}
                   disabled={setStatus.isPending || applyPreview.isPending}
                   onAccept={() => handleSetStatus(s.id, "accepted")}
                   onReject={() => handleSetStatus(s.id, "rejected")}
@@ -356,6 +396,8 @@ export default function ReviewSession({
                 key={s.id}
                 suggestion={s}
                 showText={!canPreview}
+                selected={selectedId === s.id}
+                onSelect={canPreview ? () => handleSelect(s) : undefined}
                 disabled={setStatus.isPending || applyPreview.isPending}
                 onAccept={() => handleSetStatus(s.id, "accepted")}
                 onReject={() => handleSetStatus(s.id, "rejected")}
@@ -482,7 +524,7 @@ export default function ReviewSession({
               <div className="flex flex-wrap items-start gap-6">
                 <Card className="min-w-0 flex-[1_1_560px]">
                   <CardContent className="p-3">
-                    <div ref={previewRef} className="max-h-[80vh] overflow-y-auto overflow-x-hidden" />
+                    <div ref={previewRef} className="relative max-h-[80vh] overflow-y-auto overflow-x-hidden" />
                   </CardContent>
                 </Card>
                 <div className="min-w-[260px] flex-[0_1_340px] lg:max-h-[80vh] lg:overflow-y-auto lg:pr-1">{suggestionGroups}</div>
