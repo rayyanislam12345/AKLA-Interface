@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { renderAsync } from "docx-preview";
+import { fitDocxPreview } from "@/lib/fitDocxPreview";
 import { acceptTrackedChanges } from "@/lib/docxAccept";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, Loader2, Save } from "lucide-react";
 import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
@@ -70,11 +71,20 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
     if (!blob || !previewRef.current) return;
     previewRef.current.innerHTML = "";
     let cancelled = false;
-    const render = async () => { const file = form === "clean" ? await acceptTrackedChanges(blob) : blob; if (!cancelled && previewRef.current) await renderAsync(file, previewRef.current, previewRef.current, { renderChanges: form !== "clean", inWrapper: true }); };
+    let stopFitting = () => {};
+    const render = async () => {
+      const file = form === "clean" ? await acceptTrackedChanges(blob) : blob;
+      if (cancelled || !previewRef.current) return;
+      await renderAsync(file, previewRef.current, previewRef.current, { renderChanges: form !== "clean", inWrapper: true });
+      if (!cancelled && previewRef.current) stopFitting = fitDocxPreview(previewRef.current);
+    };
     render().catch((err) => {
       toast({ title: "Couldn't render the Word file", description: String(err?.message ?? err), variant: "destructive" });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stopFitting();
+    };
   }, [blob, form, toast]);
 
   const fileFor = async (): Promise<Blob> => {
@@ -238,7 +248,7 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
       <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading the Word file…</p>}
         {error && <p className="p-4 text-sm text-destructive">{String((error as Error).message)}</p>}
-        <div ref={previewRef} className="docx-preview-container overflow-x-auto bg-muted/40 p-4" data-testid="docx-preview" />
+        <div ref={previewRef} className="docx-preview-container overflow-x-hidden bg-muted/40 p-4" data-testid="docx-preview" />
       </div>
     </div>
   );
