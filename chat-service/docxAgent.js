@@ -951,6 +951,39 @@ export function applyReviewSuggestions(bytes, changes) {
   return { bytes: writeZip(entries), results };
 }
 
+// The AI's own tracked changes accepted, and nothing else: revisions already
+// in the file by anyone else stay as they are, and comments stay. A draft
+// filled in from the firm's standard is a new document, so its fills are
+// written in rather than left for someone to approve one by one.
+export function acceptChangesBy(bytes, author = DOCX_AUTHOR) {
+  const entries = readZip(bytes);
+  const who = escapeRegExp(escapeXml(author));
+  const insMark = new RegExp(`<w:ins\\b[^>]*w:author="${who}"[^>]*\\/>`, "g");
+  const delMark = new RegExp(`<w:del\\b[^>]*w:author="${who}"[^>]*\\/>`);
+  for (const part of Object.keys(entries).filter((p) => STORY_PART.test(p))) {
+    let xml = dec.decode(entries[part]);
+    if (!xml.includes(`w:author="${escapeXml(author)}"`)) continue;
+    // Paragraph marks first: a paragraph this author deleted goes, one this
+    // author inserted simply stays.
+    xml = xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, (p) => {
+      const pPr = child(p, "w:pPr");
+      const rPr = pPr && child(pPr, "w:rPr");
+      if (rPr && delMark.test(rPr)) {
+        const remaining = p.replace(/<w:del\b[\s\S]*?<\/w:del>/g, "");
+        return /<w:t(?:\s[^>]*)?>[^<]/.test(remaining) ? p.replace(delMark, "") : "";
+      }
+      return p.replace(insMark, "");
+    });
+    xml = xml
+      .replace(new RegExp(`<w:del\\b[^>]*w:author="${who}"[^>]*>[\\s\\S]*?<\\/w:del>`, "g"), "")
+      .replace(new RegExp(`<w:ins\\b[^>]*w:author="${who}"[^>]*>([\\s\\S]*?)<\\/w:ins>`, "g"), "$1");
+    xml = xml.replace(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g, (cell) => (/<w:p(?:\s|>|\/)/.test(cell) ? cell : cell.replace("</w:tc>", "<w:p/></w:tc>")));
+    entries[part] = enc.encode(xml);
+  }
+  validateXml(entries);
+  return writeZip(entries);
+}
+
 // One line per operation, for the reply and the artifact's change list.
 export function describeResults(results) {
   const verb = { replace: "Changed", insert_after: "Added after", delete: "Deleted", comment: "Commented on" };

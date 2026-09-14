@@ -90,7 +90,9 @@ export function ArtifactCard({
   const subtitle = docxData
     ? docxData.original
       ? `Word file · ${edit?.title ?? docxData.fileName} v${edit?.versionNumber ?? ""}`.trim()
-      : `Word file · ${docxData.applied ?? 0} tracked change${docxData.applied === 1 ? "" : "s"}${edit?.versionNumber ? ` · from v${edit.versionNumber}` : docxData.standard ? " · from the firm's standard" : ""}`
+      : docxData.standard && docxData.tracked === false
+        ? `Word file · filled in from the firm's standard`
+        : `Word file · ${docxData.applied ?? 0} tracked change${docxData.applied === 1 ? "" : "s"}${edit?.versionNumber ? ` · from v${edit.versionNumber}` : docxData.standard ? " · from the firm's standard" : ""}`
     : edit
     ? `${(artifact.data as any)?.original ? "Original" : "Edited"} · ${edit.title} v${edit.versionNumber}`
     : artifact.kind === "review"

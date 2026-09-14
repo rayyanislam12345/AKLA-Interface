@@ -288,3 +288,34 @@ test('every document fits in the prompt, long ones as marked excerpts, and "the 
   // The same purpose gives the same excerpt, so the prompt can be cached.
   assert.equal(excerptDocument(longReport, 6000, 'concession period').text, excerptDocument(longReport, 6000, 'concession period').text);
 });
+
+test('a draft from the standard takes its fills directly, keeping comments and the standard\'s own revisions', async () => {
+  const { acceptChangesBy } = await import('../docxAgent.js');
+  const bytes = zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>'),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'),
+    'word/document.xml': strToU8(`<w:document ${ns}><w:body>`
+      + `<w:p><w:r><w:t xml:space="preserve">The Concession Period is [●] years.</w:t></w:r></w:p>`
+      + `<w:p><w:r><w:t xml:space="preserve">Optional clause to remove.</w:t></w:r></w:p>`
+      + `<w:p><w:r><w:t xml:space="preserve">Kept </w:t></w:r><w:ins w:id="5" w:author="Counsel" w:date="2026-05-08T00:00:00Z"><w:r><w:t>standard redline</w:t></w:r></w:ins></w:p>`
+      + `<w:sectPr/></w:body></w:document>`),
+  });
+  const view = inspectDocx(bytes);
+  const ref = (start) => [...view.byRef].find(([, r]) => r.exactText.startsWith(start));
+  const [p1, r1] = ref('The Concession Period');
+  const [p2, r2] = ref('Optional clause');
+  const out = await applyDocxOps(bytes, [
+    { op: 'replace', p: p1, expected: r1.exactText, text: 'The Concession Period is thirty (30) years.' },
+    { op: 'comment', p: p1, expected: r1.exactText, text: 'Taken from the Term Sheet, Sr. No. 2; to be confirmed.' },
+    { op: 'delete', p: p2, expected: r2.exactText },
+    { op: 'insert_after', p: p1, expected: r1.exactText, text: 'A new clause from the Term Sheet.' },
+  ], view.byRef);
+  const clean = strFromU8(unzipSync(acceptChangesBy(out.bytes))['word/document.xml']);
+  assert.ok(!/w:author="AKLA AI"/.test(clean), 'no AI revision is left to approve');
+  const words = clean.replace(/<w:delText[^>]*>[^<]*<\/w:delText>/g, '').replace(/<[^>]+>/g, '');
+  assert.ok(words.includes('The Concession Period is thirty (30) years.') && !words.includes('[●]'));
+  assert.ok(!clean.includes('Optional clause to remove.'));
+  assert.ok(clean.includes('A new clause from the Term Sheet.'));
+  assert.ok(clean.includes('w:author="Counsel"'), "the standard's own revision stays");
+  assert.ok(clean.includes('commentReference'), 'comments stay');
+});

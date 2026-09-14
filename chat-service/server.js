@@ -21,7 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
 import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun } from "./chatState.js";
 import { researchLaw, needsResearch } from "./research.js";
-import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions } from "./docxAgent.js";
+import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy } from "./docxAgent.js";
 import { runReview } from "./review.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
@@ -1249,7 +1249,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       const src = docxBase.editSource ?? {};
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
       if (docxBase.standard) {
-        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. If the essentials are missing (parties, term, key amounts, governing law, disputes), ask ONE focused question at a time; the moment the lawyer says to draft now, do it with what you have.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}`;
+        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. Do not stop to ask the lawyer before filling in: fill every placeholder the project's documents, the attached documents and this conversation support, in this turn. Where a value is not given, leave its placeholder and put an AKLA comment on that paragraph saying what is needed and where it would come from. Where the standard's wording assumes something the project's documents contradict — a different contracting structure, a party acting in its own right rather than on behalf of a government — make the change the documents support and comment on it, rather than asking first. Your changes are written straight into the draft, not as tracked changes, so the comments are how the lawyer sees what to check. Ask a question only if nothing at all can be filled without the answer.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}\n\nIN THIS DRAFT: "applied as a tracked change" above does not apply — every change is written directly into the document.`;
       } else {
         skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy and gold section bars, the numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}\n\n${OPS_PROTOCOL}`;
       }
@@ -1430,6 +1430,10 @@ You answer the way a careful senior associate would: precise, conservative, and 
       if (ops?.length) {
         send("notice", { text: "Applying the changes to the Word file…" });
         const out = await applyDocxOps(docxBase.bytes, ops, docxBase.inspection.byRef);
+        // A draft from the firm's standard is a new document: the facts go
+        // straight in, with nothing for the lawyer to accept one by one.
+        // Comments stay; so do any revisions the standard itself carried.
+        if (docxBase.standard && out.applied > 0) out.bytes = acceptChangesBy(out.bytes);
         const changes = describeResults(out.results);
         const skipped = changes.filter((c) => c.status !== "applied");
         if (out.applied > 0) {
@@ -1460,7 +1464,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
                 changes,
                 applied: out.applied,
                 skipped: skipped.length,
-                tracked: true,
+                tracked: !docxBase.standard,
                 validation: out.validation,
                 sourceStoragePath: docxBase.storagePath,
                 ...(docxBase.rendered ? { rendered: "akla" } : {}),
