@@ -262,3 +262,29 @@ test('a review chat runs a new review only when asked, and "review it" is not an
   for (const m of ['re-run the review', 'Rerun', 'please review it again', 'run a fresh review', 'start over']) assert.equal(asksForReviewRerun(m), true, m);
   for (const m of ['why is clause 23 flagged?', 'check the tolling clause', 'review it']) assert.equal(asksForReviewRerun(m), false, m);
 });
+
+test('every document fits in the prompt, long ones as marked excerpts, and "the project docs" means all of them', async () => {
+  const { mentionsProjectDocuments, fitDocuments, excerptDocument } = await import('../contextBudget.js');
+  for (const m of ['Draft a concession based on the project docs', 'use all the documents', 'pick up everything from the documents on this project', 'from the available documents']) assert.equal(mentionsProjectDocuments(m), true, m);
+  for (const m of ['review the term sheet', 'what does clause 4 say?', 'draft a concession agreement']) assert.equal(mentionsProjectDocuments(m), false, m);
+
+  const para = (label, n) => Array.from({ length: n }, (_, i) => `${label} paragraph ${i} about general matters of the project.`).join('\n\n');
+  const longReport = `CONTENTS\nExecutive summary of the report.\n\n${para('Background', 400)}\n\nThe concession period shall be thirty (30) years from financial close.\n\n${para('Annex', 400)}`;
+  const docs = [
+    { name: 'Term Sheet', text: para('Term', 20) },
+    { name: 'Concept Note', text: para('Concept', 15) },
+    { name: 'Report', text: longReport },
+  ];
+  const total = docs[0].text.length + docs[1].text.length + 6000;
+  const fitted = fitDocuments(docs, total, 'Draft: Concession Agreement concession period');
+  assert.equal(fitted.length, 3, 'nothing is dropped');
+  assert.equal(fitted[0].text, docs[0].text);
+  assert.equal(fitted[1].text, docs[1].text);
+  assert.equal(fitted[2].excerpted, true);
+  assert.ok(fitted.reduce((n, d) => n + d.text.length, 0) <= total);
+  assert.ok(fitted[2].text.startsWith('CONTENTS'), 'the opening is kept');
+  assert.ok(fitted[2].text.includes('thirty (30) years'), 'the relevant passage is kept');
+  assert.ok(fitted[2].text.includes('[… passage omitted …]'));
+  // The same purpose gives the same excerpt, so the prompt can be cached.
+  assert.equal(excerptDocument(longReport, 6000, 'concession period').text, excerptDocument(longReport, 6000, 'concession period').text);
+});
