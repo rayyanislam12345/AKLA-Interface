@@ -385,3 +385,19 @@ test('an official source the server cannot reach comes through the download rela
   // A URL off the approved domains never reaches the relay.
   await assert.rejects(fetchViaRelay('https://example.com/x.pdf', { spawner: () => { throw new Error('should not run'); } }), /approved Pakistani authority domain/);
 });
+
+test('one bad suggestion or a chatty reply no longer sinks a review pass', async () => {
+  const { readPassReply, anchorQuote } = await import('../review.js');
+  const src = '<p>The Authority&#39;s  “Concession Period” shall be 25 years &amp; not more.</p><p>Next <strong>bold</strong> text.</p>';
+  // Decoded entities, straight quotes and single spaces map back to the source's own text.
+  assert.equal(anchorQuote(`The Authority's "Concession Period" shall be 25 years & not more.`, src), 'The Authority&#39;s  “Concession Period” shall be 25 years &amp; not more.');
+  assert.equal(anchorQuote('Next bold text.', src), null);
+  assert.equal(anchorQuote('not in the document', src), null);
+  const reply = 'Here are my findings:\n```json\n[{"clause_reference":"a","original_text":"shall be 25 years","suggested_text":"shall be 30 years","rationale":"Term sheet"},{"clause_reference":"b","original_text":"invented words","suggested_text":"x","rationale":"y"}]\n```';
+  const { rows, dropped } = readPassReply(reply, 'end_turn', src);
+  assert.equal(rows.length, 1);
+  assert.equal(dropped, 1);
+  // Unreadable or unfinished replies are still never a clean result.
+  assert.throws(() => readPassReply('I could not complete this.', 'end_turn', src));
+  assert.throws(() => readPassReply('[]', 'max_tokens', src));
+});
