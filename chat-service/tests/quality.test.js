@@ -401,3 +401,18 @@ test('one bad suggestion or a chatty reply no longer sinks a review pass', async
   assert.throws(() => readPassReply('I could not complete this.', 'end_turn', src));
   assert.throws(() => readPassReply('[]', 'max_tokens', src));
 });
+
+test('an instruction answered at length is kept, with its locatable suggestions', async () => {
+  const { readInstructionReply } = await import('../review.js');
+  const src = '<p>The concession period is 25 years.</p>';
+  const raw = '<answer>\n## Corrections\n1. Concession period: the proposal says 25 years; the Term Sheet (Sr. No. 4) says 30 years.\n</answer>\n<suggestions>\n[{"clause_reference":"Para 2","original_text":"25 years","suggested_text":"30 years","rationale":"Term Sheet Sr. No. 4"},{"clause_reference":"x","original_text":"not there","suggested_text":"y","rationale":"z"}]\n</suggestions>';
+  const read = readInstructionReply(raw, 'end_turn', src);
+  assert.match(read.answer, /^## Corrections/);
+  assert.equal(read.rows.length, 1);
+  assert.equal(read.dropped, 1);
+  // The old layout, or no layout at all, still yields the answer rather than an error.
+  assert.equal(readInstructionReply('REPLY: Nothing to add.\nSUGGESTIONS: []', 'end_turn', src).answer, 'Nothing to add.');
+  const cut = readInstructionReply('<answer>A long list that stops mid', 'max_tokens', src);
+  assert.equal(cut.answer, 'A long list that stops mid');
+  assert.equal(cut.unfinished, true);
+});
