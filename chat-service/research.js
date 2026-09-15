@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { fetchOfficial, sourceIdentityMatches } from './sourcePolicy.js';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fetchOfficial, officialUrl, sourceIdentityMatches } from './sourcePolicy.js';
 import { extractTextFromFile } from './extractText.js';
 
 export function needsResearch(message, skill) {
@@ -46,7 +48,57 @@ export function describeLookup(research) {
 }
 
 // Pakistani government sites do not answer the chat service's server, which
-// is hosted in India; the lawyer is told plainly rather than shown "fetch failed".
+// is hosted in India. They do answer the firm's DigitalOcean server, which
+// runs a download relay reachable only over SSH with a key that can do
+// nothing else (official-fetch-relay/). The relay applies the same source
+// gate, and the file's final address is checked again here.
+const RELAY_DIR = process.env.OFFICIAL_FETCH_RELAY_DIR ?? '/opt/chat-service/.relay';
+const RELAY_HOST = process.env.OFFICIAL_FETCH_RELAY_HOST ?? 'aklarelay@157.245.240.172';
+const RELAY_MAX_BYTES = 21 * 1024 * 1024;
+
+export function relayConfigured() {
+  return existsSync(`${RELAY_DIR}/id_ed25519`) && existsSync(`${RELAY_DIR}/known_hosts`);
+}
+
+export async function fetchViaRelay(url, { signal, spawner = spawn } = {}) {
+  officialUrl(url);
+  return new Promise((resolve, reject) => {
+    const child = spawner('ssh', [
+      '-i', `${RELAY_DIR}/id_ed25519`, '-o', `UserKnownHostsFile=${RELAY_DIR}/known_hosts`,
+      '-o', 'StrictHostKeyChecking=yes', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
+      RELAY_HOST, url,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = []; let size = 0; let err = '';
+    const stop = (error) => { child.kill('SIGKILL'); reject(error); };
+    const timer = setTimeout(() => stop(new Error('the download relay did not finish in time')), 120_000);
+    const onAbort = () => stop(new Error('Research stopped'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (d) => {
+      size += d.length;
+      if (size > RELAY_MAX_BYTES) return stop(new Error('Source is too large'));
+      chunks.push(d);
+    });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('error', (e) => { clearTimeout(timer); reject(new Error(`the download relay could not start: ${e.message}`)); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      const lines = err.split('\n');
+      if (code !== 0) {
+        const message = lines.find((l) => l.startsWith('ERROR '))?.slice(6) ?? `the download relay failed (${code})`;
+        return reject(new Error(message));
+      }
+      try {
+        const finalUrl = officialUrl(lines.find((l) => l.startsWith('FINAL '))?.slice(6).trim() || url).href;
+        const type = lines.find((l) => l.startsWith('TYPE '))?.slice(5).trim() ?? '';
+        resolve({ blob: new Blob([Buffer.concat(chunks)], { type }), url: finalUrl });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
 function unreachable(err) {
   const text = `${err?.message ?? ''} ${err?.cause?.code ?? ''} ${err?.name ?? ''}`;
   return /fetch failed|ETIMEDOUT|UND_ERR_CONNECT|ENOTFOUND|ECONNRESET|TimeoutError|timed out/i.test(text);
@@ -136,8 +188,14 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
         try {
           downloaded = await fetchOfficial(candidate.url, { signal });
         } catch (err) {
-          if (signal?.aborted) throw err;
-          throw unreachable(err) ? new Error(`the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)`) : err;
+          if (signal?.aborted || !unreachable(err)) throw err;
+          if (!relayConfigured()) throw new Error("the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)");
+          try {
+            downloaded = await fetchViaRelay(candidate.url, { signal });
+          } catch (relayError) {
+            if (signal?.aborted) throw relayError;
+            throw new Error(`the official website could not be reached, directly or through the download relay: ${relayError.message}`);
+          }
         }
         const bytes = new Uint8Array(await downloaded.blob.arrayBuffer());
         if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') throw new Error('Source is not a PDF');

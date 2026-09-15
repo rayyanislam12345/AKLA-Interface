@@ -358,3 +358,30 @@ test('the law lookup finds a law the library already holds under any of its titl
   assert.ok(line.includes('Could not obtain: Public Procurement Rules, 2004'));
   assert.ok(!line.includes('M-6 corridor'), 'open points about the project are not mixed into the lookup');
 });
+
+test('an official source the server cannot reach comes through the download relay, still gated', async () => {
+  const { fetchViaRelay } = await import('../research.js');
+  const { EventEmitter } = await import('node:events');
+  const { Readable } = await import('node:stream');
+  const fakeSsh = ({ stdout = Buffer.alloc(0), stderr = '', code = 0 }) => () => {
+    const child = new EventEmitter();
+    child.stdout = Readable.from([stdout]);
+    child.stderr = Readable.from([Buffer.from(stderr)]);
+    child.kill = () => {};
+    let pending = 2;
+    const done = () => { if (--pending === 0) setImmediate(() => child.emit('close', code)); };
+    child.stdout.on('end', done);
+    child.stderr.on('end', done);
+    return child;
+  };
+  const pdf = Buffer.from('%PDF-1.4 test');
+  const ok = await fetchViaRelay('https://pakistancode.gov.pk/pdffiles/a.pdf', { spawner: fakeSsh({ stdout: pdf, stderr: 'FINAL https://pakistancode.gov.pk/pdffiles/a.pdf\nTYPE application/pdf\n' }) });
+  assert.equal(ok.url, 'https://pakistancode.gov.pk/pdffiles/a.pdf');
+  assert.equal(Buffer.from(await ok.blob.arrayBuffer()).toString(), '%PDF-1.4 test');
+  // The relay's own refusal reaches the lawyer as its message.
+  await assert.rejects(fetchViaRelay('https://na.gov.pk/x.pdf', { spawner: fakeSsh({ stderr: 'ERROR Source download failed (404)\n', code: 2 }) }), /Source download failed \(404\)/);
+  // A final address off the approved domains is refused here too.
+  await assert.rejects(fetchViaRelay('https://na.gov.pk/x.pdf', { spawner: fakeSsh({ stdout: pdf, stderr: 'FINAL https://evil.example.com/x.pdf\n' }) }), /approved Pakistani authority domain/);
+  // A URL off the approved domains never reaches the relay.
+  await assert.rejects(fetchViaRelay('https://example.com/x.pdf', { spawner: () => { throw new Error('should not run'); } }), /approved Pakistani authority domain/);
+});
