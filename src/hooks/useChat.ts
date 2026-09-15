@@ -339,6 +339,8 @@ interface SendInput {
   message: string;
   attachments: ChatAttachment[];
   skill: ActiveSkill | null;
+  /** The document open in the panel: the one this message is about. */
+  workingArtifactId?: string | null;
 }
 
 // The edge chat function stops generating before Supabase kills it at ~150s
@@ -569,7 +571,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   );
 
   const send = useCallback(
-    async ({ matterId, threadId, message, attachments, skill }: SendInput) => {
+    async ({ matterId, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
       const key = turnKey(threadId);
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
@@ -594,7 +596,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         const round = await runRound(
           matterId,
           keyRef,
-          { matterId, threadId, message, attachments, skill: skillPayload },
+          { matterId, threadId, message, attachments, skill: skillPayload, workingArtifactId: workingArtifactId ?? null },
           controller.signal,
           !threadId,
         );

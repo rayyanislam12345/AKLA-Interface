@@ -483,6 +483,54 @@ def fold_footnotes(markdown):
     return re.sub(r"(?im)^#{1,4}\s*AKLA\s+Comments?\s*$\s*(?=^#|\Z)", "", text)
 
 
+LOG_HEADING = re.compile(r"^#{1,4}\s*(?:\d+[.)]?\s+)?(comments?\s+log|akla\s+comments?|open\s+items(?:\s+log)?|drafting\s+comments)\s*$", re.IGNORECASE)
+LOG_ENTRY = re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*)?\[(C\d+)\](?:\*\*)?\s*[—–:.\-]*\s*(.+)$")
+ANCHOR = re.compile(r"`?\[(C\d+)\]`?")
+
+
+def fold_comments_log(markdown):
+    """[C1] anchors and a "Comments Log" section become margin comments.
+
+    Asked for remarks without being told how, models mark each point [C1] in
+    the text and list the explanations at the end. In a Word document the
+    explanation belongs on the text it concerns: the first mention of each
+    anchor takes the comment, later mentions ("cross-referenced") lose the
+    marker, and the log section goes.
+    """
+    lines = markdown.split("\n")
+    start = next((i for i, l in enumerate(lines) if LOG_HEADING.match(l.strip())), None)
+    if start is None:
+        return markdown
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^#{1,4}\s", lines[i].strip())), len(lines))
+    notes = {}
+    for line in lines[start + 1:end]:
+        m = LOG_ENTRY.match(line)
+        if m:
+            notes[m.group(1)] = plain_note(m.group(2))
+    if not notes:
+        return markdown
+    body = "\n".join(lines[:start] + lines[end:])
+    used = set()
+
+    def swap(m):
+        key = m.group(1)
+        if key not in notes:
+            return m.group(0)
+        if key in used:
+            return ""
+        used.add(key)
+        return f"[[AKLA Comment: {notes[key]}]]"
+
+    body = ANCHOR.sub(swap, body)
+    body = re.sub(r"\s*,?\s*\((?:cross[- ]referenced|see above)\)", "", body, flags=re.IGNORECASE)
+    body = re.sub(r"(\]\])\s*,\s*(?=\[\[|$)", r"\1 ", body, flags=re.MULTILINE)
+    return body.rstrip() + "\n"
+
+
+TYPED_NUMBER = re.compile(r"^(?:\d+(?:\.\d+)+\.?|[A-Z](?:\.\d+)+\.?)\s+(?=\S)")
+TOC_HEADING = re.compile(r"^(?:table\s+of\s+)?contents$", re.IGNORECASE)
+
+
 def take_comments(text):
     """The text without its comment markers, and the comments it carried."""
     notes = [m.group(1).strip() for m in COMMENT.finditer(text)]
@@ -525,6 +573,7 @@ def add_runs(paragraph, text):
 
 
 def banner(doc, text):
+    lines = text if isinstance(text, list) else [text]
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table_borders(table, "nil")
@@ -532,9 +581,10 @@ def banner(doc, text):
     cell_margins(table, 288, 288, 144, 144)
     cell = table.rows[0].cells[0]
     cell_fill(cell, NAVY)
-    p = cell.paragraphs[0]
-    p.style = doc.styles["AKLA Title"]
-    add_runs(p, text)
+    for k, line in enumerate(lines):
+        p = cell.paragraphs[0] if k == 0 else cell.add_paragraph()
+        p.style = doc.styles["AKLA Title"]
+        add_runs(p, line)
     doc.add_paragraph(style="AKLA Front").paragraph_format.space_after = Pt(6)
 
 
@@ -604,7 +654,8 @@ def render(doc, markdown, numbering):
     body_level = 1        # the outline level body text takes where it stands
     list_num = None       # the w:num of the list in progress, if any
     last = None
-    lines = fold_footnotes(markdown).replace("\r\n", "\n").split("\n")
+    lines = fold_comments_log(fold_footnotes(markdown.replace("\r\n", "\n"))).split("\n")
+    lines = [re.sub(r"`([^`]*)`", r"\1", l) for l in lines]   # code marks are not document formatting
     i = 0
     while i < len(lines):
         raw = lines[i]
@@ -644,13 +695,43 @@ def render(doc, markdown, numbering):
         heading = re.match(r"^(#{1,4})\s+(.*)$", line)
         if heading:
             depth, text = len(heading.group(1)), heading.group(2).strip()
-            text = re.sub(r"^(\d+(\.\d+)*\.?|[A-Z]\.|[IVX]+\.)\s+", "", text)  # typed numbers
+            text = re.sub(r"^(\d+(\.\d+)*\.?|[A-Z](\.\d+)*\.|[A-Z]\.\d+(\.\d+)*|[IVX]+\.)\s+", "", text)  # typed numbers
             list_num = None
             if depth == 1:
-                banner(doc, text)
+                # "## " lines straight after the title, with nothing between
+                # them, are the rest of the title set on separate lines.
+                parts = [text]
+                j = i
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                run = []
+                while j < len(lines) and re.match(r"^##\s+", lines[j].strip()):
+                    run.append(lines[j].strip()[3:].strip())
+                    j += 1
+                if len(run) >= 2:
+                    parts += run
+                    i = j
+                banner(doc, parts)
                 title_done = True
                 if notes:
                     print("warning: a comment on the title was dropped", file=sys.stderr)
+                continue
+            if TOC_HEADING.match(text):
+                # A contents list typed by hand goes stale the moment a
+                # section moves; Word's own table of contents does not.
+                p = doc.add_paragraph(style="AKLA Divider")
+                add_runs(p, "Table Of Contents")
+                toc = doc.add_paragraph(style="AKLA Front")
+                field = _el("w:fldSimple", **{"w:instr": 'TOC \\o "1-2" \\h \\z \\u'})
+                placeholder = OxmlElement("w:r")
+                t = OxmlElement("w:t")
+                t.text = "Right-click and choose Update Field to show the table of contents."
+                placeholder.append(t)
+                field.append(placeholder)
+                toc._p.append(field)
+                while i < len(lines) and not re.match(r"^#{1,4}\s", lines[i].strip()):
+                    i += 1
+                last = p
                 continue
             if depth == 4:
                 p = doc.add_paragraph(style="AKLA Divider")
@@ -690,6 +771,7 @@ def render(doc, markdown, numbering):
             p = doc.add_paragraph(style="AKLA Front")
         else:
             p = doc.add_paragraph(style="AKLA Body 1" if body_level == 1 else "AKLA Body 2")
+            line = TYPED_NUMBER.sub("", line)   # Word numbers the clause itself
         add_runs(p, line)
         attach_comments(doc, p, notes)
         last = p
@@ -728,6 +810,10 @@ def main():
     for p in list(body.findall(qn("w:p"))):
         body.remove(p)   # the template's empty first paragraph
     render(doc, markdown, numbering)
+    if doc.element.body.find(".//" + qn("w:fldSimple")) is not None:
+        settings = doc.settings.element
+        if settings.find(qn("w:updateFields")) is None:
+            settings.append(_el("w:updateFields", **{"w:val": "true"}))
     doc.save(args.out)
     print(args.out)
 

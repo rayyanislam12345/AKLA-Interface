@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
-import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun } from "./chatState.js";
+import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun, chooseWorkingDocument } from "./chatState.js";
 import { researchLaw, needsResearch } from "./research.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy } from "./docxAgent.js";
 import { runReview } from "./review.js";
@@ -501,6 +501,7 @@ async function handleChat(req, res) {
     attachments: rawAttachments = [],
     skill: requestedSkill = null,
     continueMessageId = null,
+    workingArtifactId = null,
   } = body;
   let skill = requestedSkill;
   const isContinuation = !!continueMessageId;
@@ -617,20 +618,27 @@ async function handleChat(req, res) {
   let docxBase = null;
   let currentDraft = null;
   let convertedArtifact = null;
+  let otherDocuments = [];
   // A document produced in this conversation is the document the next turn
   // works on — in a plain chat too, since "format it" or "add comments" is
   // asked there as often as in Draft or Edit. It is always worked on as a
   // Word file: a Markdown draft from before documents were delivered as
   // Word is converted to one first.
   if (!skill || skill?.key === "edit" || skill?.key === "draft") {
-    const { data: latest } = await supabase
+    // A chat can hold several documents — a proposal and its drafting note
+    // from one reply, each edited into new copies. This turn works on the
+    // one the lawyer means: the one open beside the chat, else the one the
+    // message names, else the draft over a note. Only ever loading the most
+    // recent sent "recheck the proposal" to the note.
+    const { data: threadDocs } = await supabase
       .from("ai_artifacts")
-      .select("id, kind, title, content, data")
+      .select("id, kind, title, content, data, created_at")
       .eq("thread_id", threadId)
       .in("kind", ["docx", "draft", "memo"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: true });
+    const choice = chooseWorkingDocument(threadDocs ?? [], { message, workingArtifactId: typeof workingArtifactId === "string" ? workingArtifactId : null });
+    const latest = choice.chosen;
+    otherDocuments = choice.others ?? [];
     let d = latest?.data ?? {};
     const rendered = d.rendered === "akla";
     if (latest && latest.kind !== "docx" && !d.editSource && latest.content?.trim() && !isContinuation) {
@@ -647,7 +655,7 @@ async function handleChat(req, res) {
     }
     if (latest?.kind === "draft" && skill) currentDraft = latest.content;
     if (latest?.kind === "docx" && d.storagePath) {
-      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered };
+      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered, title: choice.root?.title ?? latest.title };
     } else if (skill?.key === "edit") {
       if (latest?.content && d.editSource) {
         editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
@@ -1251,7 +1259,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       if (docxBase.standard) {
         skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\nThis is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. Do not stop to ask the lawyer before filling in: fill every placeholder the project's documents, the attached documents and this conversation support, in this turn. Where a value is not given, leave its placeholder and put an AKLA comment on that paragraph saying what is needed and where it would come from. Where the standard's wording assumes something the project's documents contradict — a different contracting structure, a party acting in its own right rather than on behalf of a government — make the change the documents support and comment on it, rather than asking first. Your changes are written straight into the draft, not as tracked changes, so the comments are how the lawyer sees what to check. Ask a question only if nothing at all can be filled without the answer.${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}\n\nIN THIS DRAFT: "applied as a tracked change" above does not apply — every change is written directly into the document.`;
       } else {
-        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy title banner, numbered section headings with a rule beneath, the unindented numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}\n\n${OPS_PROTOCOL}`;
+        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the lawyer means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again — never say a document cannot be reached.` : ""}${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy title banner, numbered section headings with a rule beneath, the unindented numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}\n\n${OPS_PROTOCOL}`;
       }
     } else if (skill?.key === "draft" && documentType) {
       const reqFields = Array.isArray(documentType.required_fields) && documentType.required_fields.length
@@ -1302,7 +1310,10 @@ ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}`;
       skillBlock = `\n\nSKILL IN FORCE — "${customSkill.name}" (the firm's own instructions):\n${customSkill.instructions}` +
         (customSkill.produces_document ? `\n\n${COMPLETENESS_RULES}\n\n${FIRM_MARKDOWN_RULES}\n\n${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}` : "");
     } else {
-      skillBlock = `\n\n${ARTIFACT_RULES}`;
+      // A plain chat drafts documents too, and was never told they come out
+      // as Word files with margin comments; the model then invented its own
+      // [C1] anchors and a Comments Log.
+      skillBlock = `\n\n${ARTIFACT_RULES}\n\n${FIRM_MARKDOWN_RULES}`;
     }
 
     if (currentDraft && !docxBase && !editBase) skillBlock += `\n\nCURRENT DRAFT TO REVISE (preserve all unrequested content):\n${currentDraft}`;
@@ -1444,7 +1455,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
           const src = docxBase.editSource ?? {};
           const title = docxBase.standard
             ? `Draft: ${documentType?.name ?? "document"}`
-            : `${src.title ?? docxBase.fileName}${src.versionNumber ? ` (v${src.versionNumber})` : ""}`;
+            : `${src.title ?? docxBase.title ?? docxBase.fileName}${src.versionNumber ? ` (v${src.versionNumber})` : ""}`;
           const { data: artifact } = await supabase
             .from("ai_artifacts")
             .insert({

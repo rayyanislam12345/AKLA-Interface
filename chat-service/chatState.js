@@ -27,3 +27,51 @@ export function isBareReviewRequest(message) {
 export function asksForReviewRerun(message) {
   return /\b(re-?run|run (the |a )?(new |fresh )?review( again)?|review (it |this |the document )?again|fresh review|new review|start (the review )?over)\b/i.test(String(message ?? ''));
 }
+
+const TITLE_STOPWORDS = new Set(['the', 'of', 'and', 'for', 'to', 'a', 'an', 'on', 'in', 'with', 'by', 'akla', 'draft', 'docx', 'this', 'that', 'it']);
+const titleWords = (text) => new Set(String(text ?? '').toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 1 && !TITLE_STOPWORDS.has(w) && !/^\d{4}$/.test(w)));
+
+/**
+ * Which document in a conversation a message is about. A chat can produce
+ * several (a proposal and its drafting note in one reply) and each can be
+ * edited into new copies. Each document is followed to its newest copy; the
+ * one open in the panel wins, then the one whose title the message names,
+ * then a draft over a note, then the most recent.
+ *
+ * artifacts: every document row in the thread, oldest first.
+ */
+export function chooseWorkingDocument(artifacts, { message = '', workingArtifactId = null } = {}) {
+  const byPath = new Map(artifacts.filter((a) => a.data?.storagePath).map((a) => [a.data.storagePath, a]));
+  const rootOf = (a) => {
+    let cur = a;
+    for (let guard = 0; guard < 50; guard++) {
+      const parent = cur.data?.sourceStoragePath ? byPath.get(cur.data.sourceStoragePath) : null;
+      if (!parent || parent === cur) return cur;
+      cur = parent;
+    }
+    return cur;
+  };
+  const heads = new Map();
+  for (const a of artifacts) heads.set(rootOf(a).id, a); // oldest first, so the last seen is the newest copy
+  const docs = [...heads.entries()].map(([rootId, head]) => ({ root: artifacts.find((a) => a.id === rootId), head }));
+  if (!docs.length) return { chosen: null, others: [] };
+  const pick = (doc) => ({ chosen: doc.head, root: doc.root, others: docs.filter((d) => d !== doc).map((d) => d.root) });
+
+  if (workingArtifactId) {
+    const open = artifacts.find((a) => a.id === workingArtifactId);
+    if (open) return pick(docs.find((d) => d.root.id === rootOf(open).id));
+  }
+  if (docs.length === 1) return pick(docs[0]);
+
+  const said = titleWords(message);
+  const words = docs.map((d) => titleWords(d.root.title));
+  const shared = [...words[0]].filter((w) => words.every((set) => set.has(w)));
+  const scores = words.map((set) => [...set].filter((w) => !shared.includes(w) && said.has(w)).length);
+  const best = Math.max(...scores);
+  if (best > 0 && scores.filter((s) => s === best).length === 1) return pick(docs[scores.indexOf(best)]);
+
+  const kindOf = (d) => d.root.data?.sourceKind ?? d.root.kind;
+  const drafts = docs.filter((d) => kindOf(d) === 'draft');
+  const pool = drafts.length ? drafts : docs;
+  return pick(pool[pool.length - 1]);
+}

@@ -208,7 +208,10 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
 
   const handleSend = async (input: { message: string; attachments: ChatAttachment[]; skill: ActiveSkill | null }) => {
-    await chat.send({ matterId, threadId: activeThreadId, ...input });
+    // A chat can hold several documents; the one open beside it is the one
+    // the lawyer is talking about.
+    const working = openArtifact && ["docx", "draft", "memo"].includes(openArtifact.kind) ? openArtifact.id : null;
+    await chat.send({ matterId, threadId: activeThreadId, ...input, workingArtifactId: working });
   };
 
   const sidebar = (

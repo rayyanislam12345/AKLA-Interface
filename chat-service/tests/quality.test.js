@@ -319,3 +319,22 @@ test('a draft from the standard takes its fills directly, keeping comments and t
   assert.ok(clean.includes('w:author="Counsel"'), "the standard's own revision stays");
   assert.ok(clean.includes('commentReference'), 'comments stay');
 });
+
+test('a follow-up works on the document the lawyer means, not just the last one made', async () => {
+  const { chooseWorkingDocument } = await import('../chatState.js');
+  const proposal = { id: 'p', kind: 'docx', title: 'M-6 Sukkur–Hyderabad Motorway — Project Proposal (Legal Limb — Draft)', data: { storagePath: 'x/proposal.docx', sourceKind: 'draft' } };
+  const note = { id: 'n', kind: 'docx', title: 'Drafting Control Note — M-6 Project Proposal (Legal Limb)', data: { storagePath: 'x/note.docx', sourceKind: 'memo' } };
+  const noteEdited = { id: 'n2', kind: 'docx', title: 'Drafting Control Note — M-6 Project Proposal (Legal Limb) [AKLA][September 15, 2026].docx', data: { storagePath: 'x/note-2.docx', sourceStoragePath: 'x/note.docx' } };
+  const all = [proposal, note, noteEdited];
+  // Both titles say "project proposal": the draft wins over its note.
+  assert.equal(chooseWorkingDocument(all, { message: 'reverify this project proposal and fix the mistakes' }).chosen.id, 'p');
+  // Naming the note picks its newest copy.
+  assert.equal(chooseWorkingDocument(all, { message: 'update the control note' }).chosen.id, 'n2');
+  // The document open in the panel wins over the words.
+  assert.equal(chooseWorkingDocument(all, { message: 'update the control note', workingArtifactId: 'p' }).chosen.id, 'p');
+  assert.equal(chooseWorkingDocument(all, { message: 'fix it', workingArtifactId: 'n' }).chosen.id, 'n2');
+  const picked = chooseWorkingDocument(all, { message: 'fix it' });
+  assert.deepEqual(picked.others.map((d) => d.id), ['n']);
+  assert.equal(chooseWorkingDocument([note, noteEdited], { message: 'anything' }).chosen.id, 'n2');
+  assert.equal(chooseWorkingDocument([], {}).chosen, null);
+});
