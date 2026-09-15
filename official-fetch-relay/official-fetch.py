@@ -14,6 +14,7 @@ stdout: the file's bytes.   stderr: "FINAL <url>" and "TYPE <content-type>",
 or one line starting "ERROR " and a non-zero exit.
 """
 import os
+import socket
 import sys
 import urllib.error
 import urllib.parse
@@ -23,6 +24,18 @@ import urllib.request
 OFFICIAL_DOMAINS = ["gov.pk", "sbp.org.pk", "nepra.org.pk", "ogra.org.pk", "ppra.org.pk", "na.gov.pk", "senate.gov.pk"]
 MAX_BYTES = 20 * 1024 * 1024
 TIMEOUT = 45
+
+# Government sites publish IPv6 addresses they do not answer on. Python tries
+# them first and waits out each timeout (47 seconds for one statute, against
+# 2 seconds for curl), so IPv4 addresses are tried first.
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(*args, **kwargs):
+    return sorted(_getaddrinfo(*args, **kwargs), key=lambda info: info[0] != socket.AF_INET)
+
+
+socket.getaddrinfo = _ipv4_first
 
 
 def fail(message, code=2):

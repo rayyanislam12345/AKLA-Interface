@@ -99,6 +99,15 @@ export async function fetchViaRelay(url, { signal, spawner = spawn } = {}) {
   });
 }
 
+// A site that did not answer directly is sent to the relay straight away for
+// the next hour, instead of costing every lookup another connection timeout.
+const relayFirst = new Map();
+const RELAY_FIRST_MS = 60 * 60 * 1000;
+const goesStraightToRelay = (url) => {
+  const until = relayFirst.get(new URL(url).hostname);
+  return until !== undefined && until > Date.now();
+};
+
 function unreachable(err) {
   const text = `${err?.message ?? ''} ${err?.cause?.code ?? ''} ${err?.name ?? ''}`;
   return /fetch failed|ETIMEDOUT|UND_ERR_CONNECT|ENOTFOUND|ECONNRESET|TimeoutError|timed out/i.test(text);
@@ -186,10 +195,12 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
         notice(`Downloading ${candidate.title} from its official source…`);
         let downloaded;
         try {
+          if (relayConfigured() && goesStraightToRelay(candidate.url)) throw Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
           downloaded = await fetchOfficial(candidate.url, { signal });
         } catch (err) {
           if (signal?.aborted || !unreachable(err)) throw err;
           if (!relayConfigured()) throw new Error("the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)");
+          relayFirst.set(new URL(candidate.url).hostname, Date.now() + RELAY_FIRST_MS);
           try {
             downloaded = await fetchViaRelay(candidate.url, { signal });
           } catch (relayError) {
