@@ -93,7 +93,7 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
             ))}
           </div>
         )}
-        {stream.error && (
+        {stream.error && !messages.some((m) => m.role === "user" && messageMetadata(m).error === stream.error) && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
             {stream.error}
           </div>
@@ -119,7 +119,23 @@ function MessageRow({
 }) {
   const meta = messageMetadata(message);
   if (message.role === "user") {
-    return <UserBubble content={message.content} attachments={meta.attachments ?? []} />;
+    return (
+      <>
+        <UserBubble content={message.content} attachments={meta.attachments ?? []} />
+        {(!!meta.notices?.length || meta.error) && (
+          <div className="-mb-4 min-w-0" data-testid="turn-notices">
+            {meta.notices?.map((n, i) => (
+              <p key={i} className="mb-2 text-xs text-amber-700 dark:text-amber-400">{n}</p>
+            ))}
+            {meta.error && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+                {meta.error}
+              </div>
+            )}
+          </div>
+        )}
+      </>
+    );
   }
   return (
     <div className="min-w-0" data-testid="assistant-message">

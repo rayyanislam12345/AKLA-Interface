@@ -59,6 +59,10 @@ export interface MessageMetadata {
   // The chat function saved this reply before it was finished (it ran out
   // of wall clock) and expects to be asked for the rest.
   incomplete?: boolean;
+  // On the lawyer's message: what the turn reported doing while it ran, and
+  // the error it ended with, kept so every load of the chat shows them.
+  notices?: string[];
+  error?: string;
 }
 
 export function messageMetadata(m: ChatMessage): MessageMetadata {
@@ -298,6 +302,26 @@ export async function openDocumentForEdit(
 
 // -------------------------------------------------------------- streaming
 
+async function recordClientError(threadId: string, error: string) {
+  try {
+    const { data } = await supabase
+      .from("ai_chat_messages")
+      .select("id, metadata")
+      .eq("thread_id", threadId)
+      .eq("role", "user")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data || (data.metadata as MessageMetadata | null)?.error) return;
+    await supabase
+      .from("ai_chat_messages")
+      .update({ metadata: { ...((data.metadata as Record<string, unknown>) ?? {}), error } as never })
+      .eq("id", data.id);
+  } catch {
+    /* the error still shows in this browser */
+  }
+}
+
 export interface StreamingState {
   threadId: string | null;
   text: string;
@@ -468,7 +492,8 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             generatedChars = data.generatedChars ?? 0;
             break;
           case "error":
-            throw new Error(data.message);
+            // The server has already saved this error on the lawyer's message.
+            throw Object.assign(new Error(data.message), { recorded: true });
         }
       };
 
@@ -606,7 +631,14 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          patchStream(keyRef.current, (s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+          const text = err instanceof Error ? err.message : String(err);
+          patchStream(keyRef.current, (s) => ({ ...s, error: text }));
+          // A failure only this browser saw (the connection dropped, the
+          // request never reached the server) is saved too, so the chat shows
+          // it wherever it is opened next.
+          if (!(err as { recorded?: boolean }).recorded && keyRef.current !== NEW_CHAT_KEY) {
+            await recordClientError(keyRef.current, text);
+          }
         }
       } finally {
         await finishTurn(matterId, keyRef.current);
