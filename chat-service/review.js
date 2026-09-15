@@ -591,19 +591,29 @@ your Markdown answer for the lawyer
 a JSON array of {"clause_reference": string, "original_text": string, "suggested_text": string, "rationale": string}, or [] if none. "original_text" must be copied word for word from the document above.
 </suggestions>`;
 
+  // Sonnet 5 thinks unless told otherwise, and a request left at the default
+  // effort spent all 32,000 tokens thinking about a 126,000-character
+  // proposal and wrote no answer. Medium effort leaves room for the answer;
+  // streaming lets the reply run past the non-streaming timeouts.
   let data;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: REVIEW_MODEL, max_tokens: MAX_OUTPUT_TOKENS, system, messages: [{ role: "user", content: instruction }] }),
-      signal,
-    });
-    if (resp.ok) { data = await resp.json(); break; }
-    console.error(`review instruction: provider ${resp.status} ${(await resp.text()).slice(0, 200)}`);
-    if (attempt === 1 || signal?.aborted) throw new Error("the AI provider could not answer the instruction");
+    try {
+      data = await streamMessage(anthropicKey, {
+        model: REVIEW_MODEL,
+        max_tokens: INSTRUCTION_MAX_TOKENS,
+        output_config: { effort: "medium" },
+        system,
+        messages: [{ role: "user", content: instruction }],
+      }, signal);
+      if (data.text.trim() || attempt === 1) break;
+      console.error(`review instruction: no answer (stop_reason ${data.stop_reason}), asking again`);
+    } catch (err) {
+      console.error(`review instruction: ${err.message}`);
+      if (attempt === 1 || signal?.aborted) throw new Error("the AI provider could not answer the instruction");
+    }
   }
-  const { answer, rows, dropped, unfinished } = readInstructionReply(data.content?.find((b) => b.type === "text")?.text ?? "", data.stop_reason, fullText);
+  if (!data.text.trim()) throw new Error(`no answer came back (${data.stop_reason ?? "unknown stop"})`);
+  const { answer, rows, dropped, unfinished } = readInstructionReply(data.text, data.stop_reason, fullText);
   if (dropped) console.log(`review instruction run=${reviewRunId}: dropped ${dropped} suggestion(s) that could not be located`);
 
   let newSuggestions = [];
@@ -629,6 +639,38 @@ a JSON array of {"clause_reference": string, "original_text": string, "suggested
     dropped ? `_${dropped} proposed change${dropped === 1 ? " was" : "s were"} not added to the review because the quoted wording could not be found in the document._` : "",
   ].filter(Boolean);
   return { reply: [answer, ...notes].filter(Boolean).join("\n\n"), newSuggestions };
+}
+
+const INSTRUCTION_MAX_TOKENS = 64_000;
+
+// One Messages request, streamed, returning its text and why it stopped.
+async function streamMessage(anthropicKey, body, signal) {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, stream: true }),
+    signal,
+  });
+  if (!resp.ok || !resp.body) throw new Error(`provider ${resp.status} ${(await resp.text()).slice(0, 200)}`);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", text = "", stop_reason = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const event of events) {
+      const line = event.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      const data = JSON.parse(line.slice(5));
+      if (data.type === "content_block_delta" && data.delta?.type === "text_delta") text += data.delta.text;
+      else if (data.type === "message_delta" && data.delta?.stop_reason) stop_reason = data.delta.stop_reason;
+      else if (data.type === "error") throw new Error(data.error?.message ?? "stream error");
+    }
+  }
+  return { text, stop_reason };
 }
 
 /** The answer and suggestions from an instruction reply, read leniently. */
