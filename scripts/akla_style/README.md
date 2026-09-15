@@ -21,7 +21,10 @@ house format, rendered by `chat-service/akla/build_docx.py` and checked by
 3. **Choices the firm made where its documents disagree** (September 15, 2026):
    section headings are numbered "1.", left-aligned, with a rule beneath, in
    every family; the navy banner is for the title only; body text sits one
-   level below its heading (1.1. under a section, 1.1.1. under a sub-heading).
+   level below its heading (1.1. under a section, 1.1.1. under a sub-heading);
+   and nothing is indented — every number sits at the left margin and all text
+   starts 0.75" from it at every level, headings, clauses, (a) lists, quoted
+   text and tables alike. Only the number shows the depth.
 
 ## Measuring a document
 

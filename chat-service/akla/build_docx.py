@@ -12,7 +12,10 @@ documents disagree, the firm chose (September 15, 2026):
     with a single rule beneath, in memos, notes, proposals and reports alike;
   - the navy banner with gold small caps is for the document title only;
   - body text sits one level below its heading: 1.1. under a section,
-    1.1.1. under a sub-heading.
+    1.1.1. under a sub-heading;
+  - nothing is indented. Every number sits at the left margin and all text
+    starts the same distance from it, at every level - headings, clauses,
+    lists, quoted text and tables alike. Only the number shows the depth.
 
 How it is built matters as much as how it looks. The first version typed
 formatting onto every paragraph, so indents drifted and anything added later
@@ -30,7 +33,7 @@ Input is a Markdown subset:
     #### Divider            -> centred bold small caps with a rule beneath
     plain paragraph         -> AKLA Body 1 ("1.1.") or AKLA Body 2 ("1.1.1.")
     - item / 1. item        -> (a); indented two spaces -> (i); four -> A.
-    > quoted text           -> italic, indented from both margins, justified
+    > quoted text           -> italic, aligned with the clause text, justified
     ::: key figure          -> shaded centred box
     | a | b |               -> table, navy header row with gold small caps
     **bold**  *italic*      -> inline runs
@@ -68,6 +71,10 @@ TWIP = 1440                 # twentieths of a point in an inch
 PAGE_W, PAGE_H = Mm(210), Mm(297)
 MARGIN = Inches(1)
 TEXT_TWIPS = int((PAGE_W - 2 * MARGIN) / 635)  # EMU -> twips
+
+# Where the text of every numbered paragraph starts, at every level: wide
+# enough for "10.10.10." in Arial 11 after a number set at the margin.
+TEXT_AT = 1080              # twips (0.75")
 
 OUTLINE = (7100, 7101)      # abstractNumId, numId for 1. / 1.1. / 1.1.1.
 # Lists restart for each group, so each gets its own w:num; these abstract
@@ -238,28 +245,27 @@ def build_numbering(doc):
     for child in list(numbering):
         numbering.remove(child)
 
-    # The outline. Numbers sit at the margin for 1. and 1.1. with the text at
-    # half an inch; 1.1.1. numbers sit under that text with its own text at
-    # one inch - the positions the firm's circulated documents use.
+    # The outline. The firm does not indent: every level's number sits at the
+    # margin and its text at TEXT_AT, so only the number shows the depth.
     outline = _el("w:abstractNum", **{"w:abstractNumId": OUTLINE[0]})
     outline.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
     plain = OxmlElement("w:rPr")
     plain.append(_el("w:u", **{"w:val": "none"}))
-    outline.append(_level(0, "decimal", "%1.", 720, 720))
-    outline.append(_level(1, "decimal", "%1.%2.", 720, 720, plain))
-    outline.append(_level(2, "decimal", "%1.%2.%3.", 1440, 720))
+    outline.append(_level(0, "decimal", "%1.", TEXT_AT, TEXT_AT))
+    outline.append(_level(1, "decimal", "%1.%2.", TEXT_AT, TEXT_AT, plain))
+    outline.append(_level(2, "decimal", "%1.%2.%3.", TEXT_AT, TEXT_AT))
     for ilvl in range(3, 9):
-        outline.append(_level(ilvl, "decimal", "%1.%2.%3." + "".join(f"%{i + 1}." for i in range(3, ilvl + 1)), 1440 + 360 * (ilvl - 2), 720))
+        outline.append(_level(ilvl, "decimal", "%1.%2.%3." + "".join(f"%{i + 1}." for i in range(3, ilvl + 1)), TEXT_AT, TEXT_AT))
     numbering.append(outline)
 
-    # Lists: (a) -> (i) -> A., the Guide's scheme, one step in from the text
-    # of the paragraph they belong to.
-    for abstract_id, base in ((LIST_UNDER_BODY1, 720), (LIST_UNDER_BODY2, 1440)):
+    # Lists: (a) -> (i) -> A., the Guide's scheme, set the same way - number
+    # at the margin, text at TEXT_AT.
+    for abstract_id in (LIST_UNDER_BODY1, LIST_UNDER_BODY2):
         lists = _el("w:abstractNum", **{"w:abstractNumId": abstract_id})
         lists.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
-        lists.append(_level(0, "lowerLetter", "(%1)", base + 720, 720))
-        lists.append(_level(1, "lowerRoman", "(%2)", base + 1440, 720))
-        lists.append(_level(2, "upperLetter", "%3.", base + 2160, 720))
+        lists.append(_level(0, "lowerLetter", "(%1)", TEXT_AT, TEXT_AT))
+        lists.append(_level(1, "lowerRoman", "(%2)", TEXT_AT, TEXT_AT))
+        lists.append(_level(2, "upperLetter", "%3.", TEXT_AT, TEXT_AT))
         numbering.append(lists)
 
     num = _el("w:num", **{"w:numId": OUTLINE[1]})
@@ -608,7 +614,7 @@ def render(doc, markdown, numbering):
             attach_comments(doc, last, notes)
             continue
 
-        text_indent = 720 if body_level == 1 else 1440   # where body text starts
+        text_indent = 0   # nothing is indented; tables and boxes run from the margin
 
         if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", line):
             # A Markdown rule is a visual separator, not a paragraph.
@@ -660,8 +666,8 @@ def render(doc, markdown, numbering):
         quote = re.match(r"^>\s?(.*)$", line)
         if quote:
             p = doc.add_paragraph(style="AKLA Quote")
-            left = (text_indent if in_sections else 0) + 720
-            indent(p._p.get_or_add_pPr(), left, right=720)
+            # Quoted text lines up with the text around it; italics mark it.
+            indent(p._p.get_or_add_pPr(), TEXT_AT if in_sections else 0)
             add_runs(p, quote.group(1))
             attach_comments(doc, p, notes)
             last = p
