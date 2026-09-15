@@ -1,8 +1,10 @@
 // Every document the AI Workspace writes is delivered as a Word file in the
-// firm's house format. The model writes Markdown; the firm's own renderer
-// (akla/build_docx.py, from the legal-summary skill) turns it into the Word
-// file — Arial, navy and gold heading bars, a real 1. / 1.1. / 1.1.1. / (a)
-// outline, the running header with the AK emblem, "Page X of Y" — and AKLA
+// firm's house format. The model writes Markdown; akla/build_docx.py turns it
+// into the Word file to the firm's Word Formatting and Shortcuts Guide, as
+// measured from circulated firm documents — A4, Arial 11, the title on a navy
+// banner, "1." section headings in bold small caps with a rule beneath, a
+// 1. / 1.1. / 1.1.1. outline and (a) (i) A. lists owned by named AKLA styles,
+// the running header and "Page X of Y" after a clean first page — and AKLA
 // comments into native Word comments. The format is applied by construction
 // and then checked, rather than asked of the model and hoped for.
 
@@ -81,18 +83,36 @@ export function checkAklaFormat(bytes) {
   const footers = Object.keys(files).filter((n) => /^word\/footer\d*\.xml$/.test(n)).map(part).join("");
   const comments = part("word/comments.xml");
   const findings = [];
-  const normal = /<w:style [^>]*w:styleId="Normal"[\s\S]*?<\/w:style>/.exec(styles)?.[0] ?? "";
+  const styleXml = (id) => new RegExp(`<w:style [^>]*w:styleId="${id}"[\\s\\S]*?<\\/w:style>`).exec(styles)?.[0] ?? "";
+
+  // Page: A4 with one-inch margins, a clean first page (the Guide).
+  const pgSz = /<w:pgSz [^>]*\/>/.exec(doc)?.[0] ?? "";
+  if (!/w:w="1190\d"/.test(pgSz) || !/w:h="168\d\d"/.test(pgSz)) findings.push("The page is not A4.");
+  if (!/<w:titlePg\/>/.test(doc)) findings.push("The first page is not kept clean of the running header and page number.");
+
+  // Text: Arial 11 through Normal, and every paragraph on a named AKLA style.
+  const normal = styleXml("Normal");
   if (!/w:ascii="Arial"/.test(normal)) findings.push("Body text is not set in Arial.");
   if (!/<w:sz w:val="22"\/>/.test(normal)) findings.push("Body text is not 11pt.");
+  const unstyled = (doc.match(/<w:p>|<w:p (?![^>]*\/>)[^>]*>/g) ?? []).length - (doc.match(/<w:pStyle w:val="AKLA/g) ?? []).length;
+  if (unstyled > 0) findings.push(`${unstyled} paragraph(s) are not on an AKLA style.`);
+
+  // Outline: 1. / 1.1. / 1.1.1. owned by the heading and body styles.
   if (!/w:abstractNumId="7100"/.test(numbering) || !/w:lvlText w:val="%1\.%2\.%3\."/.test(numbering)) findings.push("The 1. / 1.1. / 1.1.1. outline is missing.");
-  const headingParagraphs = doc.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*?<w:pStyle w:val="Heading1"\/>[\s\S]*?<\/w:p>/g) ?? [];
-  const sections = headingParagraphs.length;
-  if (headingParagraphs.some((p) => !p.includes('w:fill="0E2841"'))) findings.push("A section heading is missing its navy bar.");
-  if (sections && !/FFC000/.test(doc)) findings.push("No gold heading text was found.");
+  const heading1 = styleXml("AKLAHeading1");
+  if (!/<w:numId w:val="7101"\/>/.test(heading1)) findings.push("Section headings are not numbered by their style.");
+  if (!/<w:bottom [^>]*w:val="single"/.test(heading1)) findings.push("Section headings have no rule beneath.");
+  if (!/<w:sz w:val="26"\/>/.test(heading1) || !/<w:smallCaps\/>/.test(heading1) || !/<w:b\/>/.test(heading1)) findings.push("Section headings are not 13pt bold small caps.");
+  if (!/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody1")) || !/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody2"))) findings.push("Body paragraphs are not numbered by their style.");
+
+  // Title banner, header, footer.
+  if (/<w:pStyle w:val="AKLATitle"\/>/.test(doc) && !/w:fill="002060"/.test(doc)) findings.push("The title is not on the navy banner.");
   if (!headers.includes("C00000")) findings.push("The running header's confidentiality line is missing.");
   if (!/PAGE/.test(footers) || !/NUMPAGES/.test(footers)) findings.push("The Page X of Y footer is missing.");
+
   if (/\[\[\s*AKLA|\[\^[^\]]+\]/i.test(doc)) findings.push("A comment or footnote marker was left in the text.");
   const authors = [...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1]);
   if (authors.some((a) => a !== "AKLA Comments")) findings.push("A comment is not titled AKLA Comments.");
+  const sections = (doc.match(/<w:pStyle w:val="AKLAHeading1"\/>/g) ?? []).length;
   return { status: findings.length ? "needs_review" : "checked", findings, sections, comments: authors.length };
 }

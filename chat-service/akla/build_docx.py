@@ -1,41 +1,44 @@
 #!/usr/bin/env python3
 """Render a document into a Word file in AKLA house format.
 
-Copied from the firm's legal-summary skill (scripts/build_docx.py), which is
-where the house format was measured and verified. Changes here: comments,
-stdin input, and the logo sitting beside this file. Every document the AI
-Workspace generates is rendered through this, so the house format is applied
-by construction rather than asked of the model.
+The house format comes from the firm's Word Formatting and Shortcuts Guide
+(June 17, 2026) and was measured against circulated firm documents - the
+Artistic DISCOs Proposal (AM7), the Notes on Restrictions under the MRA
+(OES2), the FESCO data-room Memorandum (FE-M01) and the Special Technology
+Zone formatting exercise - with scripts/akla_style/analyze_docx.py. Where those
+documents disagree, the firm chose (September 15, 2026):
 
-Comments: "[[AKLA Comment: text]]" anywhere in a line becomes a native Word
-comment by "AKLA Comments" on that paragraph, and is removed from the text.
-On a line of its own it attaches to the paragraph before it.
+  - section headings are numbered "1.", left-aligned, 13pt bold small caps,
+    with a single rule beneath, in memos, notes, proposals and reports alike;
+  - the navy banner with gold small caps is for the document title only;
+  - body text sits one level below its heading: 1.1. under a section,
+    1.1.1. under a sub-heading.
 
-Originally: render a plain-English legal summary into a Word document in AKLA house format.
+How it is built matters as much as how it looks. The first version typed
+formatting onto every paragraph, so indents drifted and anything added later
+in Word or by the AI had nothing to inherit. Here every paragraph takes a
+named AKLA style, and the outline numbering belongs to those styles, so Word
+renumbers and indents consistently and a paragraph inserted later picks up the
+same format.
 
-The output matches the firm's proposal/report family: Arial throughout, navy
-heading bars with gold Small Caps text, a real 1. / 1.1. / 1.1.1. / (a) legal
-outline, the four-line running header with the AK emblem, and a centered
-"Page X of Y" footer.
+Input is a Markdown subset:
+
+    # Title                 -> navy title banner, gold bold small caps
+    lines before first ##   -> front matter (parties, date, status), unnumbered
+    ## Section              -> AKLA Heading 1: "1." 13pt bold small caps, rule beneath
+    ### Sub-section         -> AKLA Heading 2: "1.1." bold underlined small caps
+    #### Divider            -> centred bold small caps with a rule beneath
+    plain paragraph         -> AKLA Body 1 ("1.1.") or AKLA Body 2 ("1.1.1.")
+    - item / 1. item        -> (a); indented two spaces -> (i); four -> A.
+    > quoted text           -> italic, indented from both margins, justified
+    ::: key figure          -> shaded centred box
+    | a | b |               -> table, navy header row with gold small caps
+    **bold**  *italic*      -> inline runs
+    [[AKLA Comment: ...]]   -> native Word comment by "AKLA Comments"
+    [^1] ... [^1]: note     -> the note becomes a comment where it is cited
 
 Usage:
-    python3 build_docx.py NOTES.md -o "Notes On X [AKLA][September 04, 2026].docx" \
-        --doc-title "Notes On The Concession Agreement" \
-        --doc-status "First Circulation Version" \
-        --doc-date "September 04, 2026"
-
-Input is a small Markdown subset (see the skill's SKILL.md):
-
-    # Title                 -> navy banner, gold bold Small Caps, centered
-    ## Major topic          -> navy bar heading, numbered 1.,  gold bold Small Caps
-    ### Sub-topic           -> numbered 1.1.,  bold underlined Small Caps
-    #### Divider            -> centered bold Small Caps, ruled above and below
-    plain paragraph         -> numbered 1.1.1., Arial 11pt justified
-    - short item            -> numbered (a), Arial 11pt justified
-    > quoted clause text    -> italic, indented both sides, unnumbered
-    ::: boxed figure        -> shaded centered box (fees, caps, key numbers)
-    | a | b |               -> table, navy header row with gold Small Caps text
-    **bold**  *italic*      -> inline runs
+    python3 build_docx.py NOTES.md -o OUT.docx --doc-title "..." --doc-status "Draft" --doc-date "September 15, 2026"
 """
 import argparse
 import os
@@ -43,25 +46,36 @@ import re
 import sys
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, Inches, RGBColor, Emu
+from docx.shared import Inches, Mm, Pt, RGBColor
 
-BODY_FONT = "Arial"
+FONT = "Arial"
 BODY_PT = 11
+HEADING_PT = 13
+TITLE_PT = 14
 SMALL_PT = 8
 
-NAVY = "0E2841"    # heading bars, table header rows, banner
-GOLD = "FFC000"    # text on navy
-RED = "C00000"     # the confidentiality line in the running header
-SHADE = "F2F2F2"   # boxed-figure fill
+NAVY = "002060"   # title banner, table header rows, the firm's name
+GOLD = "FFC000"   # text on navy
+RED = "C00000"    # confidentiality line in the running header
+SHADE = "F2F2F2"  # key-figure box
 
-ABSTRACT_ID = 7100
-NUM_ID = 7101
+TWIP = 1440                 # twentieths of a point in an inch
+PAGE_W, PAGE_H = Mm(210), Mm(297)
+MARGIN = Inches(1)
+TEXT_TWIPS = int((PAGE_W - 2 * MARGIN) / 635)  # EMU -> twips
 
-TEXT_WIDTH = Inches(6.5)   # letter page, 1" margins
+OUTLINE = (7100, 7101)      # abstractNumId, numId for 1. / 1.1. / 1.1.1.
+# Lists restart for each group, so each gets its own w:num; these abstract
+# ids are the two indentation contexts a list can sit in.
+LIST_UNDER_BODY1 = 7200     # (a) under a 1.1. paragraph
+LIST_UNDER_BODY2 = 7300     # (a) under a 1.1.1. paragraph
+
+FIRM_NAME = re.compile(r"(Ali Khan Law Associates)")
 
 # Each of these element sequences is schema-mandated: append a child out of
 # order and Word declares the file corrupt on open.
@@ -75,304 +89,352 @@ PPR_ORDER = [
     "w:textDirection", "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl",
     "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange",
 ]
-
 TBLPR_ORDER = [
     "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual",
     "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
     "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout",
     "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
 ]
-
 TCPR_ORDER = [
     "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge",
     "w:tcBorders", "w:shd", "w:noWrap", "w:tcMar", "w:textDirection",
     "w:tcFitText", "w:vAlign", "w:hideMark",
 ]
+TRPR_ORDER = ["w:cnfStyle", "w:divId", "w:gridBefore", "w:gridAfter", "w:wBefore",
+              "w:wAfter", "w:cantSplit", "w:trHeight", "w:tblHeader",
+              "w:tblCellSpacing", "w:jc", "w:hidden"]
 
 
 # --------------------------------------------------------------------------
-# low-level Word plumbing
+# XML helpers
 # --------------------------------------------------------------------------
 
 def _el(tag, **attrs):
-    e = OxmlElement(tag)
+    el = OxmlElement(tag)
     for k, v in attrs.items():
-        e.set(qn(k), str(v))
-    return e
+        el.set(qn(k), str(v))
+    return el
 
 
 def _insert(parent, element, sequence):
-    """Insert a child at the position the schema requires."""
-    order = [qn(t) for t in sequence]
-    idx = order.index(element.tag)
-    for child in parent:
-        if child.tag in order and order.index(child.tag) > idx:
-            child.addprevious(element)
-            return
+    tag = element.tag
+    rank = sequence.index(next(s for s in sequence if qn(s) == tag))
+    for existing in parent.findall(tag):
+        parent.remove(existing)
+    for i, child in enumerate(list(parent)):
+        names = [qn(s) for s in sequence]
+        if child.tag in names and names.index(child.tag) > rank:
+            parent.insert(i, element)
+            return element
     parent.append(element)
+    return element
 
 
-def _ppr_insert(ppr, element):
-    _insert(ppr, element, PPR_ORDER)
+def ppr_insert(ppr, element):
+    return _insert(ppr, element, PPR_ORDER)
 
 
-def shade_paragraph(paragraph, fill):
-    ppr = paragraph._p.get_or_add_pPr()
-    _ppr_insert(ppr, _el("w:shd", **{
-        "w:val": "clear", "w:color": "auto", "w:fill": fill}))
-
-
-def set_indent(paragraph, left=None, hanging=None, first_line=None):
-    ppr = paragraph._p.get_or_add_pPr()
-    attrs = {}
-    if left is not None:
-        attrs["w:left"] = left
-    if hanging is not None:
-        attrs["w:hanging"] = hanging
-    if first_line is not None:
-        attrs["w:firstLine"] = first_line
-    _ppr_insert(ppr, _el("w:ind", **attrs))
-
-
-def set_mark_format(paragraph, color=None, bold=False, size_pt=None,
-                    small_caps=False):
-    """Format the paragraph mark, which is what the list number inherits."""
-    ppr = paragraph._p.get_or_add_pPr()
-    rpr = ppr.find(qn("w:rPr"))
-    if rpr is None:
-        rpr = OxmlElement("w:rPr")
-        _ppr_insert(ppr, rpr)
-    rfonts = _el("w:rFonts")
+def arial(rpr):
+    """Arial for every script, and no theme font that would outrank it."""
+    fonts = rpr.find(qn("w:rFonts"))
+    if fonts is None:
+        fonts = OxmlElement("w:rFonts")
+        rpr.insert(0, fonts)
+    for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
+        fonts.attrib.pop(qn(attr), None)
     for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-        rfonts.set(qn(attr), BODY_FONT)
-    rpr.append(rfonts)
-    if bold:
-        rpr.append(_el("w:b"))
-    if small_caps:
-        rpr.append(_el("w:smallCaps"))
-    if color:
-        rpr.append(_el("w:color", **{"w:val": color}))
-    if size_pt:
-        rpr.append(_el("w:sz", **{"w:val": int(size_pt * 2)}))
+        fonts.set(qn(attr), FONT)
 
 
-def add_multilevel_numbering(doc):
-    """Define a real 1. / 1.1. / 1.1.1. / (a) list so Word renumbers on edit."""
-    numbering = doc.part.numbering_part.element
-
-    abstract = _el("w:abstractNum", **{"w:abstractNumId": ABSTRACT_ID})
-    abstract.append(_el("w:multiLevelType", **{"w:val": "hybridMultilevel"}))
-
-    # (indent, hanging) per level; the heading level sits flush so its navy
-    # bar spans the full text width.
-    layout = [(0, 0), (720, 720), (1440, 720), (2160, 720)]
-
-    for lvl, (left, hanging) in enumerate(layout):
-        el = _el("w:lvl", **{"w:ilvl": lvl})
-        el.append(_el("w:start", **{"w:val": 1}))
-        if lvl == 3:
-            el.append(_el("w:numFmt", **{"w:val": "lowerLetter"}))
-            text = "(%4)"
-        else:
-            el.append(_el("w:numFmt", **{"w:val": "decimal"}))
-            text = ".".join(f"%{i + 1}" for i in range(lvl + 1)) + "."
-        el.append(_el("w:lvlText", **{"w:val": text}))
-        el.append(_el("w:lvlJc", **{"w:val": "left"}))
-
-        ppr = OxmlElement("w:pPr")
-        ppr.append(_el("w:ind", **{"w:left": left, "w:hanging": hanging}))
-        el.append(ppr)
-        abstract.append(el)
-
-    numbering.insert(0, abstract)
-
-    num = _el("w:num", **{"w:numId": NUM_ID})
-    num.append(_el("w:abstractNumId", **{"w:val": ABSTRACT_ID}))
-    numbering.append(num)
+def bottom_rule(ppr, size=6, space=1):
+    borders = OxmlElement("w:pBdr")
+    borders.append(_el("w:bottom", **{"w:val": "single", "w:sz": size, "w:space": space, "w:color": "000000"}))
+    ppr_insert(ppr, borders)
 
 
-def set_number(paragraph, level):
-    ppr = paragraph._p.get_or_add_pPr()
+def numbering_ref(ppr, num_id, level):
     numpr = OxmlElement("w:numPr")
     numpr.append(_el("w:ilvl", **{"w:val": level}))
-    numpr.append(_el("w:numId", **{"w:val": NUM_ID}))
-    _ppr_insert(ppr, numpr)
+    numpr.append(_el("w:numId", **{"w:val": num_id}))
+    ppr_insert(ppr, numpr)
 
 
-def add_field(paragraph, instruction, size_pt=SMALL_PT):
-    """Insert a Word field code (PAGE, NUMPAGES) that updates on open."""
-    run = paragraph.add_run()
-    run.font.name = BODY_FONT
-    run.font.size = Pt(size_pt)
-    begin = _el("w:fldChar", **{"w:fldCharType": "begin"})
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = f" {instruction} "
-    end = _el("w:fldChar", **{"w:fldCharType": "end"})
-    run._r.append(begin)
-    run._r.append(instr)
-    run._r.append(end)
-
-
-def rule(paragraph, edges=("bottom",), color="000000", size=6):
-    ppr = paragraph._p.get_or_add_pPr()
-    borders = OxmlElement("w:pBdr")
-    for edge in ("top", "left", "bottom", "right"):
-        if edge in edges:
-            borders.append(_el(f"w:{edge}", **{
-                "w:val": "single", "w:sz": size, "w:space": 4, "w:color": color}))
-    _ppr_insert(ppr, borders)
+def indent(ppr, left, hanging=None, right=None):
+    attrs = {"w:left": left}
+    if hanging is not None:
+        attrs["w:hanging"] = hanging
+    if right is not None:
+        attrs["w:right"] = right
+    ppr_insert(ppr, _el("w:ind", **attrs))
 
 
 def cell_fill(cell, fill):
     tcpr = cell._tc.get_or_add_tcPr()
-    _insert(tcpr, _el("w:shd", **{
-        "w:val": "clear", "w:color": "auto", "w:fill": fill}), TCPR_ORDER)
+    _insert(tcpr, _el("w:shd", **{"w:val": "clear", "w:color": "auto", "w:fill": fill}), TCPR_ORDER)
 
 
-def cell_margins(table, top=144, bottom=144, left=108, right=108):
-    tblpr = table._tbl.tblPr
+def cell_margins(table, top, bottom, left=108, right=108):
     mar = OxmlElement("w:tblCellMar")
-    for edge, val in (("top", top), ("left", left),
-                      ("bottom", bottom), ("right", right)):
+    for edge, val in (("top", top), ("left", left), ("bottom", bottom), ("right", right)):
         mar.append(_el(f"w:{edge}", **{"w:w": val, "w:type": "dxa"}))
-    _insert(tblpr, mar, TBLPR_ORDER)
+    _insert(table._tbl.tblPr, mar, TBLPR_ORDER)
 
 
-def no_borders(table):
-    tblpr = table._tbl.tblPr
+def table_borders(table, val="single"):
     borders = OxmlElement("w:tblBorders")
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        borders.append(_el(f"w:{edge}", **{"w:val": "none", "w:sz": 0}))
-    _insert(tblpr, borders, TBLPR_ORDER)
+        attrs = {"w:val": val}
+        if val != "nil":
+            attrs.update({"w:sz": 4, "w:space": 0, "w:color": "000000"})
+        borders.append(_el(f"w:{edge}", **attrs))
+    _insert(table._tbl.tblPr, borders, TBLPR_ORDER)
+
+
+def table_width(table, twips, indent_twips=0):
+    tblpr = table._tbl.tblPr
+    _insert(tblpr, _el("w:tblW", **{"w:w": twips, "w:type": "dxa"}), TBLPR_ORDER)
+    if indent_twips:
+        _insert(tblpr, _el("w:tblInd", **{"w:w": indent_twips, "w:type": "dxa"}), TBLPR_ORDER)
+    _insert(tblpr, _el("w:tblLayout", **{"w:type": "fixed"}), TBLPR_ORDER)
+
+
+def add_field(paragraph, instruction, size_pt=SMALL_PT):
+    """A Word field (PAGE, NUMPAGES) that updates when the file is opened."""
+    run = paragraph.add_run()
+    run.font.name = FONT
+    run.font.size = Pt(size_pt)
+    run._r.append(_el("w:fldChar", **{"w:fldCharType": "begin"}))
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = f" {instruction} "
+    run._r.append(instr)
+    run._r.append(_el("w:fldChar", **{"w:fldCharType": "separate"}))
+    placeholder = OxmlElement("w:t")
+    placeholder.text = "1"
+    run._r.append(placeholder)
+    run._r.append(_el("w:fldChar", **{"w:fldCharType": "end"}))
 
 
 # --------------------------------------------------------------------------
-# document setup
+# numbering and styles
 # --------------------------------------------------------------------------
 
-def build_styles(doc, heading_pt):
+def _level(ilvl, fmt, text, left, hanging, rpr=None):
+    lvl = _el("w:lvl", **{"w:ilvl": ilvl})
+    lvl.append(_el("w:start", **{"w:val": 1}))
+    lvl.append(_el("w:numFmt", **{"w:val": fmt}))
+    lvl.append(_el("w:lvlText", **{"w:val": text}))
+    lvl.append(_el("w:lvlJc", **{"w:val": "left"}))
+    ppr = OxmlElement("w:pPr")
+    ppr.append(_el("w:ind", **{"w:left": left, "w:hanging": hanging}))
+    lvl.append(ppr)
+    if rpr is not None:
+        lvl.append(rpr)
+    return lvl
+
+
+def build_numbering(doc):
+    numbering = doc.part.numbering_part.element
+    for child in list(numbering):
+        numbering.remove(child)
+
+    # The outline. Numbers sit at the margin for 1. and 1.1. with the text at
+    # half an inch; 1.1.1. numbers sit under that text with its own text at
+    # one inch - the positions the firm's circulated documents use.
+    outline = _el("w:abstractNum", **{"w:abstractNumId": OUTLINE[0]})
+    outline.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
+    plain = OxmlElement("w:rPr")
+    plain.append(_el("w:u", **{"w:val": "none"}))
+    outline.append(_level(0, "decimal", "%1.", 720, 720))
+    outline.append(_level(1, "decimal", "%1.%2.", 720, 720, plain))
+    outline.append(_level(2, "decimal", "%1.%2.%3.", 1440, 720))
+    for ilvl in range(3, 9):
+        outline.append(_level(ilvl, "decimal", "%1.%2.%3." + "".join(f"%{i + 1}." for i in range(3, ilvl + 1)), 1440 + 360 * (ilvl - 2), 720))
+    numbering.append(outline)
+
+    # Lists: (a) -> (i) -> A., the Guide's scheme, one step in from the text
+    # of the paragraph they belong to.
+    for abstract_id, base in ((LIST_UNDER_BODY1, 720), (LIST_UNDER_BODY2, 1440)):
+        lists = _el("w:abstractNum", **{"w:abstractNumId": abstract_id})
+        lists.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
+        lists.append(_level(0, "lowerLetter", "(%1)", base + 720, 720))
+        lists.append(_level(1, "lowerRoman", "(%2)", base + 1440, 720))
+        lists.append(_level(2, "upperLetter", "%3.", base + 2160, 720))
+        numbering.append(lists)
+
+    num = _el("w:num", **{"w:numId": OUTLINE[1]})
+    num.append(_el("w:abstractNumId", **{"w:val": OUTLINE[0]}))
+    numbering.append(num)
+    return numbering
+
+
+class ListNumbers:
+    """A fresh w:num per list, so every list starts again at (a)."""
+
+    def __init__(self, numbering):
+        self.numbering = numbering
+        self.next_id = 7400
+
+    def new(self, abstract_id):
+        num_id = self.next_id
+        self.next_id += 1
+        num = _el("w:num", **{"w:numId": num_id})
+        num.append(_el("w:abstractNumId", **{"w:val": abstract_id}))
+        for ilvl in range(3):
+            override = _el("w:lvlOverride", **{"w:ilvl": ilvl})
+            override.append(_el("w:startOverride", **{"w:val": 1}))
+            num.append(override)
+        self.numbering.append(num)
+        return num_id
+
+
+def style(doc, name, base="Normal", size=None, bold=None, italic=None, small_caps=None,
+          underline=None, color=None, align=None, before=None, after=None,
+          keep_next=False, outline=None, numbered=None, rule=False, left=None, hanging=None, right=None):
+    st = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+    st.base_style = doc.styles[base]
+    st.quick_style = True
+    font = st.font
+    if size:
+        font.size = Pt(size)
+    if bold is not None:
+        font.bold = bold
+    if italic is not None:
+        font.italic = italic
+    if small_caps is not None:
+        font.small_caps = small_caps
+    if underline is not None:
+        font.underline = underline
+    if color:
+        font.color.rgb = RGBColor.from_string(color)
+    pf = st.paragraph_format
+    if align is not None:
+        pf.alignment = align
+    if before is not None:
+        pf.space_before = Pt(before)
+    if after is not None:
+        pf.space_after = Pt(after)
+    if keep_next:
+        pf.keep_with_next = True
+    ppr = st.element.get_or_add_pPr()
+    if numbered is not None:
+        numbering_ref(ppr, OUTLINE[1], numbered)
+    if rule:
+        bottom_rule(ppr)
+    if left is not None:
+        indent(ppr, left, hanging, right)
+    if outline is not None:
+        ppr_insert(ppr, _el("w:outlineLvl", **{"w:val": outline}))
+    arial(st.element.get_or_add_rPr())
+    return st
+
+
+def build_styles(doc):
+    part = doc.styles.element
+    defaults = part.find(qn("w:docDefaults"))
+    if defaults is not None:
+        rpr = defaults.find(qn("w:rPrDefault") + "/" + qn("w:rPr"))
+        if rpr is not None:
+            arial(rpr)
+
     normal = doc.styles["Normal"]
-    normal.font.name = BODY_FONT
+    normal.font.name = FONT
     normal.font.size = Pt(BODY_PT)
     normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    normal.paragraph_format.space_after = Pt(8)
-    # East-Asian font mapping, so Arial actually sticks in Word
-    rpr = normal.element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = OxmlElement("w:rFonts")
-        rpr.append(rfonts)
-    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-        rfonts.set(qn(attr), BODY_FONT)
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(10)
+    normal.paragraph_format.line_spacing = 1.0
+    arial(normal.element.get_or_add_rPr())
 
-    # Heading 1 = navy bar, gold text. Heading 2 = black, bold, underlined.
-    for name, size, color, underline in (
-        ("Heading 1", heading_pt, GOLD, False),
-        ("Heading 2", BODY_PT, "000000", True),
-    ):
-        st = doc.styles[name]
-        st.font.name = BODY_FONT
-        st.font.size = Pt(size)
-        st.font.bold = True
-        st.font.underline = underline
-        st.font.color.rgb = RGBColor.from_string(color)
-        st.font.small_caps = True
-        st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        st.paragraph_format.space_before = Pt(12)
-        st.paragraph_format.space_after = Pt(6)
-        st.paragraph_format.keep_with_next = True
-        # The default template's heading styles name theme fonts, and in Word
-        # a theme font outranks the Arial set beside it.
-        fonts = st.element.get_or_add_rPr().find(qn("w:rFonts"))
-        if fonts is not None:
-            for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
-                fonts.attrib.pop(qn(attr), None)
-            for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-                fonts.set(qn(attr), BODY_FONT)
+    LEFT, CENTER = WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER
+    style(doc, "AKLA Title", size=TITLE_PT, bold=True, small_caps=True, color=GOLD, align=CENTER, before=0, after=0)
+    style(doc, "AKLA Front", align=LEFT, after=4)
+    style(doc, "AKLA Heading 1", size=HEADING_PT, bold=True, small_caps=True, align=LEFT, before=12, after=10,
+          keep_next=True, outline=0, numbered=0, rule=True)
+    style(doc, "AKLA Heading 2", bold=True, small_caps=True, underline=True, align=LEFT, before=4, after=10,
+          keep_next=True, outline=1, numbered=1)
+    style(doc, "AKLA Body 1", numbered=1)
+    style(doc, "AKLA Body 2", numbered=2)
+    style(doc, "AKLA Divider", bold=True, small_caps=True, align=CENTER, before=12, after=10, keep_next=True, rule=True)
+    style(doc, "AKLA List", after=6)
+    style(doc, "AKLA Quote", italic=True, after=10)
+    style(doc, "AKLA Table Text", align=LEFT, before=0, after=0)
+    style(doc, "AKLA Table Header", bold=True, small_caps=True, color=GOLD, align=CENTER, before=0, after=0)
+    style(doc, "AKLA Header", size=SMALL_PT, small_caps=True, align=LEFT, before=0, after=0)
+    style(doc, "AKLA Footer", size=SMALL_PT, align=CENTER, before=0, after=0)
 
 
-def build_header(section, title, status, notice, date, logo):
-    """The four-line reference strip on the left, the AK emblem on the right."""
-    lines = [
-        (line, True, "000000") for line in (title or "").split("|") if line.strip()
-    ]
+# --------------------------------------------------------------------------
+# page furniture
+# --------------------------------------------------------------------------
+
+def build_page(doc, args):
+    section = doc.sections[0]
+    section.page_width, section.page_height = PAGE_W, PAGE_H
+    for attr in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
+        setattr(section, attr, MARGIN)
+    section.header_distance = Inches(0.5)
+    section.footer_distance = Inches(0.5)
+
+    # The Guide: the first page is clean - no reference strip, no page
+    # number. Every page after carries both.
+    section.different_first_page_header_footer = True
+    for part in (section.first_page_header, section.first_page_footer):
+        part.is_linked_to_previous = False
+        part.paragraphs[0].style = doc.styles["AKLA Footer"]
+
+    footer = section.footer.paragraphs[0]
+    footer.style = doc.styles["AKLA Footer"]
+    for text, field in (("Page ", "PAGE"), (" of ", "NUMPAGES")):
+        run = footer.add_run(text)
+        run.font.size = Pt(SMALL_PT)
+        add_field(footer, field)
+
+    build_header(doc, section, args.doc_title, args.doc_status, args.doc_notice, args.doc_date, args.logo)
+
+
+def build_header(doc, section, title, status, notice, date, logo):
+    """The reference strip on the left, the AK emblem on the right."""
+    lines = [(line.strip(), True, "000000") for line in (title or "").split("|") if line.strip()]
     if status:
         lines.append((status, False, "000000"))
     if notice:
         lines.append((notice, False, RED))
     if date:
         lines.append((date, False, "000000"))
+    header = section.header
+    original = header.paragraphs[0]
     if not lines and not logo:
         return
-
-    original = section.header.paragraphs[0]
-    table = section.header.add_table(rows=1, cols=2, width=TEXT_WIDTH)
+    table = header.add_table(rows=1, cols=2, width=Inches(6.27))
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
-    no_borders(table)
-    cell_margins(table, top=0, bottom=0, left=0, right=0)
-
+    table_borders(table, "nil")
+    cell_margins(table, 0, 0, 0, 0)
     left, right = table.rows[0].cells
-    left.width = Inches(5.4)
-    right.width = Inches(1.1)
-
-    first = True
-    for text, bold, color in lines:
-        p = left.paragraphs[0] if first else left.add_paragraph()
-        first = False
-        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        p.paragraph_format.space_after = Pt(0)
-        p.paragraph_format.space_before = Pt(0)
-        run = p.add_run(text.strip())
-        run.font.name = BODY_FONT
-        run.font.size = Pt(SMALL_PT)
+    left.width, right.width = Inches(5.2), Inches(1.07)
+    for i, (text, bold, color) in enumerate(lines):
+        p = left.paragraphs[0] if i == 0 else left.add_paragraph()
+        p.style = doc.styles["AKLA Header"]
+        run = p.add_run(text)
         run.font.bold = bold
-        run.font.small_caps = True
         run.font.color.rgb = RGBColor.from_string(color)
-
     rp = right.paragraphs[0]
+    rp.style = doc.styles["AKLA Header"]
     rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    rp.paragraph_format.space_after = Pt(0)
     if logo and os.path.exists(logo):
         rp.add_run().add_picture(logo, height=Inches(0.55))
     elif logo:
         print(f"warning: logo not found at {logo}", file=sys.stderr)
-
-    trailing = section.header.add_paragraph()
-    trailing.paragraph_format.space_after = Pt(0)
-    for run in trailing.runs:
-        run.font.size = Pt(1)
+    # The header part must end in a paragraph; keep it as small as possible.
     original._element.getparent().remove(original._element)
-
-
-def build_page(doc, args):
-    section = doc.sections[0]
-    section.different_first_page_header_footer = False
-    for attr in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
-        setattr(section, attr, Inches(1))
-
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    def small(text):
-        r = footer.add_run(text)
-        r.font.name = BODY_FONT
-        r.font.size = Pt(SMALL_PT)
-
-    small("Page ")
-    add_field(footer, "PAGE")
-    small(" of ")
-    add_field(footer, "NUMPAGES")
-
-    build_header(section, args.doc_title, args.doc_status, args.doc_notice,
-                 args.doc_date, args.logo)
+    tail = header.add_paragraph()
+    tail.style = doc.styles["AKLA Header"]
+    tail.paragraph_format.space_after = Pt(6)
 
 
 # --------------------------------------------------------------------------
-# markdown -> paragraphs
+# comments
 # --------------------------------------------------------------------------
-
-INLINE = re.compile(r"(\*\*.+?\*\*|\*.+?\*|_.+?_)")
 
 # The closing "]]" is the last pair in a run of brackets, so a comment that
 # ends on a placeholder - "... PKR [●]" - keeps its own bracket.
@@ -405,7 +467,6 @@ def fold_footnotes(markdown):
             continue
         body = [m.group(2)]
         i += 1
-        # indented continuation lines belong to the same note
         while i < len(lines) and lines[i].startswith(("    ", "\t")) and lines[i].strip():
             body.append(lines[i].strip())
             i += 1
@@ -413,7 +474,6 @@ def fold_footnotes(markdown):
     if not notes:
         return markdown
     text = FOOTNOTE_REF.sub(lambda m: f"[[AKLA Comment: {notes[m.group(1)]}]]" if m.group(1) in notes else "", "\n".join(kept))
-    # an "AKLA Comments" heading with nothing left beneath it
     return re.sub(r"(?im)^#{1,4}\s*AKLA\s+Comments?\s*$\s*(?=^#|\Z)", "", text)
 
 
@@ -433,86 +493,94 @@ def attach_comments(doc, paragraph, notes):
         doc.add_comment(runs, text=note, author=COMMENT_AUTHOR, initials="AKLA")
 
 
-def add_runs(paragraph, text, color=None, size_pt=None, small_caps=False,
-             bold=False, italic=False):
+# --------------------------------------------------------------------------
+# text
+# --------------------------------------------------------------------------
+
+INLINE = re.compile(r"(\*\*.+?\*\*|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)")
+
+
+def add_runs(paragraph, text):
+    """Runs for a line: **bold**, *italic*, and the firm's name in italic navy."""
     for token in filter(None, INLINE.split(text)):
-        if token.startswith("**") and token.endswith("**"):
-            run = paragraph.add_run(token[2:-2])
-            run.bold = True
-        elif len(token) > 2 and token[0] in "*_" and token[-1] == token[0]:
-            run = paragraph.add_run(token[1:-1])
-            run.italic = True
-        else:
-            run = paragraph.add_run(token)
-        run.font.name = BODY_FONT
-        if bold:
-            run.bold = True
-        if italic:
-            run.italic = True
-        if small_caps:
-            run.font.small_caps = True
-        if color:
-            run.font.color.rgb = RGBColor.from_string(color)
-        if size_pt:
-            run.font.size = Pt(size_pt)
+        bold = token.startswith("**") and token.endswith("**") and len(token) > 4
+        italic = not bold and len(token) > 2 and token[0] in "*_" and token[-1] == token[0]
+        inner = token[2:-2] if bold else token[1:-1] if italic else token
+        for piece in filter(None, FIRM_NAME.split(inner)):
+            run = paragraph.add_run(piece)
+            if bold:
+                run.bold = True
+            if italic:
+                run.italic = True
+            if FIRM_NAME.fullmatch(piece):
+                # The Guide: the firm's name in running text is italic, dark blue.
+                run.italic = True
+                run.font.color.rgb = RGBColor.from_string(NAVY)
 
 
-def add_banner(doc, text, heading_pt):
-    """The navy title block, gold Small Caps, as on the proposal cover."""
+def banner(doc, text):
     table = doc.add_table(rows=1, cols=1)
-    table.autofit = False
-    no_borders(table)
-    cell_margins(table, top=144, bottom=144, left=144, right=144)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table_borders(table, "nil")
+    table_width(table, TEXT_TWIPS)
+    cell_margins(table, 288, 288, 144, 144)
     cell = table.rows[0].cells[0]
-    cell.width = TEXT_WIDTH
     cell_fill(cell, NAVY)
     p = cell.paragraphs[0]
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_after = Pt(0)
-    add_runs(p, text, color=GOLD, size_pt=heading_pt, small_caps=True, bold=True)
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    p.style = doc.styles["AKLA Title"]
+    add_runs(p, text)
+    doc.add_paragraph(style="AKLA Front").paragraph_format.space_after = Pt(6)
 
 
-def add_box(doc, lines):
-    """Shaded centered box for a figure that must not be missed."""
+def box(doc, lines, indent_twips):
     table = doc.add_table(rows=1, cols=1)
-    table.autofit = False
-    cell_margins(table, top=144, bottom=144, left=144, right=144)
+    table_borders(table, "nil")
+    table_width(table, TEXT_TWIPS - indent_twips, indent_twips)
+    cell_margins(table, 144, 144, 144, 144)
     cell = table.rows[0].cells[0]
-    cell.width = TEXT_WIDTH
     cell_fill(cell, SHADE)
     for i, line in enumerate(lines):
         p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+        p.style = doc.styles["AKLA Table Text"]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.space_after = Pt(0)
-        add_runs(p, line, small_caps=True, bold=True)
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+        run_start = len(p.runs)
+        add_runs(p, line)
+        for run in p.runs[run_start:]:
+            run.bold = True
+            run.font.small_caps = True
+    doc.add_paragraph(style="AKLA Front").paragraph_format.space_after = Pt(4)
 
 
-def add_table(doc, rows):
+def data_table(doc, rows, indent_twips):
     header, body = rows[0], rows[1:]
-    table = doc.add_table(rows=len(rows), cols=len(header))
-    table.style = "Table Grid"
-    cell_margins(table)
-
+    cols = len(header)
+    table = doc.add_table(rows=len(rows), cols=cols)
+    table_borders(table)
+    width = TEXT_TWIPS - indent_twips
+    table_width(table, width, indent_twips)
+    cell_margins(table, 144, 144)
+    grid = table._tbl.find(qn("w:tblGrid"))
+    for col in grid.findall(qn("w:gridCol")):
+        col.set(qn("w:w"), str(width // cols))
+    trpr = table.rows[0]._tr.get_or_add_trPr()
+    _insert(trpr, _el("w:tblHeader"), TRPR_ORDER)
     for j, text in enumerate(header):
-        text, _ = take_comments(text)
         cell = table.rows[0].cells[j]
+        cell.width = width * 635 // cols
         cell_fill(cell, NAVY)
         p = cell.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        add_runs(p, text, color=GOLD, small_caps=True, bold=True)
-
+        p.style = doc.styles["AKLA Table Header"]
+        add_runs(p, take_comments(text)[0])
     for i, row in enumerate(body, start=1):
-        for j, text in enumerate(row):
-            if j >= len(header):
-                continue
-            p = table.rows[i].cells[j].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            text, notes = take_comments(text)
+        for j in range(cols):
+            cell = table.rows[i].cells[j]
+            cell.width = width * 635 // cols
+            p = cell.paragraphs[0]
+            p.style = doc.styles["AKLA Table Text"]
+            text, notes = take_comments(row[j] if j < len(row) else "")
             add_runs(p, text)
             attach_comments(doc, p, notes)
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    doc.add_paragraph(style="AKLA Front").paragraph_format.space_after = Pt(4)
 
 
 def split_row(line):
@@ -520,105 +588,103 @@ def split_row(line):
 
 
 DIVIDER = re.compile(r"^\|[\s:|-]+\|$")
+ITEM = re.compile(r"^(\s*)(?:[-*•]|\d{1,2}[.)]|\([a-z]{1,4}\))\s+(.*)$")
 
 
-def render(doc, markdown, heading_pt):
+def render(doc, markdown, numbering):
+    lists = ListNumbers(numbering)
     title_done = False
-    in_sections = False  # text before the first section is front matter
-    body_level = 2       # 1.1. under a section heading, 1.1.1. under a sub-heading
-    last = None  # the paragraph a free-standing comment belongs to
+    in_sections = False
+    body_level = 1        # the outline level body text takes where it stands
+    list_num = None       # the w:num of the list in progress, if any
+    last = None
     lines = fold_footnotes(markdown).replace("\r\n", "\n").split("\n")
     i = 0
     while i < len(lines):
-        line, notes = take_comments(lines[i].strip())
+        raw = lines[i]
+        line, notes = take_comments(raw.strip())
         i += 1
         if not line:
             attach_comments(doc, last, notes)
             continue
 
-        # pipe table: header row, divider row, then body rows
+        text_indent = 720 if body_level == 1 else 1440   # where body text starts
+
+        if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", line):
+            # A Markdown rule is a visual separator, not a paragraph.
+            attach_comments(doc, last, notes)
+            list_num = None
+            continue
+
         if line.startswith("|") and i < len(lines) and DIVIDER.match(lines[i].strip()):
             rows = [split_row(line)]
             i += 1
             while i < len(lines) and lines[i].strip().startswith("|"):
                 rows.append(split_row(lines[i]))
                 i += 1
-            add_table(doc, rows)
+            data_table(doc, rows, text_indent if in_sections else 0)
+            list_num = None
             continue
 
-        # boxed figure: consecutive ::: lines form one box
         if line.startswith(":::"):
-            box = [line[3:].strip()]
+            group = [line[3:].strip()]
             while i < len(lines) and lines[i].strip().startswith(":::"):
-                box.append(lines[i].strip()[3:].strip())
+                group.append(lines[i].strip()[3:].strip())
                 i += 1
-            add_box(doc, box)
+            box(doc, group, text_indent if in_sections else 0)
+            list_num = None
             continue
 
         heading = re.match(r"^(#{1,4})\s+(.*)$", line)
         if heading:
             depth, text = len(heading.group(1)), heading.group(2).strip()
+            text = re.sub(r"^(\d+(\.\d+)*\.?|[A-Z]\.|[IVX]+\.)\s+", "", text)  # typed numbers
+            list_num = None
             if depth == 1:
-                add_banner(doc, text, heading_pt)
+                banner(doc, text)
                 title_done = True
                 if notes:
                     print("warning: a comment on the title was dropped", file=sys.stderr)
-            elif depth == 4:
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.paragraph_format.space_before = Pt(12)
-                p.paragraph_format.space_after = Pt(10)
-                add_runs(p, text, small_caps=True, bold=True, size_pt=BODY_PT)
-                rule(p, edges=("top", "bottom"))
-                attach_comments(doc, p, notes)
-                last = p
+                continue
+            if depth == 4:
+                p = doc.add_paragraph(style="AKLA Divider")
             else:
                 in_sections = True
-                p = doc.add_paragraph(style=f"Heading {depth - 1}")
+                p = doc.add_paragraph(style="AKLA Heading 1" if depth == 2 else "AKLA Heading 2")
                 body_level = 1 if depth == 2 else 2
-                add_runs(p, text,
-                         color=GOLD if depth == 2 else "000000",
-                         size_pt=heading_pt if depth == 2 else BODY_PT,
-                         small_caps=True, bold=True)
-                set_number(p, depth - 2)
-                if depth == 2:
-                    shade_paragraph(p, NAVY)
-                    set_indent(p, left=0, hanging=0)
-                    set_mark_format(p, color=GOLD, bold=True,
-                                    size_pt=heading_pt, small_caps=True)
-                    p.paragraph_format.line_spacing = 1.15
-                attach_comments(doc, p, notes)
-                last = p
+            add_runs(p, text)
+            attach_comments(doc, p, notes)
+            last = p
             continue
 
         quote = re.match(r"^>\s?(.*)$", line)
         if quote:
-            p = doc.add_paragraph()
-            p.paragraph_format.left_indent = Inches(1.75)
-            p.paragraph_format.right_indent = Inches(0.5)
-            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            add_runs(p, quote.group(1), italic=True)
+            p = doc.add_paragraph(style="AKLA Quote")
+            left = (text_indent if in_sections else 0) + 720
+            indent(p._p.get_or_add_pPr(), left, right=720)
+            add_runs(p, quote.group(1))
             attach_comments(doc, p, notes)
             last = p
             continue
 
-        item = re.match(r"^[-*•]\s+(.*)$", line)
+        item = ITEM.match(take_comments(raw.rstrip())[0]) if in_sections else None
         if item:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(6)
-            add_runs(p, item.group(1))
-            if in_sections:
-                set_number(p, 3)
+            depth = min(2, len(item.group(1).replace("\t", "    ")) // 2)
+            if list_num is None:
+                list_num = lists.new(LIST_UNDER_BODY1 if body_level == 1 else LIST_UNDER_BODY2)
+            p = doc.add_paragraph(style="AKLA List")
+            numbering_ref(p._p.get_or_add_pPr(), list_num, depth)
+            add_runs(p, item.group(2).strip())
             attach_comments(doc, p, notes)
             last = p
             continue
 
-        p = doc.add_paragraph()
-        add_runs(p, line)
-        if in_sections:
-            set_number(p, body_level)
+        list_num = None
+        if not in_sections:
+            p = doc.add_paragraph(style="AKLA Front")
         else:
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p = doc.add_paragraph(style="AKLA Body 1" if body_level == 1 else "AKLA Body 2")
+        add_runs(p, line)
         attach_comments(doc, p, notes)
         last = p
 
@@ -628,22 +694,16 @@ def render(doc, markdown, heading_pt):
 
 def main():
     default_logo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "akla-logo.png")
-
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", help="Markdown file to render, or - for stdin")
     ap.add_argument("-o", "--out", required=True, help="output .docx path")
-    ap.add_argument("--heading-pt", type=int, default=13,
-                    help="major-heading size (default: 13)")
-    ap.add_argument("--doc-title", default="",
-                    help="header reference strip, bold; use | to split lines")
-    ap.add_argument("--doc-status", default="",
-                    help="header version line, e.g. 'First Circulation Version'")
-    ap.add_argument("--doc-notice", default="Privileged And Confidential",
-                    help="header confidentiality line, printed in red")
+    ap.add_argument("--doc-title", default="", help="header reference strip, bold; use | to split lines")
+    ap.add_argument("--doc-status", default="", help="header version line, e.g. 'First Circulation Version'")
+    ap.add_argument("--doc-notice", default="Privileged And Confidential", help="header confidentiality line, printed in red")
     ap.add_argument("--doc-date", default="", help="header date line")
-    ap.add_argument("--logo", default=default_logo,
-                    help="header emblem (default: the bundled AK mark)")
+    ap.add_argument("--logo", default=default_logo, help="header emblem (default: the bundled AK mark)")
     ap.add_argument("--no-logo", action="store_true")
+    ap.add_argument("--heading-pt", type=int, default=HEADING_PT, help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.no_logo:
         args.logo = ""
@@ -655,10 +715,13 @@ def main():
             markdown = fh.read()
 
     doc = Document()
-    add_multilevel_numbering(doc)
-    build_styles(doc, args.heading_pt)
+    numbering = build_numbering(doc)
+    build_styles(doc)
     build_page(doc, args)
-    render(doc, markdown, args.heading_pt)
+    body = doc.element.body
+    for p in list(body.findall(qn("w:p"))):
+        body.remove(p)   # the template's empty first paragraph
+    render(doc, markdown, numbering)
     doc.save(args.out)
     print(args.out)
 
