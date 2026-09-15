@@ -1,5 +1,5 @@
 // The same source gate is used by interactive research and statute resolution.
-export const OFFICIAL_DOMAINS = ['gov.pk', 'sbp.org.pk', 'nepra.org.pk', 'ogra.org.pk', 'na.gov.pk', 'senate.gov.pk'];
+export const OFFICIAL_DOMAINS = ['gov.pk', 'sbp.org.pk', 'nepra.org.pk', 'ogra.org.pk', 'ppra.org.pk', 'na.gov.pk', 'senate.gov.pk'];
 export function officialUrl(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') || !OFFICIAL_DOMAINS.some(d => url.hostname === d || url.hostname.endsWith('.' + d))) {

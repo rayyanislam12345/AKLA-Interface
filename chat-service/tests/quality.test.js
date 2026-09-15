@@ -338,3 +338,23 @@ test('a follow-up works on the document the lawyer means, not just the last one 
   assert.equal(chooseWorkingDocument([note, noteEdited], { message: 'anything' }).chosen.id, 'n2');
   assert.equal(chooseWorkingDocument([], {}).chosen, null);
 });
+
+test('the law lookup finds a law the library already holds under any of its titles', async () => {
+  const { findInLibrary, describeLookup } = await import('../research.js');
+  const library = [
+    { act_name: 'Public Private Partnership Authority Act, 2017', chunk_count: 30 },
+    { act_name: 'Public Private Partnership Authority Act, 2017 (Act No. VIII of 2017)', chunk_count: 9 },
+    { act_name: 'National Highway Authority Act, 1991', chunk_count: 6 },
+    { act_name: 'Public Procurement Regulatory Authority Ordinance (PPRA), 2002', chunk_count: 5 },
+    { act_name: 'THE STATE-OWNED ENTERPRISES (GOVERNANCE AND OPERATIONS) ACT, 2023', chunk_count: 12 },
+  ];
+  assert.equal(findInLibrary('The Public Private Partnership Authority Act, 2017.', library).act_name, 'Public Private Partnership Authority Act, 2017');
+  assert.equal(findInLibrary('National Highway Authority Act 1991', library).chunk_count, 6);
+  assert.equal(findInLibrary('State-Owned Enterprises (Governance and Operations) Act, 2023', library).chunk_count, 12);
+  assert.equal(findInLibrary('Public Procurement Rules, 2004', library), null, 'a different instrument is not a match');
+  assert.equal(findInLibrary('National Highway Authority Act, 1990', library), null, 'a different year is not a match');
+  const line = describeLookup({ status: 'partial', sources: [{}, {}], fromLibrary: ['National Highway Authority Act, 1991', 'Public Private Partnership Authority Act, 2017'], downloaded: [], failures: ["Public Procurement Rules, 2004 — the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)"], unresolved: ['M-6 corridor jurisdiction not evidenced'] });
+  assert.ok(line.startsWith('Law lookup: used 2 from the law library'));
+  assert.ok(line.includes('Could not obtain: Public Procurement Rules, 2004'));
+  assert.ok(!line.includes('M-6 corridor'), 'open points about the project are not mixed into the lookup');
+});
