@@ -78,7 +78,12 @@ const MAX_ATTACHMENT_CHARS = 60_000;
 const MAX_ATTACHMENTS_TOTAL_CHARS = 400_000;
 // "The project docs" attaches every document on the project, up to this many.
 const MAX_PROJECT_DOCS = 10;
-const MAX_TOKENS = 32_000;
+// Sonnet 5 thinks before it writes, and on a long, document-heavy request
+// the thinking alone filled a 32,000-token reply — five minutes, nothing
+// written, saved as an empty answer. Medium effort keeps the thinking in
+// proportion, and the ceiling leaves room for a long draft after it.
+const MAX_TOKENS = 64_000;
+const CHAT_EFFORT = "medium";
 // max_tokens is a real per-call ceiling regardless of where this runs; a
 // long agreement can need several calls. With no wall clock to respect the
 // cap is generous — 8 × 32k tokens is far beyond any document the firm writes.
@@ -295,10 +300,12 @@ async function anthropicStreamOnce(body, onDelta, signal) {
 // wrote; it is replayed as an assistant turn plus a continue instruction.
 async function anthropicComplete(body, onDelta, { initialText = "", clientSignal }) {
   const baseMessages = body.messages ?? [];
+  let request = { ...body, output_config: { effort: CHAT_EFFORT, ...(body.output_config ?? {}) } };
   let accumulated = initialText;
   let generated = "";
   let incomplete = false;
   let stoppedByClient = false;
+  let thoughtItAllAway = false;
 
   for (let attempt = 0; attempt <= MAX_CONTINUATIONS; attempt++) {
     // Not trimmed: a trailing newline tells the model whether the text
@@ -307,7 +314,7 @@ async function anthropicComplete(body, onDelta, { initialText = "", clientSignal
       ? [...baseMessages, { role: "assistant", content: accumulated }, { role: "user", content: continueInstruction(accumulated) }]
       : baseMessages;
 
-    const result = await anthropicStreamOnce({ ...body, messages }, onDelta, clientSignal);
+    const result = await anthropicStreamOnce({ ...request, messages }, onDelta, clientSignal);
     accumulated += result.text;
     generated += result.text;
 
@@ -323,10 +330,31 @@ async function anthropicComplete(body, onDelta, { initialText = "", clientSignal
       if (result.stopReason !== "end_turn") incomplete = true;
       break;
     }
-    if (!result.text) break;
+    if (!result.text) {
+      // The whole reply went on thinking and nothing was written. Once,
+      // ask again with the thinking reined in; an empty answer is never
+      // saved as if it were one.
+      if (!thoughtItAllAway) {
+        thoughtItAllAway = true;
+        console.error("chat: the reply was all thinking and no text; retrying at low effort");
+        request = { ...request, output_config: { ...request.output_config, effort: "low" } };
+        continue;
+      }
+      if (!accumulated) throw new Error("The model spent the whole reply thinking and wrote nothing. Ask again, or narrow the request to one document or one change.");
+      incomplete = true;
+      break;
+    }
     if (attempt === MAX_CONTINUATIONS) incomplete = true;
   }
   return { text: accumulated, generated, incomplete, stoppedByClient };
+}
+
+// A library search that timed out is tried once more — the second run
+// finds the index warm — and only then given up on.
+async function searchLibrary(rpc) {
+  let result = await rpc();
+  if (result.error && /statement timeout/i.test(result.error.message ?? "")) result = await rpc();
+  return result;
 }
 
 // Extracted text of stored files. A project version or chat upload never
@@ -1265,15 +1293,25 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
         // Omitted, not null: an empty act filter makes the SQL match nothing.
         if (actNames.length > 0) statuteParams.filter_act_names = actNames;
         const [m, p, s, t] = await Promise.all([
-          matterId ? supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: 6, filter_matter_id: matterId }) : none([]),
-          supabase.rpc("match_documents", {
+          matterId ? searchLibrary(() => supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: 6, filter_matter_id: matterId })) : none([]),
+          searchLibrary(() => supabase.rpc("match_documents", {
             query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: standardising ? 10 : 6, precedent_only: true,
             ...(documentType ? { filter_document_type_id: documentType.id } : {}),
-          }),
-          supabase.rpc("match_documents", statuteParams),
+          })),
+          searchLibrary(() => supabase.rpc("match_documents", statuteParams)),
           Promise.resolve({ data: templateRow }),
         ]);
-        for (const result of [m, p, s]) if (result.error) throw new Error(`Library retrieval failed: ${result.error.message}`);
+        // A search that still times out does not fail the turn when the
+        // lawyer has attached what they are asking about: the reply is
+        // grounded in those documents and says the library was not read.
+        const failed = [m, p, s].filter((result) => result.error);
+        if (failed.length) {
+          const timedOut = failed.every((result) => /statement timeout/i.test(result.error.message ?? ""));
+          if (!timedOut || !contextDocs.length) throw new Error(`Library retrieval failed: ${failed[0].error.message}`);
+          console.error(`library retrieval timed out for thread=${threadId}; answering from the attached documents`);
+          send("notice", { text: "The firm's library could not be searched in time for this message, so this reply relies on the attached documents and the conversation only." });
+          for (const result of failed) result.data = [];
+        }
         sources = [
           ...(m.data ?? []).map((x) => ({ ...x, scope: "matter" })),
           ...(p.data ?? []).map((x) => ({ ...x, scope: "precedent" })),
