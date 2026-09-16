@@ -19,6 +19,7 @@ import RecordMeetingPage from "./pages/RecordMeetingPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
 import PrecedentLibraryPage from "./pages/PrecedentLibraryPage";
 import StandardizeDocumentTypePage from "./pages/StandardizeDocumentTypePage";
+import StandardisationPage from "./pages/StandardisationPage";
 import MandateOpportunitiesPage from "./pages/MandateOpportunitiesPage";
 import WhatsAppActivityPage from "./pages/WhatsAppActivityPage";
 import ClientsPage from "./pages/ClientsPage";
@@ -126,6 +127,16 @@ const App = () => {
                       <ProtectedRoute>
                         <AppLayout>
                           <PrecedentLibraryPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/precedent-library/standardize/:documentTypeId/build"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <StandardisationPage />
                         </AppLayout>
                       </ProtectedRoute>
                     }

@@ -216,8 +216,8 @@ function AiWorkspace({ matterId }: { matterId: string }) {
 
   const sidebar = (
     <ChatSidebar
-      matterId={matterId}
-      matterName={matter?.name}
+      scopeKey={matterId}
+      subtitle={matter?.name}
       threads={threads ?? []}
       activeThreadId={activeThreadId}
       busyThreadIds={chat.busyThreadIds}

@@ -45,3 +45,36 @@ export async function acceptTrackedChanges(file: Blob): Promise<Blob> {
   }
   return zip.generateAsync({ type: "blob", mimeType: DOCX_MIME, compression: "DEFLATE" });
 }
+
+/**
+ * The same Word file with every margin comment removed — the comment marks
+ * in the body and the comment parts themselves. A master's AKLA comments
+ * are guidance for the associate building it; the standard that every
+ * future draft is filled from must not carry them into a client document.
+ */
+export async function stripComments(file: Blob): Promise<Blob> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  if (!zip.file("word/document.xml")) throw new Error("Not a Word file");
+  for (const part of Object.keys(zip.files).filter(p => /^word\/(document|header\d+|footer\d+|footnotes|endnotes)\.xml$/.test(p))) {
+    const xml = await zip.file(part)!.async("string");
+    zip.file(
+      part,
+      xml
+        .replace(/<w:commentRange(?:Start|End)\s[^>]*\/>/g, "")
+        .replace(/<w:r(?:\s[^>]*)?>(?:(?!<\/w:r>)[\s\S])*?<w:commentReference\s[^>]*\/>[\s\S]*?<\/w:r>/g, ""),
+    );
+  }
+  const commentParts = ["word/comments.xml", "word/commentsExtended.xml", "word/commentsIds.xml", "word/commentsExtensible.xml", "word/people.xml"];
+  for (const part of commentParts) if (zip.file(part)) zip.remove(part);
+  const rels = zip.file("word/_rels/document.xml.rels");
+  if (rels) {
+    const xml = await rels.async("string");
+    zip.file("word/_rels/document.xml.rels", xml.replace(/<Relationship\s[^>]*Target="(?:comments|commentsExtended|commentsIds|commentsExtensible|people)\.xml"[^>]*\/>/g, ""));
+  }
+  const types = zip.file("[Content_Types].xml");
+  if (types) {
+    const xml = await types.async("string");
+    zip.file("[Content_Types].xml", xml.replace(/<Override\s[^>]*PartName="\/word\/(?:comments|commentsExtended|commentsIds|commentsExtensible|people)\.xml"[^>]*\/>/g, ""));
+  }
+  return zip.generateAsync({ type: "blob", mimeType: DOCX_MIME, compression: "DEFLATE" });
+}

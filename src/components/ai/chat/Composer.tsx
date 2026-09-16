@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
+import { ArrowUp, BookMarked, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { type ActiveSkill, type ChatAttachment, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
 import { UPLOAD_ACCEPT } from "@/components/ai/DocumentUploadCard";
 import AddFromMatterDialog from "@/components/ai/chat/AddFromMatterDialog";
+import AddFromLibraryDialog from "@/components/ai/chat/AddFromLibraryDialog";
 import EditDocumentDialog from "@/components/ai/chat/EditDocumentDialog";
 import SkillsDialog from "@/components/ai/chat/SkillsDialog";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,10 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 interface ComposerProps {
-  matterId: string;
+  matterId?: string;
+  // A standardisation session: sources come from uploads, the Precedent
+  // Library and any project; there are no skills to choose.
+  standard?: { documentTypeId: string; documentTypeName: string };
   sending: boolean;
   initialText?: string;
   initialSkill?: ActiveSkill | null;
@@ -54,6 +58,7 @@ const BUILT_IN = [
 // for files, and chips for what's attached and which skill is in force.
 export default function Composer({
   matterId,
+  standard,
   sending,
   initialText,
   initialSkill,
@@ -75,7 +80,9 @@ export default function Composer({
   const [slashOpen, setSlashOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [addFromMatterOpen, setAddFromMatterOpen] = useState(false);
+  const [addFromLibraryOpen, setAddFromLibraryOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
+  const scope = standard ? { documentTypeId: standard.documentTypeId } : matterId!;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +125,7 @@ export default function Composer({
     await Promise.all(
       list.map(async (file, i) => {
         try {
-          const uploaded = await uploadChatFile(matterId, file);
+          const uploaded = await uploadChatFile(scope, file);
           setAttachments((prev) => prev.map((a) => (a.path === placeholders[i].path ? uploaded : a)));
         } catch (err: any) {
           setAttachments((prev) => prev.filter((a) => a.path !== placeholders[i].path));
@@ -163,7 +170,7 @@ export default function Composer({
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setText(v);
-    setSlashOpen(v.startsWith("/") && !v.includes(" ") && v.length < 30);
+    setSlashOpen(!standard && v.startsWith("/") && !v.includes(" ") && v.length < 30);
   };
 
   const onPaste = (e: React.ClipboardEvent) => {
@@ -256,7 +263,9 @@ export default function Composer({
                 onPaste={onPaste}
                 rows={1}
                 placeholder={
-                  skill?.key === "draft"
+                  standard
+                    ? "Attach the firm's earlier documents and say what the master should be — e.g. \"build the master from these three agreements\" — or ask for a change…"
+                    : skill?.key === "draft"
                     ? "Describe the deal, or just say \"draft it\"…"
                     : skill?.key === "review" || skill?.key === "verify"
                       ? "Attach a project document and press send to review it…"
@@ -322,9 +331,15 @@ export default function Composer({
                 <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
                   <Paperclip className="mr-2 h-4 w-4" />Upload a file
                 </DropdownMenuItem>
+                {standard && (
+                  <DropdownMenuItem onClick={() => setAddFromLibraryOpen(true)}>
+                    <BookMarked className="mr-2 h-4 w-4" />Add from Precedent Library
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => setAddFromMatterOpen(true)}>
-                  <FolderOpen className="mr-2 h-4 w-4" />Add from project
+                  <FolderOpen className="mr-2 h-4 w-4" />{standard ? "Add from a project" : "Add from project"}
                 </DropdownMenuItem>
+                {!standard && <>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs text-muted-foreground">Skills</DropdownMenuLabel>
                 <DropdownMenuSub>
@@ -367,9 +382,10 @@ export default function Composer({
                 <DropdownMenuItem onClick={() => setSkillsDialogOpen(true)}>
                   <Settings2 className="mr-2 h-4 w-4" />Manage skills
                 </DropdownMenuItem>
+                </>}
               </DropdownMenuContent>
             </DropdownMenu>
-            <span className="hidden text-[11px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line · / for skills</span>
+            <span className="hidden text-[11px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line{standard ? "" : " · / for skills"}</span>
           </div>
 
           {sending ? (
@@ -397,18 +413,29 @@ export default function Composer({
       </div>
 
       <AddFromMatterDialog
-        matterId={matterId}
+        matterId={standard ? undefined : matterId}
         open={addFromMatterOpen}
         onOpenChange={setAddFromMatterOpen}
         onPick={(a) => setAttachments((prev) => (prev.some((p) => p.path === a.path) ? prev : [...prev, a]))}
       />
+      {standard && (
+        <AddFromLibraryDialog
+          documentTypeId={standard.documentTypeId}
+          documentTypeName={standard.documentTypeName}
+          open={addFromLibraryOpen}
+          onOpenChange={setAddFromLibraryOpen}
+          onPick={(a) => setAttachments((prev) => (prev.some((p) => p.path === a.path) ? prev : [...prev, a]))}
+        />
+      )}
       <SkillsDialog open={skillsDialogOpen} onOpenChange={setSkillsDialogOpen} />
-      <EditDocumentDialog
-        matterId={matterId}
-        open={editPickerOpen}
-        onOpenChange={(o) => onEditPickerOpenChange?.(o)}
-        onPick={(target) => onEditDocument?.(target)}
-      />
+      {matterId && (
+        <EditDocumentDialog
+          matterId={matterId}
+          open={editPickerOpen}
+          onOpenChange={(o) => onEditPickerOpenChange?.(o)}
+          onPick={(target) => onEditDocument?.(target)}
+        />
+      )}
     </div>
   );
 }

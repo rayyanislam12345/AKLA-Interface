@@ -27,7 +27,17 @@ export interface ChatAttachment {
 }
 
 // "verify" is kept for chats saved before Verify was merged into Review.
-export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "custom";
+// "standardise" is what every message in a standardisation session carries.
+export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "custom" | "standardise";
+
+// What a conversation is about: a project, or — in a standardisation
+// session — a document type whose standard master is being built.
+export type ChatScope = { matterId: string; documentTypeId?: undefined } | { matterId?: undefined; documentTypeId: string };
+/** The cache key and the chat bucket prefix for a scope; the chat server uses the same prefix. */
+export function chatScopeKey(scope: ChatScope | string): string {
+  if (typeof scope === "string") return scope;
+  return scope.matterId ?? `standards/${scope.documentTypeId}`;
+}
 export interface ActiveSkill {
   key: SkillKey;
   documentTypeId?: string;
@@ -71,15 +81,17 @@ export function messageMetadata(m: ChatMessage): MessageMetadata {
 
 // ---------------------------------------------------------------- threads
 
-export function useChatThreads(matterId: string | undefined) {
+export function useChatThreads(scope: ChatScope | string | undefined) {
+  const key = scope ? chatScopeKey(scope) : undefined;
   return useQuery({
-    queryKey: ["chat-threads", matterId],
-    enabled: !!matterId,
+    queryKey: ["chat-threads", key],
+    enabled: !!key,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ai_chat_threads")
-        .select("*")
-        .eq("matter_id", matterId!)
+      const base = supabase.from("ai_chat_threads").select("*");
+      const scoped = typeof scope === "string" || scope!.matterId
+        ? base.eq("matter_id", typeof scope === "string" ? scope : scope!.matterId!)
+        : base.eq("document_type_id", scope!.documentTypeId!).is("matter_id", null);
+      const { data, error } = await scoped
         .order("pinned", { ascending: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
@@ -89,25 +101,26 @@ export function useChatThreads(matterId: string | undefined) {
   });
 }
 
-export function useUpdateChatThread(matterId: string | undefined) {
+// `scopeKey` is the threads list to refresh — chatScopeKey(scope).
+export function useUpdateChatThread(scopeKey: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...patch }: { id: string; title?: string; pinned?: boolean; archived?: boolean }) => {
+    mutationFn: async ({ id, ...patch }: { id: string; title?: string; pinned?: boolean; archived?: boolean; laws?: string[] }) => {
       const { error } = await supabase.from("ai_chat_threads").update(patch).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] }),
   });
 }
 
-export function useDeleteChatThread(matterId: string | undefined) {
+export function useDeleteChatThread(scopeKey: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("ai_chat_threads").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] }),
   });
 }
 
@@ -210,11 +223,12 @@ export function useDeleteCustomSkill() {
 // ---------------------------------------------------------------- uploads
 
 // A file dropped into the composer goes to the private ai-chat-files bucket,
-// scoped to the matter, and is only read by the chat function. It is NOT a
-// matter document — "Add to matter" from the chip is the deliberate step
-// that makes it part of the record.
-export async function uploadChatFile(matterId: string, file: File): Promise<ChatAttachment> {
-  const path = `${matterId}/${Date.now()}-${sanitizeStorageFilename(file.name)}`;
+// under the conversation's scope (the project, or standards/<type>), and is
+// only read by the chat function. It is NOT a matter document — "Add to
+// matter" from the chip is the deliberate step that makes it part of the
+// record.
+export async function uploadChatFile(scope: ChatScope | string, file: File): Promise<ChatAttachment> {
+  const path = `${chatScopeKey(scope)}/${Date.now()}-${sanitizeStorageFilename(file.name)}`;
   const { error } = await supabase.storage.from("ai-chat-files").upload(path, file, { contentType: file.type || undefined });
   if (error) throw error;
   return { bucket: "ai-chat-files", path, name: file.name, size: file.size, type: file.type };
@@ -358,7 +372,11 @@ export const NEW_CHAT_KEY = "new";
 const turnKey = (threadId: string | null) => threadId ?? NEW_CHAT_KEY;
 
 interface SendInput {
-  matterId: string;
+  matterId?: string;
+  /** A standardisation session: the document type whose standard is being built. */
+  documentTypeId?: string;
+  /** Standardisation only: the Acts the associate has identified, sent with each message. */
+  laws?: string[];
   threadId: string | null;
   message: string;
   attachments: ChatAttachment[];
@@ -420,7 +438,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   // rather than a key: the turn can change key mid-round (see adopt).
   const runRound = useCallback(
     async (
-      matterId: string,
+      scopeKey: string,
       keyRef: { current: string },
       payload: Record<string, unknown>,
       signal: AbortSignal,
@@ -465,7 +483,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
               keyRef.current = data.threadId;
               // The sidebar needs the new row now, not when the turn ends,
               // so it can show the reply being written there.
-              queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+              queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
               if (isFirstRound) onThreadCreated?.(data.threadId);
             }
             break;
@@ -483,7 +501,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             onArtifact?.(data);
             break;
           case "title":
-            queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+            queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
             break;
           case "done":
             receivedDone = true;
@@ -528,21 +546,22 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   // from a short pause between rounds.
   const continueUntilDone = useCallback(
     async (
-      matterId: string,
+      scope: ChatScope,
       keyRef: { current: string },
       threadId: string,
       first: RoundResult,
       skillPayload: Record<string, unknown> | null,
       signal: AbortSignal,
     ) => {
+      const scopeKey = chatScopeKey(scope);
       let round = first;
       let rounds = 0;
       while (round.incomplete && round.assistantMessageId && rounds < MAX_CONTINUATION_ROUNDS) {
         rounds++;
         round = await runRound(
-          matterId,
+          scopeKey,
           keyRef,
-          { matterId, threadId, message: "", attachments: [], skill: skillPayload, continueMessageId: round.assistantMessageId },
+          { matterId: scope.matterId ?? null, documentTypeId: scope.documentTypeId ?? null, threadId, message: "", attachments: [], skill: skillPayload, continueMessageId: round.assistantMessageId },
           signal,
           false,
         );
@@ -562,7 +581,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   );
 
   const finishTurn = useCallback(
-    async (matterId: string, key: string) => {
+    async (scopeKey: string, key: string) => {
       const controller = controllers.current.get(key);
       const wasStopped = controller?.signal.aborted ?? false;
       controllers.current.delete(key);
@@ -579,7 +598,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       // connection closed — this first refetch usually lands before that row
       // exists. Look again once it has had a moment.
       if (wasStopped) setTimeout(refetch, 2500);
-      queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
       // The turn is over: drop it, unless it failed — the error stays visible
       // in that chat until dismissed.
       setTurns((all) => {
@@ -596,8 +615,11 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   );
 
   const send = useCallback(
-    async ({ matterId, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
+    async ({ matterId, documentTypeId, laws, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
+      if (!matterId && !documentTypeId) throw new Error("A conversation needs a project or a document type");
+      const scope: ChatScope = matterId ? { matterId } : { documentTypeId: documentTypeId! };
+      const scopeKey = chatScopeKey(scope);
       const key = turnKey(threadId);
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
@@ -619,15 +641,15 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         : null;
       try {
         const round = await runRound(
-          matterId,
+          scopeKey,
           keyRef,
-          { matterId, threadId, message, attachments, skill: skillPayload, workingArtifactId: workingArtifactId ?? null },
+          { matterId: matterId ?? null, documentTypeId: documentTypeId ?? null, laws: laws ?? null, threadId, message, attachments, skill: skillPayload, workingArtifactId: workingArtifactId ?? null },
           controller.signal,
           !threadId,
         );
         const resolvedThreadId = round.threadId ?? threadId;
         if (resolvedThreadId) {
-          await continueUntilDone(matterId, keyRef, resolvedThreadId, round, skillPayload, controller.signal);
+          await continueUntilDone(scope, keyRef, resolvedThreadId, round, skillPayload, controller.signal);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -641,7 +663,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
           }
         }
       } finally {
-        await finishTurn(matterId, keyRef.current);
+        await finishTurn(scopeKey, keyRef.current);
       }
     },
     [session, runRound, continueUntilDone, finishTurn, patchStream],
@@ -652,8 +674,9 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   // exactly where it stopped. The stored partial is what the model resumes
   // from, so nothing already written is regenerated.
   const resume = useCallback(
-    async ({ matterId, threadId, message }: { matterId: string; threadId: string; message: ChatMessage }) => {
+    async ({ matterId, documentTypeId, threadId, message }: { matterId?: string; documentTypeId?: string; threadId: string; message: ChatMessage }) => {
       if (!session?.access_token) throw new Error("Not signed in");
+      const scope: ChatScope = matterId ? { matterId } : { documentTypeId: documentTypeId! };
       const key = turnKey(threadId);
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
@@ -674,7 +697,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       }));
       try {
         await continueUntilDone(
-          matterId,
+          scope,
           keyRef,
           threadId,
           { threadId, assistantMessageId: message.id, incomplete: true, generatedChars: 1 },
@@ -686,7 +709,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
           patchStream(keyRef.current, (s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
         }
       } finally {
-        await finishTurn(matterId, keyRef.current);
+        await finishTurn(chatScopeKey(scope), keyRef.current);
       }
     },
     [session, continueUntilDone, finishTurn, patchStream],

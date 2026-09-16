@@ -23,8 +23,9 @@ import {
 import { cn } from "@/lib/utils";
 
 interface ChatSidebarProps {
-  matterId: string;
-  matterName?: string;
+  // chatScopeKey(scope): which threads list the actions refresh.
+  scopeKey: string;
+  subtitle?: string;
   threads: ChatThread[];
   activeThreadId: string | null;
   // Chats with a reply being written right now, whichever chat is open.
@@ -45,14 +46,14 @@ function relativeDay(iso: string | null) {
 // The left pane: every conversation on this matter, pinned ones first, with
 // rename / pin / archive / delete. "New chat" doesn't create a row — the
 // thread appears once the first message is sent, like claude.ai.
-export default function ChatSidebar({ matterId, matterName, threads, activeThreadId, busyThreadIds, onSelect }: ChatSidebarProps) {
+export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadId, busyThreadIds, onSelect }: ChatSidebarProps) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renaming, setRenaming] = useState<ChatThread | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<ChatThread | null>(null);
-  const update = useUpdateChatThread(matterId);
-  const remove = useDeleteChatThread(matterId);
+  const update = useUpdateChatThread(scopeKey);
+  const remove = useDeleteChatThread(scopeKey);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -106,7 +107,7 @@ export default function ChatSidebar({ matterId, matterName, threads, activeThrea
           <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats" className="h-8 pl-7 text-sm" />
         </div>
-        {matterName && <p className="truncate px-1 text-xs text-muted-foreground" title={matterName}>{matterName}</p>}
+        {subtitle && <p className="truncate px-1 text-xs text-muted-foreground" title={subtitle}>{subtitle}</p>}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">

@@ -23,8 +23,11 @@ import { useToast } from "@/hooks/use-toast";
 import { artifactIcon } from "@/components/ai/chat/MarkdownMessage";
 
 interface ArtifactPanelProps {
-  matterId: string;
+  matterId?: string;
   matterName?: string;
+  // A standardisation session: the Word file can be set as the type's
+  // standard, and there is no project to save it to.
+  standard?: { documentTypeId: string; documentTypeName: string };
   artifact: ChatArtifact;
   lawUpdate?: LawUpdate | null;
   onClose: () => void;
@@ -34,7 +37,7 @@ interface ArtifactPanelProps {
 // an editable rich-text editor with a Word preview, copy, download and
 // "Save to project"; a review opens the full three-pass ReviewSession for the
 // document under review.
-export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdate, onClose }: ArtifactPanelProps) {
+export default function ArtifactPanel({ matterId, matterName, standard, artifact, lawUpdate, onClose }: ArtifactPanelProps) {
   const Icon = artifactIcon(artifact.kind);
   return (
     <div className="flex h-full min-w-0 flex-col bg-background" data-testid="artifact-panel">
@@ -54,10 +57,10 @@ export default function ArtifactPanel({ matterId, matterName, artifact, lawUpdat
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {artifact.kind === "review" ? (
+        {artifact.kind === "review" && matterId ? (
           <ReviewArtifact matterId={matterId} artifact={artifact} lawUpdate={lawUpdate ?? null} />
         ) : artifact.kind === "docx" ? (
-          <DocxArtifact key={artifact.id} matterId={matterId} artifact={artifact} />
+          <DocxArtifact key={artifact.id} matterId={matterId} standard={standard} artifact={artifact} />
         ) : artifact.kind === "file" ? (
           <FileArtifact key={artifact.id} artifact={artifact} />
         ) : (
@@ -80,7 +83,7 @@ function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; a
   );
 }
 
-function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string; matterName?: string; artifact: ChatArtifact }) {
+function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: string; matterName?: string; artifact: ChatArtifact }) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -188,8 +191,8 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId: string
   };
 
   const handleSaveToMatter = async () => {
-    if (!documentTypeId) {
-      toast({ title: "Pick a document type first", variant: "destructive" });
+    if (!documentTypeId || !matterId) {
+      toast({ title: matterId ? "Pick a document type first" : "This document belongs to a standardisation session, not a project", variant: "destructive" });
       return;
     }
     setSaving(true);

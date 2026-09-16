@@ -142,3 +142,48 @@ export function useChatFile(bucket: string | undefined, storagePath: string | un
     },
   });
 }
+
+// Every standard a type has had, newest first — the snapshot trigger keeps
+// one row per uploaded file, so a standard replaced from a standardisation
+// session can be brought back.
+export function useDocumentTemplateVersions(documentTypeId: string | undefined) {
+  return useQuery({
+    queryKey: ["document-template-versions", documentTypeId],
+    enabled: !!documentTypeId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("document_template_versions")
+        .select("id, storage_path, filename, created_at, created_by")
+        .eq("document_type_id", documentTypeId!)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useRestoreDocumentTemplateVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ documentTypeId, versionId }: { documentTypeId: string; versionId: string }) => {
+      const { data: version, error: readError } = await supabase
+        .from("document_template_versions")
+        .select("storage_path, filename, content_html, format_rules")
+        .eq("id", versionId)
+        .eq("document_type_id", documentTypeId)
+        .single();
+      if (readError || !version) throw readError ?? new Error("That version no longer exists");
+      const { data: userData } = await supabase.auth.getUser();
+      const { error } = await supabase.from("document_type_templates").upsert(
+        { document_type_id: documentTypeId, ...version, updated_by: userData.user?.id, updated_at: new Date().toISOString() },
+        { onConflict: "document_type_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["document-type-templates"] });
+      queryClient.invalidateQueries({ queryKey: ["document-type-template", variables.documentTypeId] });
+      queryClient.invalidateQueries({ queryKey: ["document-template-versions", variables.documentTypeId] });
+    },
+  });
+}

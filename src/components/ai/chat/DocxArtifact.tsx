@@ -3,11 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { renderAsync } from "docx-preview";
 import { fitDocxPreview } from "@/lib/fitDocxPreview";
-import { acceptTrackedChanges } from "@/lib/docxAccept";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, Loader2, Save } from "lucide-react";
+import { acceptTrackedChanges, stripComments } from "@/lib/docxAccept";
+import { AlertTriangle, BadgeCheck, Check, ChevronDown, ChevronRight, Download, FileText, Loader2, Save } from "lucide-react";
 import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { useChatFile } from "@/hooks/useDocumentTypeTemplates";
+import { useChatFile, useUploadDocumentTypeTemplate } from "@/hooks/useDocumentTypeTemplates";
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,6 +29,8 @@ interface DocxArtifactData {
   savedMatterDocumentId?: string;
   savedVersion?: number;
   savedVersionId?: string;
+  // Standardisation: when this copy was published as the type's standard.
+  publishedAsStandardAt?: string;
 }
 
 function download(blob: Blob, name: string) {
@@ -44,8 +46,10 @@ function download(blob: Blob, name: string) {
 // standard, or the AI's latest copy with its changes shown as Word tracked
 // changes. Nothing here is rebuilt from text — the preview is the file, the
 // download is the file, and saving to the project stores the file.
-export default function DocxArtifact({ matterId, artifact }: { matterId: string; artifact: ChatArtifact }) {
+export default function DocxArtifact({ matterId, standard, artifact }: { matterId?: string; standard?: { documentTypeId: string; documentTypeName: string }; artifact: ChatArtifact }) {
   const { toast } = useToast();
+  const uploadStandard = useUploadDocumentTypeTemplate();
+  const [publishing, setPublishing] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const data = (artifact.data ?? {}) as unknown as DocxArtifactData;
@@ -101,9 +105,30 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
     }
   };
 
+  // The master becomes the firm's standard for the type: every change
+  // accepted, the AKLA comments (guidance for the associate, not for a
+  // client) stripped, and the file put through the same upload the
+  // Standardize page uses, so the previous standard is kept as a version.
+  const handleSetAsStandard = async () => {
+    if (!standard || !blob) return;
+    if (!window.confirm(`Set this file as the firm's standard for "${standard.documentTypeName}"? Every future draft of that type will start from it. The current standard is kept as an earlier version.`)) return;
+    setPublishing(true);
+    try {
+      const clean = await stripComments(await acceptTrackedChanges(blob));
+      const file = new File([clean], data.fileName, { type: clean.type });
+      await uploadStandard.mutateAsync({ documentTypeId: standard.documentTypeId, file });
+      await updateArtifact.mutateAsync({ id: artifact.id, data: { ...(artifact.data as object), publishedAsStandardAt: new Date().toISOString() } }).catch(() => {});
+      toast({ title: `Set as the standard for ${standard.documentTypeName}`, description: data.fileName });
+    } catch (err: any) {
+      toast({ title: "Couldn't set the standard", description: err.message, variant: "destructive" });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const handleSave = async () => {
-    if (!documentTypeId) {
-      toast({ title: "Pick a document type first", variant: "destructive" });
+    if (!documentTypeId || !matterId) {
+      toast({ title: matterId ? "Pick a document type first" : "This file belongs to a standardisation session, not a project", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -172,7 +197,21 @@ export default function DocxArtifact({ matterId, artifact }: { matterId: string;
         </div>
       </div>
 
-      {!data.original && (
+      {standard && (
+        <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
+          <Button size="sm" className="h-8" onClick={handleSetAsStandard} disabled={publishing || !blob} data-testid="set-as-standard">
+            {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
+            Set as standard
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {data.publishedAsStandardAt
+              ? `Set as the standard on ${new Date(data.publishedAsStandardAt).toLocaleString()}`
+              : "Publishes a clean copy — changes accepted, AKLA comments removed — as the firm's standard for this type."}
+          </span>
+        </div>
+      )}
+
+      {!data.original && !standard && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
           <Select value={documentTypeId} onValueChange={setDocumentTypeId} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? data.documentTypeId)}>
             <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">

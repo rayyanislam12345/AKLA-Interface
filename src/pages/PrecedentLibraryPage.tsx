@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Trash2, Upload } from "lucide-react";
+import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Sparkles, Trash2, Upload } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   usePrecedentSources,
@@ -156,7 +156,7 @@ function StandardizeTab() {
                   <TableHead>Document Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Updated</TableHead>
-                  <TableHead className="w-32"></TableHead>
+                  <TableHead className="w-64"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -176,13 +176,24 @@ function StandardizeTab() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
-                      >
-                        {row.filename ? "Replace" : "Upload"}
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
+                        >
+                          {row.filename ? "Replace" : "Upload"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          title="Build the standard with the AI from the firm's documents and the relevant law"
+                          onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}/build`)}
+                        >
+                          <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                          {row.filename ? "Revise with AI" : "Build with AI"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -198,13 +209,23 @@ function StandardizeTab() {
                   <Badge variant={row.filename ? "default" : "secondary"}>
                     {row.filename ? "Standardized" : "Not yet standardized"}
                   </Badge>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
-                  >
-                    {row.filename ? "Replace" : "Upload"}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
+                    >
+                      {row.filename ? "Replace" : "Upload"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}/build`)}
+                    >
+                      <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                      AI
+                    </Button>
+                  </div>
                 </div>
                 {row.updated_at && (
                   <p className="text-xs text-muted-foreground">

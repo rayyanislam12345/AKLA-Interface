@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Download, FileText, Gavel, Trash2, Upload } from "lucide-react";
+import { Download, FileText, Gavel, History, Sparkles, Trash2, Upload } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   useDocumentTypeTemplate,
   useUploadDocumentTypeTemplate,
   useDeleteDocumentTypeTemplate,
+  useDocumentTemplateVersions,
+  useRestoreDocumentTemplateVersion,
   fetchTemplateDocxBytes,
 } from "@/hooks/useDocumentTypeTemplates";
 import { Button } from "@/components/ui/button";
@@ -21,6 +23,9 @@ export default function StandardizeDocumentTypePage() {
   const { data: existingTemplate, isLoading } = useDocumentTypeTemplate(documentTypeId);
   const uploadTemplate = useUploadDocumentTypeTemplate();
   const deleteTemplate = useDeleteDocumentTypeTemplate();
+  const { data: versions } = useDocumentTemplateVersions(documentTypeId);
+  const restoreVersion = useRestoreDocumentTemplateVersion();
+  const earlierVersions = (versions ?? []).filter((v) => v.storage_path !== existingTemplate?.storage_path);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,14 +141,52 @@ export default function StandardizeDocumentTypePage() {
             </div>
           )}
 
-          <Button
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            {uploading ? "Uploading…" : existingTemplate?.filename ? "Replace with a new .docx" : "Upload .docx"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {uploading ? "Uploading…" : existingTemplate?.filename ? "Replace with a new .docx" : "Upload .docx"}
+            </Button>
+            <Button variant="outline" onClick={() => navigate(`/precedent-library/standardize/${documentTypeId}/build`)} data-testid="build-standard-with-ai">
+              <Sparkles className="h-4 w-4 mr-2" />
+              {existingTemplate?.filename ? "Revise with AI" : "Build with AI"}
+            </Button>
+          </div>
+
+          {earlierVersions.length > 0 && (
+            <div className="rounded-md border" data-testid="standard-versions">
+              <p className="flex items-center gap-2 border-b px-3 py-2 text-xs font-medium">
+                <History className="h-3.5 w-3.5" /> Earlier versions
+              </p>
+              {earlierVersions.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{v.filename ?? v.storage_path.split("/").pop()}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(v.created_at).toLocaleString()}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={restoreVersion.isPending}
+                    onClick={async () => {
+                      if (!window.confirm(`Make "${v.filename ?? "this version"}" the current standard again?`)) return;
+                      try {
+                        await restoreVersion.mutateAsync({ documentTypeId, versionId: v.id });
+                        toast({ title: "Standard restored" });
+                      } catch (err: any) {
+                        toast({ title: "Couldn't restore", description: err.message, variant: "destructive" });
+                      }
+                    }}
+                  >
+                    Restore
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {existingTemplate?.filename && (
             <Button variant="ghost" onClick={() => navigate("/precedent-library")}>

@@ -1,13 +1,17 @@
 import { useMemo, useState } from "react";
 import { FileText, Search } from "lucide-react";
 import { useMatterDocuments } from "@/hooks/useMatterDocuments";
+import { useMatters } from "@/hooks/useMatters";
 import type { ChatAttachment } from "@/hooks/useChat";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AddFromMatterDialogProps {
-  matterId: string;
+  // Without a matter the associate picks the project first — a
+  // standardisation session draws on any project's documents.
+  matterId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPick: (attachment: ChatAttachment) => void;
@@ -16,7 +20,10 @@ interface AddFromMatterDialogProps {
 // Attach one of the matter's own documents (its latest version) to the
 // conversation. Carries the version id so Verify knows what to review.
 export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPick }: AddFromMatterDialogProps) {
-  const { data: documents } = useMatterDocuments(matterId);
+  const [chosenMatterId, setChosenMatterId] = useState<string | undefined>(matterId);
+  const activeMatterId = matterId ?? chosenMatterId;
+  const { data: matters } = useMatters();
+  const { data: documents } = useMatterDocuments(activeMatterId);
   const [query, setQuery] = useState("");
 
   const rows = useMemo(() => {
@@ -30,9 +37,21 @@ export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add from project</DialogTitle>
-          <DialogDescription>Attach the latest version of a document already on this project.</DialogDescription>
+          <DialogTitle>{matterId ? "Add from project" : "Add from a project"}</DialogTitle>
+          <DialogDescription>
+            {matterId ? "Attach the latest version of a document already on this project." : "Pick a project, then the document to use as a source."}
+          </DialogDescription>
         </DialogHeader>
+        {!matterId && (
+          <Select value={chosenMatterId} onValueChange={setChosenMatterId}>
+            <SelectTrigger data-testid="source-project-select"><SelectValue placeholder="Which project?" /></SelectTrigger>
+            <SelectContent>
+              {(matters ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id}>{m.name}{m.client?.name ? ` — ${m.client.name}` : ""}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <div className="relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search documents" className="pl-8" />
@@ -40,7 +59,7 @@ export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPi
         <div className="max-h-80 overflow-y-auto rounded-md border">
           {rows.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground">
-              {documents?.length ? "No documents match." : "No documents with an uploaded version on this project yet."}
+              {!activeMatterId ? "Choose a project above." : documents?.length ? "No documents match." : "No documents with an uploaded version on this project yet."}
             </p>
           )}
           {rows.map(({ doc, latest }) => (

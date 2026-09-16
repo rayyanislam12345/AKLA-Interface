@@ -127,8 +127,10 @@ export type Database = {
           archived: boolean
           created_at: string
           created_by: string | null
+          document_type_id: string | null
           document_version_id: string | null
           id: string
+          laws: Json
           last_message_at: string | null
           matter_id: string | null
           pinned: boolean
@@ -140,8 +142,10 @@ export type Database = {
           archived?: boolean
           created_at?: string
           created_by?: string | null
+          document_type_id?: string | null
           document_version_id?: string | null
           id?: string
+          laws?: Json
           last_message_at?: string | null
           matter_id?: string | null
           pinned?: boolean
@@ -153,8 +157,10 @@ export type Database = {
           archived?: boolean
           created_at?: string
           created_by?: string | null
+          document_type_id?: string | null
           document_version_id?: string | null
           id?: string
+          laws?: Json
           last_message_at?: string | null
           matter_id?: string | null
           pinned?: boolean
@@ -163,6 +169,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_chat_threads_document_type_id_fkey"
+            columns: ["document_type_id"]
+            isOneToOne: false
+            referencedRelation: "document_types"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ai_chat_threads_document_version_id_fkey"
             columns: ["document_version_id"]
@@ -274,6 +287,47 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      document_template_versions: {
+        Row: {
+          content_html: string | null
+          created_at: string
+          created_by: string | null
+          document_type_id: string
+          filename: string | null
+          format_rules: string | null
+          id: string
+          storage_path: string
+        }
+        Insert: {
+          content_html?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_type_id: string
+          filename?: string | null
+          format_rules?: string | null
+          id?: string
+          storage_path: string
+        }
+        Update: {
+          content_html?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_type_id?: string
+          filename?: string | null
+          format_rules?: string | null
+          id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_template_versions_document_type_id_fkey"
+            columns: ["document_type_id"]
+            isOneToOne: false
+            referencedRelation: "document_types"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       document_type_templates: {
         Row: {
