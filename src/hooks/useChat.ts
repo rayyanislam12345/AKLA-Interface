@@ -40,6 +40,8 @@ export function chatScopeKey(scope: ChatScope | string): string {
 }
 export interface ActiveSkill {
   key: SkillKey;
+  // standardise: "verify" runs a verification pass over the master.
+  mode?: "verify";
   documentTypeId?: string;
   customSkillId?: string;
   // edit: the exact version being worked on
@@ -633,6 +635,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       const skillPayload = skill
         ? {
             key: skill.key,
+            mode: skill.mode,
             documentTypeId: skill.documentTypeId,
             customSkillId: skill.customSkillId,
             documentVersionId: skill.documentVersionId,

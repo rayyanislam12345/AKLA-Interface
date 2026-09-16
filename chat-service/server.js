@@ -587,7 +587,10 @@ async function handleChat(req, res) {
   // are one mode now, called Review. Chats and links from before still say
   // "verify".
   if (skill?.key === "verify") skill = { ...skill, key: "review", label: "Review" };
-  // Whatever was sent, a standardisation session does one thing.
+  // Whatever was sent, a standardisation session does one thing. The one
+  // variation is a verification pass over the master, asked for by its
+  // button or in so many words.
+  const verifyAsked = standardising && (requestedSkill?.mode === "verify" || /\b(?:re-?verif(?:y|ication)|verif(?:y|ication)|validate|audit|fact-?check|(?:re-?check|check|review)\s+(?:it|this|the\s+(?:master|standard|document|draft|whole)|everything|all|each|every))\b/i.test(message));
   if (standardising) skill = { key: "standardise", documentTypeId: standardTypeId, label: "Standardise" };
   const chosenLaws = standardising
     ? [...new Set((requestedLaws ?? existingThread?.laws ?? []).map((l) => String(l).trim()).filter(Boolean))]
@@ -1303,7 +1306,9 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       // A document too long to show whole is shown where it matters: the
       // blanks when filling in a standard, the clauses the lawyer's message
       // is about when editing.
-      docxBase.inspection = inspectDocx(docxBase.bytes, docxBase.standard && !docxBase.revising ? { placeholders: true } : { query: message });
+      // A verification pass reads the whole master, not the paragraphs a
+      // message happens to mention.
+      docxBase.inspection = inspectDocx(docxBase.bytes, docxBase.standard && !docxBase.revising ? { placeholders: true } : verifyAsked ? { query: message, budget: 320_000 } : { query: message });
       send("notice", { text: `Working on ${docxBase.fileName} (${docxBase.inspection.paragraphCount} paragraphs).` });
     }
 
@@ -1410,7 +1415,13 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     let skillBlock = "";
     if (docxBase && skill?.key === "standardise") {
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
-      skillBlock = `\n\nSKILL IN FORCE — STANDARDISE: with the associate, revise "${docxBase.title ?? docxBase.fileName}", ${docxBase.revising ? "the firm's current standard" : "the working master"} for a ${documentType.name}, a Word file.\n\n${listing}\n\n${STANDARD_MASTER_RULES}\n\nHow to work: make exactly the changes the associate asks for and leave everything else as it is. When they point at a source document (attached above) or a law, lift the wording or requirement from that text, generalise the deal's facts to placeholders and adapt defined terms and cross-references to fit the master. Every change is a tracked change for the associate to accept. When a change affects where a clause came from or a legal point, say so in your reply, so the Standardisation Note can be updated: the associate opens the note beside the chat and asks. If the associate is asking a question rather than for a change, answer it and send no block. If they want a different document type altogether, say that has its own standardisation session.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the associate means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again.` : ""}\n\n${OPS_PROTOCOL}`;
+      const verifyBlock = `How to work — VERIFICATION PASS: go through the master clause by clause, in order, and check every one of these:
+1. Against each identified law (set out above): every provision the law requires of a ${documentType.name} is present and stated correctly; nothing the law prohibits is present; every citation names the right Act and section; a rule quoted or paraphrased says what the law actually says.
+2. Against the source documents: no deal-specific fact, name, date or figure from a source has been carried into the master as if it were standard — each must be a [●] placeholder; no term has been invented that neither the sources nor the laws support.
+3. Internal consistency: defined terms used consistently and defined before use; cross-references resolve to a clause that exists; the sequence of steps (notices, deadlines, approvals) is coherent; nothing is duplicated or contradicted elsewhere in the master.
+4. Placeholders and AKLA comments are where the rules above require them, and nowhere that a standard wording is settled.
+Correct what is wrong as tracked changes, each carrying an AKLA comment that cites the Act and section, or the source, that the correction rests on. Do not restyle, reword or improve anything that is not wrong. Then reply with a findings table — Clause | Finding | Authority (Act & section, or source) | Action — covering every correction and every point you checked and found wrong but could not correct, followed by one line on what you could not verify because the law or source text needed was not available. If everything checks out, say so and send no block.`;
+      skillBlock = `\n\nSKILL IN FORCE — STANDARDISE: with the associate, revise "${docxBase.title ?? docxBase.fileName}", ${docxBase.revising ? "the firm's current standard" : "the working master"} for a ${documentType.name}, a Word file.\n\n${listing}\n\n${STANDARD_MASTER_RULES}\n\n${verifyAsked ? verifyBlock : "How to work: make exactly the changes the associate asks for and leave everything else as it is."} When they point at a source document (attached above) or a law, lift the wording or requirement from that text, generalise the deal's facts to placeholders and adapt defined terms and cross-references to fit the master. Every change is a tracked change for the associate to accept. When a change affects where a clause came from or a legal point, say so in your reply, so the Standardisation Note can be updated: the associate opens the note beside the chat and asks. If the associate is asking a question rather than for a change, answer it and send no block. If they want a different document type altogether, say that has its own standardisation session.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the associate means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again.` : ""}\n\n${OPS_PROTOCOL}`;
     } else if (skill?.key === "standardise") {
       const existing = templateRow?.content_html?.trim()
         ? `\n\nTHE FIRM'S CURRENT STANDARD FOR THIS TYPE (not a Word file, so it is rebuilt rather than revised; keep what stands and improve it from the sources):\n${templateRow.content_html.slice(0, MAX_TEMPLATE_CHARS)}`

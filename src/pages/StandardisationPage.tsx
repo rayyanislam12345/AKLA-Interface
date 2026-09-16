@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, FileText, Globe, Menu, PanelRightOpen, Plus, Scale, X } from "lucide-react";
+import { ArrowLeft, Check, FileText, Globe, Menu, PanelRightOpen, PencilLine, Plus, Scale, ShieldCheck, X } from "lucide-react";
 import AddLawDialog from "@/components/law/AddLawDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
@@ -127,10 +127,32 @@ function Standardisation({ documentTypeId }: { documentTypeId: string }) {
   }, [messages]);
 
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
+  // The latest copy of the master itself (not the Standardisation Note):
+  // what "Verify" checks whichever document is open in the panel.
+  const master = useMemo(
+    () => [...(threadArtifacts ?? [])].reverse().find((a) => a.kind === "docx" && (((a.data as { sourceKind?: string })?.sourceKind ?? "") === "draft" || /^Standard\b/.test(a.title ?? ""))) ?? null,
+    [threadArtifacts],
+  );
 
   const handleSend = async (input: { message: string; attachments: ChatAttachment[] }) => {
     const working = openArtifact && ["docx", "draft", "memo"].includes(openArtifact.kind) ? openArtifact.id : null;
     await chat.send({ documentTypeId, threadId: activeThreadId, laws, message: input.message, attachments: input.attachments, skill: null, workingArtifactId: working });
+  };
+  // Verification runs in the same session, on the master, against the
+  // identified laws and the sources already supplied — no need to take the
+  // file to a project chat and back.
+  const handleVerify = async () => {
+    if (!master || !activeThreadId) return;
+    setOpenArtifact(master);
+    await chat.send({
+      documentTypeId,
+      threadId: activeThreadId,
+      laws,
+      message: "Verify the master clause by clause against the identified laws and the source documents, correct what is wrong as tracked changes, and report your findings.",
+      attachments: [],
+      skill: { key: "standardise", mode: "verify", label: "Verify" },
+      workingArtifactId: master.id,
+    });
   };
 
   const sidebar = (
@@ -158,7 +180,7 @@ function Standardisation({ documentTypeId }: { documentTypeId: string }) {
         <li><span className="font-medium text-foreground">1. Supply sources.</span> Use <kbd className="rounded border px-1">+</kbd> to upload the firm's earlier documents of this type, take them from the Precedent Library, or pick them from any project. Two or more is best.</li>
         <li><span className="font-medium text-foreground">2. Identify the law.</span> Add the Acts this document turns on with <span className="font-medium">Add law</span> above; the AI checks every clause against them and cites the sections.</li>
         <li><span className="font-medium text-foreground">3. Ask for the master.</span> The AI produces the master with [●] placeholders and AKLA comments, and a Standardisation Note showing where each clause came from, the laws checked and what is left for a partner to decide.</li>
-        <li><span className="font-medium text-foreground">4. Refine, then publish.</span> Ask for changes — they come as tracked changes — and press <span className="font-medium">Set as standard</span> on the master when it is ready.</li>
+        <li><span className="font-medium text-foreground">4. Verify, refine, publish.</span> Press <span className="font-medium">Verify master</span> to check it clause by clause against the laws and sources; ask for changes in the chat — they come as tracked changes; press <span className="font-medium">Set as standard</span> on the master when it is ready.</li>
       </ol>
     </div>
   );
@@ -191,6 +213,13 @@ function Standardisation({ documentTypeId }: { documentTypeId: string }) {
                 <span className="font-medium">{activeThread?.title ?? "New session"}</span>
                 <span className="text-muted-foreground"> · Standard {documentTypeName}</span>
               </div>
+              {master && (
+                <Button variant="outline" size="sm" className="h-8" onClick={handleVerify} disabled={!!turn?.inFlight} title="Check the master clause by clause against the identified laws and the sources; corrections come as tracked changes" data-testid="verify-master">
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Verify master</span>
+                  <span className="sm:hidden">Verify</span>
+                </Button>
+              )}
               {!openArtifact && lastArtifact && (
                 <Button variant="ghost" size="sm" className="h-8" onClick={() => setOpenArtifact(lastArtifact)}>
                   <PanelRightOpen className="mr-2 h-4 w-4" />
@@ -201,6 +230,11 @@ function Standardisation({ documentTypeId }: { documentTypeId: string }) {
             </div>
 
             <ContextStrip laws={laws} onLawsChange={setLaws} sources={sources} />
+            {master && (
+              <p className="flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px] text-muted-foreground" data-testid="edit-hint">
+                <PencilLine className="h-3 w-3" /> To edit the master, ask in the chat — every change comes back as a tracked change. Verify checks it against the laws and sources.
+              </p>
+            )}
 
             <MessageList
               messages={messages ?? []}
