@@ -79,6 +79,14 @@ async function pdftotext(pdfBytes) {
 // isolate kill it was on Supabase, but a tracked-changes-heavy 5MB file
 // still expanded to 14MB of HTML there; the Python service handles those.
 const LARGE_DOCX_BYTES = 2 * 1024 * 1024;
+
+// mammoth writes every picture into the HTML as a base64 data URI: a
+// 31-page RFP with a few logos extracted to 8.6 million characters, of
+// which the words were a fraction, and the model was shown 5% of the file.
+// A picture is not text; a marker says one was there.
+function stripImages(html) {
+  return String(html ?? "").replace(/<img\b[^>]*>/gi, "[image]");
+}
 async function docxHtmlFallback(docxBytes) {
   const data = await ocrService("/extract/docx", "application/octet-stream", docxBytes);
   return data?.html ?? null;
@@ -209,13 +217,13 @@ export async function extractTextFromFile(fileData, fileName) {
     const arrayBuffer = await fileData.arrayBuffer();
     if (arrayBuffer.byteLength > LARGE_DOCX_BYTES) {
       const html = await docxHtmlFallback(new Uint8Array(arrayBuffer));
-      if (html) return { text: html, metadata: { original_format: "docx", large_docx_offloaded: true } };
+      if (html) return { text: stripImages(html), metadata: { original_format: "docx", large_docx_offloaded: true } };
       // ocr-service unreachable — a shot in-process beats no text at all.
     }
     // convertToHtml, not extractRawText: headings/bold/lists survive as
     // semantic HTML, which is real formatting signal for the model.
     const result = await mammoth.convertToHtml({ buffer: Buffer.from(arrayBuffer) });
-    return { text: result.value, metadata: { original_format: "docx" } };
+    return { text: stripImages(result.value), metadata: { original_format: "docx" } };
   }
 
   if (fileExtension === "pptx") {
