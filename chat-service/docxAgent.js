@@ -43,7 +43,7 @@ export const OPS_PROTOCOL = `HOW TO CHANGE THE DOCUMENT. The document is a real 
 ]}
 \`\`\`
 Rules:
-- If you need a section hidden by a gap, emit {"read":[{"from":100,"to":140}]} in the JSON block instead of ops. The document reader will return those paragraphs and you can continue. Request at most 200 paragraphs at once.
+- If you need a section hidden by a gap, emit {"read":[{"from":100,"to":140}]} in the JSON block instead of ops. The document reader will return those paragraphs and you can continue. Request at most 200 paragraphs at once; a longer range is served as its first 200 and you may ask for the rest afterwards.
 - Every operation must include "expected": the exact current text of that paragraph, without the ¶ label. Never operate on a paragraph that was not shown.
 - "replace" gives the COMPLETE new text of that one paragraph, copied from above with your change made in it. Word shows only the words that differ, so keep everything you are not changing exactly as it is — same wording, same spacing, same defined terms. One paragraph per op; never merge or split paragraphs.
 - "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead.

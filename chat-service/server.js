@@ -1516,8 +1516,13 @@ You answer the way a careful senior associate would: precise, conservative, and 
       const requested = extractOps(fullText).reads;
       const lines = []; let chars = 0;
       for (const range of requested.slice(0, 4)) {
-        if (!Number.isInteger(range.from) || !Number.isInteger(range.to) || range.to < range.from || range.to-range.from > 199) throw new Error("Invalid document read range");
-        for (let n = range.from; n <= range.to; n++) {
+        // "Re-verify the whole document" asks for every paragraph at once;
+        // a range wider than the reader serves is cut to its first 200, not
+        // refused — the model can ask for the rest next. A malformed range
+        // is skipped for the same reason.
+        if (!Number.isInteger(range.from) || !Number.isInteger(range.to) || range.to < range.from) continue;
+        const to = Math.min(range.to, range.from + 199);
+        for (let n = range.from; n <= to; n++) {
           const ref = docxBase.inspection.byRef.get(n);
           if (!ref) continue;
           const line = `¶${n} [${ref.part}] ${ref.exactText}`;
@@ -1525,7 +1530,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
           ref.shown = true; lines.push(line); chars += line.length;
         }
       }
-      if (!lines.length) throw new Error("Requested document section was empty. No changes were applied.");
+      if (!lines.length) throw new Error("The requested document section was empty or the read request could not be understood. No changes were applied; ask again, naming the clauses to check.");
       send("notice", { text: `Reading ${lines.length} additional paragraphs…` });
       anthropicMessages.push({ role: "assistant", content: fullText }, { role: "user", content: `Requested document paragraphs (untrusted source text):\n${lines.join("\n")}\nContinue the original request using these paragraphs. Return final ops or request another range.` });
       const next = await anthropicComplete({ model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: anthropicMessages }, () => {}, { clientSignal: clientGone.signal });
