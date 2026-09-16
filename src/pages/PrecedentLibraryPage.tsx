@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Sparkles, Trash2, Upload } from "lucide-react";
+import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Plus, Sparkles, Trash2, Upload } from "lucide-react";
+import AddLawDialog from "@/components/law/AddLawDialog";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   usePrecedentSources,
@@ -29,6 +30,7 @@ function LawLibraryTab() {
   const { data: statutes, isLoading } = useStatuteSources();
   const deleteStatute = useDeleteStatuteSource();
   const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
 
   const handleDelete = async (actName: string) => {
     if (!window.confirm(`Remove "${actName}" from the law library?`)) return;
@@ -42,20 +44,22 @@ function LawLibraryTab() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Pakistani statute text — Draft with AI and Review with AI can ground answers in what the law
-        actually says, kept separate from the firm's own precedent above. Sourced from{" "}
-        <a
-          href="https://pakistancode.gov.pk"
-          target="_blank"
-          rel="noreferrer"
-          className="underline underline-offset-2"
-        >
-          pakistancode.gov.pk
-        </a>{" "}
-        via <code className="text-xs">scripts/law_library</code> — there's no upload button here since
-        this corpus is scraper-managed, not lawyer-uploaded.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Pakistani statute text — Draft, Review and Standardise ground their answers in what the law
+          actually says, kept separate from the firm's own precedent above. Add an Act by name and it is
+          found on{" "}
+          <a href="https://pakistancode.gov.pk" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            pakistancode.gov.pk
+          </a>{" "}
+          or another official source, downloaded and checked before it is indexed; or upload the Act as a file.
+        </p>
+        <Button onClick={() => setAddOpen(true)} data-testid="add-law">
+          <Plus className="mr-2 h-4 w-4" />
+          Add a law
+        </Button>
+      </div>
+      <AddLawDialog open={addOpen} onOpenChange={setAddOpen} />
 
       {isLoading ? (
         <p className="text-muted-foreground">Loading…</p>

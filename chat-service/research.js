@@ -108,6 +108,28 @@ const goesStraightToRelay = (url) => {
   return until !== undefined && until > Date.now();
 };
 
+/**
+ * An official document, fetched directly or — when the site will not answer
+ * this server — through the relay. Throws with a plain reason when neither
+ * route worked.
+ */
+export async function downloadOfficial(url, { signal } = {}) {
+  try {
+    if (relayConfigured() && goesStraightToRelay(url)) throw Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
+    return await fetchOfficial(url, { signal });
+  } catch (err) {
+    if (signal?.aborted || !unreachable(err)) throw err;
+    if (!relayConfigured()) throw new Error("the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)");
+    relayFirst.set(new URL(url).hostname, Date.now() + RELAY_FIRST_MS);
+    try {
+      return await fetchViaRelay(url, { signal });
+    } catch (relayError) {
+      if (signal?.aborted) throw relayError;
+      throw new Error(`the official website could not be reached, directly or through the download relay: ${relayError.message}`);
+    }
+  }
+}
+
 function unreachable(err) {
   const text = `${err?.message ?? ''} ${err?.cause?.code ?? ''} ${err?.name ?? ''}`;
   return /fetch failed|ETIMEDOUT|UND_ERR_CONNECT|ENOTFOUND|ECONNRESET|TimeoutError|timed out/i.test(text);
@@ -193,21 +215,7 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
         }
         if (!candidate.url) throw new Error('Not in the law library, and no official copy was located');
         notice(`Downloading ${candidate.title} from its official source…`);
-        let downloaded;
-        try {
-          if (relayConfigured() && goesStraightToRelay(candidate.url)) throw Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
-          downloaded = await fetchOfficial(candidate.url, { signal });
-        } catch (err) {
-          if (signal?.aborted || !unreachable(err)) throw err;
-          if (!relayConfigured()) throw new Error("the official website did not respond to the AI server (add it to the project's Relevant Laws to use it)");
-          relayFirst.set(new URL(candidate.url).hostname, Date.now() + RELAY_FIRST_MS);
-          try {
-            downloaded = await fetchViaRelay(candidate.url, { signal });
-          } catch (relayError) {
-            if (signal?.aborted) throw relayError;
-            throw new Error(`the official website could not be reached, directly or through the download relay: ${relayError.message}`);
-          }
-        }
+        const downloaded = await downloadOfficial(candidate.url, { signal });
         const bytes = new Uint8Array(await downloaded.blob.arrayBuffer());
         if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') throw new Error('Source is not a PDF');
         const extracted = await extractTextFromFile(downloaded.blob, 'authority.pdf');

@@ -21,6 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
 import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun, chooseWorkingDocument } from "./chatState.js";
 import { researchLaw, needsResearch, describeLookup } from "./research.js";
+import { addLawToLibrary } from "./lawLibrary.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy } from "./docxAgent.js";
 import { runReview, checkReviewInstruction } from "./review.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
@@ -1954,6 +1955,42 @@ async function handleSkillDelete(req, res) {
   json(200, { deleted: row.id });
 }
 
+// An associate adding a law to the library by name, from the Law Library
+// tab or a standardisation session: found on official sources, checked,
+// indexed. Answers with where the Act ended up, or why it could not be
+// added — an upload is the fallback the reply points at.
+async function handleLawFind(req, res) {
+  const json = (status, body) => {
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  const { error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
+  if (typeof body.actName !== "string") return json(400, { error: "actName is required" });
+  const clientGone = new AbortController();
+  res.on("close", () => { if (!res.writableFinished) clientGone.abort(); });
+  inFlight++;
+  try {
+    const result = await addLawToLibrary({ supabase: db, authHeader, anthropicJson, actName: body.actName, signal: clientGone.signal, notice: (text) => console.log(`law find "${body.actName}": ${text}`) });
+    console.log(`law find "${body.actName}": ${result.status}${result.actName ? ` (${result.actName})` : ""}`);
+    json(200, result);
+  } catch (err) {
+    if (clientGone.signal.aborted) return;
+    console.error(`law find "${body.actName}" failed:`, err);
+    json(500, { error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    inFlight--;
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 // Requests still being answered. A restart in the middle of one cuts a
@@ -2000,6 +2037,18 @@ const server = createServer((req, res) => {
   if (req.method === "POST" && (url.pathname === "/review/preview" || url.pathname === "/review/download")) {
     handleReviewPreview(req, res, { download: url.pathname === "/review/download" }).catch((err) => {
       console.error("review preview handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/laws/find") {
+    handleLawFind(req, res).catch((err) => {
+      console.error("law find handler crashed:", err);
       if (!res.headersSent) {
         res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error" }));

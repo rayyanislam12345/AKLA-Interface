@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, FileText, Menu, PanelRightOpen, Plus, Scale, X } from "lucide-react";
+import { ArrowLeft, Check, FileText, Globe, Menu, PanelRightOpen, Plus, Scale, X } from "lucide-react";
+import AddLawDialog from "@/components/law/AddLawDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { useDocumentTypeTemplate } from "@/hooks/useDocumentTypeTemplates";
@@ -245,7 +246,15 @@ function Standardisation({ documentTypeId }: { documentTypeId: string }) {
 function ContextStrip({ laws, onLawsChange, sources }: { laws: string[]; onLawsChange: (laws: string[]) => void; sources: ChatAttachment[] }) {
   const { data: statutes } = useStatuteSources();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
   const toggle = (act: string) => onLawsChange(laws.includes(act) ? laws.filter((l) => l !== act) : [...laws, act]);
+  // A law the library does not hold is found or uploaded from here, and
+  // identified for the standard as soon as it is in.
+  const openAdd = () => {
+    setOpen(false);
+    setAddOpen(true);
+  };
   return (
     <div className="space-y-1.5 border-b bg-muted/20 px-3 py-2 text-xs" data-testid="standardisation-context">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -267,9 +276,9 @@ function ContextStrip({ laws, onLawsChange, sources }: { laws: string[]; onLawsC
           </PopoverTrigger>
           <PopoverContent align="start" className="w-96 p-0">
             <Command>
-              <CommandInput placeholder="Search the law library…" />
+              <CommandInput placeholder="Search the law library…" value={query} onValueChange={setQuery} />
               <CommandList>
-                <CommandEmpty>No Act in the library matches. Acts are added to the library from a project's Relevant Laws.</CommandEmpty>
+                <CommandEmpty>Not in the law library.</CommandEmpty>
                 <CommandGroup heading="Law library">
                   {(statutes ?? []).map((s) => (
                     <CommandItem key={s.act_name} value={s.act_name} onSelect={() => toggle(s.act_name)}>
@@ -279,9 +288,30 @@ function ContextStrip({ laws, onLawsChange, sources }: { laws: string[]; onLawsC
                   ))}
                 </CommandGroup>
               </CommandList>
+              <button
+                type="button"
+                onClick={openAdd}
+                className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs hover:bg-accent"
+                data-testid="find-or-upload-law"
+              >
+                <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span>
+                  Not here? <span className="font-medium">Find it on official sources or upload it</span>
+                  {query.trim() ? <> — “{query.trim()}”</> : null}
+                </span>
+              </button>
             </Command>
           </PopoverContent>
         </Popover>
+        <AddLawDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          initialName={query.trim()}
+          onAdded={(act) => {
+            if (!laws.includes(act)) onLawsChange([...laws, act]);
+            setQuery("");
+          }}
+        />
       </div>
       {sources.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">

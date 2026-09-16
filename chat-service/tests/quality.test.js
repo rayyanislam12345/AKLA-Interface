@@ -416,3 +416,21 @@ test('an instruction answered at length is kept, with its locatable suggestions'
   assert.equal(cut.answer, 'A long list that stops mid');
   assert.equal(cut.unfinished, true);
 });
+
+test('an Act is found on pakistancode by its search page, and the wrong Act is not', async () => {
+  const { parseSearchResults, parseActPage, titleMatches, searchPakistanCode } = await import('../lawLibrary.js');
+  const search = '<a href="https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-con-2-sg-jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj.php">A</a> <a href="https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-con-1-sg-abc.php">B</a>';
+  assert.equal(parseSearchResults(search).length, 2);
+  const page = (title, pdf) => `<h2>${title}</h2><a href="${pdf}">PDF</a>`;
+  assert.deepEqual(parseActPage(page('THE CONTRACT ACT, 1872', 'https://pakistancode.gov.pk/pdffiles/x.pdf')), { title: 'THE CONTRACT ACT, 1872', pdfUrl: 'https://pakistancode.gov.pk/pdffiles/x.pdf' });
+  assert.ok(titleMatches('Contract Act, 1872', 'THE CONTRACT ACT, 1872'));
+  assert.ok(!titleMatches('Contract Act, 1872', 'THE CONTRACT (AMENDMENT) ACT, 1996'));
+  const pages = {
+    'https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-con-1-sg-abc.php': page('THE PARTNERSHIP ACT, 1932', 'https://pakistancode.gov.pk/pdffiles/p.pdf'),
+    'https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-con-2-sg-jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj.php': page('THE CONTRACT ACT, 1872', 'https://pakistancode.gov.pk/pdffiles/c.pdf'),
+  };
+  const fetchText = async (url) => (url.includes('sHyuRsF') ? search : pages[url] ?? '');
+  const hit = await searchPakistanCode('Contract Act, 1872', { fetchText });
+  assert.equal(hit.pdfUrl, 'https://pakistancode.gov.pk/pdffiles/c.pdf');
+  assert.equal(await searchPakistanCode('Sale of Goods Act, 1930', { fetchText }), null);
+});
