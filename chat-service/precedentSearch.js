@@ -87,12 +87,14 @@ async function synonymsFor(query, anthropicJson, signal) {
     const result = await anthropicJson({
       model: process.env.RESEARCH_MODEL ?? "claude-haiku-4-5-20251001",
       max_tokens: 200,
-      system: "You expand a search over a Pakistani law firm's precedent agreements (concession, EPC, PPA/EPA, financing, shareholder and track access agreements). Reply with ONLY a JSON array of up to 8 short lower-case phrases (1-4 words each) that a drafter would write in the clause itself for the same concept as the query. Expand abbreviations the way project and construction contracts use them — LD/LDs = liquidated damages, FM = force majeure, CP = conditions precedent, COD = commercial operations date, EoT = extension of time, DSCR = debt service coverage ratio, PPA = power purchase agreement — and never offer an expansion from another field. Include the expanded term itself first. No commentary.",
+      system: "You expand a search over a Pakistani law firm's precedent agreements (concession, EPC, PPA/EPA, financing, shareholder and track access agreements). Reply with ONLY a JSON array of up to 8 short lower-case phrases (1-4 words each) that a drafter would write in the clause itself for the same concept as the query. Expand abbreviations the way project and construction contracts use them — LD/LDs = liquidated damages, FM = force majeure, CP = conditions precedent, COD = commercial operations date, EoT = extension of time, DSCR = debt service coverage ratio, PPA = power purchase agreement — and never offer an expansion from another field. The FIRST element must be the plain core term alone (e.g. 'liquidated damages'), then its common variants (e.g. 'delay damages', 'performance liquidated damages'). One phrase per element — no commas inside an element. No commentary.",
       messages: [{ role: "user", content: String(query).slice(0, 300) }],
     }, signal);
     const text = (result.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("");
     const parsed = JSON.parse(/\[[\s\S]*\]/.exec(text)?.[0] ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((p) => typeof p === "string").slice(0, 8) : [];
+    if (!Array.isArray(parsed)) return [];
+    // "liquidated damages, ld" is two phrases, not one.
+    return [...new Set(parsed.filter((p) => typeof p === "string").flatMap((p) => p.split(/[,;/]/)).map((p) => p.trim().toLowerCase()).filter((p) => p.length > 1))].slice(0, 10);
   } catch {
     return [];
   }
@@ -101,7 +103,10 @@ async function synonymsFor(query, anthropicJson, signal) {
 export async function searchPrecedents({ supabase, voyageKey, anthropicJson, query, documentTypeId = null, signal }) {
   const q = String(query ?? "").trim();
   if (q.length < 2) throw new Error("Type what you are looking for, e.g. liquidated damages.");
-  const [synonyms, [queryEmbedding]] = await Promise.all([synonymsFor(q, anthropicJson, signal), embed(voyageKey, [q], "query", signal)]);
+  const synonyms = await synonymsFor(q, anthropicJson, signal);
+  // An abbreviation embeds as noise; the question is embedded with what it
+  // stands for.
+  const [queryEmbedding] = await embed(voyageKey, [synonyms[0] && !q.toLowerCase().includes(synonyms[0]) ? `${q} (${synonyms[0]})` : q], "query", signal);
   const terms = queryTerms(q, synonyms);
 
   // The phrases the index is searched for: the question as typed (unless it
