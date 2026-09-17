@@ -434,3 +434,14 @@ test('an Act is found on pakistancode by its search page, and the wrong Act is n
   assert.equal(hit.pdfUrl, 'https://pakistancode.gov.pk/pdffiles/c.pdf');
   assert.equal(await searchPakistanCode('Sale of Goods Act, 1930', { fetchText }), null);
 });
+
+test('precedent search reads paragraphs out of HTML and matches the words asked for', async () => {
+  const { paragraphsOf, queryTerms, termHits } = await import('../precedentSearch.js');
+  const html = '<h1>12. LIQUIDATED DAMAGES</h1><p>If the Contractor fails to achieve the Commercial Operations Date, it shall pay Liquidated Damages at the rate of [●] per day &amp; no more.</p><p>Short.</p>';
+  const paras = paragraphsOf(html);
+  assert.equal(paras.length, 1);
+  assert.match(paras[0].text, /Liquidated Damages at the rate of \[●\] per day & no more\.$/);
+  const terms = queryTerms('find all LD clauses', ['liquidated damages', 'delay damages']);
+  assert.ok(terms.includes('ld') && terms.includes('liquidated damages') && !terms.includes('clauses'));
+  assert.deepEqual(termHits(paras[0].text, terms).found, ['liquidated damages']);
+});

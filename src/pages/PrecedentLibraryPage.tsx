@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Plus, Sparkles, Trash2, Upload } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import PrecedentSearchTab from "@/components/precedents/PrecedentSearchTab";
+import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import AddLawDialog from "@/components/law/AddLawDialog";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
@@ -252,6 +253,8 @@ export default function PrecedentLibraryPage() {
   const uploadDoc = useUploadPrecedentDocument();
   const deleteSource = useDeletePrecedentSource();
   const { toast } = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") ?? "precedents";
 
   const [documentTypeId, setDocumentTypeId] = useState<string>("");
   const [queue, setQueue] = useState<QueuedFile[]>([]);
@@ -317,9 +320,13 @@ export default function PrecedentLibraryPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="precedents">
+      <Tabs value={tab} onValueChange={(v) => setParams(v === "precedents" ? {} : { tab: v }, { replace: true })}>
         <TabsList>
           <TabsTrigger value="precedents">Precedents</TabsTrigger>
+          <TabsTrigger value="search">
+            <Search className="h-3.5 w-3.5 mr-1.5" />
+            Search clauses
+          </TabsTrigger>
           <TabsTrigger value="law-library">
             <Gavel className="h-3.5 w-3.5 mr-1.5" />
             Law Library
@@ -467,6 +474,10 @@ export default function PrecedentLibraryPage() {
               ))
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="search" className="mt-6">
+          <PrecedentSearchTab />
         </TabsContent>
 
         <TabsContent value="law-library" className="mt-6">

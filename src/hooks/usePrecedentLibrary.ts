@@ -73,3 +73,42 @@ export function useDeletePrecedentSource() {
     },
   });
 }
+
+export interface PrecedentExcerpt { text: string; score: number; terms: string[]; chunkIndex: number | null; offset: number }
+export interface PrecedentHit { storagePath: string | null; filename: string; documentTypeId: string | null; documentTypeName: string | null; excerpts: PrecedentExcerpt[]; score: number }
+export interface PrecedentSearchResult { query: string; terms: string[]; results: PrecedentHit[] }
+
+// Clause search across the library, on the chat server: the best passages
+// per agreement, ranked by meaning and by the words used.
+export function usePrecedentSearch(query: string, documentTypeId: string | null) {
+  return useQuery({
+    queryKey: ["precedent-search", query, documentTypeId],
+    enabled: query.trim().length >= 2,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async ({ signal }): Promise<PrecedentSearchResult> => {
+      const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
+      if (!base) throw new Error("Precedent search needs the chat server (VITE_CHAT_API_URL).");
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not signed in");
+      const resp = await fetch(`${base}/precedents/search`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query.trim(), documentTypeId }),
+        signal,
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.error ?? `Search failed (${resp.status})`);
+      return body as PrecedentSearchResult;
+    },
+  });
+}
+
+/** A precedent's extracted text, its chunks in order — for viewing a file that is not a Word document. */
+export async function fetchPrecedentText(storagePath: string): Promise<string> {
+  const { data, error } = await supabase.from("documents").select("content, metadata").eq("is_precedent", true).eq("metadata->>storage_path", storagePath).limit(500);
+  if (error) throw error;
+  return (data ?? [])
+    .sort((a, b) => (Number((a.metadata as any)?.chunk_index) || 0) - (Number((b.metadata as any)?.chunk_index) || 0))
+    .map((r) => r.content)
+    .join("\n\n");
+}

@@ -22,6 +22,7 @@ import { extractTextFromFile } from "./extractText.js";
 import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun, chooseWorkingDocument } from "./chatState.js";
 import { researchLaw, needsResearch, describeLookup } from "./research.js";
 import { addLawToLibrary } from "./lawLibrary.js";
+import { searchPrecedents } from "./precedentSearch.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy } from "./docxAgent.js";
 import { runReview, checkReviewInstruction } from "./review.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
@@ -2050,6 +2051,37 @@ async function handleLawFind(req, res) {
   }
 }
 
+// A search across the precedent library for clauses: the passages that
+// answer, grouped by the agreement they sit in.
+async function handlePrecedentSearch(req, res) {
+  const json = (status, body) => {
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  const { error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
+  if (typeof body.query !== "string" || body.query.length > 500) return json(400, { error: "query is required" });
+  const clientGone = new AbortController();
+  res.on("close", () => { if (!res.writableFinished) clientGone.abort(); });
+  try {
+    const result = await searchPrecedents({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, query: body.query, documentTypeId: typeof body.documentTypeId === "string" ? body.documentTypeId : null, signal: clientGone.signal });
+    console.log(`precedent search "${body.query}": ${result.results.length} files`);
+    json(200, result);
+  } catch (err) {
+    if (clientGone.signal.aborted) return;
+    console.error(`precedent search "${body.query}" failed:`, err);
+    json(500, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 // Requests still being answered. A restart in the middle of one cuts a
@@ -2096,6 +2128,18 @@ const server = createServer((req, res) => {
   if (req.method === "POST" && (url.pathname === "/review/preview" || url.pathname === "/review/download")) {
     handleReviewPreview(req, res, { download: url.pathname === "/review/download" }).catch((err) => {
       console.error("review preview handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/precedents/search") {
+    handlePrecedentSearch(req, res).catch((err) => {
+      console.error("precedent search handler crashed:", err);
       if (!res.headersSent) {
         res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error" }));
