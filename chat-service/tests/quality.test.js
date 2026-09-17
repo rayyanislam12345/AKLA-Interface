@@ -445,3 +445,10 @@ test('precedent search reads paragraphs out of HTML and matches the words asked 
   assert.ok(terms.includes('ld') && terms.includes('liquidated damages') && !terms.includes('clauses'));
   assert.deepEqual(termHits(paras[0].text, terms).found, ['liquidated damages']);
 });
+
+test('a short term only counts as a whole word', async () => {
+  const { termHits } = await import('../precedentSearch.js');
+  assert.equal(termHits('The Contractor should be held liable.', ['ld']).count, 0);
+  assert.equal(termHits('LDs and the LD cap apply.', ['ld']).count, 1);
+  assert.equal(termHits('Liquidated Damages (the "LDs")', ['liquidated damages']).count, 1);
+});
