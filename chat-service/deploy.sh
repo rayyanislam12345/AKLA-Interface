@@ -23,11 +23,11 @@ echo "Backing up the running copy…"
 ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
 echo "Copying the service files and the version stamp…"
-scp -i "$KEY" server.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
+scp -i "$KEY" server.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/akla && mkdir -p /tmp/akla"
 scp -i "$KEY" akla/build_docx.py akla/akla-logo.png akla/requirements.txt "$HOST:/tmp/akla/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every

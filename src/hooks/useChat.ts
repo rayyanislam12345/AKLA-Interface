@@ -38,8 +38,34 @@ export function chatScopeKey(scope: ChatScope | string): string {
   if (typeof scope === "string") return scope;
   return scope.matterId ?? `standards/${scope.documentTypeId}`;
 }
+// Guided drafting: the question being asked, as the chat server sends it.
+export interface GuideQuestion {
+  id: string;
+  section: string;
+  title: string;
+  question: string;
+  multi: boolean;
+  exclusive: string[];
+  options: Array<{ id: string; label: string; hint?: string }>;
+  index: number;
+  total: number;
+}
+export interface GuideState {
+  key: string;
+  answers: Record<string, { optionIds: string[]; labels: string[]; auto?: boolean; skipped?: boolean }>;
+  pending: GuideQuestion | null;
+  done: boolean;
+}
+export interface GuideAnswer {
+  questionId: string;
+  optionIds: string[];
+  skip?: boolean;
+}
+
 export interface ActiveSkill {
   key: SkillKey;
+  // draft, guided: the answer being given to the question asked.
+  answer?: GuideAnswer;
   // standardise: "verify" runs a verification pass over the master.
   mode?: "verify";
   documentTypeId?: string;
@@ -503,6 +529,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             onArtifact?.(data);
             break;
           case "title":
+          case "questionnaire":
             queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
             break;
           case "done":
@@ -636,6 +663,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         ? {
             key: skill.key,
             mode: skill.mode,
+            answer: skill.answer,
             documentTypeId: skill.documentTypeId,
             customSkillId: skill.customSkillId,
             documentVersionId: skill.documentVersionId,

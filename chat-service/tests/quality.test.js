@@ -452,3 +452,65 @@ test('a short term only counts as a whole word', async () => {
   assert.equal(termHits('LDs and the LD cap apply.', ['ld']).count, 1);
   assert.equal(termHits('Liquidated Damages (the "LDs")', ['liquidated damages']).count, 1);
 });
+
+test('the RFP questionnaire asks dependent questions after what they depend on, and settles what earlier answers decide', async () => {
+  const { QUESTIONNAIRES, startQuestionnaire, readAnswer, advance, answerInstruction } = await import('../questionnaire.js');
+  const rfp = QUESTIONNAIRES.rfp_federal_ppp;
+  const ids = rfp.questions.map((q) => q.id);
+  const before = (a, b) => assert.ok(ids.indexOf(a) < ids.indexOf(b), `${a} should come before ${b}`);
+  before('qualified', 'approval_chain'); before('approval_chain', 'pcp_step'); before('qualified', 'support');
+  before('revenue_model', 'revenue_sharing'); before('support', 'financing_source'); before('financing_source', 'financing_mix');
+  before('financing_source', 'benchmark'); before('bidder_structure', 'epc'); before('capability_label', 'revenue_basis');
+  before('scoring', 'award'); before('support', 'award'); before('financing_source', 'f4');
+
+  let state = startQuestionnaire(rfp);
+  assert.equal(state.pending.id, 'modality');
+  const answer = (id, optionIds) => {
+    const read = readAnswer(rfp, state, { questionId: id, optionIds });
+    assert.ok(!read.error, read.error);
+    const next = advance(rfp, { ...state.answers, [id]: { optionIds: read.optionIds, labels: read.labels } });
+    state = { answers: next.answers, pending: next.pending };
+    return next;
+  };
+  answer('modality', ['dbfot']);
+  answer('term', ['fixed']);
+  // A Qualified Project keeps the approval chain without being asked.
+  const q = answer('qualified', ['qualified']);
+  assert.deepEqual(q.autos.map((d) => d.question.id), ['approval_chain']);
+  assert.equal(state.pending.id, 'pcp_step');
+  // A wrong question id is refused.
+  assert.ok(readAnswer(rfp, state, { questionId: 'modality', optionIds: ['bot'] }).error);
+  answer('pcp_step', ['include']);
+  answer('method', ['open']); answer('competition', ['icb']); answer('procedure', ['ss2e']); answer('submission', ['physical']);
+  // An availability model has no revenue to share.
+  const r = answer('revenue_model', ['availability']);
+  assert.deepEqual(r.autos.map((d) => [d.question.id, d.optionIds[0]]), [['revenue_sharing', 'none']]);
+  assert.equal(state.pending.id, 'escalation');
+  answer('escalation', ['cpi']);
+  // Support: a minimum revenue guarantee is not offered on an availability model; "none" stands alone.
+  assert.ok(!state.pending.options.some((o) => o.id === 'mrg'));
+  assert.ok(readAnswer(rfp, state, { questionId: 'support', optionIds: ['vgf', 'none'] }).error);
+  answer('support', ['vgf', 'assets']);
+  // Equity-only financing: no mix, no benchmark, and Form F4 is settled later.
+  answer('financing_source', ['equity_only']);
+  assert.equal(state.pending.id, 'currency');
+  answer('currency', ['pkr']);
+  assert.equal(state.pending.id, 'bidder_structure');
+  const b = answer('bidder_structure', ['consortium_epc']);
+  assert.deepEqual(b.autos.map((d) => d.question.id), ['epc']);
+  const c = answer('capability_label', ['construction']);
+  assert.deepEqual(c.autos.map((d) => [d.question.id, d.optionIds[0]]), [['revenue_basis', 'construction']]);
+  answer('scoring', ['per_category']);
+  // Award: no user tariff or revenue share on an availability model; VGF was offered, so lowest VGF is.
+  const awardOptions = state.pending.options.map((o) => o.id);
+  assert.ok(!awardOptions.includes('lowest_tariff') && !awardOptions.includes('highest_share') && awardOptions.includes('lowest_vgf'));
+  answer('award', ['lowest_vgf']);
+  const s = answer('bid_security', ['bank_guarantee']);
+  assert.deepEqual(s.autos.map((d) => [d.question.id, d.optionIds[0]]), [['f4', 'not_used']]);
+  answer('environment', ['both']); answer('land_handover', ['phased']); answer('resettlement', ['no_rap']); answer('utilities', ['agency']);
+  const last = answer('kpis', ['sla']);
+  assert.equal(last.pending, null);
+  const instruction = answerInstruction([{ question: rfp.questions[0], optionIds: ['bot'] }], state.answers);
+  assert.match(instruction, /CHOSEN: Build-Operate-Transfer \(BOT\)/);
+  assert.match(instruction, /NOT CHOSEN: .*DBFOT/);
+});

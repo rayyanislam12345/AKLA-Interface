@@ -14,6 +14,7 @@ import {
   type ChatArtifact,
   type ChatAttachment,
   type EditTarget,
+  type GuideState,
   openDocumentForEdit,
   useChatMessages,
   useChatThreads,
@@ -25,6 +26,7 @@ import ChatSidebar from "@/components/ai/chat/ChatSidebar";
 import MessageList from "@/components/ai/chat/MessageList";
 import Composer from "@/components/ai/chat/Composer";
 import ArtifactPanel from "@/components/ai/chat/ArtifactPanel";
+import GuideQuestionCard from "@/components/ai/chat/GuideQuestionCard";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -207,6 +209,22 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   }, [activeThread]);
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
 
+  // Guided drafting: the question this conversation is on, if any.
+  const guide = (activeThread?.questionnaire as unknown as GuideState | null | undefined) ?? null;
+  const handleGuideAnswer = async (question: { title: string }, answer: { questionId: string; optionIds: string[]; skip?: boolean }, labels: string[]) => {
+    if (!activeThreadId) return;
+    const threadSkill = activeThread?.skill as { documentTypeId?: string } | null;
+    const working = openArtifact && openArtifact.kind === "docx" ? openArtifact.id : (threadArtifacts ?? []).filter((a) => a.kind === "docx").at(-1)?.id ?? null;
+    await chat.send({
+      matterId,
+      threadId: activeThreadId,
+      message: answer.skip ? `Skip: ${question.title}` : `${question.title}: ${labels.join("; ")}`,
+      attachments: [],
+      skill: { key: "draft", documentTypeId: threadSkill?.documentTypeId, label: "Draft", answer },
+      workingArtifactId: working,
+    });
+  };
+
   const handleSend = async (input: { message: string; attachments: ChatAttachment[]; skill: ActiveSkill | null }) => {
     // A chat can hold several documents; the one open beside it is the one
     // the lawyer is talking about.
@@ -288,6 +306,10 @@ function AiWorkspace({ matterId }: { matterId: string }) {
               resumingMessageId={turn?.resumingMessageId ?? null}
               onResume={(m) => activeThreadId && chat.resume({ matterId, threadId: activeThreadId, message: m })}
             />
+
+            {guide?.pending && (
+              <GuideQuestionCard state={guide} busy={!!turn?.inFlight} onAnswer={handleGuideAnswer} />
+            )}
 
             <Composer
               key={activeThreadId ?? "new"}

@@ -134,6 +134,7 @@ export type Database = {
           last_message_at: string | null
           matter_id: string | null
           pinned: boolean
+          questionnaire: Json | null
           skill: Json | null
           title: string | null
           updated_at: string
@@ -149,6 +150,7 @@ export type Database = {
           last_message_at?: string | null
           matter_id?: string | null
           pinned?: boolean
+          questionnaire?: Json | null
           skill?: Json | null
           title?: string | null
           updated_at?: string
@@ -164,6 +166,7 @@ export type Database = {
           last_message_at?: string | null
           matter_id?: string | null
           pinned?: boolean
+          questionnaire?: Json | null
           skill?: Json | null
           title?: string | null
           updated_at?: string
@@ -392,6 +395,7 @@ export type Database = {
           required_fields: Json
           typical_stage: string | null
           updated_at: string
+          questionnaire: string | null
         }
         Insert: {
           category: string
@@ -401,6 +405,7 @@ export type Database = {
           required_fields?: Json
           typical_stage?: string | null
           updated_at?: string
+          questionnaire?: string | null
         }
         Update: {
           category?: string
@@ -410,6 +415,7 @@ export type Database = {
           required_fields?: Json
           typical_stage?: string | null
           updated_at?: string
+          questionnaire?: string | null
         }
         Relationships: []
       }
