@@ -39,6 +39,7 @@ interface ArtifactPanelProps {
 // document under review.
 export default function ArtifactPanel({ matterId, matterName, standard, artifact, lawUpdate, onClose }: ArtifactPanelProps) {
   const Icon = artifactIcon(artifact.kind);
+  const incomplete = (artifact.data as { truncated?: boolean } | null)?.truncated === true;
   return (
     <div className="flex h-full min-w-0 flex-col bg-background" data-testid="artifact-panel">
       <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -56,6 +57,15 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {incomplete && (
+        <div role="status" className="flex items-start gap-2 border-b border-amber-400/60 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700/50 dark:bg-amber-950/20" data-testid="incomplete-document-notice">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+          <span>
+            <strong>Incomplete draft.</strong> Generation ended before this document was finished. Ask in the chat to complete it.
+            This copy cannot be published as a standard.
+          </span>
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {artifact.kind === "review" && matterId ? (
           <ReviewArtifact matterId={matterId} artifact={artifact} lawUpdate={lawUpdate ?? null} />
@@ -278,7 +288,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
         <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? initialDocTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !(artifact.data as any)?.savedMatterDocumentId && !editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
         <Button size="sm" className="h-8" onClick={handleSaveToMatter} disabled={saving || !documentTypeId} data-testid="save-to-matter">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          {saveMode === "version" ? "Save new version" : "Create document"}
+          {truncated ? "Save incomplete draft" : saveMode === "version" ? "Save new version" : "Create document"}
         </Button>
         {standard?.filename && (
           <span className="text-xs text-muted-foreground" title={standard.filename} data-testid="standard-format-note">
@@ -292,16 +302,6 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
           </Button>
         )}
       </div>
-
-      {truncated && (
-        <div className="flex items-start gap-2 border-b border-amber-400/60 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700/50 dark:bg-amber-950/20">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
-          <span>
-            This document stops before the end — it ran past the model's limit. Ask in the chat to carry on from the
-            last clause before saving it to the project.
-          </span>
-        </div>
-      )}
 
       {/* Both stay mounted: the docx export reads the editor even while the preview tab is showing. */}
       <div className="min-h-0 flex-1 overflow-y-auto">

@@ -22,6 +22,7 @@ interface DocxArtifactData {
   documentTypeId?: string | null;
   standard?: boolean;
   original?: boolean;
+  truncated?: boolean;
   validation?: { placeholders?: Array<{ part: string; paragraph: number; text: string }>; format?: { status: string; findings: Array<{ detail: string; part: string }>; limitation: string } };
   changes?: Array<{ op: string; paragraph: number; status: string; summary: string; reason?: string }>;
   applied?: number;
@@ -110,7 +111,7 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
   // client) stripped, and the file put through the same upload the
   // Standardize page uses, so the previous standard is kept as a version.
   const handleSetAsStandard = async () => {
-    if (!standard || !blob) return;
+    if (!standard || !blob || data.truncated) return;
     if (!window.confirm(`Set this file as the firm's standard for "${standard.documentTypeName}"? Every future draft of that type will start from it. The current standard is kept as an earlier version.`)) return;
     setPublishing(true);
     try {
@@ -199,14 +200,16 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
 
       {standard && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-          <Button size="sm" className="h-8" onClick={handleSetAsStandard} disabled={publishing || !blob} data-testid="set-as-standard">
+          <Button size="sm" className="h-8" onClick={handleSetAsStandard} disabled={publishing || !blob || data.truncated} data-testid="set-as-standard">
             {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
             Set as standard
           </Button>
           <span className="text-xs text-muted-foreground">
-            {data.publishedAsStandardAt
-              ? `Set as the standard on ${new Date(data.publishedAsStandardAt).toLocaleString()}`
-              : "Publishes a clean copy — changes accepted, AKLA comments removed — as the firm's standard for this type."}
+            {data.truncated
+              ? "Complete this draft before setting it as the firm's standard."
+              : data.publishedAsStandardAt
+                ? `Set as the standard on ${new Date(data.publishedAsStandardAt).toLocaleString()}`
+                : "Publishes a clean copy — changes accepted, AKLA comments removed — as the firm's standard for this type."}
           </span>
         </div>
       )}
@@ -231,7 +234,7 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
           <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? data.documentTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !data.savedMatterDocumentId && !data.editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
           <Button size="sm" className="h-8" onClick={handleSave} disabled={saving || !documentTypeId || !blob} data-testid="save-to-matter">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {saveMode === "version" ? "Save new version" : "Create document"}
+            {data.truncated ? "Save incomplete draft" : saveMode === "version" ? "Save new version" : "Create document"}
           </Button>
           {(lastSave || data.savedMatterDocumentId) && (
             <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>

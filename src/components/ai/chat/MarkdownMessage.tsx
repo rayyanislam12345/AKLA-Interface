@@ -85,6 +85,7 @@ export function ArtifactCard({
     return <div className="text-xs text-muted-foreground italic">(document no longer available)</div>;
   }
   const Icon = artifactIcon(artifact.kind);
+  const incomplete = (artifact.data as { truncated?: boolean } | null)?.truncated === true;
   const edit = (artifact.data as any)?.editSource;
   const docxData = artifact.kind === "docx" ? (artifact.data as any) : null;
   const subtitle = docxData
@@ -115,7 +116,10 @@ export function ArtifactCard({
       </div>
       <div className="min-w-0">
         <div className="truncate text-sm font-medium">{artifact.title}</div>
-        <div className="text-xs text-muted-foreground">{subtitle} · Click to open</div>
+        <div className="text-xs text-muted-foreground">
+          {incomplete && <span className="font-medium text-amber-700 dark:text-amber-400">Incomplete draft · </span>}
+          {subtitle} · Click to open
+        </div>
       </div>
     </button>
   );
