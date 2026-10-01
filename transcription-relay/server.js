@@ -570,11 +570,25 @@ function getDeployedVersion() {
 
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (req.method === "POST" && url.pathname === "/transcribe-file") {
+  // The web app calls this from another origin, and its upload carries the
+  // file's own MIME type as Content-Type, so the browser preflights it.
+  // Auth is the token in the query string, not a cookie, so "*" is safe.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, { "Access-Control-Max-Age": "86400" });
+    res.end();
+    return;
+  }
+  // The web app derives its HTTP base from the WebSocket URL, which ends in
+  // /meeting, so accept the HTTP routes under that prefix as well.
+  const pathname = url.pathname.replace(/^\/meeting(?=\/)/, "");
+  if (req.method === "POST" && pathname === "/transcribe-file") {
     handleTranscribeFileUpload(req, res, url);
     return;
   }
-  if (req.method === "GET" && url.pathname === "/version") {
+  if (req.method === "GET" && pathname === "/version") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ...getDeployedVersion(), startedAt: SERVER_STARTED_AT }));
     return;
@@ -588,15 +602,31 @@ const wss = new WebSocketServer({ server: httpServer, path: "/meeting" });
 wss.on("connection", async (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const token = url.searchParams.get("token");
+
+  // The browser's socket is open as soon as the handshake completes, and it
+  // sends straight away (Generate Minutes connects and fires translate-batch
+  // in one go). Verifying the token is a round trip to Supabase, so listen
+  // now and hold anything that arrives until we know who this is — a
+  // listener attached after the await would silently drop those messages.
+  let session = null;
+  const early = [];
+  ws.on("message", (data, isBinary) => {
+    if (session) handleMessage(data, isBinary);
+    else early.push([data, isBinary]);
+  });
+  ws.on("close", () => session?.cleanup());
+
   const user = await verifySupabaseToken(token);
   if (!user) {
     ws.close(4001, "Unauthorized");
     return;
   }
+  if (ws.readyState !== WebSocket.OPEN) return;
 
-  const session = createSession(ws, user.id);
+  session = createSession(ws, user.id);
+  for (const [data, isBinary] of early.splice(0)) handleMessage(data, isBinary);
 
-  ws.on("message", (data, isBinary) => {
+  function handleMessage(data, isBinary) {
     if (isBinary) {
       session.handleAudioChunk(Buffer.from(data));
       return;
@@ -607,9 +637,7 @@ wss.on("connection", async (ws, req) => {
     } catch {
       // ignore malformed control message
     }
-  });
-
-  ws.on("close", () => session.cleanup());
+  }
 });
 
 httpServer.listen(PORT, () => {

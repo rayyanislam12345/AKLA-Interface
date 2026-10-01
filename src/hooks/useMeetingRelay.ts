@@ -437,13 +437,26 @@ export function useMeetingRelay() {
         }
         if (currentGroup.length > 0) groups.push(currentGroup);
 
+        // The relay gives up after three 45s attempts and answers with an
+        // error, so a reply that hasn't come by now never will (dropped
+        // socket, relay restart) — stop waiting rather than leave the page on
+        // "Translating…" forever; untranslated lines go through as they are.
+        const timeout = setTimeout(() => {
+          for (const t of targets) pendingTranslateResolvers.current.delete(t.id);
+          setError("Translation timed out; some lines were left untranslated.");
+          resolve();
+        }, 180_000);
+
         let remaining = targets.length;
         const applyResult = (id: number, translation?: string | null) => {
           if (translation) {
             setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, translation } : s)));
           }
           remaining -= 1;
-          if (remaining <= 0) resolve();
+          if (remaining <= 0) {
+            clearTimeout(timeout);
+            resolve();
+          }
         };
         for (const t of targets) {
           pendingTranslateResolvers.current.set(t.id, (results) => {
@@ -491,7 +504,9 @@ export function useMeetingRelay() {
         return { ok: false, error: "Not signed in." };
       }
 
-      const httpBase = RELAY_URL.replace(/^ws/, "http");
+      // RELAY_URL is the WebSocket endpoint (…/meeting); the upload route
+      // lives at the server root.
+      const httpBase = new URL(RELAY_URL.replace(/^ws/, "http")).origin;
       const url = `${httpBase}/transcribe-file?token=${encodeURIComponent(token)}&language=${encodeURIComponent(fileLanguage)}`;
 
       try {
