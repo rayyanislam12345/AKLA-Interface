@@ -18,6 +18,7 @@ import AiWorkspacePage from "./pages/AiWorkspacePage";
 import RecordMeetingPage from "./pages/RecordMeetingPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
 import PrecedentLibraryPage from "./pages/PrecedentLibraryPage";
+import CaselawResearchPage from "./pages/CaselawResearchPage";
 import StandardizeDocumentTypePage from "./pages/StandardizeDocumentTypePage";
 import StandardisationPage from "./pages/StandardisationPage";
 import MandateOpportunitiesPage from "./pages/MandateOpportunitiesPage";
@@ -65,6 +66,7 @@ const App = () => {
                     }
                   />
                   <Route path="/search" element={<ProtectedRoute><AppLayout><ProjectSearchPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/caselaw-research" element={<ProtectedRoute><AppLayout><CaselawResearchPage /></AppLayout></ProtectedRoute>} />
                   <Route
                     path="/matters"
                     element={
