@@ -1,0 +1,19 @@
+[Unit]
+Description=AKLA Project Hub case-law research endpoint
+After=network.target
+
+[Service]
+Type=simple
+User=opc
+WorkingDirectory=/opt/caselaw-service
+EnvironmentFile=/opt/caselaw-service/.env
+ExecStart=/usr/bin/node /opt/caselaw-service/server.js
+# Retrieval fans out many calls to the free case-law MCP and runs the planner,
+# grader and answer model; keep it off the one CPU's neck so it never starves
+# ocr-service or the live transcription relay.
+Nice=10
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

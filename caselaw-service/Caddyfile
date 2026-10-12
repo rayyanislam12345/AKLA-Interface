@@ -1,0 +1,6 @@
+# Append to /etc/caddy/Caddyfile alongside aklaocr, aklarelay and aklachat,
+# then `sudo systemctl reload caddy`. 8090 = ocr-service, 8091 =
+# transcription-relay, 8092 = chat-service, 8093 = emailbot-web. This is 8094.
+aklacaselaw.duckdns.org {
+	reverse_proxy 127.0.0.1:8094
+}

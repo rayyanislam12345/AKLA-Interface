@@ -1,0 +1,19 @@
+{
+  "name": "akla-caselaw-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AKLA case-law research chat — retrieves and reasons over reported Pakistani judgments. Separate from the AI Workspace chat service.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.57.4",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
