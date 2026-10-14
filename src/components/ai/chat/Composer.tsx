@@ -153,7 +153,9 @@ export default function Composer({
 
   const uploading = attachments.some((a) => a.uploading);
   const needsDocType = skill?.key === "draft" && !skill.documentTypeId;
-  const canSend = !sending && !uploading && !needsDocType && (text.trim().length > 0 || attachments.length > 0);
+  // A Draft may be sent without a type: the server works it out from the
+  // request, or drafts untyped. The select below stays as a way to be specific.
+  const canSend = !sending && !uploading && (text.trim().length > 0 || attachments.length > 0);
 
   const submit = async () => {
     if (!canSend) return;
@@ -242,7 +244,7 @@ export default function Composer({
           <div className="px-3 pt-3">
             <Select onValueChange={(id) => setSkill({ key: "draft", documentTypeId: id, label: `Draft · ${documentTypes?.find((t) => t.id === id)?.name ?? ""}` })}>
               <SelectTrigger className="h-9" data-testid="draft-type-select">
-                <SelectValue placeholder="Which document type should this draft be?" />
+                <SelectValue placeholder="Document type — or leave it and the assistant will work it out" />
               </SelectTrigger>
               <SelectContent>
                 {typesByCategory.map(([category, types]) => (
