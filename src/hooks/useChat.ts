@@ -291,6 +291,26 @@ export interface EditTarget {
 // AI edit that follows is saved as a further artifact with the same
 // editSource, which is what "Save as new version" uses to version the right
 // document.
+// Opens a block of text — minutes or a proposal from Record Meeting — in a new
+// general chat as a document of its own, so it can be refined, saved to a
+// project, or used as the source for an agreement without a re-upload.
+export async function openTextInAssistant({ userId, title, markdown, documentTypeId = null }: { userId?: string; title: string; markdown: string; documentTypeId?: string | null }) {
+  if (!userId) throw new Error("Not signed in");
+  const { data: thread, error: threadError } = await supabase
+    .from("ai_chat_threads")
+    .insert({ matter_id: null, document_type_id: null, title, created_by: userId })
+    .select("id")
+    .single();
+  if (threadError || !thread) throw new Error(threadError?.message ?? "Could not start the chat");
+  const { data: artifact, error: artifactError } = await supabase
+    .from("ai_artifacts")
+    .insert({ thread_id: thread.id, matter_id: null, kind: "memo", title, content: markdown, data: { documentTypeId, sourceKind: "draft", generatedBy: "record-meeting" }, created_by: userId })
+    .select("id")
+    .single();
+  if (artifactError || !artifact) throw new Error(artifactError?.message ?? "Could not record the document");
+  return { threadId: thread.id as string, artifactId: artifact.id as string };
+}
+
 export async function openDocumentForEdit(
   matterId: string,
   target: EditTarget,

@@ -1,7 +1,7 @@
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
-import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, ScanSearch, Save } from "lucide-react";
+import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, ScanSearch, Save, Sparkles } from "lucide-react";
 import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
@@ -16,7 +16,10 @@ import SegmentList, {
   segmentsToEnglishTranscriptText,
   segmentsToTranscriptText,
 } from "@/components/meeting/SegmentList";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { openTextInAssistant } from "@/hooks/useChat";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -110,6 +113,20 @@ export default function RecordMeetingPage() {
   const documentTypeIdFor = useMemo(() => {
     return (format: MeetingOutputFormat) => documentTypes?.find((t) => t.name === UPLOAD_DOCUMENT_TYPE_NAME[format])?.id;
   }, [documentTypes]);
+
+  // Hand a generated output to the AI Assistant as a document in a new chat:
+  // refine it there, save it to a project, or turn the meeting into an
+  // agreement — without downloading and re-uploading.
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const handleOpenInAssistant = async (format: MeetingOutputFormat, text: string) => {
+    try {
+      const { threadId } = await openTextInAssistant({ userId: user?.id, title: OUTPUT_LABELS[format], markdown: text, documentTypeId: documentTypeIdFor(format) ?? null });
+      navigate(`/assistant?chat=${threadId}`);
+    } catch (err: any) {
+      toast({ title: "Couldn't open the assistant", description: err.message, variant: "destructive" });
+    }
+  };
 
   const wantsSpeakerDetection = captureMeetingAudio && detectSpeakers;
 
@@ -689,6 +706,10 @@ export default function RecordMeetingPage() {
               <Download className="h-4 w-4 mr-2" />
               Save Proposal (.docx)
             </Button>
+            <Button variant="outline" onClick={() => proposalDraft && handleOpenInAssistant("proposal", proposalDraft)} disabled={!proposalDraft}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Open in the assistant
+            </Button>
             <Button
               onClick={() => proposalDraft && handleUploadToMatter("proposal", proposalDraft)}
               disabled={!proposalDraft || !uploadMatterId || uploadingFormat === "proposal"}
@@ -719,6 +740,10 @@ export default function RecordMeetingPage() {
             >
               <Download className="h-4 w-4 mr-2" />
               Save Minutes (.docx)
+            </Button>
+            <Button variant="outline" onClick={() => minutesDraft && handleOpenInAssistant(minutesDraft.format, minutesDraft.text)} disabled={!minutesDraft}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Open in the assistant
             </Button>
             <Button
               onClick={() => minutesDraft && handleUploadToMatter(minutesDraft.format, minutesDraft.text)}

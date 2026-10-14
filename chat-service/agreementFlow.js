@@ -63,7 +63,13 @@ export async function handleAgreementTurn(ctx) {
   const prior = (memos ?? []).find((a) => a.data?.agreement?.facts);
 
   if (!prior) {
-    const sources = (attachments ?? []).filter((a) => a.text && a.text.trim());
+    let sources = (attachments ?? []).filter((a) => a.text && a.text.trim());
+    if (!sources.length) {
+      // Minutes or a proposal opened from Record Meeting sit in this chat as a
+      // document; with nothing attached, that is the source.
+      const own = (memos ?? []).find((a) => !a.data?.agreement && a.content && a.content.trim().length > 200);
+      if (own) sources = [{ name: own.title, text: own.content }];
+    }
     const transcript = sources.length ? sources.map((s) => `### ${s.name}\n${s.text}`).join("\n\n") : message.length >= 400 ? message : "";
     if (!transcript) {
       say("Attach the meeting transcript or the concept note (or paste the transcript into the message) and send again — I'll pull out the deal facts for you to confirm before anything is drafted.");
