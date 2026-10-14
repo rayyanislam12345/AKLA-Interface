@@ -1,0 +1,51 @@
+# Daily Agenda spec. Build with:
+#   python3 scripts/build_agenda.py examples/example.yaml --outdir ~/Desktop
+#
+# name / role / closing / ak_column can live in ~/.akla-agenda.yaml instead,
+# so the author never has to repeat them.
+name: Ayaan Qureshi
+role: Associate                 # Senior Counsel | Associate | Intern (printed as the label)
+timesheet_date: 2026-10-06      # the day being reported (today); default: today
+agenda_date: 2026-10-07         # the day being planned; default: next working day
+note: To be discussed with Boss.   # the "*Note:" bullet under Deliverables; set to null to omit
+closing: allocation             # allocation -> "[Subject To Allocation Of Tasks During The Day]"
+                                # blank      -> "[***The Rest Of This Page Has Been Intentionally Left Blank***]"
+ak_column: true                 # show the "AK Billable Hours" column
+
+# ---- Daily Agenda (tomorrow): one block per transaction ----
+deliverables:
+  - transaction: MEW
+    scope: Finalising the authority letter for the EPC contract.
+    complete_deliverable: Authority letter.
+    day_deliverable: Authority letter.          # default: same as complete_deliverable
+    status: Pending with me.                    # default: "Pending with me."
+  - transaction: PTQ Expressway
+    scope: Finalising the project documents for circulation to the lenders.
+    complete_deliverable: Finalised project documents.
+    status: Pending with me.
+  - transaction: Parking Plaza
+    scope: Overseeing the interns on the DCA amendments.
+    complete_deliverable: Amended DCA.
+    status: Pending with the interns.
+
+# optional "Internal/Administrative" bullets on the agenda page
+internal:
+  - Follow up on the September 2026 timesheet approval and have the invoice circulated through Mr. Zulfiqar.
+
+# ---- Daily Timesheet (today): one row per transaction ----
+timesheet:
+  - transaction: Internal
+    description:                                # a list becomes "A; and / B." in the cell
+      - Agenda call with Boss and the AKLA team
+      - Discussion with Areen on the term sheet
+    hours: 2
+  - transaction: MEW
+    description: Drafted the authority letter for the EPC contract and circulated it to Boss for review.
+    hours: 3.5
+    billable: 3.5
+  - transaction: ADB
+    description:
+      - Attended the meeting at the NHA office
+      - Attended the meeting at the ADB office for the upcoming conference (non-billable)
+    hours: 3
+    ak_billable: 2
