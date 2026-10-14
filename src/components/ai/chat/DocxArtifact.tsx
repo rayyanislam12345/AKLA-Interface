@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMyProfile } from "@/hooks/useProfiles";
+import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 import { cn } from "@/lib/utils";
 
 interface DocxArtifactData {
@@ -66,7 +67,9 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
   const [documentTypeId, setDocumentTypeId] = useState<string | undefined>(data.documentTypeId ?? undefined);
   const [form, setForm] = useState<"tracked" | "clean">("tracked");
   const [saving, setSaving] = useState(false);
-  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId: string } | null>(null);
+  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId?: string; matterId?: string } | null>(null);
+  // Saving from a general chat (no project open) asks which project first.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"new" | "version">(data.savedMatterDocumentId || data.editSource?.matterDocumentId ? "version" : "new");
   const [changesOpen, setChangesOpen] = useState(true);
 
@@ -132,9 +135,12 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
     }
   };
 
-  const handleSave = async () => {
-    if (!documentTypeId || !matterId) {
-      toast({ title: matterId ? "Pick a document type first" : "This file belongs to a standardisation session, not a project", variant: "destructive" });
+  // A document type is optional: an untyped document has always been valid in
+  // the database; only this button used to insist on one.
+  const handleSave = async (targetMatterId = matterId) => {
+    if (!targetMatterId) {
+      if (standard) toast({ title: "This file belongs to a standardisation session, not a project", variant: "destructive" });
+      else setPickerOpen(true);
       return;
     }
     setSaving(true);
@@ -142,16 +148,16 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
       const file = await fileFor();
       const src = data.editSource;
       const result = await saveDraftToMatter({
-        matterId,
-        documentTypeId,
+        matterId: targetMatterId,
+        documentTypeId: documentTypeId ?? null,
         documentTypeName,
         blob: file,
         title: src?.standard ? undefined : src?.title ?? baseName,
         matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? data.savedMatterDocumentId ?? src?.matterDocumentId,
         expectedVersionId: lastSave?.versionId ?? data.savedVersionId ?? src?.documentVersionId,
       });
-      setLastSave({ ...result, documentTypeId });
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      setLastSave({ ...result, documentTypeId, matterId: targetMatterId });
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
@@ -221,11 +227,12 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
 
       {!data.original && !standard && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-          <Select value={documentTypeId} onValueChange={setDocumentTypeId} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? data.documentTypeId)}>
+          <Select value={documentTypeId ?? "none"} onValueChange={(v) => setDocumentTypeId(v === "none" ? undefined : v)} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? data.documentTypeId)}>
             <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
-              <SelectValue placeholder="Document type (for saving)" />
+              <SelectValue placeholder="Document type (optional)" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="none">No specific type</SelectItem>
               {typesByCategory.map(([category, types]) => (
                 <SelectGroup key={category}>
                   <SelectLabel>{category}</SelectLabel>
@@ -237,12 +244,13 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
             </SelectContent>
           </Select>
           <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? data.documentTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !data.savedMatterDocumentId && !data.editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
-          <Button size="sm" className="h-8" onClick={handleSave} disabled={saving || !documentTypeId || !blob} data-testid="save-to-matter">
+          <Button size="sm" className="h-8" onClick={() => handleSave()} disabled={saving || !blob} data-testid="save-to-matter">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             {data.truncated ? "Save incomplete draft" : saveMode === "version" ? "Save new version" : "Create document"}
           </Button>
+          <ProjectPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} title="Save to which project?" description="The file will be added to that project's documents." onPick={(id) => { setPickerOpen(false); void handleSave(id); }} />
           {(lastSave || data.savedMatterDocumentId) && (
-            <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
+            <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${lastSave?.matterId ?? matterId}`)}>
               <FileText className="mr-1 h-3.5 w-3.5" />
               Saved as v{lastSave?.versionNumber ?? data.savedVersion} · open project
             </Button>

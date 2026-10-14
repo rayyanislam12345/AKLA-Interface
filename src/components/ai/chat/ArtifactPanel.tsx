@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { artifactIcon } from "@/components/ai/chat/MarkdownMessage";
+import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 
 interface ArtifactPanelProps {
   matterId?: string;
@@ -72,9 +73,9 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
         ) : artifact.kind === "docx" ? (
           <DocxArtifact key={artifact.id} matterId={matterId} standard={standard} artifact={artifact} />
         ) : artifact.kind === "file" ? (
-          <FileArtifact key={artifact.id} artifact={artifact} />
+          <FileArtifact key={artifact.id} artifact={artifact} matterId={matterId} />
         ) : (
-          <DocumentArtifact key={artifact.id} matterId={matterId} matterName={matterName} artifact={artifact} />
+          <DocumentArtifact key={artifact.id} matterId={matterId} matterName={matterName} standard={standard} artifact={artifact} />
         )}
       </div>
     </div>
@@ -93,7 +94,9 @@ function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; a
   );
 }
 
-function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: string; matterName?: string; artifact: ChatArtifact }) {
+function DocumentArtifact({ matterId, matterName, standard: session, artifact }: { matterId?: string; matterName?: string; standard?: { documentTypeId: string; documentTypeName: string }; artifact: ChatArtifact }) {
+  // Saving from a general chat (no project open) asks which project first.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -105,7 +108,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [buildingPreview, setBuildingPreview] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId: string } | null>(null);
+  const [lastSave, setLastSave] = useState<{ matterDocumentId: string; versionId: string; versionNumber: number; documentTypeId?: string; matterId?: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -200,9 +203,12 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
     toast({ title: "Edits saved" });
   };
 
-  const handleSaveToMatter = async () => {
-    if (!documentTypeId || !matterId) {
-      toast({ title: matterId ? "Pick a document type first" : "This document belongs to a standardisation session, not a project", variant: "destructive" });
+  // A document type is optional: an untyped document has always been valid in
+  // the database; only this button used to insist on one.
+  const handleSaveToMatter = async (targetMatterId = matterId) => {
+    if (!targetMatterId) {
+      if (session) toast({ title: "This document belongs to a standardisation session, not a project", variant: "destructive" });
+      else setPickerOpen(true);
       return;
     }
     setSaving(true);
@@ -210,16 +216,16 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
       const blob = await buildBlob();
       if (!blob) throw new Error("Editor is not ready yet");
       const result = await saveDraftToMatter({
-        matterId,
-        documentTypeId,
+        matterId: targetMatterId,
+        documentTypeId: documentTypeId ?? null,
         documentTypeName,
         blob,
         title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
         matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? (artifact.data as any)?.savedMatterDocumentId ?? editSource?.matterDocumentId,
         expectedVersionId: lastSave?.versionId ?? (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
       });
-      setLastSave({ ...result, documentTypeId });
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      setLastSave({ ...result, documentTypeId, matterId: targetMatterId });
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
@@ -270,11 +276,12 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-        <Select value={documentTypeId} onValueChange={setDocumentTypeId} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? initialDocTypeId)}>
+        <Select value={documentTypeId ?? "none"} onValueChange={(v) => setDocumentTypeId(v === "none" ? undefined : v)} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? initialDocTypeId)}>
           <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
-            <SelectValue placeholder="Document type (for saving)" />
+            <SelectValue placeholder="Document type (optional)" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="none">No specific type</SelectItem>
             {typesByCategory.map(([category, types]) => (
               <SelectGroup key={category}>
                 <SelectLabel>{category}</SelectLabel>
@@ -286,17 +293,18 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
           </SelectContent>
         </Select>
         <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? initialDocTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !(artifact.data as any)?.savedMatterDocumentId && !editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
-        <Button size="sm" className="h-8" onClick={handleSaveToMatter} disabled={saving || !documentTypeId} data-testid="save-to-matter">
+        <Button size="sm" className="h-8" onClick={() => handleSaveToMatter()} disabled={saving} data-testid="save-to-matter">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
           {truncated ? "Save incomplete draft" : saveMode === "version" ? "Save new version" : "Create document"}
         </Button>
+        <ProjectPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} title="Save to which project?" description="The document will be added to that project's documents." onPick={(id) => { setPickerOpen(false); void handleSaveToMatter(id); }} />
         {standard?.filename && (
           <span className="text-xs text-muted-foreground" title={standard.filename} data-testid="standard-format-note">
             Uses firm standard · layout not verified
           </span>
         )}
         {saved && (
-          <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
+          <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${lastSave?.matterId ?? matterId}`)}>
             <FileText className="mr-1 h-3.5 w-3.5" />
             Saved as v{lastSave?.versionNumber ?? (artifact.data as any)?.savedVersion} · open project
           </Button>
