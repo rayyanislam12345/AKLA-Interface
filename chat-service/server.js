@@ -773,7 +773,7 @@ async function handleChat(req, res) {
     }
     if (latest?.kind === "draft" && skill) currentDraft = latest.content;
     if (latest?.kind === "docx" && d.storagePath) {
-      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered, title: choice.root?.title ?? latest.title };
+      docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, savedMatterDocumentId: d.savedMatterDocumentId ?? null, savedVersionId: d.savedVersionId ?? null, savedVersion: d.savedVersion ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered, title: choice.root?.title ?? latest.title };
     } else if (skill?.key === "edit") {
       if (latest?.content && d.editSource) {
         editBase = { content: latest.content, editSource: d.editSource, original: !!d.original, documentTypeId: d.documentTypeId };
@@ -1826,6 +1826,10 @@ You answer the way a careful senior associate would: precise, conservative, and 
                 tracked: !docxBase.standard || !!docxBase.revising,
                 validation: out.validation,
                 sourceStoragePath: docxBase.storagePath,
+                // Where this document was last saved travels with it, so the next
+                // save is a new version of the same project document, not a stale
+                // base the database refuses.
+                ...(docxBase.savedMatterDocumentId ? { savedMatterDocumentId: docxBase.savedMatterDocumentId, savedVersionId: docxBase.savedVersionId, savedVersion: docxBase.savedVersion } : {}),
                 ...(docxBase.rendered ? { rendered: "akla" } : {}),
               },
               created_by: user.id,
@@ -2031,12 +2035,13 @@ async function handleReviewPreview(req, res, { download = false } = {}) {
 
   let output;
   try {
-    // The download is for Word, where the lawyer or the other side decides
-    // each change: every suggestion not rejected goes in as a tracked change,
-    // including the ones accepted here. The preview writes accepted ones in.
+    // Preview, download and save show the same state: a suggestion the lawyer
+    // accepted is written in, a pending one stays a tracked change, a rejected
+    // one is absent. The download used to send accepted ones out as pending
+    // revisions again, so a decision made here was undone in Word.
     output = applyReviewSuggestions(
       new Uint8Array(await file.arrayBuffer()),
-      (suggestions ?? []).map((s) => ({ id: s.id, original: s.original_text, suggested: s.suggested_text, accepted: !download && s.status === "accepted" })),
+      (suggestions ?? []).map((s) => ({ id: s.id, original: s.original_text, suggested: s.suggested_text, accepted: s.status === "accepted" })),
     );
   } catch (err) {
     console.error("review preview failed:", err);

@@ -47,12 +47,20 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 truncate text-sm" title={artifact.title}>
           <span className="font-medium">{artifact.title}</span>
-          {(artifact.data as any)?.editSource && (
-            <span className="ml-2 text-xs text-muted-foreground">
-              {(artifact.data as any).original ? "as uploaded" : "edited"} · v{(artifact.data as any).editSource.versionNumber} of{" "}
-              {(artifact.data as any).editSource.title}
-            </span>
-          )}
+          {/* The working document names where it came from and where it stands:
+              the project, the version it was opened from, and whether it has
+              been saved back — the one line the workflow proposal asks for. */}
+          {artifact.kind !== "review" && (() => {
+            const d = (artifact.data ?? {}) as any;
+            const es = d.editSource;
+            const origin = es
+              ? es.standard
+                ? "from the firm's standard"
+                : `${d.original ? "as uploaded" : "edited"} · ${es.versionNumber ? `v${es.versionNumber} of ${es.title}` : es.title}`
+              : matterName ?? "not in a project";
+            const saved = d.savedVersion ? `saved as v${d.savedVersion}` : matterId ? "not saved to the project yet" : "not saved yet";
+            return <span className="ml-2 text-xs text-muted-foreground">{origin} · {saved}</span>;
+          })()}
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close panel">
           <X className="h-4 w-4" />
