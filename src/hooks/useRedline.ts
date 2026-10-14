@@ -113,20 +113,6 @@ export function useRunRedlineReview() {
   });
 }
 
-export function useRedlineChat() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { documentVersionId: string; threadId?: string; reviewRunId?: string; instruction: string }) => {
-      const { data, error } = await supabase.functions.invoke("redline-chat", { body: input });
-      if (error) throw error;
-      return data as { threadId: string; reply: string; newSuggestions: RedlineSuggestion[] };
-    },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["redline-suggestions", variables.documentVersionId] });
-    },
-  });
-}
-
 export function useSetSuggestionStatus() {
   const queryClient = useQueryClient();
   return useMutation({

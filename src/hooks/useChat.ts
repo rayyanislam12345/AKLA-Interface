@@ -537,6 +537,13 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
             break;
           case "artifact":
             patchStream(key, (s) => ({ ...s, artifacts: [...s.artifacts, data] }));
+            // A review follow-up answered in this chat re-sends its review artifact;
+            // the panel beside it reads suggestions and the run from their own
+            // queries, so refresh those or it keeps showing the old review.
+            if (data?.kind === "review") {
+              queryClient.invalidateQueries({ queryKey: ["redline-suggestions"] });
+              queryClient.invalidateQueries({ queryKey: ["review-run"] });
+            }
             onArtifact?.(data);
             break;
           case "title":

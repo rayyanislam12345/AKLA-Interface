@@ -9,7 +9,6 @@ import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/u
 import {
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
-  useRedlineChat,
   useReviewRun,
   useRedlinePreviewFile,
   useRedlineSuggestions,
@@ -18,7 +17,6 @@ import {
   type RedlineReviewType,
   type RedlineSuggestion,
 } from "@/hooks/useRedline";
-import DocumentChatPanel, { type DocumentChatMessage } from "@/components/chat/DocumentChatPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -198,7 +196,6 @@ export default function ReviewSession({
   const { data: suggestions } = useRedlineSuggestions(version?.id, reviewRun?.id);
   const runReview = useRunRedlineReview();
   const setStatus = useSetSuggestionStatus();
-  const redlineChat = useRedlineChat();
   const applyPreview = useApplyRedlinesPreview();
 
   // apply-redlines-to-docx patches the real uploaded .docx with OOXML
@@ -212,8 +209,6 @@ export default function ReviewSession({
   const { data: previewBlob } = useRedlinePreviewFile(previewStoragePath);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  const [chatMessages, setChatMessages] = useState<DocumentChatMessage[]>([]);
-  const [chatThreadId, setChatThreadId] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
   const regeneratePreview = async (documentVersionId: string, runId = reviewRun?.id) => {
@@ -234,8 +229,6 @@ export default function ReviewSession({
   useEffect(() => {
     setPreviewStoragePath(undefined);
     setApplySummary(null);
-    setChatMessages([]);
-    setChatThreadId(undefined);
   }, [version?.id, reviewRun?.id]);
 
   // Rebuild the preview automatically once suggestions exist and nothing's
@@ -248,6 +241,18 @@ export default function ReviewSession({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version?.id, reviewRun?.id, suggestions, canPreview]);
+
+  // A follow-up sent from the main chat can add suggestions after the preview
+  // was built; rebuild it when the set changes, so the panel never shows a
+  // preview the suggestion list has moved past.
+  const suggestionSig = useRef("");
+  useEffect(() => {
+    const sig = (suggestions ?? []).map((s) => s.id).join(",");
+    const changed = suggestionSig.current !== "" && sig !== suggestionSig.current;
+    suggestionSig.current = sig;
+    if (changed && canPreview && version?.id && previewStoragePath && !applyPreview.isPending) regeneratePreview(version.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions]);
 
   // A Word page renders at its real width, about 800 pixels for A4, which is
   // wider than the column beside the suggestions on most screens — so the
@@ -341,24 +346,6 @@ export default function ReviewSession({
       await regeneratePreview(version.id, result.reviewRunId);
     } catch (err: any) {
       toast({ title: "Review failed", description: err.message, variant: "destructive" });
-    }
-  };
-
-  const handleSendReviewMessage = async (text: string) => {
-    if (!version?.id) return;
-    setChatMessages((prev) => [...prev, { role: "user", content: text }]);
-    try {
-      const result = await redlineChat.mutateAsync({
-        documentVersionId: version.id,
-        threadId: chatThreadId,
-        reviewRunId: reviewRun?.id,
-        instruction: text,
-      });
-      setChatThreadId(result.threadId);
-      setChatMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
-      if (result.newSuggestions.length > 0) await regeneratePreview(version.id);
-    } catch (err: any) {
-      toast({ title: "Message failed", description: err.message, variant: "destructive" });
     }
   };
 
@@ -639,30 +626,19 @@ export default function ReviewSession({
             <p className="text-muted-foreground">No material issues flagged.</p>
           )}
 
-          {/* Normally the conversation opens once a review has produced
-              something to talk about. Arriving from a "Revise" link is the
-              exception: the pre-written instruction has to have somewhere to
-              land even on a document nobody has reviewed yet. */}
+          {/* One conversation, not two: questions about a suggestion and
+              requests for another check go through the chat beside this panel,
+              which already handles review follow-ups; the reply and any new
+              suggestions land here. A "Revise" link arrives with its
+              instruction already in that chat. */}
           {(runReview.isSuccess || (suggestions && suggestions.length > 0) || lawUpdate) && (
             <Card className={cn(lawUpdate && "border-amber-400/60")}>
-              <CardContent className="pt-6 space-y-4">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  {lawUpdate ? "Revise against this change" : "Continue the conversation"}
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">
+                  {lawUpdate
+                    ? "The instruction to review this document against the change is in the chat — adjust it if you want, then send it. New suggestions appear here."
+                    : "Ask about a suggestion or request another check in the chat — e.g. \"also check the indemnity clause\". The reply and any new suggestions appear here."}
                 </p>
-                <DocumentChatPanel
-                  messages={chatMessages}
-                  onSend={handleSendReviewMessage}
-                  sending={redlineChat.isPending}
-                  placeholder="Ask a question or request another check…"
-                  emptyHint={
-                    lawUpdate
-                      ? "Read the instruction below, adjust it if you want, then send it to review this document against the change."
-                      : 'Ask about a suggestion, or request another pass — e.g. "also check the indemnity clause".'
-                  }
-                  initialInput={
-                    lawUpdate ? buildRevisePrompt(lawUpdate, matterDocument?.title ?? undefined) : undefined
-                  }
-                />
               </CardContent>
             </Card>
           )}

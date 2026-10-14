@@ -53,8 +53,10 @@ is switched off for the same reason.
   clock to respect.
 - Stop: the browser closing the connection aborts the upstream model stream
   (`res.on("close")`), and what was written is saved with `stopped: true`.
-- The verify skill still calls the `suggest-redline` and `redline-chat` edge
-  functions over the network. Fine at 1.7ms.
+- Review follow-ups asked in the chat are answered here (`review.js`'s
+  `checkReviewInstruction`); the review panel has no chat of its own any more.
+  The `redline-chat` edge function is only reached through the edge `chat`
+  fallback, which is slated for removal.
 
 **Different by being here** — the large-docx/pptx and scanned-PDF offloads go
 to ocr-service on `127.0.0.1:8090` rather than across the internet.
