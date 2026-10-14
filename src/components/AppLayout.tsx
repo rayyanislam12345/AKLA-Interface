@@ -10,8 +10,10 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   useActivityTracking();
 
+  // The sidebar opens by default so its 13 entries carry their labels;
+  // collapsed to bare icons, associates had to memorise which icon was which.
   return (
-    <SidebarProvider defaultOpen={false}>
+    <SidebarProvider defaultOpen={true}>
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         {/* min-w-0 overrides the flex default of min-width:auto — without it,

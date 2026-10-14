@@ -83,7 +83,7 @@ export default function StandardizeDocumentTypePage() {
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Gavel className="h-5 w-5 text-primary" />
-          Standardize: {documentType?.name ?? "Document Type"}
+          Standardise: {documentType?.name ?? "Document Type"}
         </h1>
         <p className="text-muted-foreground">
           The firm's canonical .docx for this document type. Drafting follows its clause structure ahead of the

@@ -76,3 +76,4 @@ supabase/.branches/
 # scripts/precedent_backlog/supabase_io.py
 law-monitor/supabase_io.py
 law-monitor/.env
+.vercel

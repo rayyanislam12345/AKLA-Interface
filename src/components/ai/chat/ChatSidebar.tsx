@@ -155,7 +155,7 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{deleting?.title}" and any documents it produced that haven't been saved to the matter will be removed for everyone.
+              "{deleting?.title}" and any documents it produced that haven't been saved to the project will be removed for everyone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

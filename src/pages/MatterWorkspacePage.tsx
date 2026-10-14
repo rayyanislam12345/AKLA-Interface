@@ -93,6 +93,13 @@ function statusVariant(status: string): "default" | "secondary" | "outline" {
 
 const STAGE_CYCLE = ["not_started", "in_progress", "complete"] as const;
 
+// Every mutation on this page used to fire with no error handling: a failed
+// add, tick, status change or dismiss simply did nothing, and the lawyer was
+// left wondering whether it had worked. Each call now names what failed.
+const onFail = (toast: ReturnType<typeof useToast>["toast"], title: string) => ({
+  onError: (err: any) => toast({ title, description: err?.message ?? "Please try again.", variant: "destructive" as const }),
+});
+
 function StageIcon({ status }: { status: string }) {
   if (status === "complete") return <Check className="h-4 w-4 text-green-600" />;
   if (status === "in_progress") return <CircleDot className="h-4 w-4 text-amber-500" />;
@@ -431,7 +438,7 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                         variant="ghost"
                         title="Dismiss on this project only"
                         onClick={() =>
-                          acknowledgeUpdate.mutate({ matterId: matterId!, lawUpdateId: update.id })
+                          acknowledgeUpdate.mutate({ matterId: matterId!, lawUpdateId: update.id }, onFail(toast, "Couldn't dismiss the update"))
                         }
                       >
                         Dismiss
@@ -824,7 +831,7 @@ export default function MatterWorkspacePage() {
 
   const cycleStage = (stageId: string, current: string) => {
     const next = STAGE_CYCLE[(STAGE_CYCLE.indexOf(current as any) + 1) % STAGE_CYCLE.length];
-    setStageStatus.mutate({ stageId, status: next, matterId: matterId! });
+    setStageStatus.mutate({ stageId, status: next, matterId: matterId! }, onFail(toast, "Couldn't update the stage"));
   };
 
   return (
@@ -847,7 +854,9 @@ export default function MatterWorkspacePage() {
             <MessageSquare className="h-4 w-4 mr-2" />
             Ask AI
           </Button>
-          <DeleteMatterDialog matterId={matterId!} matterName={matter.name} />
+          {/* Deleting a project removes it for everyone; any approved member
+              could do it. Admins only until the partners decide otherwise. */}
+          {isAdmin && <DeleteMatterDialog matterId={matterId!} matterName={matter.name} />}
         </div>
       </div>
 
@@ -942,7 +951,7 @@ export default function MatterWorkspacePage() {
                           matterDocumentId: doc.id,
                           status: value as DocumentStatus,
                           matterId: matterId!,
-                        })
+                        }, onFail(toast, "Couldn't change the document's status"))
                       }
                     >
                       <SelectTrigger className="w-44 h-8 text-xs shrink-0">
@@ -1146,7 +1155,7 @@ export default function MatterWorkspacePage() {
                     matter_id: matterId!,
                     title: newDocTitle.trim(),
                     document_type_id: newDocTypeId || undefined,
-                  });
+                  }, onFail(toast, "Couldn't add the document"));
                   setNewDocTitle("");
                   setNewDocTypeId("");
                 }}
@@ -1176,7 +1185,7 @@ export default function MatterWorkspacePage() {
                 variant="outline"
                 disabled={!partyName.trim() || !partyRole.trim()}
                 onClick={() => {
-                  addParty.mutate({ matter_id: matterId!, name: partyName.trim(), role: partyRole.trim() });
+                  addParty.mutate({ matter_id: matterId!, name: partyName.trim(), role: partyRole.trim() }, onFail(toast, "Couldn't add the party"));
                   setPartyName("");
                   setPartyRole("");
                 }}
@@ -1201,7 +1210,7 @@ export default function MatterWorkspacePage() {
                       taskId: task.id,
                       status: checked ? "done" : "open",
                       matterId: matterId!,
-                    })
+                    }, onFail(toast, "Couldn't update the task"))
                   }
                 />
                 <span className={cn(task.status === "done" && "line-through text-muted-foreground")}>
@@ -1238,7 +1247,7 @@ export default function MatterWorkspacePage() {
                 variant="outline"
                 disabled={!taskTitle.trim()}
                 onClick={() => {
-                  addTask.mutate({ matter_id: matterId!, title: taskTitle.trim() });
+                  addTask.mutate({ matter_id: matterId!, title: taskTitle.trim() }, onFail(toast, "Couldn't add the task"));
                   setTaskTitle("");
                 }}
               >
@@ -1268,7 +1277,7 @@ export default function MatterWorkspacePage() {
                 variant="outline"
                 disabled={!noteContent.trim()}
                 onClick={() => {
-                  addNote.mutate({ matter_id: matterId!, content: noteContent.trim() });
+                  addNote.mutate({ matter_id: matterId!, content: noteContent.trim() }, onFail(toast, "Couldn't add the note"));
                   setNoteContent("");
                 }}
               >
@@ -1296,7 +1305,7 @@ export default function MatterWorkspacePage() {
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
               Curated facts carried forward across "Draft with AI" sessions on this project, so the next
-              document doesn't have to re-ask what an earlier one already established. Use "Summarize"
+              document doesn't have to re-ask what an earlier one already established. Use "Summarise"
               to pull a first draft of this from the project's existing documents and past AI sessions —
               review and edit before saving.
             </p>
@@ -1318,7 +1327,7 @@ export default function MatterWorkspacePage() {
               </Button>
               <Button size="sm" variant="outline" onClick={handleSummarizeContext} disabled={summarizing}>
                 <Wand2 className="h-4 w-4 mr-2" />
-                {summarizing ? "Summarizing…" : "Summarize from documents & AI sessions"}
+                {summarizing ? "Summarising…" : "Summarise from documents & AI sessions"}
               </Button>
             </div>
           </CardContent>

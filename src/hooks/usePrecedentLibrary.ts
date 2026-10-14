@@ -87,7 +87,7 @@ export function usePrecedentSearch(query: string, documentTypeId: string | null)
     staleTime: 5 * 60 * 1000,
     queryFn: async ({ signal }): Promise<PrecedentSearchResult> => {
       const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
-      if (!base) throw new Error("Precedent search needs the chat server (VITE_CHAT_API_URL).");
+      if (!base) throw new Error("Clause search isn't available right now. Ask an administrator to check the AI service.");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not signed in");
       const resp = await fetch(`${base}/precedents/search`, {

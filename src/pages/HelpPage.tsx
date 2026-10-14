@@ -79,14 +79,14 @@ const HelpPage = () => {
         {
           question: "How do the AI features work?",
           answer:
-            "Anthropic Claude handles drafting, review, and chat; Voyage AI's voyage-law-2 (a legal-domain embedding model) powers retrieval from the firm's documents. AI output is grounded in what's actually been uploaded — drafts mark unknown commercial terms as placeholders (e.g. [CONCESSION PERIOD — TO BE CONFIRMED]) instead of inventing figures, and chat says clearly when nothing relevant is found rather than guessing.",
+            "The AI drafts, reviews and answers questions using what the firm has actually uploaded: the project's documents, the precedent library and the law library. Its output is grounded in that material — drafts mark unknown commercial terms as placeholders (e.g. [CONCESSION PERIOD — TO BE CONFIRMED]) instead of inventing figures, and chat says clearly when nothing relevant is found rather than guessing.",
         },
       ],
       faqs: [
         {
           question: "Do I need to set anything up before using AI features?",
           answer:
-            "An administrator needs to add two API keys (ANTHROPIC_API_KEY and VOYAGE_API_KEY) as Edge Function secrets in the Supabase project — a one-time setup step. Project tracking, document upload, and everything else works without them.",
+            "No. If an AI feature says it isn't available, tell an administrator — it is a server setting, not something you configure. Project tracking, document upload and everything else work regardless.",
         },
         {
           question: "Can multiple lawyers work on the same project?",
@@ -394,6 +394,12 @@ const HelpPage = () => {
             <h1 className="text-3xl font-bold">Help Center</h1>
             <p className="text-muted-foreground">Learn how to use AKLA Project Hub</p>
           </div>
+        </div>
+        {/* Several answers below describe an earlier version of the app. The
+            page is being replaced by guidance inside the features themselves;
+            until then, say so rather than let a stale answer mislead. */}
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+          This page is being rewritten. Some answers describe older screens and buttons; if something here doesn't match what you see, trust the app, and use the form at the bottom to ask.
         </div>
 
         <div className="relative max-w-md">

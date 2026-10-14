@@ -298,7 +298,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
         {saved && (
           <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${matterId}`)}>
             <FileText className="mr-1 h-3.5 w-3.5" />
-            Saved as v{lastSave?.versionNumber ?? (artifact.data as any)?.savedVersion} · open matter
+            Saved as v{lastSave?.versionNumber ?? (artifact.data as any)?.savedVersion} · open project
           </Button>
         )}
       </div>

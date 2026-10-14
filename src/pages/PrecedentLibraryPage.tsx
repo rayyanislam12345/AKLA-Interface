@@ -170,7 +170,7 @@ function StandardizeTab() {
                     <TableCell className="max-w-md">{row.document_type_name}</TableCell>
                     <TableCell>
                       <Badge variant={row.filename ? "default" : "secondary"}>
-                        {row.filename ? "Standardized" : "Not yet standardized"}
+                        {row.filename ? "Standardised" : "Not yet standardised"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -212,7 +212,7 @@ function StandardizeTab() {
                 <p className="text-sm font-medium">{row.document_type_name}</p>
                 <div className="flex items-center justify-between gap-2">
                   <Badge variant={row.filename ? "default" : "secondary"}>
-                    {row.filename ? "Standardized" : "Not yet standardized"}
+                    {row.filename ? "Standardised" : "Not yet standardised"}
                   </Badge>
                   <div className="flex gap-2">
                     <Button
@@ -294,7 +294,22 @@ export default function PrecedentLibraryPage() {
       }
     }
     setUploading(false);
-    toast({ title: "Batch upload complete" });
+    // Report the real outcome: "complete" used to show even when files failed,
+    // and each file's error text was recorded but never surfaced.
+    setQueue((final) => {
+      const failed = final.filter((q) => q.status === "error");
+      const done = final.filter((q) => q.status === "done").length;
+      if (failed.length === 0) {
+        toast({ title: `${done} file${done === 1 ? "" : "s"} uploaded` });
+      } else {
+        toast({
+          title: `${done} uploaded, ${failed.length} failed`,
+          description: failed.map((q) => `${q.file.name}: ${q.error ?? "upload failed"}`).join("\n"),
+          variant: "destructive",
+        });
+      }
+      return final;
+    });
   };
 
   const handleDelete = async (storagePath: string, filename: string) => {
@@ -333,7 +348,7 @@ export default function PrecedentLibraryPage() {
           </TabsTrigger>
           <TabsTrigger value="standardize">
             <FileCheck className="h-3.5 w-3.5 mr-1.5" />
-            Standardize
+            Standardise
           </TabsTrigger>
         </TabsList>
 

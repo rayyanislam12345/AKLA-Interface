@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useMyProfile } from "@/hooks/useProfiles";
 
 interface SkillsDialogProps {
   open: boolean;
@@ -38,6 +39,9 @@ async function callSkillsService(path: string, init: RequestInit) {
 // purpose: a name, a one-line description for the palette, the
 // instructions themselves, and whether the result should open as a document.
 export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) {
+  // Firm skills are shared by everyone; removing one should be an admin's act.
+  const { data: me } = useMyProfile();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
   const { data: skills } = useCustomSkills();
   const save = useSaveCustomSkill();
   const remove = useDeleteCustomSkill();
@@ -180,7 +184,8 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
                     size="icon"
                     className="h-7 w-7 text-destructive"
                     aria-label="Delete skill"
-                    disabled={deletingId === s.id}
+                    title={isAdmin ? undefined : "Only an administrator can delete a firm skill"}
+                    disabled={deletingId === s.id || !isAdmin}
                     onClick={() => deleteSkill(s)}
                   >
                     {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}

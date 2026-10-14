@@ -234,7 +234,7 @@ async function anthropicJson(body, signal) {
     body: JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
   });
-  if (!resp.ok) throw new Error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  if (!resp.ok) { console.error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`); throw new Error(`The AI service didn't respond properly (${resp.status}). Try again in a moment.`); };
   return resp.json();
 }
 
@@ -254,7 +254,7 @@ async function anthropicStreamOnce(body, onDelta, signal) {
     if (signal?.aborted || err?.name === "AbortError") return { text: "", stopReason: null, aborted: true };
     throw err;
   }
-  if (!resp.ok || !resp.body) throw new Error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  if (!resp.ok || !resp.body) { console.error(`AI provider error ${resp.status}: ${(await resp.text()).slice(0, 300)}`); throw new Error(`The AI service didn't respond properly (${resp.status}). Try again in a moment.`); };
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -569,8 +569,8 @@ async function handleChat(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader) return json(401, { error: "Authorization header required" });
-  if (!ANTHROPIC_KEY) return json(500, { error: "Anthropic API key not configured" });
-  if (!VOYAGE_KEY) return json(500, { error: "Voyage API key not configured" });
+  if (!ANTHROPIC_KEY) return json(500, { error: "The AI service isn't set up on this server. Ask an administrator." });
+  if (!VOYAGE_KEY) return json(500, { error: "The document search service isn't set up on this server. Ask an administrator." });
 
   const supabase = db;
   const { user, error: authError } = await authorize(authHeader);
@@ -1893,8 +1893,8 @@ async function handleReview(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader) return json(401, { error: "Authorization header required" });
-  if (!ANTHROPIC_KEY) return json(500, { error: "Anthropic API key not configured" });
-  if (!VOYAGE_KEY) return json(500, { error: "Voyage API key not configured" });
+  if (!ANTHROPIC_KEY) return json(500, { error: "The AI service isn't set up on this server. Ask an administrator." });
+  if (!VOYAGE_KEY) return json(500, { error: "The document search service isn't set up on this server. Ask an administrator." });
 
   const supabase = db;
   const { user, error: authError } = await authorize(authHeader);
@@ -2061,7 +2061,7 @@ async function handleSkillUpload(req, res) {
     published = await publishSkill(ANTHROPIC_KEY, parsed, existing?.anthropic_skill_id ?? null);
   } catch (err) {
     console.error("skill publish failed:", err);
-    return json(502, { error: `Anthropic did not accept the skill: ${err.message}` });
+    return json(502, { error: `The skill couldn't be uploaded: ${err.message}` });
   }
   const fields = {
     name: parsed.name,
@@ -2079,7 +2079,7 @@ async function handleSkillUpload(req, res) {
   const { data: row, error } = targetId
     ? await db.from("ai_skills").update(fields).eq("id", targetId).select("*").single()
     : await db.from("ai_skills").insert({ ...fields, created_by: user.id }).select("*").single();
-  if (error) return json(500, { error: `The skill was stored with Anthropic but not recorded here: ${error.message}` });
+  if (error) return json(500, { error: `The skill was uploaded but couldn't be saved here: ${error.message}` });
   console.log(`skill ${parsed.name} ${targetId ? "updated" : "added"}: ${parsed.files.length} files, ${parsed.totalBytes} bytes`);
   json(200, { skill: row, replaced: !!targetId, renamed: parsed.renamed });
 }
@@ -2105,7 +2105,7 @@ async function handleSkillDelete(req, res) {
     try {
       await unpublishSkill(ANTHROPIC_KEY, row.anthropic_skill_id);
     } catch (err) {
-      return json(502, { error: `Anthropic would not remove the skill: ${err.message}` });
+      return json(502, { error: `The skill couldn't be removed: ${err.message}` });
     }
   }
   const { error } = await db.from("ai_skills").delete().eq("id", row.id);

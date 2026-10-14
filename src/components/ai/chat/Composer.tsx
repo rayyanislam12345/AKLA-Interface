@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookMarked, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { type ActiveSkill, type ChatAttachment, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
-import { UPLOAD_ACCEPT } from "@/components/ai/DocumentUploadCard";
+// The file types the chat uploader accepts. Lived in DocumentUploadCard until
+// that card stopped being rendered anywhere; the constant was all Composer used.
+const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.xls,.pptx";
 import AddFromMatterDialog from "@/components/ai/chat/AddFromMatterDialog";
 import AddFromLibraryDialog from "@/components/ai/chat/AddFromLibraryDialog";
 import EditDocumentDialog from "@/components/ai/chat/EditDocumentDialog";

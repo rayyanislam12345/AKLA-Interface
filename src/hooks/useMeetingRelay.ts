@@ -139,7 +139,7 @@ export function useMeetingRelay() {
   const connect = useCallback(async () => {
     setError(null);
     if (!RELAY_URL) {
-      setError("Transcription relay is not configured (VITE_TRANSCRIPTION_RELAY_URL).");
+      setError("Transcription isn't available right now. Ask an administrator to check the transcription service.");
       return false;
     }
     const { data } = await supabase.auth.getSession();
@@ -496,7 +496,7 @@ export function useMeetingRelay() {
   const transcribeFile = useCallback(
     async (file: File, fileLanguage: MeetingLanguage): Promise<{ ok: boolean; segments?: MeetingSegment[]; error?: string }> => {
       if (!RELAY_URL) {
-        return { ok: false, error: "Transcription relay is not configured (VITE_TRANSCRIPTION_RELAY_URL)." };
+        return { ok: false, error: "Transcription isn't available right now. Ask an administrator to check the transcription service." };
       }
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;

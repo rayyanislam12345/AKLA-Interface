@@ -12,6 +12,7 @@ import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useMyProfile } from "@/hooks/useProfiles";
 import { cn } from "@/lib/utils";
 
 interface DocxArtifactData {
@@ -49,6 +50,10 @@ function download(blob: Blob, name: string) {
 // download is the file, and saving to the project stores the file.
 export default function DocxArtifact({ matterId, standard, artifact }: { matterId?: string; standard?: { documentTypeId: string; documentTypeName: string }; artifact: ChatArtifact }) {
   const { toast } = useToast();
+  // Publishing a standard changes what every future draft of that type
+  // starts from — an admin's call, not any member's.
+  const { data: me } = useMyProfile();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
   const uploadStandard = useUploadDocumentTypeTemplate();
   const [publishing, setPublishing] = useState(false);
   const navigate = useNavigate();
@@ -200,7 +205,7 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
 
       {standard && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-          <Button size="sm" className="h-8" onClick={handleSetAsStandard} disabled={publishing || !blob || data.truncated} data-testid="set-as-standard">
+          <Button size="sm" className="h-8" onClick={handleSetAsStandard} disabled={publishing || !blob || data.truncated || !isAdmin} title={isAdmin ? undefined : "Only an administrator can set the firm's standard"} data-testid="set-as-standard">
             {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
             Set as standard
           </Button>

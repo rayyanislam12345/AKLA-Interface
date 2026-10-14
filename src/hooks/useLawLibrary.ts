@@ -57,7 +57,7 @@ export function useFindLawOnline() {
   return useMutation({
     mutationFn: async ({ actName }: { actName: string }): Promise<FindLawResult> => {
       const base = (import.meta.env.VITE_CHAT_API_URL as string | undefined)?.replace(/\/$/, "");
-      if (!base) throw new Error("Finding laws online needs the chat server (VITE_CHAT_API_URL). Upload the Act instead.");
+      if (!base) throw new Error("Finding laws online isn't available right now. Upload the Act instead, or ask an administrator.");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not signed in");
       const resp = await fetch(`${base}/laws/find`, {
