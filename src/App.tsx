@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -13,7 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
-import ProjectSearchPage from "./pages/ProjectSearchPage";
+import AssistantSearchPage from "./pages/AssistantSearchPage";
 import AiWorkspacePage from "./pages/AiWorkspacePage";
 import RecordMeetingPage from "./pages/RecordMeetingPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
@@ -34,6 +34,15 @@ const queryClient = new QueryClient();
 // Ask AI, Draft with AI and Review with AI used to be three pages; they're
 // now tabs of the AI Workspace. Old URLs (bookmarks, in-flight sessions)
 // land on the right tab — and, for a review, the right document.
+// Search moved under the AI Assistant; old links (and the project page's
+// "Search project" button) keep their query string.
+function RedirectSearch() {
+  const { search } = useLocation();
+  const p = new URLSearchParams(search);
+  if (!p.has("tab")) p.set("tab", "projects");
+  return <Navigate to={`/assistant/search?${p.toString()}`} replace />;
+}
+
 function RedirectToAiWorkspace({ mode }: { mode: "ask" | "draft" | "review" }) {
   const { matterId, matterDocumentId } = useParams<{ matterId: string; matterDocumentId?: string }>();
   const params = new URLSearchParams({ mode });
@@ -65,7 +74,8 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
-                  <Route path="/search" element={<ProtectedRoute><AppLayout><ProjectSearchPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/search" element={<RedirectSearch />} />
+                  <Route path="/assistant/search" element={<ProtectedRoute><AppLayout><AssistantSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/caselaw-research" element={<ProtectedRoute><AppLayout><CaselawResearchPage /></AppLayout></ProtectedRoute>} />
                   <Route
                     path="/matters"

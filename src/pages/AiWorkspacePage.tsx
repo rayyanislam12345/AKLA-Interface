@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote } from "lucide-react";
+import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote, Search } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useMatter } from "@/hooks/useMatters";
@@ -270,6 +270,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
         <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => (matterId ? setSearchParams(new URLSearchParams({ mode: "review" }), { replace: true }) : setProjectPicker("review"))} />
         <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
         <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => (matterId ? setEditPickerOpen(true) : setProjectPicker("edit"))} />
+        <SuggestionChip Icon={Search} label="Find a document or clause" onClick={() => navigate("/assistant/search")} />
       </div>
     </div>
   );

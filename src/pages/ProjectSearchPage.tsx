@@ -20,7 +20,7 @@ const PAGE_SIZE = 25;
 function Snippet({ text }: { text: string }) {
   return <>{text.split(/(⟦[^⟧]*⟧)/g).map((part,i) => part.startsWith("⟦") ? <mark key={i} className="rounded bg-amber-100 px-0.5 text-inherit dark:bg-amber-900/40">{part.slice(1,-1)}</mark> : <span key={i}>{part}</span>)}</>;
 }
-export default function ProjectSearchPage() {
+export default function ProjectSearchPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const matterId = params.get("matter") ?? "all";
@@ -59,7 +59,7 @@ export default function ProjectSearchPage() {
     finally { setDownloading(null); }
   };
   return <div className="mx-auto max-w-5xl space-y-6">
-    <div><h1 className="text-2xl font-semibold">Project search</h1><p className="text-muted-foreground">Find documents, clauses, notes, and tasks across your projects.</p></div>
+    {!embedded && <div><h1 className="text-2xl font-semibold">Project search</h1><p className="text-muted-foreground">Find documents, clauses, notes, and tasks across your projects.</p></div>}
     <form className="flex gap-2" onSubmit={e => { e.preventDefault(); update({q:input.trim()}); }}>
       <Input aria-label="Search projects" placeholder='Search words or an exact phrase in quotes' value={input} maxLength={200} onChange={e => setInput(e.target.value)} autoFocus />
       <Button type="submit" disabled={input.trim().length<2}><Search className="mr-2 h-4 w-4"/>Search</Button>
