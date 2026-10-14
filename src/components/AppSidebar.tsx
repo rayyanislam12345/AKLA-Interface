@@ -29,7 +29,7 @@ const NAV_ITEMS = [
   { title: "Team", url: "/team", icon: Users },
   { title: "Today's Timesheet", url: "/timesheet", icon: Clock },
   { title: "Record Meeting", url: "/record-meeting", icon: Mic },
-  { title: "Precedent Library", url: "/precedent-library", icon: BookMarked },
+  { title: "Firm Library", url: "/precedent-library", icon: BookMarked },
   { title: "Case-Law Research", url: "/caselaw-research", icon: Scale },
   { title: "Mandate Opportunities", url: "/mandate-opportunities", icon: Megaphone },
   { title: "WhatsApp Activity", url: "/whatsapp-activity", icon: MessageCircle },

@@ -228,7 +228,7 @@ function DocumentArtifact({ matterId, matterName, artifact }: { matterId?: strin
       setSaveMode("version");
       toast({
         title: `Saved to the project as v${result.versionNumber}`,
-        description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess before relying on it in Ask AI.`,
+        description: result.indexed ? result.fileName : `${result.fileName} — saved, but it couldn't be prepared for search. Open the project and press Try again.`,
       });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });

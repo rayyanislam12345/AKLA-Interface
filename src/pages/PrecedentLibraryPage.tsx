@@ -73,7 +73,7 @@ function LawLibraryTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Act</TableHead>
-                  <TableHead>Chunks</TableHead>
+                  <TableHead>Indexed passages</TableHead>
                   <TableHead>Added</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
@@ -327,28 +327,28 @@ export default function PrecedentLibraryPage() {
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <BookMarked className="h-5 w-5 text-primary" />
-          Precedent Library
+          Firm Library
         </h1>
         <p className="text-muted-foreground">
-          What "Draft with AI" and "Review with AI" ground their answers in — the firm's own past
-          agreements, and Pakistani statute text, kept as two distinct corpora.
+          The firm's own agreements and the laws they rely on — what the AI draws on when it drafts,
+          reviews and answers.
         </p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setParams(v === "precedents" ? {} : { tab: v }, { replace: true })}>
         <TabsList>
-          <TabsTrigger value="precedents">Precedents</TabsTrigger>
+          <TabsTrigger value="precedents">Agreements</TabsTrigger>
           <TabsTrigger value="search">
             <Search className="h-3.5 w-3.5 mr-1.5" />
-            Search clauses
+            Find a clause
           </TabsTrigger>
           <TabsTrigger value="law-library">
             <Gavel className="h-3.5 w-3.5 mr-1.5" />
-            Law Library
+            Laws
           </TabsTrigger>
           <TabsTrigger value="standardize">
             <FileCheck className="h-3.5 w-3.5 mr-1.5" />
-            Standardise
+            Standards
           </TabsTrigger>
         </TabsList>
 
@@ -437,7 +437,7 @@ export default function PrecedentLibraryPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>File</TableHead>
-                          <TableHead>Chunks</TableHead>
+                          <TableHead>Indexed passages</TableHead>
                           <TableHead>Added</TableHead>
                           <TableHead className="w-12"></TableHead>
                         </TableRow>

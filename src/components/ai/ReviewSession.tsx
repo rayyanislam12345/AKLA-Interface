@@ -429,7 +429,7 @@ export default function ReviewSession({
       if (!matterDocument?.document_type_id || !version) throw new Error("Document type and source version are required");
       const result = await saveDraftToMatter({ matterId, documentTypeId: matterDocument.document_type_id, documentTypeName: matterDocument.title, blob: previewBlob,
         matterDocumentId, title: matterDocument.title, expectedVersionId: version.id });
-      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? result.fileName : "Saved, but search indexing failed. Reprocess the document before using it in Ask AI." });
+      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? result.fileName : "Saved, but it couldn't be prepared for search. Open the project and press Try again." });
       navigate(`/matters/${matterId}`);
     } catch (err: any) {
       toast({ title: "Failed to save version", description: err.message, variant: "destructive" });

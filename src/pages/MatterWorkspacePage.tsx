@@ -343,8 +343,8 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Statutes the AI grounds drafting/review in for this project specifically — falls back to
-          searching the whole law library until at least one is attached here.
+          The laws the AI relies on for this project. Until one is added here, it searches the
+          firm's whole law library.
         </p>
 
         <input ref={fileInputRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleFileSelected} />
@@ -663,7 +663,7 @@ export default function MatterWorkspacePage() {
         file,
         expectedVersionId: target.expectedVersionId,
       });
-      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? "Ready for search and Ask AI" : "Saved, but text indexing has not completed. The file remains available for download." });
+      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? "Ready for search and Ask AI" : "Saved. It will be searchable in a minute." });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     }
@@ -674,12 +674,27 @@ export default function MatterWorkspacePage() {
     setRetryingIndex(version.id);
     try {
       const indexed = await indexStoredVersion({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document' });
-      toast({ title: indexed ? "Document ready for search" : "Indexing failed", description: indexed ? undefined : "The original file remains saved. Try again or upload a supported document.", variant: indexed ? "default" : "destructive" });
+      toast({ title: indexed ? "Ready for search" : "Couldn't prepare for search", description: indexed ? undefined : "The file is saved. Try again, or upload it as a PDF or Word file.", variant: indexed ? "default" : "destructive" });
       queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
-    } catch (err) { toast({ title: "Indexing failed", description: String(err instanceof Error ? err.message : err), variant: "destructive" }); }
+    } catch (err) { toast({ title: "Couldn't prepare for search", description: String(err instanceof Error ? err.message : err), variant: "destructive" }); }
     finally { setRetryingIndex(null); }
   };
+
+  // A version that failed to index is retried once on its own, so the usual
+  // transient failure never needs a lawyer to notice a badge and press a button.
+  const autoRetried = useRef(new Set<string>());
+  useEffect(() => {
+    for (const d of matterDocuments ?? []) {
+      for (const v of d.versions ?? []) {
+        if (v.indexing_status === "failed" && !autoRetried.current.has(v.id)) {
+          autoRetried.current.add(v.id);
+          void retryIndex(v, d.document_type_id ?? null);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matterDocuments]);
 
   const handleDeleteDocument = async (matterDocumentId: string, title: string) => {
     if (!matterId) return;
@@ -1029,8 +1044,8 @@ export default function MatterWorkspacePage() {
                               >
                                 {v.file_name || `Version ${v.version_number}`}
                               </span>
-                              <Badge variant="outline" className="text-[10px]">v{v.version_number} · {v.indexing_status === "indexed" ? "Search ready" : v.indexing_status === "failed" ? "Indexing failed" : v.indexing_status === "pending" ? "Indexing" : v.indexing_status === "unsupported" ? "Text search unavailable" : "Text indexing unconfirmed"}</Badge>
-                              {v.indexing_status !== "indexed" && v.indexing_status !== "unsupported" && (v.indexing_status !== "pending" || Date.now()-new Date(v.created_at).getTime()>120000) && <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={!!retryingIndex} onClick={() => retryIndex(v, doc.document_type_id)}>{retryingIndex === v.id ? "Indexing…" : "Retry indexing"}</Button>}
+                              <Badge variant="outline" className="text-[10px]">v{v.version_number} · {v.indexing_status === "indexed" ? "Ready" : v.indexing_status === "failed" ? "Couldn't prepare for search" : v.indexing_status === "pending" ? "Preparing…" : v.indexing_status === "unsupported" ? "Not searchable (file type)" : "Preparing…"}</Badge>
+                              {v.indexing_status !== "indexed" && v.indexing_status !== "unsupported" && (v.indexing_status !== "pending" || Date.now()-new Date(v.created_at).getTime()>120000) && <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={!!retryingIndex} onClick={() => retryIndex(v, doc.document_type_id)}>{retryingIndex === v.id ? "Indexing…" : "Try again"}</Button>}
                               {editingVersionId === v.id ? (
                                 <>
                                   <Input

@@ -29,11 +29,13 @@ import { useToast } from "@/hooks/use-toast";
 const OUTPUT_LABELS: Record<MeetingOutputFormat, string> = {
   proposal: "Client Proposal Letter (AKLA Format)",
   "minutes-akla": "Meeting Minutes (AKLA Format)",
+  "concept-note": "Concept Note (AKLA Format)",
 };
 
 const UPLOAD_DOCUMENT_TYPE_NAME: Record<MeetingOutputFormat, string> = {
   proposal: "Client Proposal Letter",
   "minutes-akla": "Meeting Minutes",
+  "concept-note": "Concept Note",
 };
 
 export default function RecordMeetingPage() {
@@ -46,7 +48,12 @@ export default function RecordMeetingPage() {
 
   const [exampleProposals, setExampleProposals] = useState("");
   const [proposalDraft, setProposalDraft] = useState<string | null>(null);
-  const [minutesDraft, setMinutesDraft] = useState<{ format: "minutes-akla"; text: string } | null>(null);
+  // The second pane is shared: minutes and the concept note are both AKLA
+  // numbered-outline markdown and render through the same builder, so the
+  // format travels with the draft rather than being a separate piece of state.
+  const [minutesDraft, setMinutesDraft] = useState<
+    { format: "minutes-akla" | "concept-note"; text: string } | null
+  >(null);
   const [translating, setTranslating] = useState(false);
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
@@ -282,6 +289,18 @@ export default function RecordMeetingPage() {
     }
   };
 
+  const handleGenerateConceptNote = async () => {
+    if (relay.segments.length === 0) return;
+    await ensureTranslated();
+    const transcriptText = segmentsToEnglishTranscriptText(relay.segments, relay.speakerLabel);
+    try {
+      const result = await minutesMutation.mutateAsync({ transcriptText, format: "concept-note" });
+      setMinutesDraft({ format: "concept-note", text: result.draft });
+    } catch (err: any) {
+      toast({ title: "Concept note generation failed", description: err.message, variant: "destructive" });
+    }
+  };
+
   const handleUploadTranscriptClick = () => {
     if (relay.recording) return;
     transcriptFileInputRef.current?.click();
@@ -372,14 +391,20 @@ export default function RecordMeetingPage() {
   };
 
   const handleUploadToMatter = async (format: MeetingOutputFormat, text: string) => {
-    const documentTypeId = documentTypeIdFor(format);
-    if (!uploadMatterId || !documentTypeId) return;
+    // The three output types are looked up by name; if an admin renamed or
+    // removed one, file the document anyway, untyped, and say so — never a
+    // greyed-out button with no explanation.
+    const documentTypeId = documentTypeIdFor(format) ?? null;
+    if (!uploadMatterId) return;
     setUploadingFormat(format);
     try {
       const title = OUTPUT_LABELS[format];
       const blob = await buildAklaDocxBlob(text, title);
       const result = await saveDraftToMatter({ matterId: uploadMatterId, documentTypeId, documentTypeName: title, title, blob });
-      toast({ title: `${title} saved to project`, description: result.indexed ? "Ready for search" : "Text indexing is incomplete; the file is saved." });
+      toast({
+        title: `${title} saved to project`,
+        description: [result.indexed ? "Ready for search." : "Saved; it will be searchable shortly.", documentTypeId ? null : `Filed without a document type — the "${UPLOAD_DOCUMENT_TYPE_NAME[format]}" type isn't set up; an administrator can add it.`].filter(Boolean).join(" "),
+      });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     } finally {
@@ -610,6 +635,14 @@ export default function RecordMeetingPage() {
               <FileText className="h-4 w-4 mr-2" />
               Generate Minutes (AKLA Format)
             </Button>
+            <Button
+              variant="outline"
+              onClick={handleGenerateConceptNote}
+              disabled={!hasContent || minutesMutation.isPending || translating}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Generate Concept Note
+            </Button>
           </div>
 
           {(translating || proposalMutation.isPending || minutesMutation.isPending) && (
@@ -658,7 +691,7 @@ export default function RecordMeetingPage() {
             </Button>
             <Button
               onClick={() => proposalDraft && handleUploadToMatter("proposal", proposalDraft)}
-              disabled={!proposalDraft || !uploadMatterId || !documentTypeIdFor("proposal") || uploadingFormat === "proposal"}
+              disabled={!proposalDraft || !uploadMatterId || uploadingFormat === "proposal"}
             >
               <Upload className="h-4 w-4 mr-2" />
               {uploadingFormat === "proposal" ? "Uploading…" : "Upload to Project"}
@@ -692,7 +725,6 @@ export default function RecordMeetingPage() {
               disabled={
                 !minutesDraft ||
                 !uploadMatterId ||
-                !documentTypeIdFor(minutesDraft?.format ?? "minutes-akla") ||
                 uploadingFormat === minutesDraft?.format
               }
             >

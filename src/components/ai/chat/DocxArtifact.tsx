@@ -158,7 +158,7 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
         data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
       }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
       setSaveMode("version");
-      toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved, but search indexing failed. Reprocess this document before relying on it in Ask AI.` });
+      toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved, but it couldn't be prepared for search. Open the project and press Try again.` });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
     } finally {
