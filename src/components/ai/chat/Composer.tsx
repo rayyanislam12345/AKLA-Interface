@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookMarked, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { type ActiveSkill, type ChatAttachment, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
+import { type ActiveSkill, type ChatAttachment, type ChatScope, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
+import { useAuth } from "@/hooks/useAuth";
 // The file types the chat uploader accepts. Lived in DocumentUploadCard until
 // that card stopped being rendered anywhere; the constant was all Composer used.
 const UPLOAD_ACCEPT = ".pdf,.docx,.xlsx,.xls,.pptx";
@@ -84,7 +85,10 @@ export default function Composer({
   const [addFromMatterOpen, setAddFromMatterOpen] = useState(false);
   const [addFromLibraryOpen, setAddFromLibraryOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
-  const scope = standard ? { documentTypeId: standard.documentTypeId } : matterId!;
+  // Uploads sit under the conversation's own prefix: the project, the standard,
+  // or — with neither — the user's general chats.
+  const { user } = useAuth();
+  const scope: ChatScope = standard ? { documentTypeId: standard.documentTypeId } : matterId ? { matterId } : { general: user?.id ?? "" };
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -365,9 +369,11 @@ export default function Composer({
                 <DropdownMenuItem onClick={() => applySkill({ key: "summarise", label: "Summarise" })}>
                   <StickyNote className="mr-2 h-4 w-4" />Summarise
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={openEditPicker}>
-                  <PencilLine className="mr-2 h-4 w-4" />Edit a document
-                </DropdownMenuItem>
+                {matterId && (
+                  <DropdownMenuItem onClick={openEditPicker}>
+                    <PencilLine className="mr-2 h-4 w-4" />Edit a document
+                  </DropdownMenuItem>
+                )}
                 {!!customSkills?.length && (
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger><Wand2 className="mr-2 h-4 w-4" />Firm skills</DropdownMenuSubTrigger>

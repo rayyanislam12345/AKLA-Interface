@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Search, Scale } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Search, Scale, Sparkles } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -20,6 +20,9 @@ import aklaLogo from "@/assets/akla-logo.png";
 import aklaMonogram from "@/assets/akla-monogram.png";
 
 const NAV_ITEMS = [
+  // The front door: the AI with no project chosen first. Everything an
+  // associate wants from the AI starts here; a project is context they attach.
+  { title: "AI Assistant", url: "/assistant", icon: Sparkles },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Search", url: "/search", icon: Search },
   { title: "Projects", url: "/matters", icon: FolderKanban },

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,8 +20,8 @@ import {
   useChatThreads,
   useSendChatMessage,
   useThreadArtifacts,
-  EMPTY_STREAM,
-} from "@/hooks/useChat";
+  EMPTY_STREAM, chatScopeKey, type ChatScope } from "@/hooks/useChat";
+import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 import ChatSidebar from "@/components/ai/chat/ChatSidebar";
 import MessageList from "@/components/ai/chat/MessageList";
 import Composer from "@/components/ai/chat/Composer";
@@ -46,14 +46,22 @@ import type { ImperativePanelGroupHandle } from "react-resizable-panels";
 //                                    document attached, the prompt pre-filled
 export default function AiWorkspacePage() {
   const { matterId } = useParams<{ matterId: string }>();
-  if (!matterId) return null;
   // Keyed on the matter so navigating between matters resets every pane —
-  // React Router reuses this element across param changes otherwise.
-  return <AiWorkspace key={matterId} matterId={matterId} />;
+  // React Router reuses this element across param changes otherwise. With no
+  // matter this is the AI Assistant: the general scope, reached from the sidebar.
+  return <AiWorkspace key={matterId ?? "assistant"} matterId={matterId} />;
 }
 
-function AiWorkspace({ matterId }: { matterId: string }) {
+function AiWorkspace({ matterId }: { matterId?: string }) {
   const { data: matter } = useMatter(matterId);
+  const navigate = useNavigate();
+  const { user: me } = useAuth();
+  // The conversation's scope: this project, or — with none — the user's own
+  // general chats. Drives the thread list, uploads and the chat server.
+  const scope: ChatScope = matterId ? { matterId } : { general: me?.id ?? "" };
+  // A Review or Edit asked for with no project open: ask which project, then
+  // continue inside that project's workspace, where its documents are.
+  const [projectPicker, setProjectPicker] = useState<null | "review" | "edit">(null);
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -62,7 +70,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const docParam = searchParams.get("doc") ?? undefined;
   const lawUpdateId = searchParams.get("update") ?? undefined;
 
-  const { data: threads } = useChatThreads(matterId);
+  const { data: threads } = useChatThreads(scope);
   const { data: messages } = useChatMessages(activeThreadId ?? undefined);
   const { data: threadArtifacts } = useThreadArtifacts(activeThreadId ?? undefined);
 
@@ -83,6 +91,9 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   activeThreadIdRef.current = activeThreadId;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editPickerOpen, setEditPickerOpen] = useState(false);
+  useEffect(() => {
+    if (mode === "edit" && matterId) setEditPickerOpen(true);
+  }, [mode, matterId]);
   const [editSkill, setEditSkill] = useState<ActiveSkill | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -104,7 +115,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   // thread of its own, with the Edit skill in force for what gets typed next.
   const handleEditDocument = async (target: EditTarget) => {
     try {
-      const { threadId, artifact } = await openDocumentForEdit(matterId, target, user?.id);
+      const { threadId, artifact } = await openDocumentForEdit(matterId!, target, user?.id);
       setEditSkill({
         key: "edit",
         documentVersionId: target.versionId,
@@ -114,7 +125,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
       });
       setSearchParams(new URLSearchParams({ chat: threadId }));
       setOpenArtifact(artifact);
-      queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", chatScopeKey(scope)] });
       queryClient.invalidateQueries({ queryKey: ["chat-artifacts", threadId] });
     } catch (err: any) {
       toast({ title: "Couldn't open that document", description: err.message, variant: "destructive" });
@@ -216,7 +227,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
     const threadSkill = activeThread?.skill as { documentTypeId?: string } | null;
     const working = openArtifact && openArtifact.kind === "docx" ? openArtifact.id : (threadArtifacts ?? []).filter((a) => a.kind === "docx").at(-1)?.id ?? null;
     await chat.send({
-      matterId,
+      matterId, general: matterId ? undefined : me?.id,
       threadId: activeThreadId,
       message: answer.skip ? `Skip: ${question.title}` : `${question.title}: ${labels.join("; ")}`,
       attachments: [],
@@ -229,13 +240,13 @@ function AiWorkspace({ matterId }: { matterId: string }) {
     // A chat can hold several documents; the one open beside it is the one
     // the lawyer is talking about.
     const working = openArtifact && ["docx", "draft", "memo"].includes(openArtifact.kind) ? openArtifact.id : null;
-    await chat.send({ matterId, threadId: activeThreadId, ...input, workingArtifactId: working });
+    await chat.send({ matterId, general: matterId ? undefined : me?.id, threadId: activeThreadId, ...input, workingArtifactId: working });
   };
 
   const sidebar = (
     <ChatSidebar
-      scopeKey={matterId}
-      subtitle={matter?.name}
+      scopeKey={chatScopeKey(scope)}
+      subtitle={matter?.name ?? (matterId ? undefined : "Your assistant")}
       threads={threads ?? []}
       activeThreadId={activeThreadId}
       busyThreadIds={chat.busyThreadIds}
@@ -246,16 +257,19 @@ function AiWorkspace({ matterId }: { matterId: string }) {
   const emptyState = (
     <div className="flex flex-col items-center gap-6 pt-16 text-center">
       <div>
-        <h2 className="text-2xl font-semibold">How can I help with {matter?.name ?? "this project"}?</h2>
+        <h2 className="text-2xl font-semibold">{matterId ? `How can I help with ${matter?.name ?? "this project"}?` : "What do you need help with?"}</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Grounded in this project's documents, the firm's precedents and the law library. Drop a file in, or type <kbd className="rounded border px-1">/</kbd> for a skill.
+          {matterId
+            ? "Grounded in this project's documents, the firm's precedents and the law library. "
+            : "Drop in a document or ask a question. Grounded in the firm's precedents and the law library. "}
+          Drop a file in, or type <kbd className="rounded border px-1">/</kbd> for a skill.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
         <SuggestionChip Icon={Sparkles} label="Draft a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "draft" }), { replace: true })} />
-        <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "review" }), { replace: true })} />
+        <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => (matterId ? setSearchParams(new URLSearchParams({ mode: "review" }), { replace: true }) : setProjectPicker("review"))} />
         <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
-        <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => setEditPickerOpen(true)} />
+        <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => (matterId ? setEditPickerOpen(true) : setProjectPicker("edit"))} />
       </div>
     </div>
   );
@@ -304,7 +318,7 @@ function AiWorkspace({ matterId }: { matterId: string }) {
               onOpenArtifact={setOpenArtifact}
               empty={emptyState}
               resumingMessageId={turn?.resumingMessageId ?? null}
-              onResume={(m) => activeThreadId && chat.resume({ matterId, threadId: activeThreadId, message: m })}
+              onResume={(m) => activeThreadId && chat.resume({ matterId, general: matterId ? undefined : me?.id, threadId: activeThreadId, message: m })}
             />
 
             {guide?.pending && (
@@ -342,6 +356,13 @@ function AiWorkspace({ matterId }: { matterId: string }) {
           </>
         )}
       </ResizablePanelGroup>
+      <ProjectPickerDialog
+        open={!!projectPicker}
+        onOpenChange={(o) => { if (!o) setProjectPicker(null); }}
+        title={projectPicker === "edit" ? "Edit which project's document?" : "Review which project's document?"}
+        description="You'll continue inside that project, where its documents are."
+        onPick={(id) => { const purpose = projectPicker; setProjectPicker(null); navigate(`/matters/${id}/ai?mode=${purpose}`); }}
+      />
     </div>
   );
 }

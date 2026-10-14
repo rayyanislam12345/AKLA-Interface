@@ -175,7 +175,7 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
     // lookup is told what is held so it spends its searches on what is not.
     const [{ data: library, error: libraryError }, { data: projectLaws }] = await Promise.all([
       supabase.rpc('statute_sources'),
-      supabase.from('matter_relevant_laws').select('act_name').eq('matter_id', matter.id).eq('status', 'available'),
+      matter.id ? supabase.from('matter_relevant_laws').select('act_name').eq('matter_id', matter.id).eq('status', 'available') : Promise.resolve({ data: [] }),
     ]);
     if (libraryError) throw new Error(`Could not read the law library: ${libraryError.message}`);
     const held = [...new Map((library ?? []).map((entry) => [actKey(entry.act_name).words.join(' ') + actKey(entry.act_name).years.join(' '), entry.act_name])).values()];

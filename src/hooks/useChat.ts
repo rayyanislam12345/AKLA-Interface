@@ -32,11 +32,18 @@ export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "c
 
 // What a conversation is about: a project, or — in a standardisation
 // session — a document type whose standard master is being built.
-export type ChatScope = { matterId: string; documentTypeId?: undefined } | { matterId?: undefined; documentTypeId: string };
+// A third scope, "general", is the AI Assistant's front door: no project and no
+// document type, a conversation that belongs to the user who started it.
+export type ChatScope =
+  | { matterId: string; documentTypeId?: undefined; general?: undefined }
+  | { matterId?: undefined; documentTypeId: string; general?: undefined }
+  | { matterId?: undefined; documentTypeId?: undefined; general: string };
 /** The cache key and the chat bucket prefix for a scope; the chat server uses the same prefix. */
 export function chatScopeKey(scope: ChatScope | string): string {
   if (typeof scope === "string") return scope;
-  return scope.matterId ?? `standards/${scope.documentTypeId}`;
+  if (scope.matterId) return scope.matterId;
+  if (scope.documentTypeId) return `standards/${scope.documentTypeId}`;
+  return `general/${scope.general}`;
 }
 // Guided drafting: the question being asked, as the chat server sends it.
 export interface GuideQuestion {
@@ -118,7 +125,10 @@ export function useChatThreads(scope: ChatScope | string | undefined) {
       const base = supabase.from("ai_chat_threads").select("*");
       const scoped = typeof scope === "string" || scope!.matterId
         ? base.eq("matter_id", typeof scope === "string" ? scope : scope!.matterId!)
-        : base.eq("document_type_id", scope!.documentTypeId!).is("matter_id", null);
+        : scope!.documentTypeId
+          ? base.eq("document_type_id", scope!.documentTypeId).is("matter_id", null)
+          // General chats are personal: only the ones this user started.
+          : base.is("matter_id", null).is("document_type_id", null).eq("created_by", scope!.general!);
       const { data, error } = await scoped
         .order("pinned", { ascending: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
@@ -401,6 +411,7 @@ const turnKey = (threadId: string | null) => threadId ?? NEW_CHAT_KEY;
 
 interface SendInput {
   matterId?: string;
+  general?: string; // the user's id: a chat with no project and no document type
   /** A standardisation session: the document type whose standard is being built. */
   documentTypeId?: string;
   /** Standardisation only: the Acts the associate has identified, sent with each message. */
@@ -644,10 +655,10 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   );
 
   const send = useCallback(
-    async ({ matterId, documentTypeId, laws, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
+    async ({ matterId, documentTypeId, general, laws, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
-      if (!matterId && !documentTypeId) throw new Error("A conversation needs a project or a document type");
-      const scope: ChatScope = matterId ? { matterId } : { documentTypeId: documentTypeId! };
+      if (!matterId && !documentTypeId && !general) throw new Error("A conversation needs a project, a document type, or a signed-in user");
+      const scope: ChatScope = matterId ? { matterId } : documentTypeId ? { documentTypeId } : { general: general! };
       const scopeKey = chatScopeKey(scope);
       const key = turnKey(threadId);
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
@@ -705,9 +716,9 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   // exactly where it stopped. The stored partial is what the model resumes
   // from, so nothing already written is regenerated.
   const resume = useCallback(
-    async ({ matterId, documentTypeId, threadId, message }: { matterId?: string; documentTypeId?: string; threadId: string; message: ChatMessage }) => {
+    async ({ matterId, documentTypeId, general, threadId, message }: { matterId?: string; documentTypeId?: string; general?: string; threadId: string; message: ChatMessage }) => {
       if (!session?.access_token) throw new Error("Not signed in");
-      const scope: ChatScope = matterId ? { matterId } : { documentTypeId: documentTypeId! };
+      const scope: ChatScope = matterId ? { matterId } : documentTypeId ? { documentTypeId } : { general: general! };
       const key = turnKey(threadId);
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();

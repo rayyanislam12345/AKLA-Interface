@@ -87,6 +87,7 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route path="/assistant" element={<ProtectedRoute><AppLayout><AiWorkspacePage /></AppLayout></ProtectedRoute>} />
                   <Route
                     path="/matters/:matterId/ai"
                     element={
