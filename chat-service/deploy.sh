@@ -23,11 +23,11 @@ echo "Backing up the running copy…"
 ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
 echo "Copying the service files and the version stamp…"
-scp -i "$KEY" server.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
+scp -i "$KEY" server.js agreement.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js package.json "$STAMP" "$HOST:/tmp/"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/akla && mkdir -p /tmp/akla"
 scp -i "$KEY" akla/build_docx.py akla/akla-logo.png akla/requirements.txt "$HOST:/tmp/akla/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/agreement.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/agreement.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every
@@ -37,6 +37,15 @@ ssh -i "$KEY" "$HOST" "cd $DEST && npm install --omit=dev --no-audit --no-fund >
 
 echo "Checking the Word renderer's Python…"
 ssh -i "$KEY" "$HOST" "cd $DEST && (test -x .akla-venv/bin/python || sudo -u opc python3 -m venv .akla-venv) && sudo -u opc .akla-venv/bin/pip install -q -r akla/requirements.txt && echo '  renderer ok'"
+
+# The agreement pipeline runs the concession skill's own compiler and checker
+# on this box. Ship the skill beside the service and give its scripts the one
+# package they need (lxml) in a venv of their own.
+echo "Copying the concession skill…"
+ssh -i "$KEY" "$HOST" "rm -rf /tmp/concession-agreement"
+scp -q -r -i "$KEY" ../firm-skills/concession-agreement "$HOST:/tmp/concession-agreement"
+ssh -i "$KEY" "$HOST" "sudo mkdir -p $DEST/skills && sudo rm -rf $DEST/skills/concession-agreement && sudo mv /tmp/concession-agreement $DEST/skills/concession-agreement && sudo chown -R opc:opc $DEST/skills"
+ssh -i "$KEY" "$HOST" "cd $DEST && (test -x .skills-venv/bin/python || sudo -u opc python3.11 -m venv .skills-venv) && sudo -u opc .skills-venv/bin/pip install -q lxml && echo '  skill scripts ok'"
 
 # A restart cuts off any reply still being written, and the lawyer is left
 # with "Load failed" and nothing saved. Wait until nothing is in progress.

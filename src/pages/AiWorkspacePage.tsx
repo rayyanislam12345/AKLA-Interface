@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote, Search } from "lucide-react";
+import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote, Search, FileSignature } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useMatter } from "@/hooks/useMatters";
@@ -196,6 +196,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
 
   const seedSkill = useMemo<ActiveSkill | null | undefined>(() => {
     if (mode === "draft") return { key: "draft", label: "Draft" };
+    if (mode === "agreement") return { key: "agreement", label: "Agreement" };
     if (mode === "review" || mode === "verify" || lawUpdateId) return { key: "review", label: "Review" };
     return undefined;
   }, [mode, lawUpdateId]);
@@ -271,6 +272,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
         <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
         <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => (matterId ? setEditPickerOpen(true) : setProjectPicker("edit"))} />
         <SuggestionChip Icon={Search} label="Find a document or clause" onClick={() => navigate("/assistant/search")} />
+        <SuggestionChip Icon={FileSignature} label="Turn a meeting into an agreement" onClick={() => setSearchParams(new URLSearchParams({ mode: "agreement" }), { replace: true })} />
       </div>
     </div>
   );

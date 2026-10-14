@@ -21,6 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "./extractText.js";
 import { inferDraftSkill, citationIssues, isBareReviewRequest, asksForReviewRerun, chooseWorkingDocument } from "./chatState.js";
 import { researchLaw, needsResearch, describeLookup } from "./research.js";
+import { handleAgreementTurn } from "./agreementFlow.js";
 import { addLawToLibrary } from "./lawLibrary.js";
 import { searchPrecedents } from "./precedentSearch.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
@@ -575,7 +576,7 @@ async function handleChat(req, res) {
   let skill = requestedSkill;
   const isContinuation = !!continueMessageId;
 
-  if (typeof message !== "string" || !Array.isArray(rawAttachments) || rawAttachments.length > 12 || message.length > 40000 || (skill && !["edit", "draft", "review", "verify", "summarise", "custom", "standardise"].includes(skill.key))) return json(400, { error: "Invalid message, attachments, or skill" });
+  if (typeof message !== "string" || !Array.isArray(rawAttachments) || rawAttachments.length > 12 || message.length > 40000 || (skill && !["edit", "draft", "review", "verify", "summarise", "custom", "standardise", "agreement"].includes(skill.key))) return json(400, { error: "Invalid message, attachments, or skill" });
   // Neither a project nor a document type: a general chat, the AI Assistant's
   // front door. A project is context the lawyer attaches, not a prerequisite.
   const general = !matterId && !standardTypeId;
@@ -1118,6 +1119,13 @@ async function handleChat(req, res) {
     }
 
     // ---- an uploaded Claude skill: its own scripts run in the sandbox ----
+    // The agreement action: deal facts out of a transcript or concept note,
+    // confirmed by the lawyer in this chat, compiled into the firm's master on
+    // this box by the concession skill's own compiler (agreementFlow.js).
+    if (!isContinuation && skill?.key === "agreement") {
+      await handleAgreementTurn({ supabase, user, threadId, matterId, scopeKey, message, attachments, send, stream: anthropicStreamOnce, anthropicJson, model: CHAT_MODEL, skill, recordTurn, finish, signal: clientGone.signal });
+      return;
+    }
     if (!isContinuation && skill?.key === "custom" && customSkill?.kind === "claude_skill") {
       send("notice", { text: `Running the ${customSkill.name} skill. Skills that build documents can take a few minutes.` });
       // The lawyer's files go into the sandbox as the files themselves, so

@@ -28,7 +28,7 @@ export interface ChatAttachment {
 
 // "verify" is kept for chats saved before Verify was merged into Review.
 // "standardise" is what every message in a standardisation session carries.
-export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "custom" | "standardise";
+export type SkillKey = "draft" | "review" | "verify" | "summarise" | "edit" | "custom" | "standardise" | "agreement";
 
 // What a conversation is about: a project, or — in a standardisation
 // session — a document type whose standard master is being built.

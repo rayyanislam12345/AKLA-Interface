@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookMarked, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
+import { ArrowUp, BookMarked, FileSignature, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { type ActiveSkill, type ChatAttachment, type ChatScope, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
 import { useAuth } from "@/hooks/useAuth";
@@ -52,6 +52,7 @@ type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string 
 const BUILT_IN = [
   { key: "draft" as const, label: "Draft", description: "Interview, then draft a document of a chosen type", Icon: Sparkles },
   { key: "review" as const, label: "Review", description: "Law lookup, then a three-pass review of a project document (legal, formatting, conflicts)", Icon: ScanSearch },
+  { key: "agreement" as const, label: "Agreement", description: "Deal facts from a meeting transcript or concept note, confirmed by you, compiled into the firm's concession master", Icon: FileSignature },
   { key: "summarise" as const, label: "Summarise", description: "A short \"Notes On …\" memo about the attached document", Icon: StickyNote },
 ];
 
@@ -277,6 +278,8 @@ export default function Composer({
                     ? "Describe the deal, or just say \"draft it\"…"
                     : skill?.key === "review" || skill?.key === "verify"
                       ? "Attach a project document and press send to review it…"
+                      : skill?.key === "agreement"
+                        ? "Attach the meeting transcript or concept note and press send — the deal facts come back for you to confirm before anything is drafted…"
                       : skill?.key === "edit"
                         ? "Describe the changes — e.g. \"tighten clause 7 and take the definitions from v2 of the shareholders agreement\"…"
                         : "Ask about this project, or type / for skills…"
