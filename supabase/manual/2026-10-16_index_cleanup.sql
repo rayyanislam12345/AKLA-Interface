@@ -16,9 +16,9 @@
 -- (project search), which are derived from it.
 --
 -- HOW TO USE: approved by Rayyan on 16 Oct 2026; this copy COMMITS. Paste the whole file into the Supabase SQL editor and run it once.
--- inside the transaction, reports what is left, and then ROLLS BACK, so
--- nothing changes. Read the counts. If they match what you expect, change the
--- last line from ROLLBACK to COMMIT and run it again.
+-- It reports what it will delete, deletes, reports what is left, and commits.
+-- Expected: 993 surplus precedent passages and 70 orphan project passages;
+-- afterwards 3,579 precedent passages across the same 155 files.
 
 begin;
 
