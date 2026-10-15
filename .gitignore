@@ -77,3 +77,4 @@ supabase/.branches/
 law-monitor/supabase_io.py
 law-monitor/.env
 .vercel
+.smoke-tmp/
