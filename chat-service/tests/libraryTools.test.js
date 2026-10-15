@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mergeChunks, readSection, sectionIndex, sectionAt, parseSection, resolveAct, sameLaw, bestCopy,
-  findPassages, createSourceRegistry, citedNumbers, labelFor, makeToolRunner, clearCaches,
+  findPassages, createSourceRegistry, citedNumbers, labelFor, makeToolRunner, clearCaches, chatTools, researchPassages,
 } from '../libraryTools.js';
-import { citationIssues } from '../chatState.js';
+import { citationIssues, documentTurnRequest, readDocumentTurn, DOCUMENT_TURN_SYSTEM } from '../chatState.js';
 
 // An Act laid out the way the library holds the Companies Act, 2017: a
 // contents list naming every section, then the body (with a stray "p. 198."
@@ -209,4 +209,93 @@ test('read_act_section returns the section as a numbered source; a failed lookup
   const empty = await run({ id: 'tu5', name: 'search_law_library', input: {} });
   assert.equal(empty.is_error, true);
   clearCaches();
+});
+
+test('a long chat keeps the sources its answers cited in view, and names every other number', () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({ n: i + 1, id: `s${i + 1}`, scope: 'statute', label: `Act — section ${i + 1}`, excerpt: 'x'.repeat(1500) }));
+  const r = createSourceRegistry([
+    { sources: many.slice(0, 30), cited: [24, 25] },
+    { metadata: { sources: many.slice(30), cited: [] } },
+  ]);
+  const block = r.earlierBlock();
+  const at = (n) => block.indexOf(`[Source ${n}] `);
+  assert.ok(at(24) >= 0 && at(25) >= 0, 'cited sources are shown');
+  assert.ok(at(25) < at(60) && at(24) < at(60), 'cited sources come first');
+  assert.match(block, /\[Source 25\] Act — section 25 \(law library\) — cited earlier in this chat\nx/);
+  assert.ok(block.includes('ALSO NUMBERED EARLIER IN THIS CHAT'));
+  for (let n = 1; n <= 60; n++) assert.ok(at(n) >= 0, `source ${n} is named`);
+  assert.ok(block.length < 40_000);
+});
+
+test('the online law lookup becomes numbered passages, and a law the library holds is pointed at, not repeated', () => {
+  const research = {
+    sources: [
+      { id: 'library:Companies Act, 2017', scope: 'statute', content: 'CONTENTS 1. Short title. 2. Definitions.', metadata: { act_name: 'Companies Act, 2017', source: 'law-library' } },
+      { id: 'hash1', scope: 'statute', content: ACT, metadata: { act_name: 'Companies Act, 2017 (official copy)', source: 'official-web-research', source_url: 'https://pakistancode.gov.pk/y' } },
+    ],
+    failures: ['Sindh Finance Act, 2024 — Not in the law library, and no official copy was located'],
+  };
+  const { passages, notes } = researchPassages(research, 'investment in associated companies arms-length');
+  assert.ok(passages.length >= 1);
+  assert.ok(passages.every((p) => p.id.startsWith('hash1@') && p.act_name === 'Companies Act, 2017 (official copy)' && p.source_url === 'https://pakistancode.gov.pk/y'));
+  assert.ok(passages.some((p) => p.text.includes('arms-length') && p.section === '199'));
+  assert.ok(notes.some((n) => n.includes('search_law_library (act "Companies Act, 2017")')));
+  assert.ok(notes.some((n) => n.startsWith('Could not obtain: Sindh Finance Act')));
+  assert.deepEqual(researchPassages({ sources: [], failures: [] }, 'x').notes, ['The online lookup identified no law to read for this question.']);
+});
+
+test('look_up_law_online is offered only when asked for, runs the lookup it is given, and registers what it found', async () => {
+  assert.ok(!chatTools().some((t) => t.name === 'look_up_law_online'));
+  const online = chatTools({ online: true }).find((t) => t.name === 'look_up_law_online');
+  assert.ok(online && /slow/i.test(online.description) && online.input_schema.required.includes('question'));
+
+  const registry = createSourceRegistry([{ sources: [{ n: 25, id: 'old', scope: 'statute', label: 'x', excerpt: 'x' }] }]);
+  const asked = [];
+  const run = makeToolRunner({
+    supabase: null, voyageKey: 'k', registry,
+    lookUpOnline: async (q) => {
+      asked.push(q);
+      return { sources: [{ id: 'hash2', content: ACT, metadata: { act_name: 'Companies Act, 2017', source_url: 'https://pakistancode.gov.pk/z' } }], failures: [], downloaded: [] };
+    },
+  });
+  const res = await run({ id: 'tu1', name: 'look_up_law_online', input: { question: 'loans to directors approval of members' } });
+  assert.deepEqual(asked, ['loans to directors approval of members']);
+  assert.ok(!res.is_error);
+  assert.match(res.content, /\[Source 26\] Companies Act, 2017 — section 198/);
+  assert.equal(registry.thisTurn()[0].n, 26);
+
+  const without = makeToolRunner({ supabase: null, voyageKey: 'k', registry });
+  const refused = await without({ id: 'tu2', name: 'look_up_law_online', input: { question: 'x' } });
+  assert.equal(refused.is_error, true);
+  const failing = makeToolRunner({ supabase: null, voyageKey: 'k', registry, lookUpOnline: async () => { throw new Error('the research step timed out'); } });
+  const failed = await failing({ id: 'tu3', name: 'look_up_law_online', input: { question: 'x' } });
+  assert.equal(failed.is_error, true);
+  assert.match(failed.content, /timed out/);
+});
+
+test('the document-turn classifier is asked about the message, the reply before it and the document, and only an explicit yes is an edit', () => {
+  const reply = `Here is section 199 [[artifact:abc-123]] ${'y'.repeat(3000)}`;
+  const req = documentTurnRequest({ message: 'its in the law library', previousReply: reply, documentTitle: 'Memo: Companies Act s.199', documentOpen: true });
+  assert.equal(req.system, DOCUMENT_TURN_SYSTEM);
+  assert.equal(req.messages.length, 1);
+  const c = req.messages[0].content;
+  assert.ok(c.includes('DOCUMENT IN THE CHAT: "Memo: Companies Act s.199"'));
+  assert.ok(c.includes('OPEN BESIDE THE CHAT: yes'));
+  assert.ok(c.includes('NEW MESSAGE:\n<<<\nits in the law library\n>>>'));
+  assert.ok(c.includes('Here is section 199 [document]'));
+  assert.ok(!c.includes('artifact:abc-123'));
+  const previous = c.split('PREVIOUS ASSISTANT REPLY (its first 1,500 characters):\n<<<\n')[1].split('\n>>>')[0];
+  assert.equal(previous.length, 1500);
+  assert.ok(documentTurnRequest({ message: 'x' }).messages[0].content.includes('OPEN BESIDE THE CHAT: no'));
+  assert.ok(documentTurnRequest({ message: 'x' }).messages[0].content.includes('(none)'));
+  assert.match(DOCUMENT_TURN_SYSTEM, /When in doubt, "edit" is false/);
+
+  assert.equal(readDocumentTurn('{"edit": true}'), 'edit');
+  assert.equal(readDocumentTurn('```json\n{"edit":true}\n```'), 'edit');
+  assert.equal(readDocumentTurn('{"edit": false}'), 'question');
+  assert.equal(readDocumentTurn('{"edit": "yes"}'), 'question');
+  assert.equal(readDocumentTurn('I think this is an edit.'), 'question');
+  assert.equal(readDocumentTurn(''), 'question');
+  assert.equal(readDocumentTurn(undefined), 'question');
+  assert.equal(readDocumentTurn('{"edit": tru'), 'question');
 });

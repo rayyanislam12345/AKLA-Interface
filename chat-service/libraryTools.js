@@ -404,7 +404,7 @@ export async function actText(supabase, actName) {
   return value;
 }
 
-/** Only for tests: forget what has been read. */
+/** Forget what has been read: in tests, and once a law has been added to the library. */
 export function clearCaches() {
   actsCache = null;
   actCache.clear();
@@ -598,8 +598,13 @@ export function citedNumbers(text) {
 export function createSourceRegistry(earlierMessages = []) {
   const byId = new Map();
   const earlier = [];
+  // Numbers an earlier reply cited: they lead the EARLIER SOURCES block, so a
+  // long chat never pushes the passages its answers rest on out of view.
+  const cited = new Set();
   let max = 0;
   for (const m of earlierMessages) {
+    const citedHere = Array.isArray(m?.cited) ? m.cited : Array.isArray(m?.metadata?.cited) ? m.metadata.cited : [];
+    for (const n of citedHere) if (Number.isInteger(n)) cited.add(n);
     const list = Array.isArray(m?.sources) ? m.sources : Array.isArray(m?.metadata?.sources) ? m.metadata.sources : [];
     for (const s of list) {
       if (!s || !Number.isInteger(s.n) || s.n < 1) continue;
@@ -643,18 +648,31 @@ export function createSourceRegistry(earlierMessages = []) {
     },
     valid: () => new Set(numbers),
     earlierCount: () => earlier.length,
-    /** EARLIER SOURCES IN THIS CHAT, most recent first, within a budget. */
-    earlierBlock({ perEntry = 1_200, total = 30_000 } = {}) {
+    /**
+     * EARLIER SOURCES IN THIS CHAT: the ones earlier replies cited first, then
+     * the rest, most recent first, with their excerpts within a budget. A
+     * source that does not fit is still named on one line, so every number
+     * in use is in front of the model.
+     */
+    earlierBlock({ perEntry = 1_200, total = 30_000, maxNamed = 200 } = {}) {
       const parts = [];
+      const named = [];
       let used = 0;
-      for (const e of [...earlier].sort((a, b) => b.n - a.n)) {
+      const order = [...earlier].sort((a, b) => (cited.has(b.n) ? 1 : 0) - (cited.has(a.n) ? 1 : 0) || b.n - a.n);
+      for (const e of order) {
         const body = String(e.excerpt ?? e.content ?? "").slice(0, perEntry);
-        const part = `[Source ${e.n}] ${e.label ?? labelFor(e)} (${SCOPE_WORDS[e.scope] ?? e.scope ?? "source"})\n${body}${body.length >= perEntry ? " …" : ""}`;
-        if (used + part.length > total) break;
+        const head = `[Source ${e.n}] ${e.label ?? labelFor(e)} (${SCOPE_WORDS[e.scope] ?? e.scope ?? "source"})${cited.has(e.n) ? " — cited earlier in this chat" : ""}`;
+        const part = `${head}\n${body}${body.length >= perEntry ? " …" : ""}`;
+        if (used + part.length > total) { named.push(e); continue; }
         parts.push(part);
         used += part.length;
       }
-      return parts.join("\n\n---\n\n");
+      let block = parts.join("\n\n---\n\n");
+      if (named.length) {
+        const lines = named.sort((a, b) => a.n - b.n).slice(0, maxNamed).map((e) => `[Source ${e.n}] ${e.label ?? labelFor(e)} (${SCOPE_WORDS[e.scope] ?? e.scope ?? "source"})${cited.has(e.n) ? " — cited earlier in this chat" : ""}`);
+        block += `${block ? "\n\n" : ""}ALSO NUMBERED EARLIER IN THIS CHAT (excerpt not repeated here; each is still valid to cite by its number):\n${lines.join("\n")}`;
+      }
+      return block;
     },
   };
 }
@@ -667,7 +685,42 @@ export function sourceText(entry, text, { fresh = true } = {}) {
 // ---------------------------------------------------------------------------
 // The tools as the model sees them
 
-export function chatTools({ project = false } = {}) {
+// What the online law lookup (research.js researchLaw) found, as passages
+// the model can cite: for each law downloaded from an official source, the
+// windows of its text that match the question (or its opening), placed in
+// their sections where that can be told. A law the firm's library already
+// holds is not repeated here — its text is better read with the library
+// tools — and is named in a note instead, as is anything that could not be
+// obtained. Pure: { passages: [{ id, act_name, section, text, source_url }], notes }.
+export function researchPassages(research, question, { perSource = 2, window = WINDOW } = {}) {
+  const passages = [];
+  const notes = [];
+  for (const s of research?.sources ?? []) {
+    const act = s?.metadata?.act_name ?? "Statute";
+    if (s?.metadata?.source === "law-library") {
+      notes.push(`${act} is in the firm's law library: search it with search_law_library (act "${act}") or read a section with read_act_section.`);
+      continue;
+    }
+    const text = norm(s?.content);
+    if (!text) continue;
+    let index = [];
+    try {
+      index = sectionIndex(text);
+    } catch {
+      index = [];
+    }
+    const found = findPassages(text, question, { max: perSource, window });
+    const picks = found.length ? found : [{ start: 0, end: Math.min(text.length, window), anchor: 0 }];
+    for (const p of picks) {
+      passages.push({ id: `${s.id}@${p.start}`, act_name: act, section: index.length ? sectionAt(index, p.anchor) : null, text: text.slice(p.start, p.end), source_url: s?.metadata?.source_url ?? null, similarity: null });
+    }
+  }
+  for (const f of research?.failures ?? []) notes.push(`Could not obtain: ${f}.`);
+  if (!(research?.sources ?? []).length && !(research?.failures ?? []).length) notes.push("The online lookup identified no law to read for this question.");
+  return { passages, notes };
+}
+
+export function chatTools({ project = false, online = false } = {}) {
   const tools = [
     {
       name: "search_law_library",
@@ -709,6 +762,18 @@ export function chatTools({ project = false } = {}) {
       },
     },
   ];
+  if (online) {
+    tools.push({
+      name: "look_up_law_online",
+      description: "Look a law up online: identifies the Pakistani laws that may apply to a question, reads any the firm's law library holds, and downloads official copies of the rest from government sources (they are then added to the library). It is SLOW — it takes tens of seconds, sometimes over a minute — so use it only when search_law_library and read_act_section do not hold the law you need (the law library list above says what is held). Returns passages of any law downloaded, each numbered [Source n], and says what could not be obtained.",
+      input_schema: {
+        type: "object",
+        properties: { question: { type: "string", description: "The legal question, in general terms, e.g. \"stamp duty on a lease of immovable property in Sindh\". Never put client or party names in it." } },
+        required: ["question"],
+        additionalProperties: false,
+      },
+    });
+  }
   if (project) {
     tools.push({
       name: "search_project_documents",
@@ -732,7 +797,7 @@ const str = (v, max) => (typeof v === "string" && v.trim() ? v.trim().slice(0, m
  * thrown. `notice` tells the lawyer what is being looked up; `onSources`
  * hears that the turn's list of sources grew.
  */
-export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = null, registry, notice = () => {}, onSources = () => {}, signal }) {
+export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = null, registry, notice = () => {}, onSources = () => {}, signal, lookUpOnline = null }) {
   const show = (passages, scope, heading) => {
     if (!passages.length) return null;
     const parts = passages.map((p) => {
@@ -776,6 +841,19 @@ export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = 
         notice(`Searching this project's documents for “${query}”…`);
         const passages = await searchProject(supabase, voyageKey, { matterId, query }, { signal });
         return show(passages, "matter", "Passages from this project's documents") ?? `Nothing in this project's documents matched “${query}”.`;
+      }
+      case "look_up_law_online": {
+        const question = str(input.question, 1000);
+        if (!question) throw new Error("A question is needed.");
+        if (!lookUpOnline) throw new Error("Looking law up online is not available in this chat; use search_law_library.");
+        // researchLaw sends its own notices as it goes.
+        const research = await lookUpOnline(question);
+        // A downloaded law is now in the library: the next search must see it.
+        if (research?.downloaded?.length) clearCaches();
+        const { passages, notes } = researchPassages(research, question);
+        const shown = show(passages, "statute", "Passages of the laws downloaded by the online lookup");
+        const tail = notes.length ? notes.join("\n") : "";
+        return [shown, tail].filter(Boolean).join("\n\n") || "The online lookup found nothing to read for this question.";
       }
       default:
         throw new Error(`There is no tool called ${name}.`);
