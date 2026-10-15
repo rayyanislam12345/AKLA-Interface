@@ -1,5 +1,6 @@
 // Smoke test for the one-change-record routes against a running chat-service.
 //
+//   node scripts/smoke-changes.mjs   (opens the sign-in page; sign in there)
 //   PW=... EMAIL=... node scripts/smoke-changes.mjs [--base https://aklachat.duckdns.org]
 //
 // Signs in as that user, opens the newest project .docx in a new Edit chat,
@@ -21,26 +22,64 @@ const fail = (what, reason) => { failed = true; console.log(`FAIL ${what}: ${rea
 const check = (ok, what, reason) => (ok ? pass(what) : fail(what, reason));
 const stop = (what, reason) => { fail(what, reason); process.exit(1); };
 
+// .env first, then .env.local over it, as Vite does; an empty value never
+// overrides a filled one.
 function readEnv() {
-  const file = [".env.local", ".env"].find((f) => existsSync(f));
-  if (!file) stop("read env", "no .env.local or .env in the current directory");
+  const files = [".env", ".env.local"].filter((f) => existsSync(f));
+  if (!files.length) stop("read env", "no .env.local or .env in the current directory");
   const vars = {};
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (m) vars[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+      const value = m?.[2].replace(/^["']|["']$/g, "");
+      if (m && value) vars[m[1]] = value;
+    }
   }
-  if (!vars.VITE_SUPABASE_URL || !vars.VITE_SUPABASE_PUBLISHABLE_KEY) stop("read env", `${file} lacks VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY`);
+  if (!vars.VITE_SUPABASE_URL || !vars.VITE_SUPABASE_PUBLISHABLE_KEY) stop("read env", "neither .env nor .env.local has VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY");
   return vars;
 }
 
-if (!EMAIL || !PW) stop("credentials", "set EMAIL and PW in the environment");
 const env = readEnv();
 const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_PUBLISHABLE_KEY, { auth: { persistSession: false } });
 
-const { data: auth, error: authError } = await supabase.auth.signInWithPassword({ email: EMAIL, password: PW });
-if (authError || !auth?.session) stop("sign in", authError?.message ?? "no session");
-pass(`signed in as ${EMAIL}`);
-const headers = { Authorization: `Bearer ${auth.session.access_token}`, apikey: env.VITE_SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" };
+// With EMAIL and PW set, sign in directly. Without them, open the live sign-in
+// page in a visible browser, let the person sign in there, and take the
+// session the app stored, so the password is never typed anywhere but the page.
+async function browserSession() {
+  const { chromium } = await import("@playwright/test");
+  const site = process.env.SITE ?? "https://akla-interface.vercel.app";
+  const browser = await chromium.launch({ headless: false, channel: "chrome" });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${site}/auth`);
+    console.log("Sign in in the browser window that just opened (waiting up to 5 minutes)...");
+    await page.waitForURL((u) => !/\/auth/.test(u.pathname), { timeout: 300_000 });
+    const stored = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((k) => /^sb-.*-auth-token$/.test(k));
+      return key ? localStorage.getItem(key) : null;
+    });
+    if (!stored) return null;
+    const s = JSON.parse(stored);
+    return s.currentSession ?? s;
+  } finally {
+    await browser.close();
+  }
+}
+
+let session;
+if (EMAIL && PW) {
+  const { data: auth, error: authError } = await supabase.auth.signInWithPassword({ email: EMAIL, password: PW });
+  if (authError || !auth?.session) stop("sign in", authError?.message ?? "no session");
+  session = auth.session;
+} else {
+  const stored = await browserSession();
+  if (!stored?.access_token) stop("sign in", "no session was found after signing in");
+  const { data, error } = await supabase.auth.setSession({ access_token: stored.access_token, refresh_token: stored.refresh_token });
+  if (error || !data?.session) stop("sign in", error?.message ?? "the session could not be used");
+  session = data.session;
+}
+pass(`signed in as ${session.user?.email ?? "you"}`);
+const headers = { Authorization: `Bearer ${session.access_token}`, apikey: env.VITE_SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" };
 
 // Newest .docx version on any project the user can see.
 const { data: versions, error: versionError } = await supabase
