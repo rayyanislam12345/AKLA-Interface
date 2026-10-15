@@ -14,7 +14,8 @@ const EMAIL = process.env.EMAIL;
 const PW = process.env.PW;
 const baseArg = process.argv.indexOf("--base");
 const BASE = (baseArg > -1 ? process.argv[baseArg + 1] : "https://aklachat.duckdns.org").replace(/\/$/, "");
-const MESSAGE = "Change the first paragraph's wording slightly and add one short sentence after it";
+const MESSAGE = "In the first ordinary paragraph of body text (skip titles, headings and tables), reword one phrase slightly, and add one short sentence as a new paragraph after it. Make both edits now as tracked changes; do not ask a question first.";
+const FOLLOW_UP = "Use the first prose paragraph of the body, the one after the headings. Make both edits now.";
 
 let failed = false;
 const pass = (what) => console.log(`PASS ${what}`);
@@ -102,54 +103,63 @@ async function readError(resp) {
   try { return (await resp.json()).error ?? `status ${resp.status}`; } catch { return `status ${resp.status}`; }
 }
 
-// One Edit turn in a new chat, through the same contract the app uses.
-const chatBody = {
-  matterId,
-  documentTypeId: null,
-  laws: null,
-  threadId: null,
-  message: MESSAGE,
-  attachments: [],
-  skill: { key: "edit", documentVersionId: version.id, matterDocumentId: version.matter_document.id },
-  workingArtifactId: null,
-};
-const chat = await post("/chat", chatBody, { signal: AbortSignal.timeout(15 * 60 * 1000) });
-if (!chat.ok || !chat.body) stop("POST /chat", await readError(chat));
-
-let threadId = null;
-let docxArtifact = null;
-let doneEvent = null;
-let streamError = null;
-let replyChars = 0;
-const handle = (event, data) => {
-  if (event === "meta") threadId = data.threadId ?? threadId;
-  else if (event === "delta") replyChars += (data.text ?? "").length;
-  else if (event === "artifact" && data?.kind === "docx") docxArtifact = data;
-  else if (event === "done") doneEvent = data;
-  else if (event === "error") streamError = data.message ?? "unknown error";
-};
-const reader = chat.body.getReader();
-const decoder = new TextDecoder();
-let buffer = "";
-for (;;) {
-  const { value, done } = await reader.read();
-  if (done) break;
-  buffer += decoder.decode(value, { stream: true });
-  const parts = buffer.split("\n\n");
-  buffer = parts.pop() ?? "";
-  for (const part of parts) {
-    let event = "message";
-    let dataLine = "";
-    for (const line of part.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+// One Edit turn through the same contract the app uses. A first turn opens a
+// new chat on the project version; a follow-up continues the same chat.
+async function chatTurn(message, threadId) {
+  const body = {
+    matterId,
+    documentTypeId: null,
+    laws: null,
+    threadId,
+    message,
+    attachments: [],
+    skill: threadId ? null : { key: "edit", documentVersionId: version.id, matterDocumentId: version.matter_document.id },
+    workingArtifactId: null,
+  };
+  const resp = await post("/chat", body, { signal: AbortSignal.timeout(15 * 60 * 1000) });
+  if (!resp.ok || !resp.body) stop("POST /chat", await readError(resp));
+  const turn = { threadId, docxArtifact: null, doneEvent: null, streamError: null, replyChars: 0 };
+  const handle = (event, data) => {
+    if (event === "meta") turn.threadId = data.threadId ?? turn.threadId;
+    else if (event === "delta") turn.replyChars += (data.text ?? "").length;
+    else if (event === "artifact" && data?.kind === "docx") turn.docxArtifact = data;
+    else if (event === "done") turn.doneEvent = data;
+    else if (event === "error") turn.streamError = data.message ?? "unknown error";
+  };
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      let event = "message";
+      let dataLine = "";
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (dataLine) handle(event, JSON.parse(dataLine));
     }
-    if (dataLine) handle(event, JSON.parse(dataLine));
   }
+  check(!!turn.threadId, "chat stream sent meta with a threadId", "no meta event");
+  check(!turn.streamError, "chat stream finished without an error event", turn.streamError ?? "");
+  check(!!turn.doneEvent, `chat stream sent done (${turn.replyChars} reply characters)`, "no done event");
+  return turn;
 }
-check(!!threadId, "chat stream sent meta with a threadId", "no meta event");
-check(!streamError, "chat stream finished without an error event", streamError ?? "");
-check(!!doneEvent, `chat stream sent done (${replyChars} reply characters)`, "no done event");
+
+let turn = await chatTurn(MESSAGE, null);
+// The assistant may ask which paragraph is meant instead of editing; answer
+// once in the same chat, as a lawyer would.
+if (!turn.docxArtifact) {
+  console.log("The assistant replied without editing (likely a question); answering once in the same chat.");
+  turn = await chatTurn(FOLLOW_UP, turn.threadId);
+}
+const threadId = turn.threadId;
+const docxArtifact = turn.docxArtifact;
 if (!docxArtifact) stop("chat stream sent a docx artifact", "none received");
 pass(`docx artifact ${docxArtifact.id} with workingDocumentId ${docxArtifact.data?.workingDocumentId ?? "(missing)"}`);
 check(!!docxArtifact.message_id, "artifact row carries message_id", "message_id is null on the streamed artifact");
