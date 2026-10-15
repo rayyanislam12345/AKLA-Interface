@@ -190,3 +190,167 @@ test('decisions are stamped and cleared', async () => {
   await assert.rejects(db.query('update redline_suggestions set decided_at=null where id=$1',[id]),/redline_suggestions_decision_check/);
  } finally {await db.close();}
 });
+
+// ---------------------------------------------------------------- quick wins
+// The live policies as they stood before 20261016090000_quick_wins.sql, on
+// stub tables, with auth.uid() and roles switchable per statement.
+const admin='00000000-0000-0000-0000-0000000000a1';
+const author='00000000-0000-0000-0000-0000000000a2';
+const colleague='00000000-0000-0000-0000-0000000000a3';
+const quickWins=()=>readFileSync('supabase/migrations/20261016090000_quick_wins.sql','utf8');
+async function quickWinsDatabase(seed=async()=>{}) {
+ const db=await database();
+ await db.exec(`
+ create or replace function auth.uid() returns uuid language sql stable as $$ select coalesce(nullif(current_setting('test.uid',true),''),'${user}')::uuid $$;
+ create type public.app_role as enum ('admin','partner','associate','paralegal','senior_counsel','founder');
+ create table public.user_roles(user_id uuid,role public.app_role);
+ insert into public.user_roles values('${admin}','admin');
+ create function public.has_role(_user_id uuid,_role public.app_role) returns boolean language sql stable security definer as $$ select exists(select 1 from public.user_roles where user_id=_user_id and (role=_role or (_role='admin' and role='founder'))) $$;
+ create function public.is_supervisor(_user_id uuid) returns boolean language sql stable as $$ select public.has_role(_user_id,'admin') or public.has_role(_user_id,'partner') or public.has_role(_user_id,'senior_counsel') $$;
+ create table public.ai_skills(id uuid primary key default gen_random_uuid(),name text,created_by uuid);
+ create table public.matter_timeslips(id uuid primary key default gen_random_uuid(),matter_id uuid,author_id uuid,hours numeric(5,2));
+ alter table matter_documents enable row level security;
+ alter table document_versions enable row level security;
+ alter table document_type_templates enable row level security;
+ alter table ai_skills enable row level security;
+ alter table matter_timeslips enable row level security;
+ alter table storage.objects enable row level security;
+ create policy "Firm members can view matter documents" on matter_documents for select using (is_firm_member(auth.uid()));
+ create policy "Firm members can manage matter documents" on matter_documents for all using (is_firm_member(auth.uid())) with check (is_firm_member(auth.uid()));
+ create policy "Firm members can view document versions" on document_versions for select using (is_firm_member(auth.uid()));
+ create policy "Firm members can create document versions" on document_versions for insert with check (is_firm_member(auth.uid()));
+ create policy "Firm members can update document versions" on document_versions for update using (is_firm_member(auth.uid())) with check (is_firm_member(auth.uid()));
+ create policy "Firm members can delete document versions" on document_versions for delete using (is_firm_member(auth.uid()));
+ create policy "Firm members can view document type templates" on document_type_templates for select using (is_firm_member(auth.uid()));
+ create policy "Firm members can manage document type templates" on document_type_templates for all using (is_firm_member(auth.uid())) with check (is_firm_member(auth.uid()));
+ create policy "Firm members can view skills" on ai_skills for select using (is_firm_member(auth.uid()));
+ create policy "Firm members can delete skills" on ai_skills for delete using (is_firm_member(auth.uid()));
+ create policy "Firm members can view all timeslips" on matter_timeslips for select using (is_firm_member(auth.uid()));
+ create policy "Authors and partners can update timeslips" on matter_timeslips for update using ((author_id = auth.uid()) or has_role(auth.uid(),'admin') or has_role(auth.uid(),'partner')) with check ((author_id = auth.uid()) or has_role(auth.uid(),'admin') or has_role(auth.uid(),'partner'));
+ create policy "Authors and partners can delete timeslips" on matter_timeslips for delete using ((author_id = auth.uid()) or has_role(auth.uid(),'admin') or has_role(auth.uid(),'partner'));
+ create policy "Firm members can read precedent library bucket" on storage.objects for select using (bucket_id='precedent-library' and is_firm_member(auth.uid()));
+ create policy "Firm members can write precedent library bucket" on storage.objects for insert with check (bucket_id='precedent-library' and is_firm_member(auth.uid()));
+ create policy "Firm members can delete precedent library bucket" on storage.objects for delete using (bucket_id='precedent-library' and is_firm_member(auth.uid()));
+ `);
+ await seed(db);
+ await db.exec(quickWins());
+ await db.exec(quickWins()); // a second run changes nothing
+ await db.exec('grant select,insert,update,delete on all tables in schema public,storage to authenticated; set role authenticated;');
+ return db;
+}
+const as=(db,uid)=>db.query("select set_config('test.uid',$1,false)",[uid]);
+const deleted=async(db,sql,params)=>(await db.query(sql+' returning id',params)).rows.length;
+
+test('quick wins (a): old unknown/pending versions become indexed where passages exist, else failed', async () => {
+ const ids={};
+ const db=await quickWinsDatabase(async(db)=>{
+  const doc=(await db.query("insert into matter_documents(matter_id,title) values($1,'Lease') returning id",[project])).rows[0].id;
+  const add=async(name,status,age,chunks)=>{
+   const path=`${project}/${doc}/${name}.pdf`;
+   ids[name]=(await db.query(`insert into document_versions(matter_document_id,version_number,storage_path,indexing_status,created_at) values($1,$2,$3,$4,now()-$5::interval) returning id`,[doc,Object.keys(ids).length+1,path,status,age])).rows[0].id;
+   if(chunks) await db.query('insert into documents(matter_id,content,metadata) values($1,$2,$3)',[project,'text',JSON.stringify({storage_path:path})]);
+  };
+  await add('oldRead','unknown','3 days',true);
+  await add('oldUnread','unknown','3 days',false);
+  await add('stuckPending','pending','2 hours',true);
+  await add('justUploaded','unknown','5 minutes',false);
+  await add('alreadyFailed','failed','3 days',true);
+ });
+ try {
+  const status=async(name)=>(await db.query('select indexing_status from document_versions where id=$1',[ids[name]])).rows[0].indexing_status;
+  assert.equal(await status('oldRead'),'indexed');
+  assert.equal(await status('oldUnread'),'failed');
+  assert.equal(await status('stuckPending'),'indexed');
+  assert.equal(await status('justUploaded'),'unknown');
+  assert.equal(await status('alreadyFailed'),'failed');
+ } finally {await db.close();}
+});
+
+test('quick wins (b): only an administrator can set or remove a standard, everyone can read it', async () => {
+ const db=await quickWinsDatabase(async(db)=>{
+  await db.query("insert into document_type_templates(document_type_id,storage_path,filename,content_html) values($1,'standards/x/1-a.docx','a.docx','text')",[type]);
+ });
+ try {
+  await as(db,colleague);
+  assert.equal((await db.query('select * from document_type_templates')).rows.length,1);
+  assert.equal((await db.query("update document_type_templates set filename='b.docx' returning 1")).rows.length,0);
+  await assert.rejects(db.query("insert into document_type_templates(document_type_id,content_html) values($1,'x') on conflict (document_type_id) do update set content_html='x'",[type]),/row-level security/);
+  assert.equal((await db.query('delete from document_type_templates where document_type_id=$1 returning 1',[type])).rows.length,0);
+  await assert.rejects(db.query("insert into storage.objects values('precedent-library','standards/x/2-b.docx')"),/row-level security/);
+  await db.query("insert into storage.objects values('precedent-library','precedent/x/2-b.docx')");
+  await as(db,admin);
+  await db.query("insert into storage.objects values('precedent-library','standards/x/3-c.docx')");
+  await db.query("update document_type_templates set filename='c.docx',storage_path='standards/x/3-c.docx'");
+  assert.equal((await db.query('select filename from document_type_templates')).rows[0].filename,'c.docx');
+ } finally {await db.close();}
+});
+
+test('quick wins (c): a firm skill can be deleted only by an administrator or its creator', async () => {
+ const db=await quickWinsDatabase(async(db)=>{
+  await db.query("insert into ai_skills(name,created_by) values('mine',$1),('other',$1),('third',$1)",[author]);
+ });
+ try {
+  const del=(name)=>deleted(db,'delete from ai_skills where name=$1',[name]);
+  await as(db,colleague);
+  assert.equal(await del('mine'),0);
+  await as(db,author);
+  assert.equal(await del('mine'),1);
+  await as(db,admin);
+  assert.equal(await del('other'),1);
+  await db.exec("select set_config('test.member','false',false)");
+  await as(db,author);
+  assert.equal(await del('third'),0,'an author who is no longer approved cannot delete');
+ } finally {await db.close();}
+});
+
+test('quick wins (d): a project document can be deleted only by an administrator or its creator; anyone can still edit', async () => {
+ const docs={};
+ const db=await quickWinsDatabase(async(db)=>{
+  for(const [name,creator] of [['byAuthor',author],['byAuthor2',author],['legacy',null]]) {
+   docs[name]=(await db.query('insert into matter_documents(matter_id,title,created_by) values($1,$2,$3) returning id',[project,name,creator])).rows[0].id;
+   await db.query("insert into document_versions(matter_document_id,version_number,storage_path,uploaded_by) values($1,1,$2,$3),($1,2,$4,$5)",[docs[name],`${project}/${docs[name]}/v1.docx`,creator??colleague,`${project}/${docs[name]}/v2.docx`,admin]);
+  }
+ });
+ try {
+  const delDoc=(name)=>deleted(db,'delete from matter_documents where id=$1',[docs[name]]);
+  const delVersion=(name,n)=>deleted(db,'delete from document_versions where matter_document_id=$1 and version_number=$2',[docs[name],n]);
+  await as(db,colleague);
+  assert.equal(await delDoc('byAuthor'),0);
+  assert.equal(await delVersion('byAuthor',1),0);
+  await db.query("update matter_documents set title='Renamed by a colleague' where id=$1",[docs.byAuthor]);
+  assert.equal((await db.query('select title from matter_documents where id=$1',[docs.byAuthor])).rows[0].title,'Renamed by a colleague');
+  await db.query("insert into matter_documents(matter_id,title,created_by) values($1,'New',$2)",[project,colleague]);
+  // No creator recorded: whoever uploaded the first version counts as the creator.
+  assert.equal(await delDoc('legacy'),1);
+  await as(db,author);
+  assert.equal(await delVersion('byAuthor',2),1,"the document's creator can remove a version someone else uploaded");
+  assert.equal(await delDoc('byAuthor'),1);
+  assert.equal((await db.query('select * from document_versions where matter_document_id=$1',[docs.byAuthor])).rows.length,0,'versions go with the document');
+  await as(db,admin);
+  assert.equal(await delDoc('byAuthor2'),1);
+ } finally {await db.close();}
+});
+
+test('quick wins (e): timeslip billable columns exist and the author policies are not duplicated', async () => {
+ const db=await quickWinsDatabase();
+ try {
+  const cols=(await db.query("select column_name from information_schema.columns where table_name='matter_timeslips' and column_name like '%billable_hours' order by 1")).rows.map(r=>r.column_name);
+  assert.deepEqual(cols,['ak_billable_hours','billable_hours']);
+  const policies=(await db.query("select policyname from pg_policies where tablename='matter_timeslips' order by 1")).rows.map(r=>r.policyname);
+  assert.deepEqual(policies,['Authors and partners can delete timeslips','Authors and partners can update timeslips','Firm members can view all timeslips']);
+ } finally {await db.close();}
+});
+
+test('quick wins (e): on a database without author timeslip policies, authors get them', async () => {
+ const db=await quickWinsDatabase(async(db)=>{
+  await db.exec('drop policy "Authors and partners can update timeslips" on matter_timeslips; drop policy "Authors and partners can delete timeslips" on matter_timeslips;');
+  await db.query('insert into matter_timeslips(matter_id,author_id,hours) values($1,$2,1),($1,$2,2)',[project,author]);
+ });
+ try {
+  await as(db,colleague);
+  assert.equal((await db.query('update matter_timeslips set hours=3 returning id')).rows.length,0);
+  await as(db,author);
+  assert.equal((await db.query('update matter_timeslips set hours=3 where hours=1 returning id')).rows.length,1);
+  assert.equal(await deleted(db,'delete from matter_timeslips where hours=2',[]),1);
+ } finally {await db.close();}
+});

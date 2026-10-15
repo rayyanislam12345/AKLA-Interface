@@ -1,14 +1,18 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PrecedentSearchTab from "@/components/precedents/PrecedentSearchTab";
-import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
+import { BookMarked, ExternalLink, FileCheck, FileText, Gavel, Plus, RotateCcw, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import AddLawDialog from "@/components/law/AddLawDialog";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import {
   usePrecedentSources,
   useUploadPrecedentDocument,
   useDeletePrecedentSource,
+  fetchLibraryFileKeys,
+  hashFile,
+  libraryFileKey,
 } from "@/hooks/usePrecedentLibrary";
+import { useMyProfile } from "@/hooks/useProfiles";
 import { useStatuteSources, useDeleteStatuteSource } from "@/hooks/useLawLibrary";
 import { useDocumentTypeTemplates } from "@/hooks/useDocumentTypeTemplates";
 import { Button } from "@/components/ui/button";
@@ -20,12 +24,30 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
-type FileStatus = "queued" | "uploading" | "done" | "error";
+type FileStatus = "queued" | "checking" | "uploading" | "done" | "error" | "duplicate";
 interface QueuedFile {
+  id: number;
   file: File;
   status: FileStatus;
   error?: string;
+  hash?: string;
 }
+
+const STATUS_LABEL: Record<FileStatus, string> = {
+  queued: "Waiting",
+  checking: "Checking",
+  uploading: "Uploading",
+  done: "Added",
+  error: "Failed",
+  duplicate: "Already in the library",
+};
+
+const LEAVE_WARNING =
+  "Files are still uploading to the Firm Library. If you leave this page now, the files still waiting will not be added. Leave anyway?";
+
+let nextQueueId = 1;
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 function LawLibraryTab() {
   const { data: statutes, isLoading } = useStatuteSources();
@@ -38,8 +60,8 @@ function LawLibraryTab() {
     try {
       await deleteStatute.mutateAsync(actName);
       toast({ title: "Removed from law library" });
-    } catch (err: any) {
-      toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to remove", description: errorMessage(err), variant: "destructive" });
     }
   };
 
@@ -136,16 +158,24 @@ function LawLibraryTab() {
   );
 }
 
-function StandardizeTab() {
-  const navigate = useNavigate();
+function StandardizeTab({ confirmLeave }: { confirmLeave: () => boolean }) {
+  const routerNavigate = useNavigate();
+  const navigate = (to: string) => {
+    if (confirmLeave()) routerNavigate(to);
+  };
   const { data: rows, isLoading } = useDocumentTypeTemplates();
+  const { data: me } = useMyProfile();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
+  const openLabel = (hasStandard: boolean) => (isAdmin ? (hasStandard ? "Replace" : "Upload") : "Open");
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        One canonical "standard version" per document type, curated by the team — "Draft with AI" uses
-        it as the primary structural and formatting jump-off point for that type, ahead of the firm's
-        other precedent.
+        One canonical "standard version" per document type — "Draft with AI" uses it as the primary
+        structural and formatting jump-off point for that type, ahead of the firm's other precedent.
+        {isAdmin
+          ? " As an administrator you set and replace them."
+          : " An administrator sets each standard; anyone can build or revise one with AI and ask an administrator to set it."}
       </p>
 
       {isLoading ? (
@@ -187,7 +217,7 @@ function StandardizeTab() {
                           variant="outline"
                           onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
                         >
-                          {row.filename ? "Replace" : "Upload"}
+                          {openLabel(!!row.filename)}
                         </Button>
                         <Button
                           size="sm"
@@ -220,7 +250,7 @@ function StandardizeTab() {
                       variant="outline"
                       onClick={() => navigate(`/precedent-library/standardize/${row.document_type_id}`)}
                     >
-                      {row.filename ? "Replace" : "Upload"}
+                      {openLabel(!!row.filename)}
                     </Button>
                     <Button
                       size="sm"
@@ -260,6 +290,15 @@ export default function PrecedentLibraryPage() {
   const [queue, setQueue] = useState<QueuedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Set when the page goes away mid-batch, so the batch stops after the file
+  // in flight rather than carrying on unseen.
+  const leftPage = useRef(false);
+  useEffect(() => {
+    leftPage.current = false;
+    return () => {
+      leftPage.current = true;
+    };
+  }, []);
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof sources>();
@@ -271,54 +310,127 @@ export default function PrecedentLibraryPage() {
     return map;
   }, [sources]);
 
+  // Leaving mid-batch: the browser asks before a reload, a closed tab or an
+  // address typed in; a click on any link inside the app asks first too.
+  useEffect(() => {
+    if (!uploading) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      if (!window.confirm(LEAVE_WARNING)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [uploading]);
+  const confirmLeave = () => !uploading || window.confirm(LEAVE_WARNING);
+
+  const patch = (id: number, change: Partial<QueuedFile>) =>
+    setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...change } : q)));
+
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (files.length === 0) return;
-    setQueue((prev) => [...prev, ...files.map((file) => ({ file, status: "queued" as FileStatus }))]);
+    setQueue((prev) => [...prev, ...files.map((file) => ({ id: nextQueueId++, file, status: "queued" as FileStatus }))]);
   };
 
-  const handleUploadAll = async () => {
-    if (!documentTypeId || queue.length === 0) return;
+  // One file at a time. Before each upload the file is checked against the
+  // library (same name and exact size) and against this batch (same content),
+  // so the same agreement is never indexed twice.
+  const runBatch = async (items: QueuedFile[]) => {
+    if (!documentTypeId || items.length === 0) return;
     setUploading(true);
-    for (let i = 0; i < queue.length; i++) {
-      if (queue[i].status === "done") continue;
-      setQueue((prev) => prev.map((q, idx) => (idx === i ? { ...q, status: "uploading" } : q)));
+    let libraryKeys = new Set<string>();
+    try {
+      libraryKeys = await fetchLibraryFileKeys();
+    } catch (err) {
+      console.warn("Could not read the library to check for duplicates:", err);
+    }
+    const seen = new Map<string, string>();
+    for (const q of queue) if (q.status === "done" && q.hash) seen.set(q.hash, q.file.name);
+
+    let added = 0;
+    let skipped = 0;
+    const failed: string[] = [];
+    for (const item of items) {
+      if (leftPage.current) break;
+      patch(item.id, { status: "checking", error: undefined });
+      let hash: string | undefined;
       try {
-        await uploadDoc.mutateAsync({ file: queue[i].file, documentTypeId });
-        setQueue((prev) => prev.map((q, idx) => (idx === i ? { ...q, status: "done" } : q)));
-      } catch (err: any) {
-        setQueue((prev) =>
-          prev.map((q, idx) => (idx === i ? { ...q, status: "error", error: err.message } : q))
-        );
+        hash = await hashFile(item.file);
+      } catch {
+        hash = undefined;
+      }
+      const sameInBatch = hash ? seen.get(hash) : undefined;
+      if (sameInBatch || libraryKeys.has(libraryFileKey(item.file.name, item.file.size))) {
+        patch(item.id, {
+          status: "duplicate",
+          hash,
+          error: sameInBatch ? `Same file as "${sameInBatch}" in this upload` : "A file with this name and size is already in the library",
+        });
+        skipped++;
+        continue;
+      }
+      patch(item.id, { status: "uploading", hash });
+      try {
+        await uploadDoc.mutateAsync({ file: item.file, documentTypeId });
+        if (hash) seen.set(hash, item.file.name);
+        libraryKeys.add(libraryFileKey(item.file.name, item.file.size));
+        patch(item.id, { status: "done" });
+        added++;
+      } catch (err) {
+        const message = errorMessage(err) || "Upload failed";
+        patch(item.id, { status: "error", error: message });
+        failed.push(`${item.file.name}: ${message}`);
       }
     }
+    if (leftPage.current) return;
     setUploading(false);
-    // Report the real outcome: "complete" used to show even when files failed,
-    // and each file's error text was recorded but never surfaced.
-    setQueue((final) => {
-      const failed = final.filter((q) => q.status === "error");
-      const done = final.filter((q) => q.status === "done").length;
-      if (failed.length === 0) {
-        toast({ title: `${done} file${done === 1 ? "" : "s"} uploaded` });
-      } else {
-        toast({
-          title: `${done} uploaded, ${failed.length} failed`,
-          description: failed.map((q) => `${q.file.name}: ${q.error ?? "upload failed"}`).join("\n"),
-          variant: "destructive",
-        });
-      }
-      return final;
-    });
+    // Report the real outcome, each failure with its reason.
+    const summary = [`${added} added`, skipped ? `${skipped} already in the library` : null, failed.length ? `${failed.length} failed` : null]
+      .filter(Boolean)
+      .join(", ");
+    if (failed.length === 0) {
+      toast({ title: summary });
+    } else {
+      toast({ title: summary, description: failed.join("\n"), variant: "destructive" });
+    }
   };
+
+  const queuedItems = queue.filter((q) => q.status === "queued");
+  const failedItems = queue.filter((q) => q.status === "error");
+  const finishedCount = queue.filter((q) => q.status === "done" || q.status === "duplicate").length;
+
+  const handleUploadAll = () => runBatch(queuedItems);
+  const handleRetryFailed = () => {
+    const retry = failedItems.map((q) => ({ ...q, status: "queued" as FileStatus, error: undefined }));
+    setQueue((prev) => prev.map((q) => (q.status === "error" ? { ...q, status: "queued", error: undefined } : q)));
+    void runBatch(retry);
+  };
+  const handleClearFinished = () => setQueue((prev) => prev.filter((q) => q.status !== "done" && q.status !== "duplicate"));
+  const handleRemoveQueued = (id: number) => setQueue((prev) => prev.filter((q) => q.id !== id));
 
   const handleDelete = async (storagePath: string, filename: string) => {
     if (!window.confirm(`Remove "${filename}" from the precedent library?`)) return;
     try {
       await deleteSource.mutateAsync(storagePath);
       toast({ title: "Removed from precedent library" });
-    } catch (err: any) {
-      toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to remove", description: errorMessage(err), variant: "destructive" });
     }
   };
 
@@ -388,9 +500,9 @@ export default function PrecedentLibraryPage() {
                 </Button>
                 <Button
                   onClick={handleUploadAll}
-                  disabled={!documentTypeId || queue.length === 0 || uploading}
+                  disabled={!documentTypeId || queuedItems.length === 0 || uploading}
                 >
-                  Upload {queue.length > 0 ? `(${queue.length})` : ""}
+                  {uploading ? "Uploading…" : `Upload${queuedItems.length > 0 ? ` (${queuedItems.length})` : ""}`}
                 </Button>
               </div>
               {!documentTypeId && (
@@ -400,21 +512,64 @@ export default function PrecedentLibraryPage() {
                 </p>
               )}
 
+              {uploading && (
+                <p className="text-xs text-muted-foreground" data-testid="upload-stay-on-page">
+                  Stay on this page until the upload finishes — files still waiting are only added while it is open.
+                </p>
+              )}
+
               {queue.length > 0 && (
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {queue.map((q, i) => (
-                    <div key={i} className="flex items-center gap-3 text-sm border-b py-1.5 last:border-0">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="truncate flex-1">{q.file.name}</span>
-                      <Badge
-                        variant={
-                          q.status === "done" ? "default" : q.status === "error" ? "destructive" : "secondary"
-                        }
-                      >
-                        {q.status}
-                      </Badge>
+                <div className="space-y-2">
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {queue.map((q) => (
+                      <div key={q.id} className="flex items-start gap-3 text-sm border-b py-1.5 last:border-0">
+                        <FileText className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate">{q.file.name}</p>
+                          {q.error && (
+                            <p className={cn("text-xs", q.status === "error" ? "text-destructive" : "text-muted-foreground")}>
+                              {q.error}
+                            </p>
+                          )}
+                        </div>
+                        <Badge
+                          className="shrink-0"
+                          variant={
+                            q.status === "done" ? "default" : q.status === "error" ? "destructive" : q.status === "duplicate" ? "outline" : "secondary"
+                          }
+                        >
+                          {STATUS_LABEL[q.status]}
+                        </Badge>
+                        {q.status === "queued" && !uploading && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 shrink-0"
+                            aria-label={`Remove ${q.file.name} from the upload`}
+                            title="Remove from the upload"
+                            onClick={() => handleRemoveQueued(q.id)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {(failedItems.length > 0 || finishedCount > 0) && !uploading && (
+                    <div className="flex flex-wrap gap-2">
+                      {failedItems.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={handleRetryFailed} disabled={!documentTypeId} data-testid="retry-failed-uploads">
+                          <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                          Retry failed ({failedItems.length})
+                        </Button>
+                      )}
+                      {finishedCount > 0 && (
+                        <Button size="sm" variant="ghost" onClick={handleClearFinished} data-testid="clear-finished-uploads">
+                          Clear finished ({finishedCount})
+                        </Button>
+                      )}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </CardContent>
@@ -500,7 +655,7 @@ export default function PrecedentLibraryPage() {
         </TabsContent>
 
         <TabsContent value="standardize" className="mt-6">
-          <StandardizeTab />
+          <StandardizeTab confirmLeave={confirmLeave} />
         </TabsContent>
       </Tabs>
     </div>

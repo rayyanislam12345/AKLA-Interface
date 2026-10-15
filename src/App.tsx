@@ -27,6 +27,7 @@ import ClientsPage from "./pages/ClientsPage";
 import TodaysTimesheetPage from "./pages/TodaysTimesheetPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
+import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -220,6 +221,16 @@ const App = () => {
                       <ProtectedRoute>
                         <AppLayout>
                           <HelpPage />
+                        </AppLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings"
+                    element={
+                      <ProtectedRoute>
+                        <AppLayout>
+                          <SettingsPage />
                         </AppLayout>
                       </ProtectedRoute>
                     }

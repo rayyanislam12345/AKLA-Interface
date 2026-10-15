@@ -16,6 +16,17 @@ export interface RedlineSuggestion {
   review_type: RedlineReviewType;
 }
 
+// The document's type as stored right now, read at save time. A new version
+// is saved under the document's own type — none, for an untyped document —
+// because the database only accepts the type the document already has. A
+// type remembered from when the chat or review opened can be out of date.
+export async function fetchMatterDocumentTypeId(matterDocumentId: string): Promise<string | null> {
+  const { data, error } = await supabase.from("matter_documents").select("document_type_id").eq("id", matterDocumentId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("That document is no longer in the project.");
+  return data.document_type_id ?? null;
+}
+
 export function useLatestDocumentVersion(matterDocumentId: string | undefined, documentVersionId?: string) {
   return useQuery({
     queryKey: ["latest-document-version", matterDocumentId, documentVersionId],

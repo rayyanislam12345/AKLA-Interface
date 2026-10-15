@@ -34,6 +34,9 @@ const MAX_TEMPLATE_CHARS = 40_000;
 // at 8,000 characters for the same reason.
 const MAX_EXCERPT_CHARS = 8_000;
 const MAX_FINDINGS_PER_PASS = 20;
+// Similarity floors for the evidence a review is given (see fetchGroundedContext).
+export const REVIEW_MATCH_THRESHOLD = 0.35;
+export const STATUTE_MATCH_THRESHOLD = 0.3;
 
 const excerpt = (text) => String(text ?? "").slice(0, MAX_EXCERPT_CHARS);
 
@@ -184,13 +187,17 @@ async function fetchGroundedContext(supabase, voyageKey, queryText, documentType
   const actNames = [...new Set([...(relevantActNames.data ?? []).map((r) => r.act_name).filter(Boolean), ...extraActNames])];
   const filterActNames = actNames.length > 0 ? actNames : null;
 
+  // The SQL default threshold is 0.5. Statute passages score lower than
+  // contract text against a contract (a typical relevant section sits near
+  // 0.41), so at the default most of them were dropped and the legal pass
+  // reported too little evidence. The chat uses 0.35; statutes get 0.3.
   const [precedent, statute, project] = await Promise.all([
-    supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_count: 5, filter_document_type_id: documentTypeId, precedent_only: true }),
-    supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_count: 9, statute_only: true, filter_act_names: filterActNames }),
+    supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: REVIEW_MATCH_THRESHOLD, match_count: 5, filter_document_type_id: documentTypeId, precedent_only: true }),
+    supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: STATUTE_MATCH_THRESHOLD, match_count: 9, statute_only: true, filter_act_names: filterActNames }),
     matterId
       // One extra to absorb the document being reviewed's own chunk, which
       // is filtered out below by storage path.
-      ? supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_count: 9, filter_matter_id: matterId })
+      ? supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: REVIEW_MATCH_THRESHOLD, match_count: 9, filter_matter_id: matterId })
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (precedent.error) throw new Error("Precedent retrieval failed");

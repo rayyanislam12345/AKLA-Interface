@@ -3,6 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { sanitizeStorageFilename } from "@/lib/utils";
 import { describeTemplateDocx } from "@/lib/templateDocx";
 
+// Setting, replacing, restoring or removing a standard is for administrators
+// only (enforced by the database); a refusal reads as this, not as a policy name.
+export const STANDARD_ADMIN_ONLY = "Only an administrator can set or change the firm's standard.";
+function plainStandardError(err: unknown): Error {
+  const message = (err as { message?: string } | null)?.message ?? String(err);
+  if (/row-level security|row level security|permission denied|unauthori[sz]ed|\b403\b/i.test(message)) return new Error(STANDARD_ADMIN_ONLY);
+  return err instanceof Error ? err : new Error(message);
+}
+
 export interface DocumentTypeTemplateRow {
   document_type_id: string;
   document_type_name: string;
@@ -57,11 +66,14 @@ export function useDeleteDocumentTypeTemplate() {
   return useMutation({
     mutationFn: async ({ documentTypeId, storagePath }: { documentTypeId: string; storagePath: string | null }) => {
       // Retain immutable files referenced by historical AI drafts and template snapshots.
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("document_type_templates")
         .delete()
-        .eq("document_type_id", documentTypeId);
-      if (error) throw error;
+        .eq("document_type_id", documentTypeId)
+        .select("document_type_id");
+      if (error) throw plainStandardError(error);
+      // A delete the database refuses removes nothing rather than failing.
+      if (!data?.length) throw new Error(STANDARD_ADMIN_ONLY);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["document-type-templates"] });
@@ -83,12 +95,18 @@ export function useUploadDocumentTypeTemplate() {
       const storagePath = `standards/${documentTypeId}/${Date.now()}-${sanitizeStorageFilename(file.name)}`;
 
       const { error: uploadError } = await supabase.storage.from("precedent-library").upload(storagePath, file);
-      if (uploadError) throw uploadError;
+      if (uploadError) throw plainStandardError(uploadError);
+
+      // From here a failure leaves a stored file no standard points at; remove it.
+      const discardUpload = () => supabase.storage.from("precedent-library").remove([storagePath]).catch(() => undefined);
 
       const { data: extracted, error: extractError } = await supabase.functions.invoke("extract-document-text", {
         body: { bucket: "precedent-library", storagePath, fileName: file.name },
       });
-      if (extractError) throw extractError;
+      if (extractError) {
+        await discardUpload();
+        throw extractError;
+      }
 
       // How the file is formatted — its numbering scheme, heading treatment,
       // body font — read off the .docx itself. The words go into the drafting
@@ -113,7 +131,10 @@ export function useUploadDocumentTypeTemplate() {
         },
         { onConflict: "document_type_id" }
       );
-      if (error) throw error;
+      if (error) {
+        await discardUpload();
+        throw plainStandardError(error);
+      }
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["document-type-templates"] });
@@ -178,7 +199,7 @@ export function useRestoreDocumentTemplateVersion() {
         { document_type_id: documentTypeId, ...version, updated_by: userData.user?.id, updated_at: new Date().toISOString() },
         { onConflict: "document_type_id" },
       );
-      if (error) throw error;
+      if (error) throw plainStandardError(error);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["document-type-templates"] });

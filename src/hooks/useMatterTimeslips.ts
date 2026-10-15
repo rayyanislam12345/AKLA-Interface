@@ -27,19 +27,39 @@ export const RANGE_LABELS: Record<RangePreset, string> = {
   all: "All time",
 };
 
+/** A date as YYYY-MM-DD on the user's own calendar (Asia/Karachi in
+ * practice), never UTC: toISOString() would make 00:00–05:00 in Pakistan
+ * count as the previous day. */
+export function localISODate(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Parses YYYY-MM-DD as a local calendar date (new Date("YYYY-MM-DD") would
+ * read it as midnight UTC). */
+export function parseLocalISODate(value: string): Date {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+/** The YYYY-MM-DD date `days` calendar days before or after `value`. */
+export function shiftISODate(value: string, days: number): string {
+  const date = parseLocalISODate(value);
+  date.setDate(date.getDate() + days);
+  return localISODate(date);
+}
+
 /** Inclusive [from, to] as YYYY-MM-DD, or nulls for "all". */
 export function resolveRange(preset: RangePreset): {
   from: string | null;
   to: string | null;
 } {
   if (preset === "all") return { from: null, to: null };
-  const today = new Date();
-  const to = today.toISOString().slice(0, 10);
+  const to = localISODate();
   if (preset === "today") return { from: to, to };
-  const days = Number(preset);
-  const start = new Date(today);
-  start.setDate(start.getDate() - (days - 1));
-  return { from: start.toISOString().slice(0, 10), to };
+  return { from: shiftISODate(to, -(Number(preset) - 1)), to };
 }
 
 export function useMatterTimeslips(
@@ -121,14 +141,69 @@ export function useReorderMyTimeslips() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (orderedIds: string[]) => {
-      await Promise.all(
+      const results = await Promise.all(
         orderedIds.map((id, index) =>
           supabase.from("matter_timeslips").update({ sort_order: index }).eq("id", id)
         )
       );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-timeslips"] });
+    },
+  });
+}
+
+// A time entry typed straight into the hub (not uploaded from Timekeeper).
+// RLS "Authors can insert their own timeslips" requires author_id to be the
+// signed-in user, so this always records the user's own time.
+export interface NewMyTimeslip {
+  author_id: string;
+  matter_id: string;
+  work_date: string;
+  hours: number;
+  narrative: string;
+  billable_hours: number | null;
+  ak_billable_hours: number | null;
+  sort_order: number | null;
+}
+
+export function useAddMyTimeslip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (entry: NewMyTimeslip) => {
+      const { error } = await supabase.from("matter_timeslips").insert({
+        ...entry,
+        // The yes/no billable flag the project card reads. Left at its
+        // default (billable) unless the user typed 0 billable hours.
+        billable:
+          entry.billable_hours === null ||
+          entry.billable_hours > 0 ||
+          (entry.ak_billable_hours ?? 0) > 0,
+        source: "hub",
+      });
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["my-timeslips"] });
+      queryClient.invalidateQueries({ queryKey: ["matter-timeslips"] });
+    },
+  });
+}
+
+// RLS "Authors and partners can delete timeslips" lets the author delete
+// their own rows.
+export function useDeleteMyTimeslip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("matter_timeslips").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-timeslips"] });
+      queryClient.invalidateQueries({ queryKey: ["matter-timeslips"] });
     },
   });
 }

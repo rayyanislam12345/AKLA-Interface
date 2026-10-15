@@ -872,3 +872,54 @@ export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = 
     }
   };
 }
+
+// ------------------------------------------------- automatic search, trimmed
+
+// The passages the automatic search hands a turn that can look things up
+// for itself: the few best overall, whichever library they came from. The
+// assistant searches for what else it needs, so sixteen passages up front
+// (six precedents, six project, four statutes) were mostly noise, and each
+// one took a source number the lawyer then saw listed.
+export const TOOL_TURN_PASSAGES = 3;
+export function bestPassages(sources, n = TOOL_TURN_PASSAGES) {
+  const score = (s) => (typeof s?.similarity === "number" && Number.isFinite(s.similarity) ? s.similarity : -Infinity);
+  return (sources ?? [])
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => score(b.s) - score(a.s) || a.i - b.i)
+    .slice(0, Math.max(0, n))
+    .map(({ s }) => s);
+}
+
+// ------------------------------------------------------ Word edit operations
+
+const sameWords = (a, b) => String(a ?? "").replace(/\s+/g, " ").trim() === String(b ?? "").replace(/\s+/g, " ").trim();
+
+// A comment on a paragraph the same reply rewrites is often written against
+// the new wording: the model replaces ¶12 and then comments on ¶12 quoting
+// the text it has just written. The file is checked against the paragraph as
+// it stood, so those comments were refused ("Expected paragraph text does
+// not match") — more than half of all comments. Either wording is accepted:
+// when a comment's expected text is the new text of a replace on the same
+// paragraph (and that replace itself matches the paragraph), the comment is
+// pointed at the paragraph as it stood, which is what the file is checked
+// against. Nothing else is loosened. Returns new op objects; the input is
+// left as it was.
+export function alignCommentExpectations(ops, byRef) {
+  if (!Array.isArray(ops) || !byRef) return ops;
+  const replaced = new Map();
+  for (const op of ops) {
+    if (String(op?.op ?? "").toLowerCase() !== "replace" || typeof op.text !== "string") continue;
+    const ref = byRef.get(Number(op.p));
+    if (!ref || op.expected !== ref.exactText) continue;
+    replaced.set(Number(op.p), [...(replaced.get(Number(op.p)) ?? []), op.text]);
+  }
+  if (!replaced.size) return ops;
+  return ops.map((op) => {
+    if (String(op?.op ?? "").toLowerCase() !== "comment" || typeof op.expected !== "string") return op;
+    const ref = byRef.get(Number(op.p));
+    if (!ref || op.expected === ref.exactText) return op;
+    const newTexts = replaced.get(Number(op.p));
+    if (!newTexts?.some((text) => sameWords(text, op.expected))) return op;
+    return { ...op, expected: ref.exactText };
+  });
+}

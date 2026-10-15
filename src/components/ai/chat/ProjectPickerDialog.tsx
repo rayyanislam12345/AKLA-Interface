@@ -16,7 +16,7 @@ interface ProjectPickerDialogProps {
 // reviewing or editing a project's document happens inside that project's
 // workspace, where its files and context are. One question, then hand over.
 export default function ProjectPickerDialog({ open, onOpenChange, onPick, title, description }: ProjectPickerDialogProps) {
-  const { data: matters } = useMatters();
+  const { data: matters } = useMatters({ openOnly: true });
   const [query, setQuery] = useState("");
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();

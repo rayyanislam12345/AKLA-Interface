@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,8 +14,13 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useMyProfile } from "@/hooks/useProfiles";
+import { useToast } from "@/hooks/use-toast";
+import { NAV_ITEMS } from "@/components/AppSidebar";
 import {
   Search,
   BookOpen,
@@ -27,6 +33,11 @@ import {
   Users,
   HelpCircle,
   Lightbulb,
+  Clock,
+  Mic,
+  Settings,
+  Inbox,
+  Loader2,
 } from "lucide-react";
 
 interface HelpItem {
@@ -44,10 +55,153 @@ interface HelpSection {
   faqs: HelpItem[];
 }
 
+// One line per sidebar item, keyed by its address. The list itself comes
+// from the sidebar (NAV_ITEMS), so a new or renamed item shows up here
+// without anyone retyping it; an item with no line here is still listed.
+const NAV_DESCRIPTIONS: Record<string, string> = {
+  "/assistant":
+    "the AI. Ask a question, drop in a document, or type / to draft, review or summarise. Works with or without a project.",
+  "/dashboard": "a firm-wide view: project counts, today's legal updates and the project list.",
+  "/matters": "every transaction. Open one for its stages, documents, parties, tasks, notes and time.",
+  "/clients": "the clients that projects are attached to.",
+  "/team": "everyone at the firm and their role. Admins approve new accounts here.",
+  "/timesheet": "your own time for any day. Add, edit or delete entries and download the firm's timesheet file.",
+  "/record-meeting": "live transcription of a meeting, then proposal letters, minutes or a concept note from it.",
+  "/precedent-library": "the firm's own agreements and the laws the AI draws on, with clause search and firm standards.",
+  "/caselaw-research": "ask a question of Pakistani case law and get judgments with links.",
+  "/mandate-opportunities": "new tenders and PPP opportunities found on public procurement sites.",
+  "/whatsapp-activity": "client matters and documents picked up from a linked WhatsApp account.",
+  "/document-types": "the firm's list of document types (Concession Agreement, EPC Contract and so on).",
+  "/help": "this page.",
+};
+
+const navigationBullets = [
+  ...NAV_ITEMS.map((item) =>
+    NAV_DESCRIPTIONS[item.url] ? `${item.title}: ${NAV_DESCRIPTIONS[item.url]}` : item.title
+  ),
+  "Settings (at the bottom, under your email): your name, password, two-step sign-in and signing out of all devices.",
+];
+
+interface SupportRequestRow {
+  id: string;
+  user_id: string | null;
+  subject: string;
+  message: string;
+  status: string;
+  created_at: string;
+  sender: string;
+}
+
+// Admins only (RLS "Users can view their own support requests" lets admins
+// read every row): the questions people send from the form below, newest
+// first, with a way to mark each one dealt with.
+function SupportRequestsForAdmins() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["support-requests"],
+    queryFn: async (): Promise<SupportRequestRow[]> => {
+      const { data: rows, error } = await supabase
+        .from("support_requests")
+        .select("id, user_id, subject, message, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      const ids = [...new Set((rows ?? []).map((r) => r.user_id).filter((id): id is string => !!id))];
+      const { data: people } = ids.length
+        ? await supabase.from("profiles").select("id, full_name, email").in("id", ids)
+        : { data: [] as { id: string; full_name: string | null; email: string }[] };
+      const nameOf = new Map((people ?? []).map((p) => [p.id, p.full_name || p.email]));
+      return (rows ?? []).map((r) => ({ ...r, sender: (r.user_id && nameOf.get(r.user_id)) || "Unknown" }));
+    },
+  });
+
+  const setStatus = async (id: string, status: "open" | "answered") => {
+    const { error } = await supabase.from("support_requests").update({ status }).eq("id", id);
+    if (error) {
+      toast({ title: "Could not update the request", description: error.message, variant: "destructive" });
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["support-requests"] });
+  };
+
+  const openCount = (data ?? []).filter((r) => r.status === "open").length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <Inbox className="h-6 w-6 text-primary" />
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              Questions from the team
+              {openCount > 0 && <Badge>{openCount} open</Badge>}
+            </CardTitle>
+            <CardDescription>
+              Sent with the form at the bottom of this page. Only admins see this list. Reply to the person directly,
+              then mark the question answered.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading…
+          </div>
+        ) : error ? (
+          <p className="text-sm text-destructive">Could not load questions: {(error as Error).message}</p>
+        ) : !data?.length ? (
+          <p className="text-sm text-muted-foreground">No questions yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {data.map((r) => (
+              <li key={r.id} className="py-3 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium break-words">{r.subject}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">{r.message}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {r.sender} ·{" "}
+                    {new Date(r.created_at).toLocaleString(undefined, {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+                {r.status === "open" ? (
+                  <Button size="sm" variant="outline" onClick={() => setStatus(r.id, "answered")}>
+                    Mark answered
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">Answered</Badge>
+                    <Button size="sm" variant="ghost" onClick={() => setStatus(r.id, "open")}>
+                      Reopen
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const HelpPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("getting-started");
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [sending, setSending] = useState(false);
+  const { user } = useAuth();
+  const { data: myProfile } = useMyProfile();
+  const { toast } = useToast();
+  const isAdmin = myProfile?.role === "admin" || myProfile?.role === "founder";
 
   const helpSections: HelpSection[] = [
     {
@@ -59,27 +213,22 @@ const HelpPage = () => {
         {
           question: "What is AKLA Project Hub?",
           answer:
-            "The firm's internal project management and AI drafting hub. It tracks PPP transactions and due-diligence engagements through their document lifecycle, and layers AI drafting, redline review, and Q&A on top of the firm's own document history — every AI feature is grounded in projects and precedent that actually exist, not general knowledge alone.",
+            "The firm's own workspace: every PPP transaction and due-diligence engagement with its documents, an AI assistant that works from the firm's agreements and the law, your daily timesheet, meeting transcription, and the firm's library of past agreements and laws.",
         },
         {
           question: "How do I navigate the platform?",
-          answer:
-            "The left sidebar covers the whole app: Dashboard (firm-wide view of every project), Projects (create and manage transactions), Clients, Team (lawyer directory and roles), Precedent Library (the firm's past agreements), Document Types (the contract taxonomy), and Help. AI drafting, review, and chat are reached from within a project's workspace rather than the sidebar, since they're always scoped to a specific project.",
-        },
-        {
-          question: "What are the key features?",
-          answer:
-            "Project tracking with a stage checklist and per-document status pipeline; document upload with automatic text extraction and indexing; AI-assisted drafting either from the firm's precedent or a guided intake interview; AI redline review benchmarked against precedent; a per-matter AI chat; and a firm-wide precedent library with an admin-editable document taxonomy.",
+          answer: "Everything is in the sidebar on the left, top to bottom:",
+          bullets: navigationBullets,
         },
         {
           question: "How is data organized?",
           answer:
-            "Client → Project → Documents, Stages, Parties, Tasks, and Notes. Access is firm-wide by design — every lawyer can see and work on every project, rather than being restricted to projects they're staffed on.",
+            "Client → Project → Documents, Stages, Parties, Tasks, Notes and Time. Access is firm-wide by design: every lawyer can see and work on every project.",
         },
         {
           question: "How do the AI features work?",
           answer:
-            "The AI drafts, reviews and answers questions using what the firm has actually uploaded: the project's documents, the precedent library and the law library. Its output is grounded in that material — drafts mark unknown commercial terms as placeholders (e.g. [CONCESSION PERIOD — TO BE CONFIRMED]) instead of inventing figures, and chat says clearly when nothing relevant is found rather than guessing.",
+            "Open AI Assistant (first item in the sidebar). You can use it without choosing a project: ask a question, drop in a document, or type / to pick Draft, Review, Summarise or one of the firm's own skills. To work on a particular transaction, open the project and press Ask AI (or Draft with AI on its Documents card); the assistant then also reads that project's documents. Answers come from the firm's agreements, the law library and, inside a project, its documents, with the sources listed under each reply. Drafts leave unknown commercial terms as marked placeholders such as [CONCESSION PERIOD — TO BE CONFIRMED] instead of inventing figures.",
         },
       ],
       faqs: [
@@ -117,7 +266,7 @@ const HelpPage = () => {
             "Stages (the checklist), Documents (every document on the project with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
           bullets: [
             "Stages — click to advance not started → in progress → complete.",
-            "Documents — create a document, upload versions, change status, or open it in the AI Workspace (Draft / Review with AI).",
+            "Documents — create a document, upload versions, change status, or open it in the AI Assistant to draft or review it.",
             "Parties — add a name and role for each counterparty on the deal.",
             "Tasks — add a task; check it off when done.",
             "Notes — free-text notes, newest first.",
@@ -156,7 +305,7 @@ const HelpPage = () => {
         {
           question: "How do I upload a document?",
           answer:
-            "In a project workspace, use the Documents card: give the document a title and type, then click the upload icon to attach a file as its first version. Uploading again to the same document adds a new version — nothing is overwritten. Files you drop into the AI Workspace chat are read by the assistant but are NOT project documents — save what it produces with \"Save to project\", or upload the file here.",
+            "Open the project and go to its Documents card. Type the document's title, pick its type and press +. The document appears in the list; press the upload icon on its row and choose the file. Uploading again to the same document adds a new version; nothing is overwritten. Files you drop into an AI Assistant chat are read by the assistant for that conversation but are not saved to the project. To keep something the assistant produced, press \"Save to project\" under it.",
         },
         {
           question: "What happens to a file after I upload it?",
@@ -190,22 +339,22 @@ const HelpPage = () => {
         {
           question: "How do I generate a draft?",
           answer:
-            "From a project's Documents card, click Draft with AI — it opens the AI Workspace with the Draft skill in force. Pick the document type, then talk to the assistant: it asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, preview it as a Word document, download it, or save it to the project as a version.",
+            "Two ways. Without a project: open AI Assistant, type / and choose Draft, then say what you need. For a project: open it and press Draft with AI on its Documents card. Either way the assistant asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, download it as a Word file, or save it to a project as a new version.",
         },
         {
-          question: "How does the interview work?",
+          question: "What does the assistant ask before drafting?",
           answer:
-            "Claude asks you one question at a time about the key commercial terms — parties, term, payment structure, security, governing law, and so on. When it has enough, Generate Draft lights up; you can also click Draft Now Anyway at any point and it will draft from what it has, grounded in the firm's standard template and precedent for that document type.",
+            "One short question at a time about the key commercial terms: parties, term, payment, security, governing law and so on. Say \"just draft it\" at any point and it drafts from what it has, using the firm's standard and past agreements for that document type.",
         },
         {
           question: "What happens to the draft once it's generated?",
           answer:
-            "It loads into an editable rich-text editor — never a locked or final file. The Preview as Word Document tab shows exactly how it will look as a firm-formatted .docx. Review and edit it before doing anything else with it.",
+            "It opens in the panel on the right of the chat, where you can edit it and see it as the firm-formatted Word file. Read and edit it before sending it anywhere.",
         },
         {
           question: "How do I save a draft?",
           answer:
-            "Click Save as Document Version. This creates (or reuses) a project document of that type and saves your edited text as a new .docx version.",
+            "Press \"Save new version\" in the draft panel and choose the project (if the chat isn't already in one). It is saved as a new Word version of that project's document. \"Download .docx\" gives you the file without saving it to a project.",
         },
         {
           question: "Will the AI invent commercial terms I never gave it?",
@@ -220,9 +369,9 @@ const HelpPage = () => {
             "It drafts from standard market practice instead, and the note above the draft will say so.",
         },
         {
-          question: "Will I lose my interview if I switch to the Ask or Review tab?",
+          question: "Will I lose the conversation if I leave the page?",
           answer:
-            "No — the tabs keep their state while you stay on the page, so you can hop over to Ask to check something and come back. Leaving the page (or reloading) does start fresh.",
+            "No. Every chat is kept in the list on the left of the AI Assistant, where you can pick it up again, pin it, rename it or archive it.",
         },
       ],
     },
@@ -235,7 +384,7 @@ const HelpPage = () => {
         {
           question: "How do I get redline suggestions on a draft?",
           answer:
-            "Click the review icon next to a document in the Documents card (it needs at least one uploaded version) — that opens the AI Workspace with Review in force and the document attached; press send. Or in any chat, type / and choose Review, then use the + menu → Add from project to attach the document. A review first looks up the law that may apply on official sources, then runs its three passes. Follow-up messages in the same chat are checked against that review rather than starting a new one; attach a different document or say “re-run the review” for a fresh one. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
+            "Click the review icon next to a document in the project's Documents card (it needs at least one uploaded version) — that opens the AI Assistant with Review in force and the document attached; press send. Or in any chat, type / and choose Review, then use the + menu → Add from project to attach the document. A review first looks up the law that may apply on official sources, then runs its three passes. Follow-up messages in the same chat are checked against that review rather than starting a new one; attach a different document or say “re-run the review” for a fresh one. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
         },
         {
           question: "What does the review actually check?",
@@ -272,73 +421,163 @@ const HelpPage = () => {
       ],
     },
     {
-      id: "ask-ai",
-      title: "Ask AI",
+      id: "ai-assistant",
+      title: "AI Assistant",
       icon: MessageCircle,
-      description: "Chat grounded in a project's documents and firm precedent",
+      description: "Ask, draft, review and summarise, with or without a project",
       content: [
         {
-          question: "What is Ask AI?",
+          question: "Where is it?",
           answer:
-            "A chat scoped to one project, grounded in that project's uploaded documents, the firm-wide precedent library, and the law library — not general knowledge alone. Statute excerpts come from the project's Relevant Laws when it has any, otherwise the whole law library, and each source in the answer is labelled with where it came from.",
+            "AI Assistant is the first item in the sidebar. It works like claude.ai: your conversations are listed on the left (pin, rename, archive), you type at the bottom, and drafts and reviews open in a panel on the right.",
         },
         {
-          question: "Where do I find it?",
+          question: "Do I have to choose a project first?",
           answer:
-            "Open a project's workspace and click Ask AI near the top of the page. That opens the AI Workspace — a chat that works like claude.ai: conversations for this project are listed on the left (pin, rename, archive), you type at the bottom, drop files in or use + to attach one of the project's documents, and type / to put a skill in force (Draft, Review, Summarise, or one of the firm's own). Every answer is grounded in this project's documents, the precedent library and the law library, with the sources listed under the reply.",
+            "No. Without a project the assistant answers from the firm's agreements and the law library, and from any file you drop into the chat. Open a project and press Ask AI when you want it to read that project's documents too; those chats are listed under the project.",
         },
         {
-          question: "Can I add a document from here?",
+          question: "How do I give it a document?",
           answer:
-            "Yes — click Add a document above the chat, choose a file and a document type. It's uploaded to the project like any other document and, once indexed, you can ask about it straight away.",
+            "Drop the file into the chat, or press + and choose Add from project (or Add from a project) to attach one of a project's documents. A dropped file is read for that conversation only; to keep it on a project, upload it on the project's Documents card.",
+        },
+        {
+          question: "What are skills?",
+          answer:
+            "Type / in the message box to pick one: Draft, Review, Summarise, or one of the firm's own (for example the daily agenda or a concession agreement in the firm's format). The skill stays in force for the conversation.",
         },
         {
           question: "Does it remember earlier questions in the same conversation?",
           answer:
-            "Yes — within a project, the conversation persists across turns, so follow-up questions like \"what about the dispute resolution clause\" carry the context of what was already discussed.",
+            "Yes. Follow-up questions like \"what about the dispute resolution clause\" carry the context of what was already discussed, and the sources it found stay available for the whole chat.",
         },
         {
           question: "What happens if it doesn't know the answer?",
           answer:
-            "It says so clearly rather than guessing, and distinguishes between something it recalls from the conversation itself versus something it actually found in the knowledge base.",
+            "It says so rather than guessing, and lists the sources it did use under the reply so you can check them.",
         },
       ],
       faqs: [],
     },
     {
-      id: "precedent-library",
-      title: "Precedent Library",
+      id: "firm-library",
+      title: "Firm Library",
       icon: BookMarked,
-      description: "The firm-wide pool of past agreements AI drafting draws from",
+      description: "The firm's own agreements and the laws the AI draws on",
       content: [
         {
-          question: "What is the Precedent Library?",
+          question: "What is the Firm Library?",
           answer:
-            "Firm-wide past agreements, independent of any single project. This is what Draft with AI and Review with AI actually pull from when drafting or benchmarking a document type.",
+            "The firm's past agreements and the laws they rely on, independent of any single project. The AI Assistant draws on it when it drafts, reviews and answers. It has four tabs: Agreements, Find a clause, Laws and Standards.",
         },
         {
-          question: "How do I add documents to it?",
+          question: "How do I add agreements to it?",
           answer:
-            "Go to Precedent Library, pick a document type, add one or more files, then click Upload. Every file in a batch is tagged with the same document type — run the upload again for a different type.",
+            "Open Firm Library, stay on the Agreements tab, and in Bulk Upload pick a document type, add one or more files, then upload. Every file in a batch is tagged with the same type; upload again for a different type.",
+        },
+        {
+          question: "How do I find a clause?",
+          answer:
+            "Use the Find a clause tab: type what you're looking for (for example liquidated damages, step-in rights or change in law) and, if you like, limit it to one document type. It searches every agreement in the library.",
+        },
+        {
+          question: "What are Laws and Standards?",
+          answer:
+            "Laws lists the Acts and rules the AI can quote, with a link to each source. Standards holds the firm's standard form for a document type, which the AI can build from the firm's agreements and the relevant law.",
         },
         {
           question: "Can I remove something from the library?",
           answer:
             "Yes — deleting a source removes both the underlying file and everything indexed from it.",
         },
-        {
-          question: "Is precedent tied to a specific project?",
-          answer:
-            "No. It's firm-wide and available to every project that uses a matching document type.",
-        },
       ],
       faqs: [
         {
-          question: "The library is empty — does anything still work?",
-          answer:
-            "Yes. Draft with AI falls back to standard market practice, and Review with AI benchmarks against standard practice instead of precedent — both say so explicitly rather than pretending precedent exists.",
+          question: "Is the library tied to a specific project?",
+          answer: "No. It's firm-wide and every project and conversation can use it.",
         },
       ],
+    },
+    {
+      id: "timesheet",
+      title: "Today's Timesheet",
+      icon: Clock,
+      description: "Record your time and download the daily timesheet",
+      content: [
+        {
+          question: "How do I record time?",
+          answer:
+            "Open Today's Timesheet in the sidebar and press Add entry. Choose the project, describe the work, and enter the hours. Billable hours and AK billable hours are optional and can't be more than the hours worked. It works the same on a phone.",
+        },
+        {
+          question: "Can I fill in or fix another day?",
+          answer:
+            "Yes. Use Previous day and Next day, or pick a date in the date box. Dates follow your own clock, so work done after midnight counts for the new day.",
+        },
+        {
+          question: "How do I change or remove an entry?",
+          answer:
+            "Click into any box on a row and type; it saves when you click away. The bin icon at the end of a row deletes that entry after you confirm. Drag a row by its grip handle to change the order.",
+        },
+        {
+          question: "How do I get the timesheet file?",
+          answer:
+            "Press Download Timesheet (.docx). It builds the firm's daily timesheet for the day shown, with your name and role.",
+        },
+        {
+          question: "What is Timekeeper?",
+          answer:
+            "An optional Windows app some of the firm uses to track time in the background. Entries it uploads appear on this page like any other. You do not need it: everything can be entered here.",
+        },
+      ],
+      faqs: [],
+    },
+    {
+      id: "record-meeting",
+      title: "Record Meeting",
+      icon: Mic,
+      description: "Transcribe a meeting and turn it into a letter, minutes or a concept note",
+      content: [
+        {
+          question: "How do I record a meeting?",
+          answer:
+            "Open Record Meeting, choose the language (English, or Urdu which is translated when you generate a document) and the audio source (your microphone, or microphone plus the meeting's audio for an online call), then press Start Meeting. The transcript appears as people speak. Press Stop Meeting when you're done.",
+        },
+        {
+          question: "I already have a recording or transcript.",
+          answer: "Use Upload Recording… or Upload Transcript… instead of starting a live meeting.",
+        },
+        {
+          question: "What can it produce?",
+          answer:
+            "Generate Proposal (AKLA Format), Generate Minutes (AKLA Format) or Generate Concept Note. Each draft can be saved as a Word file, uploaded to a project, or opened in the AI Assistant to refine.",
+        },
+      ],
+      faqs: [],
+    },
+    {
+      id: "settings",
+      title: "Settings",
+      icon: Settings,
+      description: "Your name, password and sign-in security",
+      content: [
+        {
+          question: "Where are my settings?",
+          answer:
+            "Press Settings at the bottom of the sidebar, under your email. There you can correct your name, change your password, turn two-step sign-in on or off, and sign out of every device.",
+        },
+        {
+          question: "What is two-step sign-in?",
+          answer:
+            "Also called two-factor authentication. Once it's on, signing in needs your password and a 6-digit code from an authenticator app on your phone, so someone who learns your password still can't get in.",
+        },
+        {
+          question: "I forgot my password.",
+          answer:
+            "On the sign-in page press Forgot your password?, enter your email and use the link in the email you receive. Links expire; if one has, the page offers to send a new one.",
+        },
+      ],
+      faqs: [],
     },
     {
       id: "team-and-types",
@@ -358,7 +597,7 @@ const HelpPage = () => {
         {
           question: "How do I manage the document taxonomy?",
           answer:
-            "On the Document Types page, admins can add, rename, or delete contract types, grouped by category. Everyone can view the list — it drives the type picker in Draft with AI, Review with AI, and document uploads.",
+            "On the Document Types page, admins can add, rename, or delete contract types, grouped by category. Everyone can view the list — it drives the type picker for drafting, the Firm Library and document uploads.",
         },
         {
           question: "Can I delete a document type that's in use?",
@@ -395,13 +634,6 @@ const HelpPage = () => {
             <p className="text-muted-foreground">Learn how to use AKLA Project Hub</p>
           </div>
         </div>
-        {/* Several answers below describe an earlier version of the app. The
-            page is being replaced by guidance inside the features themselves;
-            until then, say so rather than let a stale answer mislead. */}
-        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
-          This page is being rewritten. Some answers describe older screens and buttons; if something here doesn't match what you see, trust the app, and use the form at the bottom to ask.
-        </div>
-
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -504,33 +736,40 @@ const HelpPage = () => {
         </TabsContent>
       </Tabs>
 
+      {isAdmin && <SupportRequestsForAdmins />}
+
       <Card>
         <CardContent className="p-6">
           <h3 className="text-lg font-semibold mb-1">Need more help?</h3>
           <p className="text-muted-foreground mb-4">
-            Submit a question and an admin will get back to you.
+            Send a question to the firm's admins. They see it on this page and will reply to you directly.
           </p>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              const form = e.target as HTMLFormElement;
+              const form = e.currentTarget;
               const subject = (form.elements.namedItem("subject") as HTMLInputElement).value.trim();
               const message = (form.elements.namedItem("message") as HTMLTextAreaElement).value.trim();
               if (!subject || !message) return;
+              if (!user) {
+                toast({ title: "Your question was not sent", description: "Sign in again and retry.", variant: "destructive" });
+                return;
+              }
 
-              const {
-                data: { user },
-              } = await supabase.auth.getUser();
-              if (!user) return;
-
+              setSending(true);
               const { error } = await supabase.from("support_requests").insert({
                 user_id: user.id,
                 subject,
                 message,
               });
+              setSending(false);
 
               if (error) {
-                setShowConfirmDialog(false);
+                toast({
+                  title: "Your question was not sent",
+                  description: `${error.message}. Please try again, or message an admin directly.`,
+                  variant: "destructive",
+                });
                 return;
               }
 
@@ -547,7 +786,8 @@ const HelpPage = () => {
               maxLength={2000}
               className="min-h-[100px]"
             />
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" disabled={sending}>
+              {sending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Submit Question
             </Button>
           </form>
@@ -559,7 +799,7 @@ const HelpPage = () => {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-xl">Question sent</AlertDialogTitle>
             <AlertDialogDescription className="text-base">
-              An admin will follow up as soon as possible.
+              The firm's admins can see your question on the Help page and will reply to you directly.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

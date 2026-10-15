@@ -97,6 +97,11 @@ export default function DocumentTypesPage() {
         <div>
           <h1 className="text-2xl font-semibold">Document Types</h1>
           <p className="text-muted-foreground">The firm's contract taxonomy, used across drafting and review.</p>
+          {!isAdmin && profiles && (
+            <p className="text-sm text-muted-foreground" data-testid="document-types-admin-only">
+              Only an administrator can add, rename or remove a document type.
+            </p>
+          )}
         </div>
         {isAdmin && (
           <Dialog open={newOpen} onOpenChange={setNewOpen}>

@@ -12,11 +12,16 @@ interface SaveDraftInput {
   expectedVersionId?: string | null;
   isAiGenerated?: boolean;
   extension?: string;
+  // Return as soon as the version is saved and leave reading it for search to
+  // the caller, so a plain upload can show the new version straight away.
+  skipIndex?: boolean;
 }
+
+export const SEARCHABLE_EXTENSIONS = ["pdf", "docx", "xlsx", "xls", "pptx", "txt"];
 
 // Uploads use a unique path, then the database atomically checks the base
 // version and allocates a number. Indexing failure must not undo a saved file.
-export async function saveDraftToMatter({ matterId, documentTypeId, documentTypeName, blob, matterDocumentId, title, expectedVersionId, isAiGenerated = true, extension = "docx" }: SaveDraftInput) {
+export async function saveDraftToMatter({ matterId, documentTypeId, documentTypeName, blob, matterDocumentId, title, expectedVersionId, isAiGenerated = true, extension = "docx", skipIndex = false }: SaveDraftInput) {
   const docId = matterDocumentId ?? crypto.randomUUID();
   const stem = sanitizeStorageFilename((title ?? documentTypeName).replace(/[^\w\s-]+/g, " ").trim().replace(/[\s-]+/g, "-")).slice(0, 180) || "Document";
   const storagePath = `${matterId}/${docId}/${crypto.randomUUID()}-${stem}.${extension}`;
@@ -34,12 +39,13 @@ export async function saveDraftToMatter({ matterId, documentTypeId, documentType
     throw error;
   }
   const result = data as { matterDocumentId: string; versionId: string; versionNumber: number; fileName: string };
-  if (!["pdf", "docx", "xlsx", "xls", "pptx", "txt"].includes(extension.toLowerCase())) {
+  if (!SEARCHABLE_EXTENSIONS.includes(extension.toLowerCase())) {
     await supabase.from("document_versions").update({ indexing_status: "unsupported" }).eq("id", result.versionId);
-    return { ...result, indexed: false };
+    return { ...result, storagePath, indexed: false, unsupported: true };
   }
+  if (skipIndex) return { ...result, storagePath, indexed: false, unsupported: false };
   const indexed = await indexStoredVersion({ versionId: result.versionId, matterId, documentTypeId, storagePath, fileName: result.fileName, fileType: blob.type }).catch(() => false);
-  return { ...result, indexed };
+  return { ...result, storagePath, indexed, unsupported: false };
 }
 
 export async function indexStoredVersion({ versionId, matterId, documentTypeId, storagePath, fileName, fileType }: {

@@ -22,7 +22,7 @@ interface AddFromMatterDialogProps {
 export default function AddFromMatterDialog({ matterId, open, onOpenChange, onPick }: AddFromMatterDialogProps) {
   const [chosenMatterId, setChosenMatterId] = useState<string | undefined>(matterId);
   const activeMatterId = matterId ?? chosenMatterId;
-  const { data: matters } = useMatters();
+  const { data: matters } = useMatters({ openOnly: true });
   const { data: documents } = useMatterDocuments(activeMatterId);
   const [query, setQuery] = useState("");
 

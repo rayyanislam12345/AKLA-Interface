@@ -24,7 +24,7 @@ import { researchLaw, needsResearch, describeLookup } from "./research.js";
 import { handleAgreementTurn } from "./agreementFlow.js";
 import { addLawToLibrary } from "./lawLibrary.js";
 import { searchPrecedents } from "./precedentSearch.js";
-import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbers, listActs, MAX_EXCERPT_CHARS } from "./libraryTools.js";
+import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbers, listActs, MAX_EXCERPT_CHARS, bestPassages, TOOL_TURN_PASSAGES, alignCommentExpectations } from "./libraryTools.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
 import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, PLACEMENT_TEXT } from "./changes.js";
@@ -67,6 +67,20 @@ async function authorize(authHeader) {
   if (memberError) return { error: { status: 500, body: { error: "Could not check your firm membership" } } };
   if (!isMember) return { error: { status: 403, body: { error: "Your account is not an active member of this firm workspace." } } };
   return { user };
+}
+
+// has_role(…, 'admin') is the firm's one admin check (founders included),
+// the same one the database policies use.
+async function isFirmAdmin(userId) {
+  const { data, error } = await db.rpc("has_role", { _user_id: userId, _role: "admin" });
+  if (error) throw new Error(`Could not check your role: ${error.message}`);
+  return data === true;
+}
+
+// A firm skill is used by everyone, so deleting one is for an administrator
+// or the person who added it.
+function mayDeleteSkill(skill, userId, admin) {
+  return !!admin || (!!skill?.created_by && skill.created_by === userId);
 }
 
 let deployedVersion = {};
@@ -224,6 +238,15 @@ function resolveReferences(message, docs, excludeDocId) {
     }
   }
   return hits.slice(0, MAX_REFERENCED_DOCS);
+}
+
+// What a chat remembers of a skill: which one, and what it is applied to.
+// Not a guided-drafting answer or a one-off mode, which belong to the
+// message that carried them.
+function threadSkillFrom(skill) {
+  if (!skill || typeof skill !== "object" || !skill.key || skill.key === "none") return null;
+  const keep = ["key", "documentTypeId", "customSkillId", "documentVersionId", "matterDocumentId"];
+  return Object.fromEntries(keep.filter((k) => skill[k] !== undefined && skill[k] !== null).map((k) => [k, skill[k]]));
 }
 
 function deriveTitle(message, skill, documentTypeName) {
@@ -1045,8 +1068,14 @@ async function handleChat(req, res) {
     continueMessageId = null,
     workingArtifactId = null,
   } = body;
-  let skill = requestedSkill;
   const isContinuation = !!continueMessageId;
+  if (requestedSkill !== null && (typeof requestedSkill !== "object" || Array.isArray(requestedSkill))) return json(400, { error: "Invalid message, attachments, or skill" });
+  // { key: "none" }: the lawyer took the skill chip off. The chat's skill
+  // stays in force on every later message until it is taken off, so "no
+  // skill" has to be said, not left out: it clears the chat's skill
+  // instead of falling back to it.
+  const clearSkill = requestedSkill?.key === "none";
+  let skill = clearSkill ? null : requestedSkill;
 
   if (typeof message !== "string" || !Array.isArray(rawAttachments) || rawAttachments.length > 12 || message.length > 40000 || (skill && !["edit", "draft", "review", "verify", "summarise", "custom", "standardise", "agreement"].includes(skill.key))) return json(400, { error: "Invalid message, attachments, or skill" });
   // Neither a project nor a document type: a general chat, the AI Assistant's
@@ -1085,7 +1114,7 @@ async function handleChat(req, res) {
     const { data, error } = await lookup.maybeSingle();
     if (error || !data) return json(404, { error: general ? "Conversation not found" : standardising ? "Conversation not found for this document type" : "Conversation not found in this project" });
     existingThread = data;
-    skill ??= data.skill;
+    if (!clearSkill) skill ??= data.skill;
   }
   // Verify and the Review button were two ways into the same review; they
   // are one mode now, called Review. Chats and links from before still say
@@ -1168,6 +1197,14 @@ async function handleChat(req, res) {
       .single();
     if (error || !data) return json(500, { error: `Could not create the conversation: ${error?.message}` });
     thread = data;
+  } else if (!standardising && !isContinuation && (clearSkill || requestedSkill)) {
+    // The skill the lawyer chose (or took off) is the chat's skill from now
+    // on: the chip shows it, and a message sent with none falls back to it.
+    const next = threadSkillFrom(clearSkill ? null : skill);
+    if (JSON.stringify(next) !== JSON.stringify(threadSkillFrom(thread.skill))) {
+      await supabase.from("ai_chat_threads").update({ skill: next }).eq("id", thread.id);
+      thread = { ...thread, skill: next };
+    }
   } else if (skill && !thread.skill) {
     await supabase.from("ai_chat_threads").update({ skill }).eq("id", thread.id);
   }
@@ -2285,9 +2322,17 @@ ${JSON.stringify({ passes: review.passes, coverage: review.coverage, research: a
 
 SUGGESTIONS:
 ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause_reference, rationale: s.rationale })), null, 0).slice(0, 12_000)}${reviewEarlierBlock}`;
+      // A review started outside a project (the general assistant) belongs
+      // to the project the reviewed document is in: the panel opens the
+      // review session from it, and with no project it had nothing to show.
+      let reviewMatterId = matterId;
+      if (!reviewMatterId && target.matterDocumentId) {
+        const { data: md } = await supabase.from("matter_documents").select("matter_id").eq("id", target.matterDocumentId).maybeSingle();
+        reviewMatterId = md?.matter_id ?? null;
+      }
       const { data: artifact } = await supabase
         .from("ai_artifacts")
-        .insert({ thread_id: threadId, matter_id: matterId, kind: "review", title: `Review: ${target.name}`, data: artifactData, created_by: user.id })
+        .insert({ thread_id: threadId, matter_id: reviewMatterId, kind: "review", title: `Review: ${target.name}`, data: artifactData, created_by: user.id })
         .select("*")
         .single();
       if (!artifact) throw new Error("Could not record the review");
@@ -2366,13 +2411,16 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
         const actNames = (relevantLaws ?? []).map((r) => r.act_name).filter(Boolean);
         // A standard is checked against the law the associate named, so
         // more of it is read than a question in a project chat needs.
-        const statuteParams = { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: standardising ? 12 : 4, statute_only: true };
+        // A turn with tools gets only the few best passages overall (see
+        // below), so no search needs to bring back more than that many.
+        const count = (full) => (withTools ? Math.min(full, TOOL_TURN_PASSAGES) : full);
+        const statuteParams = { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(standardising ? 12 : 4), statute_only: true };
         // Omitted, not null: an empty act filter makes the SQL match nothing.
         if (actNames.length > 0) statuteParams.filter_act_names = actNames;
         const [m, p, s, t] = await Promise.all([
-          matterId ? searchLibrary(() => supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: 6, filter_matter_id: matterId })) : none([]),
+          matterId ? searchLibrary(() => supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(6), filter_matter_id: matterId })) : none([]),
           searchLibrary(() => supabase.rpc("match_documents", {
-            query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: standardising ? 10 : 6, precedent_only: true,
+            query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(standardising ? 10 : 6), precedent_only: true,
             ...(documentType ? { filter_document_type_id: documentType.id } : {}),
           })),
           searchLibrary(() => supabase.rpc("match_documents", statuteParams)),
@@ -2394,6 +2442,11 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
           ...(p.data ?? []).map((x) => ({ ...x, scope: "precedent" })),
           ...(s.data ?? []).map((x) => ({ ...x, scope: "statute" })),
         ];
+        // The assistant looks up what it needs on a turn with tools, so the
+        // automatic search gives it a start, not a reading list: the best
+        // few passages overall, and only those are numbered and listed.
+        // Turns without tools keep the full search.
+        if (withTools) sources = bestPassages(sources, TOOL_TURN_PASSAGES);
         templateHtml = t?.data?.content_html ?? null;
         templateRules = t?.data?.format_rules ?? null;
       } else {
@@ -2743,7 +2796,9 @@ You answer the way a careful senior associate would: precise, conservative, and 
       const metadata = { sources: sourceSummaries, skill: skill ?? null, ...citationMeta };
       if (ops?.length) {
         send("notice", { text: "Applying the changes to the Word file…" });
-        const out = await applyDocxOps(docxBase.bytes, ops, docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id) });
+        // A comment on a paragraph this reply also rewrites may quote either
+        // wording; it is checked against the paragraph as it stood.
+        const out = await applyDocxOps(docxBase.bytes, alignCommentExpectations(ops, docxBase.inspection.byRef), docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id) });
         // A draft from the firm's standard is a new document: the facts go
         // straight in, with nothing for the lawyer to accept one by one.
         // Comments stay; so do any revisions the standard itself carried.
@@ -3557,10 +3612,19 @@ async function handleSkillDelete(req, res) {
   }
   const authHeader = req.headers.authorization;
   if (!authHeader) return json(401, { error: "Authorization header required" });
-  const { error: authError } = await authorize(authHeader);
+  const { user, error: authError } = await authorize(authHeader);
   if (authError) return json(authError.status, authError.body);
-  const { data: row } = await db.from("ai_skills").select("id, kind, anthropic_skill_id").eq("id", String(body.id ?? "")).maybeSingle();
+  const { data: row } = await db.from("ai_skills").select("id, name, kind, anthropic_skill_id, created_by").eq("id", String(body.id ?? "")).maybeSingle();
   if (!row) return json(404, { error: "Skill not found" });
+  let admin = false;
+  try {
+    admin = row.created_by === user.id ? false : await isFirmAdmin(user.id);
+  } catch (err) {
+    return json(500, { error: err.message });
+  }
+  if (!mayDeleteSkill(row, user.id, admin)) {
+    return json(403, { error: `Only an administrator or the person who added /${row.name} can delete it.` });
+  }
   if (row.kind === "claude_skill" && row.anthropic_skill_id) {
     try {
       await unpublishSkill(ANTHROPIC_KEY, row.anthropic_skill_id);

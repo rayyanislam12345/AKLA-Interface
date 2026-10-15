@@ -2,8 +2,19 @@ import { indexStoredVersion } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileText, Gavel, Loader2, MessageCircle, MessageSquare, Pencil, Plus, ScanSearch, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
-import { useMatter, useMatterStages, useSetStageStatus, useDeleteMatter } from "@/hooks/useMatters";
+import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileText, Gavel, Loader2, MessageCircle, MessageSquare, MoreHorizontal, Pencil, Plus, ScanSearch, Search, Sparkles, Tag, Trash2, Upload, Wand2, X } from "lucide-react";
+import {
+  useMatter,
+  useMatterStages,
+  useSetStageStatus,
+  useDeleteMatter,
+  useSetMatterStatus,
+  normalizeMatterStatus,
+  matterStatusLabel,
+  matterStatusBadgeVariant,
+} from "@/hooks/useMatters";
+import { EditProjectDialog } from "@/pages/MattersPage";
+import { LoadState } from "@/components/LoadState";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
 import {
   useMatterRelevantLaws,
@@ -47,6 +58,7 @@ import {
   useDeleteMatterDocument,
   useDeleteDocumentVersion,
   useUpdateVersionLabel,
+  useUpdateMatterDocument,
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
 import { MatterTimeslips } from "@/components/MatterTimeslips";
@@ -68,6 +80,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +119,47 @@ function statusVariant(status: string): "default" | "secondary" | "outline" {
 }
 
 const STAGE_CYCLE = ["not_started", "in_progress", "complete"] as const;
+
+// Whether search and Ask AI can read a version, in words a lawyer can act
+// on. "unknown" (versions saved before the status was recorded) and a
+// "pending" that has sat for more than ten minutes are treated as failed:
+// they get the one automatic retry and a Try again button, never a spinner
+// that turns forever.
+const READING_TIMEOUT_MS = 10 * 60 * 1000;
+type ReadState = "searchable" | "reading" | "failed" | "unsupported";
+
+function versionReadState(v: { indexing_status: string; created_at: string }, now: number): ReadState {
+  if (v.indexing_status === "indexed") return "searchable";
+  if (v.indexing_status === "unsupported") return "unsupported";
+  if (v.indexing_status === "pending" && now - new Date(v.created_at).getTime() < READING_TIMEOUT_MS) return "reading";
+  return "failed";
+}
+
+const READ_STATE_LABEL: Record<ReadState, string> = {
+  searchable: "Searchable",
+  reading: "Reading…",
+  failed: "Couldn't be read",
+  unsupported: "Not searchable (file type)",
+};
+
+const READ_STATE_HINT: Record<ReadState, string> = {
+  searchable: "Search and Ask AI can read this version.",
+  reading: "Reading the text so search and Ask AI can use it. This usually takes under a minute.",
+  failed: "The file is saved, but search and Ask AI can't read it yet. Press Try again.",
+  unsupported: "This file type can't be read for search. The file is saved and can be downloaded.",
+};
+
+// Turns a failed upload into a sentence a lawyer can act on.
+function plainUploadError(err: unknown): string {
+  const message = err instanceof Error ? err.message : typeof err === "object" && err && "message" in err ? String((err as { message: unknown }).message) : String(err ?? "");
+  const m = message.toLowerCase();
+  if (m.includes("failed to fetch") || m.includes("network") || m.includes("load failed")) return "The file couldn't be sent. Check your connection and try again.";
+  if (m.includes("maximum allowed size") || m.includes("too large") || m.includes("payload")) return "This file is too large to upload.";
+  if (m.includes("newer document version")) return "A colleague added a version of this document a moment ago. Try the upload again.";
+  if (m.includes("does not belong to this project and type")) return "This document's type was changed while you were uploading. Try the upload again.";
+  if (m.includes("jwt") || m.includes("not authenticated") || m.includes("forbidden")) return "Your sign-in has expired. Sign in again, then retry the upload.";
+  return message || "Something went wrong. Please try again.";
+}
 
 // Every mutation on this page used to fire with no error handling: a failed
 // add, tick, status change or dismiss simply did nothing, and the lawyer was
@@ -588,7 +656,9 @@ export default function MatterWorkspacePage() {
   const scrolledTo = useRef("");
   const { matterId } = useParams<{ matterId: string }>();
   const navigate = useNavigate();
-  const { data: matter, isLoading } = useMatter(matterId);
+  const { data: matter, isLoading, error: matterError, refetch: refetchMatter } = useMatter(matterId);
+  const setMatterStatus = useSetMatterStatus();
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
   const { data: stages } = useMatterStages(matterId);
   const setStageStatus = useSetStageStatus();
 
@@ -597,7 +667,7 @@ export default function MatterWorkspacePage() {
   const [partyName, setPartyName] = useState("");
   const [partyRole, setPartyRole] = useState("");
 
-  const { data: tasks } = useMatterTasks(matterId);
+  const { data: tasks, isLoading: tasksLoading, error: tasksError, refetch: refetchTasks } = useMatterTasks(matterId);
   const addTask = useAddMatterTask();
   const toggleTask = useToggleTaskStatus();
   const deleteTask = useDeleteMatterTask();
@@ -607,7 +677,7 @@ export default function MatterWorkspacePage() {
   const currentRole = profiles?.find((p) => p.id === user?.id)?.role;
   const isAdmin = currentRole === "admin" || currentRole === "founder";
 
-  const { data: notes } = useMatterNotes(matterId);
+  const { data: notes, isLoading: notesLoading, error: notesError, refetch: refetchNotes } = useMatterNotes(matterId);
   const addNote = useAddMatterNote();
   const [noteContent, setNoteContent] = useState("");
 
@@ -619,7 +689,8 @@ export default function MatterWorkspacePage() {
 
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
-  const { data: matterDocuments } = useMatterDocuments(matterId);
+  const { data: matterDocuments, isLoading: documentsLoading, error: documentsError, refetch: refetchDocuments } = useMatterDocuments(matterId);
+  const updateMatterDocument = useUpdateMatterDocument();
   const createMatterDocument = useCreateMatterDocument();
   const setDocumentStatus = useSetMatterDocumentStatus();
   const uploadVersion = useUploadDocumentVersion();
@@ -629,8 +700,29 @@ export default function MatterWorkspacePage() {
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocTypeId, setNewDocTypeId] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadTargetRef = useRef<{ matterDocumentId: string; documentTypeId: string | null; expectedVersionId: string | null } | null>(null);
-  const [retryingIndex, setRetryingIndex] = useState<string | null>(null);
+  const uploadTargetRef = useRef<{ matterDocumentId: string; title: string; documentTypeId: string | null; expectedVersionId: string | null } | null>(null);
+  // Documents with an upload in flight, and the file being sent: the row
+  // shows it at once and its Upload button is disabled until it lands.
+  const [uploadingDocs, setUploadingDocs] = useState<Record<string, string>>({});
+  // Versions being read for search right now, from this page.
+  const [readingVersions, setReadingVersions] = useState<Set<string>>(() => new Set());
+  const autoRetried = useRef(new Set<string>());
+  const [confirmDelete, setConfirmDelete] = useState<
+    | { kind: "document"; id: string; title: string; versionCount: number }
+    | { kind: "version"; id: string; storagePath: string; title: string; versionNumber: number }
+    | null
+  >(null);
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [retypeTarget, setRetypeTarget] = useState<{ id: string; title: string } | null>(null);
+  const [retypeDraft, setRetypeDraft] = useState("none");
+  // Re-evaluated every minute, so a version stuck "Reading…" for ten minutes
+  // turns into "Couldn't be read — Try again" without a reload.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
   useEffect(() => {
     const documentId = new URLSearchParams(location.search).get("document");
@@ -645,9 +737,46 @@ export default function MatterWorkspacePage() {
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [editingLabelDraft, setEditingLabelDraft] = useState("");
 
-  const triggerUpload = (matterDocumentId: string, documentTypeId: string | null, expectedVersionId: string | null) => {
-    uploadTargetRef.current = { matterDocumentId, documentTypeId, expectedVersionId };
+  const triggerUpload = (matterDocumentId: string, title: string, documentTypeId: string | null, expectedVersionId: string | null) => {
+    if (uploadingDocs[matterDocumentId]) return;
+    uploadTargetRef.current = { matterDocumentId, title, documentTypeId, expectedVersionId };
     fileInputRef.current?.click();
+  };
+
+  const markReading = (versionId: string, on: boolean) =>
+    setReadingVersions((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(versionId); else next.delete(versionId);
+      return next;
+    });
+
+  const refreshDocuments = () => {
+    queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+    queryClient.invalidateQueries({ queryKey: ["project-search"] });
+  };
+
+  // Reads a saved version for search. Quiet when it is the automatic retry;
+  // otherwise says how it went.
+  const readVersion = async (
+    version: { id: string; storage_path: string; file_name: string | null },
+    documentTypeId: string | null,
+    opts: { quiet?: boolean; label?: string; fileType?: string } = {},
+  ) => {
+    if (!matterId) return;
+    markReading(version.id, true);
+    try {
+      const indexed = await indexStoredVersion({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document', fileType: opts.fileType });
+      if (!opts.quiet) {
+        toast(indexed
+          ? { title: `${opts.label ?? "This version"} is now searchable`, description: "Search and Ask AI can read it." }
+          : { title: `Couldn't read ${opts.label ?? "this version"}`, description: "The file is saved and can be downloaded. Press Try again next to it, or upload it as a PDF or Word file.", variant: "destructive" });
+      }
+    } catch (err) {
+      if (!opts.quiet) toast({ title: `Couldn't read ${opts.label ?? "this version"}`, description: plainUploadError(err), variant: "destructive" });
+    } finally {
+      markReading(version.id, false);
+      refreshDocuments();
+    }
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -655,56 +784,121 @@ export default function MatterWorkspacePage() {
     const target = uploadTargetRef.current;
     e.target.value = "";
     if (!file || !target || !matterId) return;
+    const docId = target.matterDocumentId;
+    setUploadingDocs((prev) => ({ ...prev, [docId]: file.name }));
+    setExpandedDocId(docId);
     try {
       const result = await uploadVersion.mutateAsync({
         matterId,
-        matterDocumentId: target.matterDocumentId,
+        matterDocumentId: docId,
         documentTypeId: target.documentTypeId,
         file,
         expectedVersionId: target.expectedVersionId,
       });
-      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? "Ready for search and Ask AI" : "Saved. It will be searchable in a minute." });
-    } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      const label = `v${result.versionNumber} of "${target.title}"`;
+      if (result.unsupported) {
+        toast({ title: `Saved as v${result.versionNumber}`, description: "This file type can't be read for search, so Ask AI won't see its contents. The file is saved and can be downloaded." });
+      } else {
+        toast({ title: `Saved as v${result.versionNumber}`, description: "Reading it now so search and Ask AI can use it. This usually takes under a minute." });
+        // This upload is read here, so the automatic retry leaves it alone.
+        autoRetried.current.add(result.versionId);
+        void readVersion({ id: result.versionId, storage_path: result.storagePath, file_name: result.fileName }, result.documentTypeId, { label, fileType: result.fileType });
+      }
+    } catch (err) {
+      toast({ title: "Upload failed", description: plainUploadError(err), variant: "destructive" });
+      refreshDocuments();
+    } finally {
+      setUploadingDocs((prev) => {
+        const next = { ...prev };
+        delete next[docId];
+        return next;
+      });
     }
   };
 
-  const retryIndex = async (version: { id: string; storage_path: string; file_name: string | null }, documentTypeId: string | null) => {
-    if (!matterId) return;
-    setRetryingIndex(version.id);
-    try {
-      const indexed = await indexStoredVersion({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document' });
-      toast({ title: indexed ? "Ready for search" : "Couldn't prepare for search", description: indexed ? undefined : "The file is saved. Try again, or upload it as a PDF or Word file.", variant: indexed ? "default" : "destructive" });
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
-      queryClient.invalidateQueries({ queryKey: ["project-search"] });
-    } catch (err) { toast({ title: "Couldn't prepare for search", description: String(err instanceof Error ? err.message : err), variant: "destructive" }); }
-    finally { setRetryingIndex(null); }
-  };
-
-  // A version that failed to index is retried once on its own, so the usual
-  // transient failure never needs a lawyer to notice a badge and press a button.
-  const autoRetried = useRef(new Set<string>());
+  // A version that couldn't be read (including ones saved before the status
+  // was recorded, and ones left "Reading…" for over ten minutes) is retried
+  // once on its own, one at a time, so the usual transient failure never
+  // needs a lawyer to notice a badge and press a button.
+  const autoRetryQueue = useRef(Promise.resolve());
   useEffect(() => {
     for (const d of matterDocuments ?? []) {
       for (const v of d.versions ?? []) {
-        if (v.indexing_status === "failed" && !autoRetried.current.has(v.id)) {
+        if (versionReadState(v, now) === "failed" && !autoRetried.current.has(v.id)) {
           autoRetried.current.add(v.id);
-          void retryIndex(v, d.document_type_id ?? null);
+          autoRetryQueue.current = autoRetryQueue.current.then(() => readVersion(v, d.document_type_id ?? null, { quiet: true }));
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matterDocuments]);
+  }, [matterDocuments, now]);
 
-  const handleDeleteDocument = async (matterDocumentId: string, title: string) => {
-    if (!matterId) return;
-    if (!window.confirm(`Remove "${title}" and all its versions from this project?`)) return;
+  // Only an admin or the person who added the document can remove it.
+  // created_by records who added it; older rows without one fall back to
+  // whoever uploaded its first version.
+  const canRemoveDocument = (doc: { created_by: string | null }, versions: Array<{ version_number: number; uploaded_by: string | null }>) => {
+    if (isAdmin) return true;
+    if (!user) return false;
+    if (doc.created_by) return doc.created_by === user.id;
+    const first = versions.reduce<(typeof versions)[number] | null>((a, b) => (!a || b.version_number < a.version_number ? b : a), null);
+    return !!first && first.uploaded_by === user.id;
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!matterId || !confirmDelete) return;
+    const target = confirmDelete;
     try {
-      await deleteMatterDocument.mutateAsync({ matterDocumentId, matterId });
-      toast({ title: "Document removed" });
-    } catch (err: any) {
-      toast({ title: "Failed to remove document", description: err.message, variant: "destructive" });
+      if (target.kind === "document") {
+        await deleteMatterDocument.mutateAsync({ matterDocumentId: target.id, matterId });
+        toast({ title: "Document removed", description: `"${target.title}" and its versions have been removed.` });
+      } else {
+        await deleteDocumentVersion.mutateAsync({ versionId: target.id, storagePath: target.storagePath, matterId });
+        toast({ title: "Version deleted" });
+      }
+      setConfirmDelete(null);
+    } catch (err) {
+      toast({
+        title: target.kind === "document" ? "Couldn't remove the document" : "Couldn't delete the version",
+        description: plainUploadError(err),
+        variant: "destructive",
+      });
     }
+  };
+
+  const handleRename = () => {
+    if (!matterId || !renameTarget || !renameDraft.trim()) return;
+    updateMatterDocument.mutate(
+      { matterDocumentId: renameTarget.id, matterId, title: renameDraft.trim() },
+      {
+        onSuccess: () => { toast({ title: "Document renamed" }); setRenameTarget(null); },
+        onError: (err) => toast({ title: "Couldn't rename the document", description: plainUploadError(err), variant: "destructive" }),
+      },
+    );
+  };
+
+  const handleRetype = () => {
+    if (!matterId || !retypeTarget) return;
+    updateMatterDocument.mutate(
+      { matterDocumentId: retypeTarget.id, matterId, documentTypeId: retypeDraft === "none" ? null : retypeDraft },
+      {
+        onSuccess: () => { toast({ title: "Document type changed" }); setRetypeTarget(null); },
+        onError: (err) => toast({ title: "Couldn't change the type", description: plainUploadError(err), variant: "destructive" }),
+      },
+    );
+  };
+
+  const handleSetProjectStatus = (status: "active" | "closed") => {
+    if (!matterId) return;
+    setMatterStatus.mutate(
+      { id: matterId, status },
+      {
+        onSuccess: () =>
+          toast(status === "closed"
+            ? { title: "Project closed", description: "It no longer appears in project lists and pickers. Reopen it any time from this page." }
+            : { title: "Project reopened", description: "It appears in project lists and pickers again." }),
+        onError: (err) => toast({ title: status === "closed" ? "Couldn't close the project" : "Couldn't reopen the project", description: plainUploadError(err), variant: "destructive" }),
+      },
+    );
   };
 
   const handleDeleteTask = async (taskId: string, title: string) => {
@@ -738,7 +932,7 @@ export default function MatterWorkspacePage() {
     }
   };
 
-  const handleDeleteVersion = async (versionId: string, storagePath: string, versionCount: number) => {
+  const handleDeleteVersion = (versionId: string, storagePath: string, versionCount: number, title: string, versionNumber: number) => {
     if (!matterId) return;
     if (versionCount <= 1) {
       toast({
@@ -748,13 +942,7 @@ export default function MatterWorkspacePage() {
       });
       return;
     }
-    if (!window.confirm("Delete this version? This cannot be undone.")) return;
-    try {
-      await deleteDocumentVersion.mutateAsync({ versionId, storagePath, matterId });
-      toast({ title: "Version deleted" });
-    } catch (err: any) {
-      toast({ title: "Failed to delete version", description: err.message, variant: "destructive" });
-    }
+    setConfirmDelete({ kind: "version", id: versionId, storagePath, title, versionNumber });
   };
 
   const startEditingLabel = (versionId: string, currentLabel: string | null) => {
@@ -820,8 +1008,8 @@ export default function MatterWorkspacePage() {
     }
   };
 
-  if (isLoading) {
-    return <p className="text-muted-foreground">Loading…</p>;
+  if (isLoading || matterError) {
+    return <LoadState isLoading={isLoading} error={matterError} onRetry={() => refetchMatter()} what="this project" />;
   }
 
   // Deleted, or never existed — a stale link or a bookmark to something that
@@ -855,7 +1043,7 @@ export default function MatterWorkspacePage() {
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-semibold break-words">{matter.name}</h1>
-            <Badge variant={matter.status === "active" ? "default" : "secondary"}>{matter.status}</Badge>
+            <Badge variant={matterStatusBadgeVariant(matter.status)}>{matterStatusLabel(matter.status)}</Badge>
           </div>
           <p className="text-muted-foreground">
             {(matter as any).client?.name || "No client"}
@@ -864,6 +1052,16 @@ export default function MatterWorkspacePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => setEditProjectOpen(true)}><Pencil className="mr-2 h-4 w-4"/>Edit</Button>
+          {normalizeMatterStatus(matter.status) === "closed" ? (
+            <Button variant="outline" disabled={setMatterStatus.isPending} onClick={() => handleSetProjectStatus("active")}>
+              <ArchiveRestore className="mr-2 h-4 w-4" />Reopen
+            </Button>
+          ) : (
+            <Button variant="outline" disabled={setMatterStatus.isPending} onClick={() => handleSetProjectStatus("closed")}>
+              <Archive className="mr-2 h-4 w-4" />Close project
+            </Button>
+          )}
           <Button variant="outline" onClick={() => navigate(`/search?matter=${matterId}`)}><Search className="mr-2 h-4 w-4"/>Search project</Button>
           <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=ask`)}>
             <MessageSquare className="h-4 w-4 mr-2" />
@@ -874,6 +1072,10 @@ export default function MatterWorkspacePage() {
           {isAdmin && <DeleteMatterDialog matterId={matterId!} matterName={matter.name} />}
         </div>
       </div>
+      <EditProjectDialog
+        matter={editProjectOpen ? matter : null}
+        onClose={() => setEditProjectOpen(false)}
+      />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -913,12 +1115,18 @@ export default function MatterWorkspacePage() {
               className="hidden"
               onChange={handleFileSelected}
             />
-            {!matterDocuments?.length ? (
-              <p className="text-sm text-muted-foreground">No documents yet.</p>
-            ) : (
+            <LoadState
+              isLoading={documentsLoading}
+              error={documentsError}
+              onRetry={() => refetchDocuments()}
+              what="documents"
+              isEmpty={!matterDocuments?.length}
+              empty="No documents yet."
+              compact
+            >
               <div className="space-y-2">
-                {matterDocuments.map((doc) => {
-                  const versions = ((doc as any).versions ?? []) as Array<{
+                {(matterDocuments ?? []).map((doc) => {
+                  const versions = (doc.versions ?? []) as Array<{
                     id: string;
                     version_number: number;
                     created_at: string;
@@ -926,9 +1134,17 @@ export default function MatterWorkspacePage() {
                     file_name: string | null;
                     label: string | null;
                     is_ai_generated: boolean;
+                    uploaded_by: string | null;
                     indexing_status: string;
                   }>;
                   const isExpanded = expandedDocId === doc.id;
+                  const uploadingFile = uploadingDocs[doc.id];
+                  const readState = (v: (typeof versions)[number]): ReadState =>
+                    readingVersions.has(v.id) ? "reading" : versionReadState(v, now);
+                  const latest = versions.reduce<(typeof versions)[number] | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
+                  const latestState = latest ? readState(latest) : null;
+                  const typeName = (doc as { document_type?: { name: string } | null }).document_type?.name;
+                  const canRemove = canRemoveDocument(doc, versions);
                   return (
                   <div
                     key={doc.id}
@@ -954,9 +1170,14 @@ export default function MatterWorkspacePage() {
                     >
                       <p className="text-sm font-medium truncate">{doc.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        {(doc as any).document_type?.name || "No type"} ·{" "}
+                        {typeName || "No type"} ·{" "}
                         {versions.length || 0} version
                         {versions.length === 1 ? "" : "s"}
+                        {uploadingFile
+                          ? " · Uploading…"
+                          : latestState && latestState !== "searchable"
+                            ? ` · Latest: ${READ_STATE_LABEL[latestState]}`
+                            : ""}
                       </p>
                     </button>
                     <Select
@@ -987,10 +1208,10 @@ export default function MatterWorkspacePage() {
                         size="icon"
                         variant="outline"
                         title="Download latest version"
-                        disabled={!versions.length}
+                        aria-label="Download latest version"
+                        disabled={!latest}
                         onClick={() => {
-                          const latest = versions.reduce((a, b) => (b.version_number > a.version_number ? b : a));
-                          handleDownloadVersion(latest.storage_path, latest.file_name || `${doc.title}-v${latest.version_number}`);
+                          if (latest) handleDownloadVersion(latest.storage_path, latest.file_name || `${doc.title}-v${latest.version_number}`);
                         }}
                       >
                         <Download className="h-4 w-4" />
@@ -998,41 +1219,84 @@ export default function MatterWorkspacePage() {
                       <Button
                         size="icon"
                         variant="outline"
-                        title="Upload a new version"
-                        onClick={() =>
-                          triggerUpload(doc.id, doc.document_type_id, [...versions].sort((a,b) => b.version_number-a.version_number)[0]?.id ?? null)
-                        }
+                        title={uploadingFile ? `Uploading ${uploadingFile}…` : "Upload a new version"}
+                        aria-label={uploadingFile ? "Uploading" : "Upload a new version"}
+                        disabled={!!uploadingFile}
+                        onClick={() => triggerUpload(doc.id, doc.title, doc.document_type_id, latest?.id ?? null)}
                       >
-                        <Upload className="h-4 w-4" />
+                        {uploadingFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                       </Button>
                       <Button
                         size="icon"
                         variant="outline"
                         title="Review with AI"
-                        disabled={!(doc as any).versions?.length}
+                        aria-label="Review with AI"
+                        disabled={!versions.length}
                         onClick={() => navigate(`/matters/${matterId}/ai?mode=review&doc=${doc.id}`)}
                       >
                         <ScanSearch className="h-4 w-4" />
                       </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        title="Remove document"
-                        onClick={() => handleDeleteDocument(doc.id, doc.title)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="outline" title="More actions" aria-label="More actions">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRenameTarget({ id: doc.id, title: doc.title });
+                              setRenameDraft(doc.title);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRetypeTarget({ id: doc.id, title: doc.title });
+                              setRetypeDraft(doc.document_type_id ?? "none");
+                            }}
+                          >
+                            <Tag className="mr-2 h-4 w-4" />
+                            Change type
+                          </DropdownMenuItem>
+                          {canRemove && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onSelect={() => setConfirmDelete({ kind: "document", id: doc.id, title: doc.title, versionCount: versions.length })}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Remove document
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
 
                   {isExpanded && (
                     <div className="mt-2 pl-9 space-y-1.5">
-                      {versions.length === 0 ? (
+                      {uploadingFile && (
+                        <div className="flex items-center gap-2 flex-wrap text-sm bg-muted/40 rounded-md px-2 py-1.5" aria-live="polite">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+                          <span className="text-xs font-medium truncate flex-1 min-w-[8rem]" title={uploadingFile}>
+                            {uploadingFile}
+                          </span>
+                          <Badge variant="outline" className="text-[10px]">Uploading…</Badge>
+                        </div>
+                      )}
+                      {versions.length === 0 && !uploadingFile ? (
                         <p className="text-xs text-muted-foreground">No versions uploaded yet.</p>
                       ) : (
                         [...versions]
                           .sort((a, b) => b.version_number - a.version_number)
-                          .map((v) => (
+                          .map((v) => {
+                            const state = readState(v);
+                            return (
                             <div
                               key={v.id}
                               id={`version-${v.id}`}
@@ -1044,8 +1308,24 @@ export default function MatterWorkspacePage() {
                               >
                                 {v.file_name || `Version ${v.version_number}`}
                               </span>
-                              <Badge variant="outline" className="text-[10px]">v{v.version_number} · {v.indexing_status === "indexed" ? "Ready" : v.indexing_status === "failed" ? "Couldn't prepare for search" : v.indexing_status === "pending" ? "Preparing…" : v.indexing_status === "unsupported" ? "Not searchable (file type)" : "Preparing…"}</Badge>
-                              {v.indexing_status !== "indexed" && v.indexing_status !== "unsupported" && (v.indexing_status !== "pending" || Date.now()-new Date(v.created_at).getTime()>120000) && <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={!!retryingIndex} onClick={() => retryIndex(v, doc.document_type_id)}>{retryingIndex === v.id ? "Indexing…" : "Try again"}</Button>}
+                              <Badge
+                                variant="outline"
+                                className={cn("text-[10px] gap-1", state === "failed" && "border-amber-500 text-amber-700 dark:text-amber-400")}
+                                title={READ_STATE_HINT[state]}
+                              >
+                                {state === "reading" && <Loader2 className="h-3 w-3 animate-spin" />}
+                                v{v.version_number} · {READ_STATE_LABEL[state]}
+                              </Badge>
+                              {state === "failed" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-xs"
+                                  onClick={() => readVersion(v, doc.document_type_id, { label: `v${v.version_number} of "${doc.title}"` })}
+                                >
+                                  Try again
+                                </Button>
+                              )}
                               {editingVersionId === v.id ? (
                                 <>
                                   <Input
@@ -1124,14 +1404,15 @@ export default function MatterWorkspacePage() {
                                     className="h-7 w-7 shrink-0"
                                     title="Delete this version"
                                     disabled={versions.length <= 1}
-                                    onClick={() => handleDeleteVersion(v.id, v.storage_path, versions.length)}
+                                    onClick={() => handleDeleteVersion(v.id, v.storage_path, versions.length, doc.title, v.version_number)}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
                                 </>
                               )}
                             </div>
-                          ))
+                            );
+                          })
                       )}
                     </div>
                   )}
@@ -1139,7 +1420,7 @@ export default function MatterWorkspacePage() {
                   );
                 })}
               </div>
-            )}
+            </LoadState>
 
             <div className="flex gap-2 pt-2 flex-wrap">
               <Input
@@ -1181,6 +1462,85 @@ export default function MatterWorkspacePage() {
           </CardContent>
         </Card>
 
+        <AlertDialog open={!!confirmDelete} onOpenChange={(next) => { if (!next) setConfirmDelete(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {confirmDelete?.kind === "document"
+                  ? `Remove "${confirmDelete.title}"?`
+                  : confirmDelete
+                    ? `Delete version ${confirmDelete.versionNumber} of "${confirmDelete.title}"?`
+                    : ""}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmDelete?.kind === "document"
+                  ? confirmDelete.versionCount === 0
+                    ? "This permanently removes the document from the project. It has no uploaded versions. This can't be undone."
+                    : `This permanently removes the document and ${confirmDelete.versionCount === 1 ? "its 1 version" : `all ${confirmDelete.versionCount} of its versions`}: the files themselves and what search and Ask AI can read from them. This can't be undone.`
+                  : "This permanently removes this version's file. The other versions stay. This can't be undone."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className={cn(buttonVariants({ variant: "destructive" }))}
+                disabled={deleteMatterDocument.isPending || deleteDocumentVersion.isPending}
+                onClick={(e) => { e.preventDefault(); void handleConfirmDelete(); }}
+              >
+                {deleteMatterDocument.isPending || deleteDocumentVersion.isPending
+                  ? "Removing…"
+                  : confirmDelete?.kind === "document" ? "Remove document" : "Delete version"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Dialog open={!!renameTarget} onOpenChange={(next) => { if (!next) setRenameTarget(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rename document</DialogTitle>
+              <DialogDescription>The versions and their files keep their names; only the document's title changes.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={(e) => { e.preventDefault(); handleRename(); }} className="space-y-4">
+              <Input autoFocus value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} aria-label="Document title" />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>Cancel</Button>
+                <Button type="submit" disabled={!renameDraft.trim() || renameDraft.trim() === renameTarget?.title || updateMatterDocument.isPending}>
+                  {updateMatterDocument.isPending ? "Saving…" : "Save"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!retypeTarget} onOpenChange={(next) => { if (!next) setRetypeTarget(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Change type</DialogTitle>
+              <DialogDescription>{retypeTarget ? `What kind of document is "${retypeTarget.title}"?` : ""}</DialogDescription>
+            </DialogHeader>
+            <Select value={retypeDraft} onValueChange={setRetypeDraft}>
+              <SelectTrigger aria-label="Document type">
+                <SelectValue placeholder="Choose a type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No type</SelectItem>
+                {documentTypes?.map((type) => (
+                  <SelectItem key={type.id} value={type.id}>
+                    {type.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRetypeTarget(null)}>Cancel</Button>
+              <Button onClick={handleRetype} disabled={updateMatterDocument.isPending}>
+                {updateMatterDocument.isPending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Parties</CardTitle>
@@ -1216,6 +1576,15 @@ export default function MatterWorkspacePage() {
             <CardTitle className="text-base">Tasks</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
+            <LoadState
+              isLoading={tasksLoading}
+              error={tasksError}
+              onRetry={() => refetchTasks()}
+              what="tasks"
+              isEmpty={!tasks?.length}
+              empty="No tasks yet."
+              compact
+            >
             {tasks?.map((task) => (
               <div key={task.id} id={`task-${task.id}`} className="flex items-center gap-3 text-sm target:ring-2 target:ring-primary scroll-mt-20">
                 <Checkbox
@@ -1251,6 +1620,7 @@ export default function MatterWorkspacePage() {
                 </div>
               </div>
             ))}
+            </LoadState>
             <div className="flex gap-2 pt-2">
               <Input
                 placeholder="New task"
@@ -1299,6 +1669,15 @@ export default function MatterWorkspacePage() {
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
+            <LoadState
+              isLoading={notesLoading}
+              error={notesError}
+              onRetry={() => refetchNotes()}
+              what="notes"
+              isEmpty={!notes?.length}
+              empty="No notes yet."
+              compact
+            >
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {notes?.map((note) => (
                 <div key={note.id} id={`note-${note.id}`} className="text-sm border-b pb-2 last:border-0 target:ring-2 target:ring-primary scroll-mt-20">
@@ -1310,6 +1689,7 @@ export default function MatterWorkspacePage() {
                 </div>
               ))}
             </div>
+            </LoadState>
           </CardContent>
         </Card>
 

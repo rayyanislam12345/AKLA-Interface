@@ -1,49 +1,62 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useMatters } from "@/hooks/useMatters";
+import { useMyProfile } from "@/hooks/useProfiles";
+import { useMatters, normalizeMatterStatus, matterStatusLabel, matterStatusBadgeVariant } from "@/hooks/useMatters";
+import { LoadState } from "@/components/LoadState";
 import LegalUpdatesCard from "@/components/dashboard/LegalUpdatesCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
+// Stored as yyyy-mm-dd; shown in the reader's own date format.
+function formatDate(value: string | null) {
+  if (!value) return "—";
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
-  const { data: matters, isLoading } = useMatters();
+  const { data: myProfile } = useMyProfile();
+  // Open projects only (Active and On hold); closed ones live on the Projects page.
+  const { data: matters, isLoading, error, refetch } = useMatters({ openOnly: true });
   const navigate = useNavigate();
 
-  const active = matters?.filter((m) => m.status === "active") ?? [];
-  const other = matters?.filter((m) => m.status !== "active") ?? [];
+  const active = matters?.filter((m) => normalizeMatterStatus(m.status) === "active") ?? [];
+  const onHold = matters?.filter((m) => normalizeMatterStatus(m.status) === "on_hold") ?? [];
+  const greetingName = myProfile?.full_name?.trim() || user?.email || "";
+  const count = (n: number) => (isLoading || error ? "—" : n);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Welcome{user?.email ? `, ${user.email}` : ""}</h1>
-        <p className="text-muted-foreground">Firm-wide view of every active project.</p>
+        <h1 className="text-2xl font-semibold">Welcome{greetingName ? `, ${greetingName}` : ""}</h1>
+        <p className="text-muted-foreground">Firm-wide view of every open project.</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground font-normal">Active Projects</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground font-normal">Active</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-semibold">{active.length}</p>
+            <p className="text-3xl font-semibold">{count(active.length)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground font-normal">Other</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground font-normal">On hold</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-semibold">{other.length}</p>
+            <p className="text-3xl font-semibold">{count(onHold.length)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground font-normal">Total</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground font-normal">Open projects</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-semibold">{matters?.length ?? 0}</p>
+            <p className="text-3xl font-semibold">{count(matters?.length ?? 0)}</p>
           </CardContent>
         </Card>
       </div>
@@ -52,14 +65,14 @@ export default function Dashboard() {
 
       <div>
         <h2 className="text-lg font-medium mb-3">Projects</h2>
-        {isLoading ? (
-          <p className="text-muted-foreground">Loading…</p>
-        ) : !matters?.length ? (
-          <p className="text-muted-foreground">
-            No projects yet — head to the Projects page to create the first one.
-          </p>
-        ) : (
-          <>
+        <LoadState
+          isLoading={isLoading}
+          error={error}
+          onRetry={() => refetch()}
+          what="projects"
+          isEmpty={!matters?.length}
+          empty="No open projects. Head to the Projects page to create one, or to see closed ones."
+        >
             <div className="hidden sm:block">
               <Table>
                 <TableHeader>
@@ -72,7 +85,7 @@ export default function Dashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {matters.map((matter) => (
+                  {(matters ?? []).map((matter) => (
                     <TableRow
                       key={matter.id}
                       className="cursor-pointer"
@@ -82,11 +95,11 @@ export default function Dashboard() {
                       <TableCell>{matter.client?.name || "—"}</TableCell>
                       <TableCell>{matter.lead_partner?.full_name || "—"}</TableCell>
                       <TableCell>
-                        <Badge variant={matter.status === "active" ? "default" : "secondary"}>
-                          {matter.status}
+                        <Badge variant={matterStatusBadgeVariant(matter.status)}>
+                          {matterStatusLabel(matter.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{matter.target_close_date || "—"}</TableCell>
+                      <TableCell>{formatDate(matter.target_close_date)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -94,7 +107,7 @@ export default function Dashboard() {
             </div>
 
             <div className="sm:hidden space-y-2">
-              {matters.map((matter) => (
+              {(matters ?? []).map((matter) => (
                 <button
                   key={matter.id}
                   className="w-full text-left border rounded-md px-3 py-2.5"
@@ -102,21 +115,20 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium">{matter.name}</p>
-                    <Badge variant={matter.status === "active" ? "default" : "secondary"} className="shrink-0">
-                      {matter.status}
+                    <Badge variant={matterStatusBadgeVariant(matter.status)} className="shrink-0">
+                      {matterStatusLabel(matter.status)}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     {[matter.client?.name, matter.lead_partner?.full_name].filter(Boolean).join(" · ") || "—"}
                   </p>
                   {matter.target_close_date && (
-                    <p className="text-xs text-muted-foreground mt-1">Target close: {matter.target_close_date}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Target close: {formatDate(matter.target_close_date)}</p>
                   )}
                 </button>
               ))}
             </div>
-          </>
-        )}
+        </LoadState>
       </div>
     </div>
   );

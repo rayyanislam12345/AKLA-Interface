@@ -27,6 +27,20 @@ export function usePrecedentSources() {
   });
 }
 
+// What the indexing function said went wrong, in its own words where it gave
+// any, rather than "Edge Function returned a non-2xx status code".
+async function describeFunctionError(err: unknown): Promise<string> {
+  const context = (err as { context?: Response } | null)?.context;
+  if (context && typeof context.json === "function") {
+    const body = await context.clone().json().catch(() => null);
+    const said = body?.error ?? body?.message;
+    if (typeof said === "string" && said.trim()) return `The file couldn't be read: ${said}`;
+  }
+  const message = (err as { message?: string } | null)?.message ?? "";
+  if (/timed? ?out|504|546/i.test(message)) return "The file took too long to read. Large scanned PDFs often do; try a smaller or text-based copy.";
+  return "The file couldn't be read. It may be scanned, damaged or too large.";
+}
+
 export function useUploadPrecedentDocument() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -36,7 +50,7 @@ export function useUploadPrecedentDocument() {
       const { error: uploadError } = await supabase.storage
         .from("precedent-library")
         .upload(storagePath, file);
-      if (uploadError) throw uploadError;
+      if (uploadError) throw new Error(`Couldn't upload the file: ${uploadError.message}`);
 
       const { error: processError } = await supabase.functions.invoke("process-document", {
         body: {
@@ -49,12 +63,54 @@ export function useUploadPrecedentDocument() {
           isPrecedent: true,
         },
       });
-      if (processError) throw processError;
+      if (processError) {
+        // Leave nothing half-done behind: the stored copy and any passages
+        // indexed before the failure go, so "Retry" starts clean instead of
+        // adding a second copy.
+        const reason = await describeFunctionError(processError);
+        await supabase.from("documents").delete().eq("is_precedent", true).eq("metadata->>storage_path", storagePath);
+        await supabase.storage.from("precedent-library").remove([storagePath]);
+        throw new Error(reason);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["precedent-sources"] });
     },
   });
+}
+
+/** A file's SHA-256, hex — to spot the same file twice in one batch. */
+export async function hashFile(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The key two copies of the same file share: its name (case aside) and exact size in bytes. */
+export function libraryFileKey(name: string, size: number | string): string {
+  return `${name.trim().toLowerCase()}|${size}`;
+}
+
+// The library stores no content hash, so a file already in it is recognised
+// by name and exact size (recorded on every passage when it was indexed).
+export async function fetchLibraryFileKeys(): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("metadata")
+      .eq("is_precedent", true)
+      .eq("metadata->>chunk_index", "0")
+      .order("id")
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const row of rows) {
+      const meta = (row.metadata ?? {}) as { filename?: unknown; file_size?: unknown };
+      if (typeof meta.filename === "string" && meta.file_size != null) keys.add(libraryFileKey(meta.filename, String(meta.file_size)));
+    }
+    if (rows.length < pageSize) return keys;
+  }
 }
 
 export function useDeletePrecedentSource() {

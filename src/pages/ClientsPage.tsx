@@ -16,9 +16,10 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { LoadState } from "@/components/LoadState";
 
 export default function ClientsPage() {
-  const { data: clients, isLoading } = useClients();
+  const { data: clients, isLoading, error, refetch } = useClients();
   const createClient = useCreateClient();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -80,12 +81,14 @@ export default function ClientsPage() {
         </Dialog>
       </div>
 
-      {isLoading ? (
-        <p className="text-muted-foreground">Loading…</p>
-      ) : !clients?.length ? (
-        <p className="text-muted-foreground">No clients yet.</p>
-      ) : (
-        <>
+      <LoadState
+        isLoading={isLoading}
+        error={error}
+        onRetry={() => refetch()}
+        what="clients"
+        isEmpty={!clients?.length}
+        empty="No clients yet."
+      >
           <div className="hidden sm:block">
             <Table>
               <TableHeader>
@@ -95,7 +98,7 @@ export default function ClientsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {clients.map((client) => (
+                {(clients ?? []).map((client) => (
                   <TableRow
                     key={client.id}
                     className="cursor-pointer"
@@ -110,7 +113,7 @@ export default function ClientsPage() {
           </div>
 
           <div className="sm:hidden space-y-2">
-            {clients.map((client) => (
+            {(clients ?? []).map((client) => (
               <button
                 key={client.id}
                 className="w-full text-left border rounded-md px-3 py-2.5"
@@ -121,8 +124,7 @@ export default function ClientsPage() {
               </button>
             ))}
           </div>
-        </>
-      )}
+      </LoadState>
     </div>
   );
 }

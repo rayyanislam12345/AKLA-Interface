@@ -7,6 +7,7 @@ import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, Sca
 import { supabase } from "@/integrations/supabase/client";
 import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/useLawUpdates";
 import {
+  fetchMatterDocumentTypeId,
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
   useReviewRun,
@@ -413,9 +414,14 @@ export default function ReviewSession({
     if (!previewBlob) return;
     setSaving(true);
     try {
-      if (!matterDocument?.document_type_id || !version) throw new Error("Document type and source version are required");
-      const result = await saveDraftToMatter({ matterId, documentTypeId: matterDocument.document_type_id, documentTypeName: matterDocument.title, blob: previewBlob,
-        matterDocumentId, title: matterDocument.title, expectedVersionId: version.id });
+      if (!version) throw new Error("The version under review could not be found. Reopen the review and try again.");
+      // The new version keeps the document's type as it is stored now — none
+      // for an untyped document. A type is optional on a document, so it is
+      // never a reason to refuse saving a review.
+      const documentTypeId = await fetchMatterDocumentTypeId(matterDocumentId);
+      const title = matterDocument?.title ?? version.file_name;
+      const result = await saveDraftToMatter({ matterId, documentTypeId, documentTypeName: title, blob: previewBlob,
+        matterDocumentId, title, expectedVersionId: version.id });
       toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? result.fileName : "Saved, but it couldn't be prepared for search. Open the project and press Try again." });
       navigate(`/matters/${matterId}`);
     } catch (err: any) {

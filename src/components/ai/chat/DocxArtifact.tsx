@@ -9,6 +9,7 @@ import { type ChatArtifact, useUpdateArtifact } from "@/hooks/useChat";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
 import { useChatFile, useUploadDocumentTypeTemplate } from "@/hooks/useDocumentTypeTemplates";
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { fetchMatterDocumentTypeId } from "@/hooks/useRedline";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -73,7 +74,6 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
   const [saveMode, setSaveMode] = useState<"new" | "version">(data.savedMatterDocumentId || data.editSource?.matterDocumentId ? "version" : "new");
   const [changesOpen, setChangesOpen] = useState(true);
 
-  const documentTypeName = documentTypes?.find((t) => t.id === documentTypeId)?.name ?? "Document";
   const typesByCategory = useMemo(() => {
     const groups = new Map<string, NonNullable<typeof documentTypes>>();
     for (const t of documentTypes ?? []) groups.set(t.category, [...(groups.get(t.category) ?? []), t]);
@@ -147,21 +147,28 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
     try {
       const file = await fileFor();
       const src = data.editSource;
+      const target = saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? data.savedMatterDocumentId ?? src?.matterDocumentId;
+      // A new version keeps the document's own type as stored now (none for
+      // an untyped document); the database accepts no other. A new document
+      // takes the type chosen here, or none.
+      const typeId = target ? await fetchMatterDocumentTypeId(target) : documentTypeId ?? null;
+      const savedTypeId = typeId ?? undefined;
       const result = await saveDraftToMatter({
         matterId: targetMatterId,
-        documentTypeId: documentTypeId ?? null,
-        documentTypeName,
+        documentTypeId: typeId,
+        documentTypeName: documentTypes?.find((t) => t.id === typeId)?.name ?? "Document",
         blob: file,
         title: src?.standard ? undefined : src?.title ?? baseName,
-        matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? data.savedMatterDocumentId ?? src?.matterDocumentId,
+        matterDocumentId: target,
         expectedVersionId: lastSave?.versionId ?? data.savedVersionId ?? src?.documentVersionId,
       });
-      setLastSave({ ...result, documentTypeId, matterId: targetMatterId });
+      setDocumentTypeId(savedTypeId);
+      setLastSave({ ...result, documentTypeId: savedTypeId, matterId: targetMatterId });
       queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
-        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
+        data: { ...(artifact.data as object), documentTypeId: typeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
       }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
       setSaveMode("version");
       toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved, but it couldn't be prepared for search. Open the project and press Try again.` });
@@ -227,8 +234,8 @@ export default function DocxArtifact({ matterId, standard, artifact }: { matterI
 
       {!data.original && !standard && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-          <Select value={documentTypeId ?? "none"} onValueChange={(v) => setDocumentTypeId(v === "none" ? undefined : v)} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? data.documentTypeId)}>
-            <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
+          <Select value={documentTypeId ?? "none"} onValueChange={(v) => setDocumentTypeId(v === "none" ? undefined : v)} disabled={saveMode === "version"}>
+            <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type" title={saveMode === "version" ? "A new version keeps the document's own type" : undefined}>
               <SelectValue placeholder="Document type (optional)" />
             </SelectTrigger>
             <SelectContent>

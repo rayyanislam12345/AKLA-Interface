@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, SquarePen, Trash2 } from "lucide-react";
 import { type ChatThread, useDeleteChatThread, useUpdateChatThread } from "@/hooks/useChat";
+import { useAuth } from "@/hooks/useAuth";
+import { useMyProfile, useProfiles } from "@/hooks/useProfiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -54,11 +56,31 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
   const [deleting, setDeleting] = useState<ChatThread | null>(null);
   const update = useUpdateChatThread(scopeKey);
   const remove = useDeleteChatThread(scopeKey);
+  // A project's chats are shared by everyone on it: each row says whose it
+  // is when it is not yours, "Mine" narrows the list to your own, and only
+  // the person who started a chat, or an administrator, can delete it.
+  const { user } = useAuth();
+  const { data: me } = useMyProfile();
+  const { data: profiles } = useProfiles();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
+  const [mineOnly, setMineOnly] = useState(false);
+  const othersChats = threads.some((t) => t.created_by && t.created_by !== user?.id);
+  const authorName = (t: ChatThread) => {
+    if (!t.created_by || t.created_by === user?.id) return null;
+    const p = profiles?.find((x) => x.id === t.created_by);
+    return p?.full_name || p?.email || "A colleague";
+  };
+  const mayDelete = (t: ChatThread) => isAdmin || (!!user?.id && t.created_by === user.id);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return threads.filter((t) => (showArchived ? t.archived : !t.archived) && (!q || (t.title ?? "").toLowerCase().includes(q)));
-  }, [threads, query, showArchived]);
+    return threads.filter(
+      (t) =>
+        (showArchived ? t.archived : !t.archived) &&
+        (!q || (t.title ?? "").toLowerCase().includes(q)) &&
+        (!mineOnly || t.created_by === user?.id),
+    );
+  }, [threads, query, showArchived, mineOnly, user?.id]);
   const pinned = visible.filter((t) => t.pinned);
   const recent = visible.filter((t) => !t.pinned);
   const archivedCount = threads.filter((t) => t.archived).length;
@@ -80,6 +102,7 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
             thread={t}
             active={t.id === activeThreadId}
             busy={!!busyThreadIds?.has(t.id)}
+            author={authorName(t)}
             onSelect={() => onSelect(t.id)}
             onRename={() => {
               setRenaming(t);
@@ -90,7 +113,7 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
               update.mutate({ id: t.id, archived: !t.archived });
               if (t.id === activeThreadId) onSelect(null);
             }}
-            onDelete={() => setDeleting(t)}
+            onDelete={mayDelete(t) ? () => setDeleting(t) : undefined}
           />
         ))}
       </div>
@@ -108,12 +131,22 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats" className="h-8 pl-7 text-sm" />
         </div>
         {subtitle && <p className="truncate px-1 text-xs text-muted-foreground" title={subtitle}>{subtitle}</p>}
+        {(othersChats || mineOnly) && (
+          <div className="flex gap-1 px-1" role="group" aria-label="Whose chats">
+            <Button size="sm" variant={mineOnly ? "ghost" : "secondary"} className="h-6 px-2 text-xs" onClick={() => setMineOnly(false)} aria-pressed={!mineOnly}>
+              Everyone's
+            </Button>
+            <Button size="sm" variant={mineOnly ? "secondary" : "ghost"} className="h-6 px-2 text-xs" onClick={() => setMineOnly(true)} aria-pressed={mineOnly} data-testid="mine-filter">
+              Mine
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         {visible.length === 0 && (
           <p className="px-2 pt-6 text-center text-xs text-muted-foreground">
-            {showArchived ? "No archived chats." : threads.length ? "No chats match." : "No chats yet — start one below."}
+            {showArchived ? "No archived chats." : mineOnly && threads.length ? "None of your chats match." : threads.length ? "No chats match." : "No chats yet — start one below."}
           </p>
         )}
         <Section label="Pinned" items={pinned} />
@@ -155,7 +188,7 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{deleting?.title}" and any documents it produced that haven't been saved to the project will be removed for everyone.
+              "{deleting?.title}"{deleting && authorName(deleting) ? `, started by ${authorName(deleting)},` : ""} and any documents it produced that haven't been saved to the project will be removed for everyone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -182,6 +215,7 @@ function ThreadRow({
   thread,
   active,
   busy,
+  author,
   onSelect,
   onRename,
   onPin,
@@ -191,11 +225,14 @@ function ThreadRow({
   thread: ChatThread;
   active: boolean;
   busy: boolean;
+  // Who started the chat, when it was not you.
+  author: string | null;
   onSelect: () => void;
   onRename: () => void;
   onPin: () => void;
   onArchive: () => void;
-  onDelete: () => void;
+  // Absent when you may not delete this chat.
+  onDelete?: () => void;
 }) {
   return (
     <div
@@ -210,7 +247,10 @@ function ThreadRow({
           <span className="truncate text-sm">{thread.title || "New chat"}</span>
           {busy && <WritingDots />}
         </div>
-        <div className="text-[11px] text-muted-foreground">{relativeDay(thread.last_message_at ?? thread.created_at)}</div>
+        <div className="truncate text-[11px] text-muted-foreground" data-testid="thread-meta">
+          {relativeDay(thread.last_message_at ?? thread.created_at)}
+          {author && <> · {author}</>}
+        </div>
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -228,8 +268,12 @@ function ThreadRow({
             {thread.archived ? <ArchiveRestore className="mr-2 h-4 w-4" /> : <Archive className="mr-2 h-4 w-4" />}
             {thread.archived ? "Unarchive" : "Archive"}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+          {onDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

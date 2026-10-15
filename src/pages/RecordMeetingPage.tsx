@@ -46,7 +46,7 @@ export default function RecordMeetingPage() {
   const relay = useMeetingRelay();
   const proposalMutation = useGenerateMeetingOutput();
   const minutesMutation = useGenerateMeetingOutput();
-  const { data: matters } = useMatters();
+  const { data: matters } = useMatters({ openOnly: true });
   const { data: documentTypes } = useDocumentTypes();
 
   const [exampleProposals, setExampleProposals] = useState("");

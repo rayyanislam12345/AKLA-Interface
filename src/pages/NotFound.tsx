@@ -1,23 +1,39 @@
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import { ArrowLeft, FileQuestion } from "lucide-react";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AppLayout } from "@/components/AppLayout";
+import { Button } from "@/components/ui/button";
 
+// A stale or mistyped link lands inside the app — sidebar and all — with one
+// clear way back, instead of a bare page that reloads everything.
 const NotFound = () => {
   const location = useLocation();
 
   useEffect(() => {
-    console.error("404 Error: User attempted to access non-existent route:", location.pathname);
+    console.warn("No page at", location.pathname);
   }, [location.pathname]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">404</h1>
-        <p className="mb-4 text-xl text-gray-600">Oops! Page not found</p>
-        <a href="/" className="text-blue-500 underline hover:text-blue-700">
-          Return to Home
-        </a>
-      </div>
-    </div>
+    <ProtectedRoute>
+      <AppLayout>
+        <div className="mx-auto flex max-w-md flex-col items-center gap-4 py-16 text-center" data-testid="not-found">
+          <FileQuestion className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold">This page doesn't exist</h1>
+            <p className="text-muted-foreground">
+              The link may be out of date, or the page may have moved. Everything else is where you left it.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to="/dashboard">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to the dashboard
+            </Link>
+          </Button>
+        </div>
+      </AppLayout>
+    </ProtectedRoute>
   );
 };
 

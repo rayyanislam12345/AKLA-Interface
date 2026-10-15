@@ -16,9 +16,10 @@ import {
   useBackfillStatus,
   useTriggerBackfill,
   useAskWhatsApp,
+  useWhatsAppLastSynced,
   whatsappDocumentDownloadUrl,
 } from "@/hooks/useWhatsAppConnection";
-import { useMatters } from "@/hooks/useMatters";
+import { useMatters, isOpenMatter } from "@/hooks/useMatters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,8 +43,8 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
   const handleChange = async (value: string) => {
     try {
       await linkMatter.mutateAsync({ id: whatsappMatter.id, matterId: value === "unlinked" ? null : value });
-    } catch (err: any) {
-      toast({ title: "Failed to update link", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to update link", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -54,7 +55,8 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
       </SelectTrigger>
       <SelectContent onClick={(e) => e.stopPropagation()}>
         <SelectItem value="unlinked">Unlinked</SelectItem>
-        {matters?.map((m) => (
+        {/* Closed projects are not offered, but the one already linked stays listed. */}
+        {matters?.filter((m) => isOpenMatter(m) || m.id === whatsappMatter.matter_id).map((m) => (
           <SelectItem key={m.id} value={m.id}>
             {m.name}
           </SelectItem>
@@ -79,16 +81,16 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
   const handleOpen = async (path: string) => {
     try {
       await openWhatsAppDocument(path);
-    } catch (err: any) {
-      toast({ title: "Failed to open document", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to open document", description: (err as Error).message, variant: "destructive" });
     }
   };
 
   const handleDownload = async (path: string, fileName: string) => {
     try {
       await downloadWhatsAppDocument(path, fileName);
-    } catch (err: any) {
-      toast({ title: "Failed to download document", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to download document", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -301,8 +303,8 @@ function BackfillControl() {
   const handleTrigger = async () => {
     try {
       await triggerBackfill.mutateAsync(parseInt(days, 10) || 20);
-    } catch (err: any) {
-      toast({ title: "Failed to start backfill", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to start backfill", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -347,8 +349,8 @@ function LinkWhatsAppButton() {
   const handleLink = async () => {
     try {
       await linkMyWhatsApp.mutateAsync();
-    } catch (err: any) {
-      toast({ title: "Failed to link WhatsApp", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to link WhatsApp", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -364,8 +366,35 @@ function LinkWhatsAppButton() {
   );
 }
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// "Last synced <date>" from the newest synced_at the tracker wrote, amber
+// once it's more than a day old so a stopped sync is visible instead of the
+// page quietly showing old activity as if it were current.
+function LastSynced() {
+  const { data: syncedAt, isLoading } = useWhatsAppLastSynced();
+  if (isLoading) return null;
+  if (!syncedAt) {
+    return <p className="text-sm text-muted-foreground">Nothing has been synced from WhatsApp yet.</p>;
+  }
+  const stale = Date.now() - new Date(syncedAt).getTime() > ONE_DAY_MS;
+  return (
+    <p
+      className={cn(
+        "text-sm",
+        stale
+          ? "rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          : "text-muted-foreground"
+      )}
+    >
+      Last synced {formatDate(syncedAt)}
+      {stale && ". Nothing new has arrived for over a day, so what is shown below may be out of date."}
+    </p>
+  );
+}
+
 function WhatsAppConnectionCard() {
-  const { data: status, isLoading } = useWhatsAppStatus();
+  const { data: status, isLoading, error } = useWhatsAppStatus();
 
   return (
     <Card>
@@ -399,9 +428,24 @@ function WhatsAppConnectionCard() {
               <AskDialog />
             </div>
           </div>
+        ) : status?.state === "unreachable" ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            The WhatsApp connection service isn't running. Ask Rayyan to start it.
+          </p>
+        ) : error ? (
+          <p className="text-sm text-destructive">
+            Could not check your WhatsApp connection: {(error as Error).message}
+          </p>
+        ) : status?.state === "disconnected" ? (
+          <p className="text-sm text-muted-foreground">
+            WhatsApp is disconnected from this account. Ask Rayyan to reconnect it.
+          </p>
         ) : (
           <p className="text-sm text-muted-foreground">Starting…</p>
         )}
+        <div className="mt-4">
+          <LastSynced />
+        </div>
       </CardContent>
     </Card>
   );

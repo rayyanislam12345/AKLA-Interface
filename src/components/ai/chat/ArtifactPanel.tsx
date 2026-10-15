@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { marked } from "marked";
 import { renderAsync } from "docx-preview";
@@ -16,6 +16,8 @@ import type { LawUpdate } from "@/hooks/useLawUpdates";
 import { buildFirmDocxBlob, type PMNode } from "@/lib/firmDocx";
 import { buildTemplateDocxBlob } from "@/lib/templateDocx";
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { supabase } from "@/integrations/supabase/client";
+import { fetchMatterDocumentTypeId } from "@/hooks/useRedline";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -76,7 +78,7 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {artifact.kind === "review" && matterId ? (
+        {artifact.kind === "review" ? (
           <ReviewArtifact matterId={matterId} artifact={artifact} lawUpdate={lawUpdate ?? null} />
         ) : artifact.kind === "docx" ? (
           <DocxArtifact key={artifact.id} matterId={matterId} standard={standard} artifact={artifact} />
@@ -90,10 +92,32 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
   );
 }
 
-function ReviewArtifact({ matterId, artifact, lawUpdate }: { matterId: string; artifact: ChatArtifact; lawUpdate: LawUpdate | null }) {
+// A review belongs to the project the reviewed document is in. Started from
+// the general assistant, there is no project open: the review carries its
+// project (or, for one saved before it did, the document's project is
+// looked up), so it opens here instead of as an empty editor.
+function ReviewArtifact({ matterId: openMatterId, artifact, lawUpdate }: { matterId?: string; artifact: ChatArtifact; lawUpdate: LawUpdate | null }) {
   const matterDocumentId = (artifact.data as any)?.matterDocumentId as string | undefined;
+  const knownMatterId = openMatterId ?? artifact.matter_id ?? undefined;
+  const { data: lookedUp, isLoading } = useQuery({
+    queryKey: ["matter-document-project", matterDocumentId],
+    enabled: !knownMatterId && !!matterDocumentId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("matter_documents").select("matter_id").eq("id", matterDocumentId!).maybeSingle();
+      if (error) throw error;
+      return data?.matter_id ?? null;
+    },
+  });
+  const matterId = knownMatterId ?? lookedUp ?? undefined;
   if (!matterDocumentId) {
     return <p className="p-4 text-sm text-muted-foreground">This review isn't tied to a project document, so there's nothing to open here.</p>;
+  }
+  if (!matterId) {
+    return (
+      <p className="p-4 text-sm text-muted-foreground">
+        {isLoading ? "Opening the review…" : "The document this review was run on is no longer in a project, so the review can't be opened."}
+      </p>
+    );
   }
   return (
     <div className="p-4">
@@ -223,21 +247,26 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
     try {
       const blob = await buildBlob();
       if (!blob) throw new Error("Editor is not ready yet");
+      const savedMatterDocumentId = (artifact.data as { savedMatterDocumentId?: string } | null)?.savedMatterDocumentId;
+      const target = saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? savedMatterDocumentId ?? editSource?.matterDocumentId;
+      // A new version keeps the document's own type as stored now (none for
+      // an untyped document); the database accepts no other.
+      const typeId = target ? await fetchMatterDocumentTypeId(target) : documentTypeId ?? null;
       const result = await saveDraftToMatter({
         matterId: targetMatterId,
-        documentTypeId: documentTypeId ?? null,
+        documentTypeId: typeId,
         documentTypeName,
         blob,
         title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
-        matterDocumentId: saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? (artifact.data as any)?.savedMatterDocumentId ?? editSource?.matterDocumentId,
+        matterDocumentId: target,
         expectedVersionId: lastSave?.versionId ?? (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
       });
-      setLastSave({ ...result, documentTypeId, matterId: targetMatterId });
+      setLastSave({ ...result, documentTypeId: typeId ?? undefined, matterId: targetMatterId });
       queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
       await updateArtifact.mutateAsync({
         id: artifact.id,
-        data: { ...(artifact.data as object), documentTypeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
+        data: { ...(artifact.data as object), documentTypeId: typeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
       }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
       setSaveMode("version");
       toast({

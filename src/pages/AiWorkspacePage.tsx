@@ -8,14 +8,18 @@ import { useMatter } from "@/hooks/useMatters";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { buildRevisePrompt, useDocumentsCitingAct, useLawUpdate } from "@/hooks/useLawUpdates";
 import { useLatestDocumentVersion } from "@/hooks/useRedline";
-import { useMatterDocuments } from "@/hooks/useMatterDocuments";
+import { useDocumentTypes, useMatterDocuments } from "@/hooks/useMatterDocuments";
 import {
   type ActiveSkill,
   type ChatArtifact,
   type ChatAttachment,
   type EditTarget,
   type GuideState,
+  type MessageMetadata,
+  type SkillKey,
+  messageMetadata,
   openDocumentForEdit,
+  useCustomSkills,
   useChatMessages,
   useChatThreads,
   useSendChatMessage,
@@ -197,6 +201,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
   const seedSkill = useMemo<ActiveSkill | null | undefined>(() => {
     if (mode === "draft") return { key: "draft", label: "Draft" };
     if (mode === "agreement") return { key: "agreement", label: "Agreement" };
+    if (mode === "summarise") return { key: "summarise", label: "Summarise" };
     if (mode === "review" || mode === "verify" || lawUpdateId) return { key: "review", label: "Review" };
     return undefined;
   }, [mode, lawUpdateId]);
@@ -207,19 +212,55 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
   }, [lawUpdate, seedDoc?.title]);
 
   const activeThread = threads?.find((t) => t.id === activeThreadId);
-  // A reopened edit thread (reload, or picked from the sidebar) keeps its
-  // Edit skill in force — the thread row remembers which version it is on.
-  const threadEditSkill = useMemo<ActiveSkill | null>(() => {
-    const sk = activeThread?.skill as any;
-    if (sk?.key !== "edit" || !sk.documentVersionId) return null;
-    return {
-      key: "edit",
-      documentVersionId: sk.documentVersionId,
-      matterDocumentId: sk.matterDocumentId,
-      label: (activeThread?.title ?? "Edit").replace(/^Edit: /, "Edit · "),
-    };
-  }, [activeThread]);
+  // The skill in force in this chat: the one its last message was sent with
+  // (or, before any message, the one the chat was opened with — an Edit). It
+  // stays in force on every later message until the lawyer takes the chip
+  // off, so the chip shows it rather than disappearing after the first send.
+  const { data: documentTypes } = useDocumentTypes();
+  const { data: customSkills } = useCustomSkills();
+  const lastUserMessage = useMemo(() => [...(messages ?? [])].reverse().find((m) => m.role === "user"), [messages]);
+  const storedSkill = (lastUserMessage ? messageMetadata(lastUserMessage).skill : (activeThread?.skill as MessageMetadata["skill"] | undefined)) ?? null;
+  const storedSkillKey = activeThreadId && storedSkill ? JSON.stringify(storedSkill) : "";
+  const threadSkill = useMemo<ActiveSkill | null>(() => {
+    if (!storedSkillKey) return null;
+    const sk = JSON.parse(storedSkillKey) as NonNullable<MessageMetadata["skill"]>;
+    const key: SkillKey = sk.key === "verify" ? "review" : sk.key;
+    const base = { documentTypeId: sk.documentTypeId, customSkillId: sk.customSkillId, documentVersionId: sk.documentVersionId, matterDocumentId: sk.matterDocumentId };
+    switch (key) {
+      case "edit":
+        if (!sk.documentVersionId) return null;
+        return { key, ...base, label: (activeThread?.title ?? "Edit").replace(/^Edit: /, "Edit · ") };
+      case "draft": {
+        const type = documentTypes?.find((t) => t.id === sk.documentTypeId)?.name;
+        return { key, ...base, label: type ? `Draft · ${type}` : "Draft" };
+      }
+      case "custom": {
+        const custom = customSkills?.find((c) => c.id === sk.customSkillId);
+        // A firm skill deleted since: nothing is applied, so nothing is shown.
+        return custom ? { key, ...base, label: custom.name } : null;
+      }
+      case "review":
+        return { key, ...base, label: "Review" };
+      case "summarise":
+        return { key, ...base, label: "Summarise" };
+      case "agreement":
+        return { key, ...base, label: "Agreement" };
+      default:
+        return null;
+    }
+  }, [storedSkillKey, activeThread?.title, documentTypes, customSkills]);
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
+
+  // A chat handed a document before anything was said in it — minutes from
+  // Record Meeting, a version opened for Edit — opens on that document, not
+  // on the general welcome. Once per chat, so closing the panel sticks.
+  const autoOpened = useRef(new Set<string>());
+  useEffect(() => {
+    if (!activeThreadId || !messages || messages.length > 0 || turn?.pending || !lastArtifact) return;
+    if (lastArtifact.thread_id !== activeThreadId || autoOpened.current.has(activeThreadId)) return;
+    autoOpened.current.add(activeThreadId);
+    if (!openArtifactState || openArtifactState.thread_id !== activeThreadId) setOpenArtifact(lastArtifact);
+  }, [activeThreadId, messages, lastArtifact, turn?.pending, openArtifactState]);
 
   // Guided drafting: the question this conversation is on, if any.
   const guide = (activeThread?.questionnaire as unknown as GuideState | null | undefined) ?? null;
@@ -241,7 +282,27 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
     // A chat can hold several documents; the one open beside it is the one
     // the lawyer is talking about.
     const working = openArtifact && ["docx", "draft", "memo"].includes(openArtifact.kind) ? openArtifact.id : null;
-    await chat.send({ matterId, general: matterId ? undefined : me?.id, threadId: activeThreadId, ...input, workingArtifactId: working });
+    // The chip was taken off a chat that has a skill in force: say so, or
+    // the chat's skill would carry on regardless.
+    // (Not while the firm skills are still loading: the chip for one is
+    // only shown once they have, and its absence then means nothing.)
+    const skillsLoading = storedSkill?.key === "custom" && !customSkills;
+    const clearSkill = !input.skill && !!activeThreadId && !skillsLoading && (!!storedSkill || !!activeThread?.skill);
+    const sentFrom = activeThreadId;
+    const seeded = !!(mode || docParam || lawUpdateId);
+    await chat.send({ matterId, general: matterId ? undefined : me?.id, threadId: activeThreadId, ...input, clearSkill, workingArtifactId: working });
+    // A seed (?mode=, ?doc=, ?update=) has done its job once sent in an
+    // existing chat; left in the address it would come back on reload. (A
+    // new chat's address is replaced when it gets its id.)
+    if (sentFrom && seeded && activeThreadIdRef.current === sentFrom) setSearchParams(new URLSearchParams({ chat: sentFrom }), { replace: true });
+  };
+  // A suggestion chip seeds the composer of the chat that is open, keeping a
+  // chat that was handed a document rather than leaving it behind.
+  const seedMode = (next: string) => {
+    const params = new URLSearchParams();
+    if (activeThreadId) params.set("chat", activeThreadId);
+    params.set("mode", next);
+    setSearchParams(params, { replace: true });
   };
 
   const sidebar = (
@@ -255,30 +316,39 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
     />
   );
 
+  // A chat handed a document before anything was said in it.
+  const handedDocument = activeThreadId && lastArtifact && !(messages ?? []).length ? lastArtifact : null;
   const emptyState = (
     <div className="flex flex-col items-center gap-6 pt-16 text-center">
       <div>
-        <h2 className="text-2xl font-semibold">{matterId ? `How can I help with ${matter?.name ?? "this project"}?` : "What do you need help with?"}</h2>
+        <h2 className="text-2xl font-semibold">
+          {handedDocument ? `"${handedDocument.title}" is open beside this chat` : matterId ? `How can I help with ${matter?.name ?? "this project"}?` : "What do you need help with?"}
+        </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          {matterId
+          {handedDocument
+            ? "Say what to do with it: tighten it, turn it into an agreement, save it to a project, or ask a question about it. "
+            : matterId
             ? "Grounded in this project's documents, the firm's precedents and the law library. "
             : "Drop in a document or ask a question. Grounded in the firm's precedents and the law library. "}
           Drop a file in, or type <kbd className="rounded border px-1">/</kbd> for a skill.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
-        <SuggestionChip Icon={Sparkles} label="Draft a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "draft" }), { replace: true })} />
-        <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => (matterId ? setSearchParams(new URLSearchParams({ mode: "review" }), { replace: true }) : setProjectPicker("review"))} />
-        <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => setSearchParams(new URLSearchParams({ mode: "summarise" }), { replace: true })} />
+        <SuggestionChip Icon={Sparkles} label="Draft a document" onClick={() => seedMode("draft")} />
+        <SuggestionChip Icon={ScanSearch} label="Review a document" onClick={() => (matterId ? seedMode("review") : setProjectPicker("review"))} />
+        <SuggestionChip Icon={StickyNote} label="Summarise a document" onClick={() => seedMode("summarise")} />
         <SuggestionChip Icon={PencilLine} label="Edit a document" onClick={() => (matterId ? setEditPickerOpen(true) : setProjectPicker("edit"))} />
         <SuggestionChip Icon={Search} label="Find a document or clause" onClick={() => navigate("/assistant/search")} />
-        <SuggestionChip Icon={FileSignature} label="Turn a meeting into an agreement" onClick={() => setSearchParams(new URLSearchParams({ mode: "agreement" }), { replace: true })} />
+        <SuggestionChip Icon={FileSignature} label="Turn a meeting into an agreement" onClick={() => seedMode("agreement")} />
       </div>
     </div>
   );
 
-  const seedSkillWithSummarise = mode === "summarise" ? ({ key: "summarise", label: "Summarise" } as ActiveSkill) : seedSkill;
-  const composerSkill = editSkill ?? threadEditSkill ?? seedSkillWithSummarise;
+  // What the composer's chip starts as: an Edit just opened, a seed from the
+  // address (a chip, a Draft or Review button, a Revise link), else the skill
+  // in force in this chat. Memoised: the composer resets its chip when this
+  // changes identity.
+  const composerSkill = useMemo(() => editSkill ?? seedSkill ?? threadSkill, [editSkill, seedSkill, threadSkill]);
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] overflow-hidden md:-m-6" data-testid="ai-workspace">
@@ -340,6 +410,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
               onEditDocument={handleEditDocument}
               editPickerOpen={editPickerOpen}
               onEditPickerOpenChange={setEditPickerOpen}
+              onNeedsProject={setProjectPicker}
             />
           </div>
         </ResizablePanel>

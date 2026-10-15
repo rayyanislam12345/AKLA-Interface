@@ -45,6 +45,9 @@ interface ComposerProps {
   onEditDocument?: (target: EditTarget) => void;
   editPickerOpen?: boolean;
   onEditPickerOpenChange?: (open: boolean) => void;
+  // The general assistant (no project open): Review and Edit work on a
+  // project's document, so the page asks which project first.
+  onNeedsProject?: (purpose: "review" | "edit") => void;
 }
 
 type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string };
@@ -73,6 +76,7 @@ export default function Composer({
   onEditDocument,
   editPickerOpen = false,
   onEditPickerOpenChange,
+  onNeedsProject,
 }: ComposerProps) {
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
@@ -193,7 +197,18 @@ export default function Composer({
   const SkillIcon = skill
     ? skill.key === "edit" ? PencilLine : (BUILT_IN.find((b) => b.key === skill.key)?.Icon ?? Wand2)
     : Wand2;
+  // No project open: Review and Edit start by asking which project. A
+  // Review with a project document already attached can go ahead here.
+  const needsProject = !matterId && !standard && !!onNeedsProject;
+  const askForProject = (purpose: "review" | "edit") => {
+    setSlashOpen(false);
+    setText((t) => (t.startsWith("/") ? "" : t));
+    onNeedsProject?.(purpose);
+  };
+  const chooseReview = () =>
+    needsProject && !attachments.some((a) => a.versionId) ? askForProject("review") : applySkill({ key: "review", label: "Review" });
   const openEditPicker = () => {
+    if (needsProject) return askForProject("edit");
     setSlashOpen(false);
     setText((t) => (t.startsWith("/") ? "" : t));
     onEditPickerOpenChange?.(true);
@@ -282,7 +297,9 @@ export default function Composer({
                         ? "Attach the meeting transcript or concept note and press send — the deal facts come back for you to confirm before anything is drafted…"
                       : skill?.key === "edit"
                         ? "Describe the changes — e.g. \"tighten clause 7 and take the definitions from v2 of the shareholders agreement\"…"
-                        : "Ask about this project, or type / for skills…"
+                        : matterId
+                          ? "Ask about this project, or type / for skills…"
+                          : "Ask anything, drop in a document, or type / for skills…"
                 }
                 className="max-h-60 min-h-[44px] w-full resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
                 data-testid="composer-input"
@@ -296,7 +313,7 @@ export default function Composer({
                 <CommandEmpty>No skill matches.</CommandEmpty>
                 <CommandGroup heading="Built in">
                   {BUILT_IN.map((b) => (
-                    <CommandItem key={b.key} value={b.label} onSelect={() => applySkill({ key: b.key, label: b.label })}>
+                    <CommandItem key={b.key} value={b.label} onSelect={() => (b.key === "review" ? chooseReview() : applySkill({ key: b.key, label: b.label }))}>
                       <b.Icon className="mr-2 h-4 w-4" />
                       <div>
                         <div className="text-sm">{b.label}</div>
@@ -368,13 +385,13 @@ export default function Composer({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                <DropdownMenuItem onClick={() => applySkill({ key: "review", label: "Review" })}>
+                <DropdownMenuItem onClick={chooseReview}>
                   <ScanSearch className="mr-2 h-4 w-4" />Review a document
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => applySkill({ key: "summarise", label: "Summarise" })}>
                   <StickyNote className="mr-2 h-4 w-4" />Summarise
                 </DropdownMenuItem>
-                {matterId && (
+                {(matterId || needsProject) && (
                   <DropdownMenuItem onClick={openEditPicker}>
                     <PencilLine className="mr-2 h-4 w-4" />Edit a document
                   </DropdownMenuItem>

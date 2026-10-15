@@ -453,6 +453,8 @@ interface SendInput {
   message: string;
   attachments: ChatAttachment[];
   skill: ActiveSkill | null;
+  /** The lawyer took the skill chip off a chat that has one in force: sent as { key: "none" }, which clears the chat's skill. */
+  clearSkill?: boolean;
   /** The document open in the panel: the one this message is about. */
   workingArtifactId?: string | null;
 }
@@ -695,7 +697,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   );
 
   const send = useCallback(
-    async ({ matterId, documentTypeId, general, laws, threadId, message, attachments, skill, workingArtifactId }: SendInput) => {
+    async ({ matterId, documentTypeId, general, laws, threadId, message, attachments, skill, clearSkill = false, workingArtifactId }: SendInput) => {
       if (!session?.access_token) throw new Error("Not signed in");
       if (!matterId && !documentTypeId && !general) throw new Error("A conversation needs a project, a document type, or a signed-in user");
       const scope: ChatScope = matterId ? { matterId } : documentTypeId ? { documentTypeId } : { general: general! };
@@ -725,7 +727,13 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         const round = await runRound(
           scopeKey,
           keyRef,
-          { matterId: matterId ?? null, documentTypeId: documentTypeId ?? null, laws: laws ?? null, threadId, message, attachments, skill: skillPayload, workingArtifactId: workingArtifactId ?? null },
+          {
+            matterId: matterId ?? null, documentTypeId: documentTypeId ?? null, laws: laws ?? null, threadId, message, attachments,
+            // Without a skill the chat would carry on with the one it has;
+            // "none" says the chip was taken off.
+            skill: skillPayload ?? (clearSkill && threadId ? { key: "none" } : null),
+            workingArtifactId: workingArtifactId ?? null,
+          },
           controller.signal,
           !threadId,
         );

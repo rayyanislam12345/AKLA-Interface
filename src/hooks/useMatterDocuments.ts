@@ -81,6 +81,13 @@ export function useMatterDocuments(matterId: string | undefined) {
       if (error) throw error;
       return data;
     },
+    // While any version is still being read for search (by this browser or a
+    // colleague's), check every 15 seconds so its badge moves on by itself.
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((d) =>
+        (d.versions ?? []).some((v) => v.indexing_status === "pending" && Date.now() - new Date(v.created_at).getTime() < 10 * 60 * 1000))
+        ? 15_000
+        : false,
   });
 }
 
@@ -134,20 +141,61 @@ export function useSetMatterDocumentStatus() {
   });
 }
 
+// Rename a document or change its type. A document created without a type
+// can be given one later (or have it cleared), without re-uploading anything.
+export function useUpdateMatterDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ matterDocumentId, matterId, title, documentTypeId }: {
+      matterDocumentId: string; matterId: string; title?: string; documentTypeId?: string | null;
+    }) => {
+      const patch: { title?: string; document_type_id?: string | null } = {};
+      if (title !== undefined) patch.title = title.trim();
+      if (documentTypeId !== undefined) patch.document_type_id = documentTypeId;
+      const { error } = await supabase.from("matter_documents").update(patch).eq("id", matterDocumentId);
+      if (error) throw error;
+      return matterId;
+    },
+    onSuccess: (matterId) => {
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-search"] });
+    },
+  });
+}
+
+// A plain upload adds the next version of the document. It reads the
+// document's stored type (null included) and its latest version just before
+// saving, so a type changed a moment ago, or a version a colleague added
+// since the page loaded, does not make the save fail with a message about
+// editing. Reading the file for search is left to the caller (the version
+// shows as "Reading…" meanwhile); the result says whether the file type can
+// be searched at all.
 export function useUploadDocumentVersion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ matterId, matterDocumentId, documentTypeId, file, expectedVersionId }: {
       matterId: string; matterDocumentId: string; documentTypeId: string | null; file: File; expectedVersionId: string | null;
     }) => {
+      const [{ data: stored }, { data: latest }] = await Promise.all([
+        supabase.from("matter_documents").select("document_type_id").eq("id", matterDocumentId).maybeSingle(),
+        supabase.from("document_versions").select("id").eq("matter_document_id", matterDocumentId)
+          .order("version_number", { ascending: false }).limit(1).maybeSingle(),
+      ]);
       const extension = file.name.split(".").pop()?.toLowerCase() || "bin";
-      const result = await saveDraftToMatter({ matterId, matterDocumentId, documentTypeId, documentTypeName: file.name,
-        title: file.name.replace(/\.[^.]+$/, ""), blob: file, expectedVersionId, isAiGenerated: false, extension });
-      return { matterId, ...result };
+      const result = await saveDraftToMatter({ matterId, matterDocumentId,
+        documentTypeId: stored ? stored.document_type_id : documentTypeId, documentTypeName: file.name,
+        title: file.name.replace(/\.[^.]+$/, ""), blob: file,
+        expectedVersionId: stored ? (latest?.id ?? null) : expectedVersionId,
+        isAiGenerated: false, extension, skipIndex: true });
+      return { matterId, matterDocumentId, documentTypeId: stored ? stored.document_type_id : documentTypeId, fileType: file.type, ...result };
     },
-    onSuccess: ({ matterId }) => {
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
-      queryClient.invalidateQueries({ queryKey: ["project-search"] });
+    // Awaited, so the real version row is on screen before the
+    // "uploading" placeholder goes away.
+    onSuccess: async ({ matterId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] }),
+        queryClient.invalidateQueries({ queryKey: ["project-search"] }),
+      ]);
     },
   });
 }
@@ -162,6 +210,13 @@ export function useDeleteMatterDocument() {
         .eq("matter_document_id", matterDocumentId);
       if (versionsError) throw versionsError;
 
+      // The row goes first: the database decides who may remove a document,
+      // and a refused delete comes back empty rather than as an error. Files
+      // and search passages are only removed once the row is really gone.
+      const { data: removed, error: deleteError } = await supabase.from("matter_documents").delete().eq("id", matterDocumentId).select("id");
+      if (deleteError) throw deleteError;
+      if (!removed?.length) throw new Error("Only an administrator or the person who added this document can remove it.");
+
       const paths = (versions ?? []).map((v) => v.storage_path);
       if (paths.length > 0) {
         await supabase.storage.from("matter-documents").remove(paths);
@@ -169,9 +224,6 @@ export function useDeleteMatterDocument() {
           await supabase.from("documents").delete().eq("metadata->>storage_path", path);
         }
       }
-
-      const { error: deleteError } = await supabase.from("matter_documents").delete().eq("id", matterDocumentId);
-      if (deleteError) throw deleteError;
 
       return matterId;
     },
@@ -194,11 +246,13 @@ export function useDeleteDocumentVersion() {
       storagePath: string;
       matterId: string;
     }) => {
+      // Row first, as for a whole document: a refused delete leaves the file.
+      const { data: removed, error } = await supabase.from("document_versions").delete().eq("id", versionId).select("id");
+      if (error) throw error;
+      if (!removed?.length) throw new Error("Only an administrator, the person who uploaded this version, or the document's creator can remove it.");
+
       await supabase.storage.from("matter-documents").remove([storagePath]);
       await supabase.from("documents").delete().eq("metadata->>storage_path", storagePath);
-
-      const { error } = await supabase.from("document_versions").delete().eq("id", versionId);
-      if (error) throw error;
 
       return matterId;
     },

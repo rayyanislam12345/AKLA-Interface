@@ -3,6 +3,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { type CustomSkill, useCustomSkills, useDeleteCustomSkill, useSaveCustomSkill } from "@/hooks/useChat";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useMyProfile } from "@/hooks/useProfiles";
+import { useAuth } from "@/hooks/useAuth";
 
 interface SkillsDialogProps {
   open: boolean;
@@ -39,9 +50,13 @@ async function callSkillsService(path: string, init: RequestInit) {
 // purpose: a name, a one-line description for the palette, the
 // instructions themselves, and whether the result should open as a document.
 export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) {
-  // Firm skills are shared by everyone; removing one should be an admin's act.
+  // Firm skills are shared by everyone; removing one is for an administrator
+  // or the person who added it (the chat service checks the same rule).
   const { data: me } = useMyProfile();
+  const { user } = useAuth();
   const isAdmin = me?.role === "admin" || me?.role === "founder";
+  const mayDelete = (s: CustomSkill) => isAdmin || (!!user?.id && s.created_by === user.id);
+  const [confirming, setConfirming] = useState<CustomSkill | null>(null);
   const { data: skills } = useCustomSkills();
   const save = useSaveCustomSkill();
   const remove = useDeleteCustomSkill();
@@ -77,11 +92,19 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
   };
 
   const deleteSkill = async (skill: CustomSkill) => {
-    if (!isUploaded(skill)) return remove.mutate(skill.id);
     setDeletingId(skill.id);
     try {
-      await callSkillsService("/skills/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: skill.id }) });
-      await queryClient.invalidateQueries({ queryKey: ["ai-skills"] });
+      // Through the chat service, which checks who may delete; a skill
+      // written here can still be removed directly where the service is not
+      // configured, and the database's own rule applies then.
+      const serviceConfigured = !!(import.meta.env.VITE_CHAT_API_URL as string | undefined);
+      if (isUploaded(skill) || serviceConfigured) {
+        await callSkillsService("/skills/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: skill.id }) });
+        await queryClient.invalidateQueries({ queryKey: ["ai-skills"] });
+      } else {
+        await remove.mutateAsync(skill.id);
+      }
+      toast({ title: `Deleted /${skill.name}` });
     } catch (err: any) {
       toast({ title: "Couldn't remove the skill", description: err.message, variant: "destructive" });
     } finally {
@@ -179,17 +202,18 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    aria-label="Delete skill"
-                    title={isAdmin ? undefined : "Only an administrator can delete a firm skill"}
-                    disabled={deletingId === s.id || !isAdmin}
-                    onClick={() => deleteSkill(s)}
-                  >
-                    {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  </Button>
+                  {mayDelete(s) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      aria-label={`Delete /${s.name}`}
+                      disabled={deletingId === s.id}
+                      onClick={() => setConfirming(s)}
+                    >
+                      {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -204,10 +228,37 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
               </Button>
               <input ref={fileInput} type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => uploadZip(e.target.files?.[0])} />
             </div>
-            <p className="text-xs text-muted-foreground">Uploading a skill with the same name as one already here replaces it with the new version.</p>
+            <p className="text-xs text-muted-foreground">
+              Uploading a skill with the same name as one already here replaces it with the new version. A skill can be
+              deleted by an administrator or by the person who added it.
+            </p>
           </div>
         )}
       </DialogContent>
+      <AlertDialog open={!!confirming} onOpenChange={(o) => !o && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete /{confirming?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              /{confirming?.name} is a firm skill: deleting it removes it for everyone, and it can't be put in force on any
+              chat after this. Chats that already used it keep their replies.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                const target = confirming;
+                setConfirming(null);
+                if (target) void deleteSkill(target);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

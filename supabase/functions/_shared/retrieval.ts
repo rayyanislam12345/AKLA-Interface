@@ -6,6 +6,12 @@
 // "supplementary" once a standard template exists), so this only owns the
 // embedding + retrieval, not final prompt text.
 
+// The SQL function's default similarity floor is 0.5, which discarded most
+// statute passages (a relevant section typically scores about 0.41 against a
+// contract). Same floors as the chat service: 0.3 for statutes, 0.35 else.
+const MATCH_THRESHOLD = 0.35;
+const STATUTE_MATCH_THRESHOLD = 0.3;
+
 export interface GroundedMatch {
   content: string;
   metadata: Record<string, unknown>;
@@ -78,12 +84,14 @@ export async function fetchGroundedContext(
   const [{ data: precedentMatches, error: precedentError }, { data: statuteMatches, error: statuteError }, matterDocumentMatches] = await Promise.all([
     supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
+      match_threshold: MATCH_THRESHOLD,
       match_count: precedentCount,
       filter_document_type_id: documentTypeId,
       precedent_only: true,
     }),
     supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
+      match_threshold: STATUTE_MATCH_THRESHOLD,
       match_count: statuteCount,
       statute_only: true,
       filter_act_names: filterActNames,
@@ -91,6 +99,7 @@ export async function fetchGroundedContext(
     includeMatterDocuments && matterId
       ? supabase.rpc('match_documents', {
           query_embedding: queryEmbedding,
+          match_threshold: MATCH_THRESHOLD,
           // One extra to absorb the document being reviewed's own chunk,
           // which is filtered out below by storage_path.
           match_count: matterDocumentCount + 1,

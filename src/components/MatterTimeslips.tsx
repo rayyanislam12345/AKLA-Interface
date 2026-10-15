@@ -121,8 +121,8 @@ function EditTimeslipDialog({
       await updateTimeslip.mutateAsync({ id: slip.id, matterId, edits });
       toast({ title: "Timeslip updated" });
       onClose();
-    } catch (err: any) {
-      toast({ title: "Failed to update timeslip", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to update timeslip", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -322,8 +322,8 @@ export function MatterTimeslips({
           </div>
         ) : !slips?.length ? (
           <p className="py-6 text-sm text-muted-foreground">
-            No time recorded against this project in this period. Associates
-            upload approved entries from Timekeeper.
+            No time recorded against this project in this period. Time is added
+            on Today's Timesheet (in the sidebar), or uploaded from Timekeeper.
           </p>
         ) : view === "entries" ? (
           <>

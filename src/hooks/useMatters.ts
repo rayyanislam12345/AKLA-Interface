@@ -24,7 +24,49 @@ export interface MatterListItem {
   lead_partner: { full_name: string | null } | null;
 }
 
-export function useMatters() {
+// A project's status used to be free text. It is now one of three fixed
+// values. Anything already stored is read case-insensitively ("Active ",
+// "on hold", "On-Hold"); a value that is none of the three reads as Active
+// until someone edits the project, so no project disappears from view.
+export const MATTER_STATUSES = ["active", "on_hold", "closed"] as const;
+export type MatterStatus = (typeof MATTER_STATUSES)[number];
+
+export const MATTER_STATUS_LABELS: Record<MatterStatus, string> = {
+  active: "Active",
+  on_hold: "On hold",
+  closed: "Closed",
+};
+
+export function normalizeMatterStatus(raw: string | null | undefined): MatterStatus {
+  const s = (raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (s === "onhold") return "on_hold";
+  if (s === "closed") return "closed";
+  return "active";
+}
+
+export function matterStatusLabel(raw: string | null | undefined) {
+  return MATTER_STATUS_LABELS[normalizeMatterStatus(raw)];
+}
+
+export function matterStatusBadgeVariant(raw: string | null | undefined): "default" | "secondary" | "outline" {
+  const s = normalizeMatterStatus(raw);
+  return s === "active" ? "default" : s === "on_hold" ? "secondary" : "outline";
+}
+
+export function isOpenMatter(m: { status: string | null }) {
+  return normalizeMatterStatus(m.status) !== "closed";
+}
+
+const openMattersOnly = (rows: MatterListItem[]) => rows.filter(isOpenMatter);
+
+/**
+ * Every project the user can see, closed ones included, so a lookup of an
+ * existing link (a timeslip's project, a linked WhatsApp project) still finds
+ * a project after it is closed. A list someone picks a project from should
+ * pass { openOnly: true } to offer only Active and On hold projects.
+ */
+export function useMatters(options: { openOnly?: boolean } = {}) {
+  const openOnly = options.openOnly ?? false;
   return useQuery({
     queryKey: ["matters"],
     queryFn: async (): Promise<MatterListItem[]> => {
@@ -37,6 +79,7 @@ export function useMatters() {
       if (error) throw error;
       return data as unknown as MatterListItem[];
     },
+    select: openOnly ? openMattersOnly : undefined,
   });
 }
 
@@ -118,7 +161,8 @@ export function useUpdateMatter() {
       client_id?: string;
       sector?: string;
       lead_partner_id?: string;
-      status: string;
+      status: MatterStatus;
+      target_close_date?: string | null;
     }) => {
       const { error } = await supabase
         .from("matters")
@@ -128,12 +172,33 @@ export function useUpdateMatter() {
           sector: input.sector || null,
           lead_partner_id: input.lead_partner_id || null,
           status: input.status,
+          target_close_date: input.target_close_date || null,
         })
         .eq("id", input.id);
       if (error) throw error;
+      return input.id;
     },
-    onSuccess: () => {
+    onSuccess: (id) => {
       queryClient.invalidateQueries({ queryKey: ["matters"] });
+      queryClient.invalidateQueries({ queryKey: ["matter", id] });
+    },
+  });
+}
+
+// Close / Reopen / put on hold from the project's own page, without opening
+// the edit form. Row-level security already lets every firm member update a
+// project, so this is open to everyone.
+export function useSetMatterStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: MatterStatus }) => {
+      const { error } = await supabase.from("matters").update({ status }).eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (id) => {
+      queryClient.invalidateQueries({ queryKey: ["matters"] });
+      queryClient.invalidateQueries({ queryKey: ["matter", id] });
     },
   });
 }

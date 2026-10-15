@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Building2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles, Settings } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import aklaLogo from "@/assets/akla-logo.png";
 import aklaMonogram from "@/assets/akla-monogram.png";
 
-const NAV_ITEMS = [
+// Exported so the Help page describes the sidebar people actually see.
+export const NAV_ITEMS = [
   // The front door: the AI with no project chosen first. Everything an
   // associate wants from the AI starts here; a project is context they attach.
   { title: "AI Assistant", url: "/assistant", icon: Sparkles },
@@ -135,6 +136,21 @@ export function AppSidebar() {
                 </div>
               )}
             </div>
+            {!isCollapsed && (
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className={`w-full justify-start hover:bg-white/10 hover:text-white ${
+                  location.pathname === "/settings" ? "text-accent" : "text-white"
+                }`}
+              >
+                <NavLink to="/settings">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Settings
+                </NavLink>
+              </Button>
+            )}
             {!isCollapsed && (
               <Button
                 variant="ghost"

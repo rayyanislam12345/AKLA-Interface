@@ -20,13 +20,21 @@ function detectInvite() {
   return window.location.hash.includes('type=invite');
 }
 
+// /auth?step=forgot opens straight on "Forgot your password?" (the expired
+// reset-link screen sends people here for a fresh link).
+function initialStep(): AuthStep {
+  if (detectInvite()) return 'accept-invite';
+  if (new URLSearchParams(window.location.search).get('step') === 'forgot') return 'forgot-password';
+  return 'login';
+}
+
 export default function Auth() {
   const { user, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authStep, setAuthStep] = useState<AuthStep>(() => detectInvite() ? 'accept-invite' : 'login');
+  const [authStep, setAuthStep] = useState<AuthStep>(initialStep);
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
   const [enrollDialogOpen, setEnrollDialogOpen] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
@@ -282,7 +290,8 @@ export default function Auth() {
                   <Input
                     id="invite-password"
                     type="password"
-                    placeholder="Choose a password"
+                    autoComplete="new-password"
+                    placeholder="At least 8 characters"
                     value={invitePassword}
                     onChange={(e) => setInvitePassword(e.target.value)}
                     required
@@ -294,6 +303,7 @@ export default function Auth() {
                   <Input
                     id="invite-confirm"
                     type="password"
+                    autoComplete="new-password"
                     placeholder="Confirm your password"
                     value={inviteConfirmPassword}
                     onChange={(e) => setInviteConfirmPassword(e.target.value)}
@@ -341,7 +351,7 @@ export default function Auth() {
                 variant="ghost"
                 className="w-full"
                 onClick={() => {
-                  toast({ title: 'Welcome to AKLA Project Hub!', description: 'You can enable 2FA later in settings.' });
+                  toast({ title: 'Welcome to AKLA Project Hub!', description: 'You can turn on two-step sign-in any time from Settings, at the bottom of the sidebar.' });
                   navigate('/dashboard', { replace: true });
                 }}
               >
@@ -403,6 +413,7 @@ export default function Auth() {
                   <Input
                     id="signup-email"
                     type="email"
+                    autoComplete="username"
                     placeholder="Enter your email"
                     value={signupEmail}
                     onChange={(e) => setSignupEmail(e.target.value)}
@@ -414,7 +425,8 @@ export default function Auth() {
                   <Input
                     id="signup-password"
                     type="password"
-                    placeholder="Choose a password"
+                    autoComplete="new-password"
+                    placeholder="At least 8 characters"
                     value={signupPassword}
                     onChange={(e) => setSignupPassword(e.target.value)}
                     required
@@ -426,6 +438,7 @@ export default function Auth() {
                   <Input
                     id="signup-confirm"
                     type="password"
+                    autoComplete="new-password"
                     placeholder="Confirm your password"
                     value={signupConfirmPassword}
                     onChange={(e) => setSignupConfirmPassword(e.target.value)}
@@ -592,6 +605,7 @@ export default function Auth() {
                     <Input
                       id="reset-email"
                       type="email"
+                      autoComplete="username"
                       placeholder="Enter your email"
                       value={forgotPasswordEmail}
                       onChange={(e) => setForgotPasswordEmail(e.target.value)}
@@ -669,6 +683,7 @@ export default function Auth() {
                   id="signin-email"
                   name="email"
                   type="email"
+                  autoComplete="username"
                   placeholder="Enter your email"
                   required
                 />
@@ -679,6 +694,7 @@ export default function Auth() {
                   id="signin-password"
                   name="password"
                   type="password"
+                  autoComplete="current-password"
                   placeholder="Enter your password"
                   required
                 />

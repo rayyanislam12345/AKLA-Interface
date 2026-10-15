@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { LoadState } from "@/components/LoadState";
 
 const ROLES: AppRole[] = ["founder", "admin", "partner", "senior_counsel", "associate", "paralegal"];
 
@@ -263,7 +264,7 @@ function PendingApprovalsSection() {
 
 export default function TeamPage() {
   const { user } = useAuth();
-  const { data: profiles, isLoading } = useProfiles();
+  const { data: profiles, isLoading, error, refetch } = useProfiles();
   const setRole = useSetUserRole();
 
   const currentUser = profiles?.find((p) => p.id === user?.id);
@@ -281,10 +282,14 @@ export default function TeamPage() {
 
       {isAdmin && <PendingApprovalsSection />}
 
-      {isLoading ? (
-        <p className="text-muted-foreground">Loading…</p>
-      ) : (
-        <>
+      <LoadState
+        isLoading={isLoading}
+        error={error}
+        onRetry={() => refetch()}
+        what="the team"
+        isEmpty={!profiles?.length}
+        empty="No one has been approved yet."
+      >
           <div className="hidden sm:block">
             <Table>
               <TableHeader>
@@ -362,8 +367,7 @@ export default function TeamPage() {
               </div>
             ))}
           </div>
-        </>
-      )}
+      </LoadState>
 
       {isAdmin && <WhatsAppAccountsSection />}
     </div>
