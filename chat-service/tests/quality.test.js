@@ -46,7 +46,7 @@ test('review suggestions redline a file that already has tracked changes', () =>
     { id: 'a', original: 'thirty (30) days payable by Party Alpha', suggested: 'forty (40) days payable by Party Beta', accepted: false },
     { id: 'b', original: 'Accepted wording<sup><a href="#f">[2]</a></sup> here.', suggested: 'Final wording here.', accepted: true },
     { id: 'c', original: 'Not in this file at all', suggested: 'Anything', accepted: false },
-  ]);
+  ], { legacy: true });
   const xml = strFromU8(unzipSync(out)['word/document.xml']);
   assert.deepEqual(results.map(r => r.status), ['applied', 'applied', 'skipped']);
   assert.equal(results[2].reason, 'not_found');
@@ -513,4 +513,506 @@ test('the RFP questionnaire asks dependent questions after what they depend on, 
   const instruction = answerInstruction([{ question: rfp.questions[0], optionIds: ['bot'] }], state.answers);
   assert.match(instruction, /CHOSEN: Build-Operate-Transfer \(BOT\)/);
   assert.match(instruction, /NOT CHOSEN: .*DBFOT/);
+});
+
+// ---- Writer changes: one id counter, ids captured per change, splits, take-over.
+
+const idsOf = (xml, author = 'AKLA AI') => [...xml.matchAll(/<w:(ins|del)\s[^>]*?\bw:id="(\d+)"[^>]*?\bw:author="([^"]*)"/g)].filter((m) => m[3] === author).map((m) => Number(m[2]));
+const docXml = (bytes, part = 'word/document.xml') => strFromU8(unzipSync(bytes)[part]);
+const docFrom = (body, extra = {}) => zipSync({ 'word/document.xml': strToU8(`<w:document ${ns}><w:body>${body}<w:sectPr/></w:body></w:document>`), ...extra });
+
+test('a replace reports its ids, wording and clause', async () => {
+  const bytes = file(); const view = inspectDocx(bytes);
+  const output = await applyDocxOps(bytes, [{ op: 'replace', p: 1, expected: 'Party Alpha pays 10.', text: 'Party Beta pays 20.', why: 'The term sheet names Party Beta.' }], view.byRef);
+  const r = output.results[0];
+  const xml = docXml(output.bytes);
+  assert.equal(r.status, 'applied');
+  assert.equal(r.revisionIds.length, 2);
+  for (const id of r.revisionIds) assert.ok(idsOf(xml).includes(id), `id ${id} is an AKLA AI revision in the body`);
+  assert.equal(r.original, 'Party Alpha pays 10.');
+  assert.equal(r.modified, 'Party Beta pays 20.');
+  assert.equal(r.via, 'inline');
+  assert.equal(r.why, 'The term sheet names Party Beta.');
+  assert.equal(r.part, 'word/document.xml');
+  assert.equal(r.clause, null);
+  assert.equal(output.maxId, Math.max(...r.revisionIds));
+});
+
+test('a body edit and a header edit in one call never share an id', async () => {
+  const bytes = file(); const view = inspectDocx(bytes);
+  const [hp, href] = [...view.byRef].find(([, r]) => r.part === 'word/header1.xml');
+  const output = await applyDocxOps(bytes, [
+    { op: 'replace', p: 1, expected: 'Party Alpha pays 10.', text: 'Party Beta pays 20.' },
+    { op: 'replace', p: hp, expected: href.exactText, text: 'Party Beta' },
+  ], view.byRef);
+  const [body, header] = output.results;
+  assert.equal(body.part, 'word/document.xml');
+  assert.equal(header.part, 'word/header1.xml');
+  assert.ok(body.revisionIds.length && header.revisionIds.length);
+  assert.ok(!body.revisionIds.some((id) => header.revisionIds.includes(id)), 'ids are disjoint across parts');
+  for (const id of header.revisionIds) assert.ok(idsOf(docXml(output.bytes, 'word/header1.xml')).includes(id));
+  assert.equal(output.maxId, 9000 + body.revisionIds.length + header.revisionIds.length);
+});
+
+test('the floor honours ids recorded earlier', async () => {
+  const bytes = file(); const view = inspectDocx(bytes);
+  const output = await applyDocxOps(bytes, [{ op: 'replace', p: 1, expected: 'Party Alpha pays 10.', text: 'Party Beta pays 20.' }], view.byRef, { idFloor: 9100 });
+  assert.ok(output.results[0].revisionIds.every((id) => id > 9100));
+  assert.ok(output.maxId > 9100);
+});
+
+test('an insert_after reports a mark id and a body id; a delete reports mark plus one per run', async () => {
+  const bytes = docFrom('<w:p><w:r><w:t>First clause.</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">Two </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>runs.</w:t></w:r></w:p>');
+  const view = inspectDocx(bytes);
+  const added = await applyDocxOps(bytes, [{ op: 'insert_after', p: 1, expected: 'First clause.', text: 'A new clause.' }], view.byRef);
+  const a = added.results[0];
+  assert.equal(a.revisionIds.length, 2);
+  assert.equal(a.markId, a.revisionIds[0]);
+  assert.equal(a.original, '');
+  assert.equal(a.anchor, 'First clause.');
+  assert.ok(docXml(added.bytes).includes(`<w:pPr><w:rPr><w:ins w:id="${a.markId}" w:author="AKLA AI"`), 'the paragraph mark is inserted');
+  const removed = await applyDocxOps(bytes, [{ op: 'delete', p: 2, expected: 'Two runs.' }], view.byRef);
+  const d = removed.results[0];
+  assert.equal(d.revisionIds.length, 3);
+  assert.equal(d.markId, d.revisionIds[0]);
+  assert.equal(d.modified, '');
+  assert.ok(docXml(removed.bytes).includes(`<w:del w:id="${d.markId}" w:author="AKLA AI" w:date="`) && docXml(removed.bytes).includes('"/></w:rPr></w:pPr>'), 'the paragraph mark is deleted');
+});
+
+test('a refused op still quotes what was expected', async () => {
+  const bytes = file();
+  const stale = await applyDocxOps(bytes, [{ op: 'replace', p: 1, expected: 'Wrong text', text: 'Changed' }], inspectDocx(bytes).byRef);
+  assert.equal(stale.results[0].status, 'skipped');
+  assert.equal(stale.results[0].original, 'Party Alpha pays 10.');
+  assert.ok(!stale.results[0].revisionIds?.length);
+  assert.equal(stale.results[0].reason, 'Expected paragraph text does not match the source; no change was made.');
+  const hidden = await applyDocxOps(bytes, [{ op: 'delete', p: 1, expected: 'Party Alpha pays 10.' }], inspectDocx(bytes, { budget: 0 }).byRef);
+  assert.equal(hidden.results[0].reason, 'Paragraph was not supplied to this turn; request that section first.');
+  assert.equal(hidden.results[0].original, 'Party Alpha pays 10.');
+});
+
+test("an insertion inside another author's insertion gets its own id", async () => {
+  const bytes = docFrom('<w:p><w:ins w:id="1" w:author="Counsel" w:date="D"><w:r><w:t xml:space="preserve">one two three</w:t></w:r></w:ins></w:p>');
+  const view = inspectDocx(bytes);
+  const output = await applyDocxOps(bytes, [{ op: 'replace', p: 1, expected: 'one two three', text: 'one 2 three' }], view.byRef);
+  const r = output.results[0];
+  const xml = docXml(output.bytes);
+  assert.equal(r.status, 'applied');
+  assert.match(xml, /<w:ins w:id="1" w:author="Counsel" w:date="D"><w:r><w:t xml:space="preserve">one <\/w:t><\/w:r><w:del w:id="\d+" w:author="AKLA AI"[^>]*><w:r><w:delText xml:space="preserve">two<\/w:delText><\/w:r><\/w:del><\/w:ins><w:ins w:id="\d+" w:author="AKLA AI"[^>]*><w:r><w:t xml:space="preserve">2<\/w:t><\/w:r><\/w:ins><w:ins w:id="(\d+)" w:author="Counsel" w:date="D"><w:r><w:t xml:space="preserve"> three<\/w:t><\/w:r><\/w:ins>/);
+  const counsel = [...xml.matchAll(/<w:ins w:id="(\d+)" w:author="Counsel"/g)].map((m) => Number(m[1]));
+  assert.equal(counsel.length, 2);
+  assert.notEqual(counsel[0], counsel[1]);
+  assert.equal((xml.match(/w:date="D"/g) ?? []).length, 2);
+  assert.deepEqual(r.revisionIds, idsOf(xml));
+  assert.deepEqual(r.splits, [{ fromId: 1, toId: counsel[1], author: 'Counsel' }]);
+  assert.ok(docXml(acceptAllChanges(output.bytes)).includes('one </w:t></w:r><w:r><w:t xml:space="preserve">2</w:t></w:r><w:r><w:t xml:space="preserve"> three'));
+});
+
+test('rewriting an AI-inserted paragraph takes over its ids', async () => {
+  const bytes = file();
+  const first = await applyDocxOps(bytes, [{ op: 'insert_after', p: 1, expected: 'Party Alpha pays 10.', text: 'Added clause.' }], inspectDocx(bytes).byRef);
+  const [M, B] = first.results[0].revisionIds;
+  const view = inspectDocx(first.bytes);
+  const [p] = [...view.byRef].find(([, r]) => r.exactText === 'Added clause.');
+  const second = await applyDocxOps(first.bytes, [{ op: 'replace', p, expected: 'Added clause.', text: 'Rewritten clause.' }], view.byRef);
+  const r = second.results[0];
+  assert.equal(r.status, 'applied');
+  assert.equal(r.revisionIds.length, 2);
+  assert.equal(r.revisionIds[0], M);
+  const B2 = r.revisionIds[1];
+  assert.ok(B2 !== B && B2 > B);
+  assert.deepEqual(r.takesOver, [M, B]);
+  const xml = docXml(second.bytes);
+  assert.ok(xml.includes(`<w:pPr><w:pStyle w:val="Normal"/><w:rPr><w:ins w:id="${M}" `), 'the mark keeps its id');
+  assert.ok(!xml.includes(`w:id="${B}"`), 'the old body id is gone');
+  assert.ok(xml.includes(`<w:ins w:id="${B2}" w:author="AKLA AI"`) && xml.includes('Rewritten clause.'));
+  const third = await applyDocxOps(first.bytes, [{ op: 'delete', p, expected: 'Added clause.' }], view.byRef);
+  assert.deepEqual(third.results[0].revisionIds, []);
+  assert.deepEqual(third.results[0].removedIds, [M, B]);
+  assert.equal(third.results[0].status, 'applied');
+  assert.ok(!docXml(third.bytes).includes('Added clause.'));
+});
+
+test("the fallback engine's ids are attributed to the op", async () => {
+  // A footnote mark inside the run that would be cut: the inline writer refuses, the engine takes it.
+  const para = (n) => `<w:p><w:r><w:t xml:space="preserve">Clause ${n} pays within</w:t></w:r><w:r><w:t xml:space="preserve"> thirty</w:t><w:footnoteReference w:id="${n}"/></w:r><w:r><w:t xml:space="preserve"> days.</w:t></w:r></w:p>`;
+  const bytes = docFrom(para(1) + para(2), {
+    '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'),
+  });
+  const view = inspectDocx(bytes);
+  const ops = [...view.byRef].map(([p, r]) => ({ op: 'replace', p, expected: r.exactText, text: r.exactText.replace('thirty', 'forty') }));
+  const output = await applyDocxOps(bytes, ops, view.byRef);
+  const xml = docXml(output.bytes);
+  assert.equal(output.applied, 2);
+  for (const r of output.results) {
+    assert.equal(r.status, 'applied');
+    assert.equal(r.via, 'fallback');
+    assert.ok(r.revisionIds.length, 'ids were read from the engine');
+    for (const id of r.revisionIds) assert.ok(idsOf(xml).includes(id), `id ${id} is in the file as AKLA AI`);
+  }
+  const [a, b] = output.results;
+  assert.ok(!a.revisionIds.some((id) => b.revisionIds.includes(id)), 'two fallback ops never share an id');
+  assert.ok(xml.includes('<w:footnoteReference w:id="1"/>') && xml.includes('<w:footnoteReference w:id="2"/>'));
+});
+
+test("review suggestions report ids and the document's own words", () => {
+  const body = `<w:p><w:r><w:t xml:space="preserve">The fee is thirty (30) days payable by Party Alpha.</w:t></w:r></w:p>`
+    + `<w:p><w:r><w:t xml:space="preserve">Existing </w:t></w:r><w:ins w:id="1" w:author="Counsel" w:date="2026-09-01T00:00:00Z"><w:r><w:t>redline</w:t></w:r></w:ins><w:r><w:t xml:space="preserve"> stays.</w:t></w:r></w:p>`
+    + `<w:p><w:r><w:t xml:space="preserve">Accepted wording here.</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r></w:p>`;
+  const bytes = docFrom(body);
+  const { bytes: out, results, maxId } = applyReviewSuggestions(bytes, [
+    { id: 'a', original: 'thirty (30) days payable by Party Alpha', suggested: 'forty (40) days payable by Party Beta', accepted: false },
+    { id: 'b', original: 'Accepted wording<sup><a href="#f">[2]</a></sup> here.', suggested: 'Final wording here.', accepted: false },
+    { id: 'c', original: 'Not in this file at all', suggested: 'Anything', accepted: false },
+  ], { legacy: false });
+  const xml = docXml(out);
+  assert.deepEqual(results.map((r) => r.status), ['applied', 'applied', 'skipped']);
+  assert.equal(results[0].original, 'thirty (30) days payable by Party Alpha');
+  assert.equal(results[0].suggested, 'forty (40) days payable by Party Beta');
+  // Two word hunks ("thirty (30)" and "Alpha"): a deletion and an insertion each.
+  assert.equal(results[0].revisionIds.length, 4);
+  // Plus suggestion b's one deletion ("Accepted"): nothing is stripped on this path.
+  assert.equal((xml.match(/<w:del [^>]*w:author="AKLA AI"/g) ?? []).length, 3);
+  assert.equal(results[0].part, 'word/document.xml');
+  assert.equal(results[0].paragraphIndex, 1);
+  assert.equal(results[1].paragraphIndex, 3);
+  assert.equal(results[1].original, 'Accepted wording here.');
+  assert.ok(results[1].revisionIds.length >= 2 && !results[1].revisionIds.some((id) => results[0].revisionIds.includes(id)));
+  assert.equal(results[2].reason, 'not_found');
+  assert.deepEqual(results[2].revisionIds, []);
+  assert.equal(results[2].original, 'Not in this file at all');
+  // Nothing is accepted on the write-through path: every change is a tracked change by the AI.
+  for (const id of [...results[0].revisionIds, ...results[1].revisionIds]) assert.ok(idsOf(xml).includes(id), `id ${id} is an AKLA AI revision`);
+  assert.ok(!xml.includes('(accepted)'));
+  assert.ok(xml.includes('w:author="Counsel"') && xml.includes('<w:footnoteReference w:id="2"/>'));
+  assert.equal(maxId, Math.max(...results[1].revisionIds, ...results[0].revisionIds));
+});
+
+test('a quote found twice is refused, unless the clause narrows it', () => {
+  const two = docFrom('<w:p><w:r><w:t>4. The Authority shall pay.</w:t></w:r></w:p><w:p><w:r><w:t>7. The Authority shall notify.</w:t></w:r></w:p>');
+  const bare = applyReviewSuggestions(two, [{ id: 'a', original: 'The Authority shall', suggested: 'The Authority must', accepted: false }]);
+  assert.equal(bare.results[0].status, 'skipped');
+  assert.equal(bare.results[0].reason, 'ambiguous');
+  assert.deepEqual(unzipSync(bare.bytes)['word/document.xml'], unzipSync(two)['word/document.xml']);
+  const narrowed = applyReviewSuggestions(two, [{ id: 'a', original: 'The Authority shall', suggested: 'The Authority must', accepted: false, clause: '7' }]);
+  assert.equal(narrowed.results[0].status, 'applied');
+  assert.equal(narrowed.results[0].paragraphIndex, 2);
+  const xml = docXml(narrowed.bytes);
+  assert.ok(xml.includes('<w:t>4. The Authority shall pay.</w:t>'), 'clause 4 is untouched');
+  assert.ok(/7\. The Authority <\/w:t><\/w:r><w:del /.test(xml) && xml.includes('<w:delText xml:space="preserve">shall</w:delText>'));
+  const twice = docFrom('<w:p><w:r><w:t>If the Authority shall pay, the Authority shall notify.</w:t></w:r></w:p>');
+  const same = applyReviewSuggestions(twice, [{ id: 'a', original: 'the Authority shall', suggested: 'the Authority must', accepted: false }]);
+  assert.equal(same.results[0].reason, 'ambiguous');
+  assert.deepEqual(unzipSync(same.bytes)['word/document.xml'], unzipSync(twice)['word/document.xml']);
+});
+
+// A Word file the review can read: the fixture body plus the package parts
+// mammoth and inspectPackage expect.
+const reviewFixture = (body = '<w:p><w:r><w:t>4. The Authority shall pay within thirty (30) days.</w:t></w:r></w:p>') => docFrom(body, {
+  '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+  'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'),
+});
+// A Supabase client that answers from canned replies per table or RPC and
+// keeps every call, so a test can say exactly what was asked of the database.
+function recordingSupabase(answers = {}, { file = null } = {}) {
+  const calls = [];
+  const reply = (call) => ({ data: answers[call.table]?.(call) ?? null, error: null });
+  const chain = (call) => {
+    calls.push(call);
+    const q = {
+      select: (cols) => { call.select = cols; return q; },
+      eq: (k, v) => { call.eq.push([k, v]); return q; },
+      maybeSingle: () => Promise.resolve(reply(call)),
+      single: () => Promise.resolve(reply(call)),
+      then: (ok, bad) => Promise.resolve(reply(call)).then(ok, bad),
+    };
+    return q;
+  };
+  return {
+    calls,
+    from: (table) => ({
+      select: (cols) => chain({ table, op: 'select', select: cols, eq: [] }),
+      insert: (row) => chain({ table, op: 'insert', row, eq: [] }),
+      update: (patch) => chain({ table, op: 'update', patch, eq: [] }),
+    }),
+    rpc: (name, args) => { calls.push({ op: 'rpc', name, args }); return Promise.resolve({ data: answers[name]?.(args) ?? [], error: null }); },
+    storage: { from: (bucket) => ({ download: (path) => { calls.push({ op: 'download', bucket, path }); return Promise.resolve({ data: new Blob([file]), error: null }); } }) },
+  };
+}
+// The model and the embedding service answered locally, every request kept.
+function stubFetch(answer) {
+  const real = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    requests.push({ url: String(url), body });
+    return answer(String(url), body);
+  };
+  return { requests, restore: () => { globalThis.fetch = real; } };
+}
+const jsonResponse = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+const streamResponse = (text, stop = 'end_turn') => new Response(
+  `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text } })}\n\n`
+  + `data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: stop } })}\n\n`,
+  { status: 200 },
+);
+
+test('reviewDocument records the run on the working document and commits nothing', async () => {
+  const { reviewDocument, runReview } = await import('../review.js');
+  const bytes = reviewFixture();
+  const finding = { clause_reference: '4', original_text: 'thirty (30) days', suggested_text: 'sixty (60) days', rationale: 'The term sheet says sixty.' };
+  const model = stubFetch((url, body) => {
+    if (url.includes('voyageai')) return jsonResponse({ data: [{ embedding: [0.1, 0.2] }] });
+    const text = body.messages[0].content.startsWith('Run the legal clauses pass') ? JSON.stringify([finding]) : '[]';
+    return jsonResponse({ stop_reason: 'end_turn', content: [{ type: 'text', text }] });
+  });
+  try {
+    const working = recordingSupabase({ ai_review_runs: (c) => (c.op === 'insert' ? { id: 'run-1' } : null) }, { file: bytes });
+    const review = await reviewDocument({ supabase: working, anthropicKey: 'k', voyageKey: 'v', bytes, fileName: 'draft.docx', title: 'Draft', run: { artifact_id: 'root' }, userId: 'u1' });
+    const started = working.calls.find((c) => c.table === 'ai_review_runs' && c.op === 'insert');
+    assert.equal(started.row.artifact_id, 'root');
+    assert.equal(started.row.document_version_id, null);
+    assert.equal(started.row.created_by, 'u1');
+    assert.ok(typeof started.row.source_hash === 'string' && started.row.source_hash.length === 64);
+    assert.ok(!working.calls.some((c) => c.op === 'rpc' && c.name === 'complete_ai_review'), 'nothing is committed');
+    assert.ok(!working.calls.some((c) => c.op === 'download'), 'the bytes it was given are the document');
+    assert.equal(review.runId, 'run-1');
+    assert.deepEqual(review.tagged.map((s) => s.review_type), ['legal_clauses']);
+    assert.equal(review.tagged[0].original_text, 'thirty (30) days');
+    assert.ok(review.fullText.includes('thirty (30) days'));
+    assert.equal(review.passes.legal_clauses.findings, 1);
+    assert.equal(review.coverage.sectionsCompleted, 1);
+    assert.ok(!working.calls.some((c) => c.table === 'ai_review_runs' && c.op === 'update' && c.patch.status), 'the run is left running for the caller to commit');
+
+    // The old entry: a saved version, loaded here, committed here, four keys.
+    const versioned = recordingSupabase({
+      document_versions: () => ({ id: 'v1', storage_path: 'm1/d1/draft.docx', matter_document: { id: 'd1', title: 'Draft', matter_id: null, document_type_id: null, document_type: null } }),
+      ai_review_runs: (c) => (c.op === 'insert' ? { id: 'run-2' } : null),
+      complete_ai_review: (args) => args.p_suggestions.map((s, i) => ({ id: `s${i}`, ...s, status: 'pending' })),
+    }, { file: bytes });
+    const result = await runReview({ supabase: versioned, anthropicKey: 'k', voyageKey: 'v', documentVersionId: 'v1', userId: 'u1' });
+    const commits = versioned.calls.filter((c) => c.op === 'rpc' && c.name === 'complete_ai_review');
+    assert.equal(commits.length, 1);
+    assert.deepEqual(Object.keys(commits[0].args), ['p_run_id', 'p_suggestions', 'p_passes', 'p_coverage']);
+    assert.equal(commits[0].args.p_run_id, 'run-2');
+    assert.equal(commits[0].args.p_suggestions[0].review_type, 'legal_clauses');
+    const run = versioned.calls.find((c) => c.table === 'ai_review_runs' && c.op === 'insert');
+    assert.equal(run.row.document_version_id, 'v1');
+    assert.ok(!('artifact_id' in run.row), 'the version-anchored run names no artifact column');
+    assert.equal(versioned.calls.find((c) => c.op === 'download').bucket, 'matter-documents');
+    assert.equal(result.reviewRunId, 'run-2');
+    assert.equal(result.suggestions.length, 1);
+    assert.equal(result.documentTitle, 'Draft');
+    assert.ok(result.fullText.includes('thirty (30) days'));
+  } finally {
+    model.restore();
+  }
+});
+
+test('the instruction check reads the bytes it is given and lists the existing changes', async () => {
+  const { checkReviewInstruction } = await import('../review.js');
+  const bytes = reviewFixture();
+  const answer = '<answer>The period should be sixty days.</answer>\n<suggestions>[{"clause_reference":"4","original_text":"thirty (30) days","suggested_text":"sixty (60) days","rationale":"Term sheet"},{"clause_reference":"9","original_text":"not in the file","suggested_text":"x","rationale":"y"}]</suggestions>';
+  const model = stubFetch(() => streamResponse(answer));
+  try {
+    const db = recordingSupabase({}, { file: bytes });
+    const out = await checkReviewInstruction({
+      supabase: db, anthropicKey: 'k',
+      document: { bytes, fileName: 'draft.docx', title: 'Draft', typeName: 'Concession Agreement' },
+      existing: [{ status: 'pending', clause_reference: '4', rationale: 'x' }],
+      insert: false,
+      instruction: 'Check the payment period against the term sheet.',
+      userId: 'u1',
+    });
+    assert.ok(!db.calls.some((c) => c.table === 'document_versions'), 'no saved version is loaded');
+    assert.ok(!db.calls.some((c) => c.op === 'download' || c.op === 'insert'), 'nothing downloaded, nothing inserted');
+    assert.equal(model.requests.length, 1);
+    const { system, stream } = model.requests[0].body;
+    assert.equal(stream, true);
+    assert.ok(system.includes('[pending] 4: x'));
+    assert.ok(system.includes('DOCUMENT BEING REVIEWED — "Draft"') && system.includes('thirty (30) days'));
+    assert.ok(system.includes('A review of the Concession Agreement below'));
+    assert.deepEqual(Object.keys(out), ['reply', 'rows']);
+    assert.ok(out.reply.startsWith('The period should be sixty days.'));
+    assert.ok(out.reply.includes('1 proposed change was not added'), 'the unlocatable one is counted in the reply');
+    assert.equal(out.rows.length, 1);
+    assert.equal(out.rows[0].original_text, 'thirty (30) days');
+    assert.equal(out.rows[0].suggested_text, 'sixty (60) days');
+  } finally {
+    model.restore();
+  }
+});
+
+// ---- Reviewer findings: what counts as the AI's own paragraph, comment
+// anchors in it, the fallback engine's ids, marks on empty run properties,
+// paragraphs holding a text box, and the old preview's first-occurrence rule.
+
+const PACKAGE = {
+  '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+  'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'),
+};
+const withPart = (bytes, xml, part = 'word/document.xml') => { const e = unzipSync(bytes); e[part] = strToU8(xml); return zipSync(e); };
+const textsOf = (bytes) => [...inspectDocx(bytes).byRef.values()].map((r) => r.exactText);
+
+test("a paragraph the AI added is its own only until someone else writes in it", async () => {
+  const base = docFrom('<w:p><w:r><w:t>Anchor.</w:t></w:r></w:p>');
+  const first = await applyDocxOps(base, [{ op: 'insert_after', p: 1, expected: 'Anchor.', text: 'Added clause.' }], inspectDocx(base).byRef);
+  const [M, B] = first.results[0].revisionIds;
+  // Counsel types " by Counsel" at the end of the added paragraph in Word.
+  const counsel = '<w:ins w:id="500" w:author="Counsel" w:date="D"><w:r><w:t xml:space="preserve"> by Counsel</w:t></w:r></w:ins>';
+  const typed = withPart(first.bytes, docXml(first.bytes).replace('</w:ins></w:p>', `</w:ins>${counsel}</w:p>`));
+  const view = inspectDocx(typed);
+  const [p] = [...view.byRef].find(([, r]) => r.exactText === 'Added clause. by Counsel');
+  // Deleting it is tracked: Counsel's words are struck through, not removed, and their revision stays.
+  const del = await applyDocxOps(typed, [{ op: 'delete', p, expected: 'Added clause. by Counsel' }], view.byRef, { idFloor: first.maxId });
+  const d = del.results[0];
+  assert.equal(d.status, 'applied');
+  assert.equal(d.removedIds, undefined);
+  assert.equal(d.revisionIds.length, 3, 'a mark and one deletion per run');
+  assert.ok(docXml(del.bytes).includes('w:id="500"') && docXml(del.bytes).includes('by Counsel'));
+  assert.ok(docXml(del.bytes).includes(`<w:rPr><w:ins w:id="${M}" `) && /<w:ins w:id="\d+" w:author="AKLA AI"[^>]*\/><w:del w:id="\d+"/.test(docXml(del.bytes)), 'the deleted mark follows the inserted one');
+  assert.deepEqual(textsOf(acceptAllChanges(del.bytes)), ['Anchor.']);
+  // Rewriting it is a redline inside the paragraph, Counsel's insertion untouched.
+  const rep = await applyDocxOps(typed, [{ op: 'replace', p, expected: 'Added clause. by Counsel', text: 'Added clause, amended. by Counsel' }], view.byRef, { idFloor: first.maxId });
+  const r = rep.results[0];
+  assert.equal(r.status, 'applied');
+  assert.equal(r.takesOver, undefined);
+  assert.ok(docXml(rep.bytes).includes(counsel), 'Counsel\'s insertion is byte-identical');
+  assert.ok(docXml(rep.bytes).includes(`<w:ins w:id="${B}" w:author="AKLA AI"`), 'the earlier insertion keeps its id');
+  assert.deepEqual(textsOf(rep.bytes), ['Anchor.', 'Added clause, amended. by Counsel']);
+  const { applyDecisions } = await import('../changes.js');
+  const back = applyDecisions(rep.bytes, [{ id: 'r', part: 'word/document.xml', revisionIds: r.revisionIds, decision: 'rejected' }]);
+  assert.equal(back.results[0].status, 'applied');
+  assert.deepEqual(textsOf(back.bytes), ['Anchor.', 'Added clause. by Counsel']);
+  assert.ok(docXml(back.bytes).includes(counsel));
+  // Text typed outside any insertion counts the same way.
+  const plain = withPart(first.bytes, docXml(first.bytes).replace('</w:ins></w:p>', '</w:ins><w:r><w:t xml:space="preserve"> plain</w:t></w:r></w:p>'));
+  const v2 = inspectDocx(plain);
+  const [p2] = [...v2.byRef].find(([, r]) => r.exactText === 'Added clause. plain');
+  const del2 = await applyDocxOps(plain, [{ op: 'delete', p: p2, expected: 'Added clause. plain' }], v2.byRef, { idFloor: first.maxId });
+  assert.equal(del2.results[0].removedIds, undefined);
+  assert.ok(docXml(del2.bytes).includes('plain'));
+  // Untouched, the paragraph is still the AI's own: deleting it withdraws the earlier change.
+  const v1 = inspectDocx(first.bytes);
+  const [p1] = [...v1.byRef].find(([, r]) => r.exactText === 'Added clause.');
+  const own = await applyDocxOps(first.bytes, [{ op: 'delete', p: p1, expected: 'Added clause.' }], v1.byRef, { idFloor: first.maxId });
+  assert.deepEqual([own.results[0].revisionIds, own.results[0].removedIds], [[], [M, B]]);
+  assert.deepEqual(textsOf(own.bytes), ['Anchor.']);
+});
+
+test('a comment on an AI-added paragraph survives its rewrite', async () => {
+  const base = docFrom('<w:p><w:r><w:t>Anchor.</w:t></w:r></w:p>', PACKAGE);
+  const first = await applyDocxOps(base, [{ op: 'insert_after', p: 1, expected: 'Anchor.', text: 'Added clause.' }], inspectDocx(base).byRef);
+  const [M, B] = first.results[0].revisionIds;
+  const v1 = inspectDocx(first.bytes);
+  const [p] = [...v1.byRef].find(([, r]) => r.exactText === 'Added clause.');
+  const noted = await applyDocxOps(first.bytes, [{ op: 'comment', p, expected: 'Added clause.', text: 'Confirm this.' }], v1.byRef, { idFloor: first.maxId });
+  assert.equal(noted.results[0].status, 'applied');
+  const anchored = docXml(noted.bytes);
+  assert.ok(anchored.includes('<w:commentRangeStart w:id="0"/><w:ins ') && anchored.includes('</w:ins><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>'));
+  const v2 = inspectDocx(noted.bytes);
+  const third = await applyDocxOps(noted.bytes, [{ op: 'replace', p, expected: 'Added clause.', text: 'Rewritten clause.' }], v2.byRef, { idFloor: noted.maxId });
+  const r = third.results[0];
+  assert.equal(r.status, 'applied');
+  assert.deepEqual(r.takesOver, [M, B], 'still the AI\'s own paragraph: the change is taken over');
+  assert.equal(r.revisionIds[0], M);
+  const xml = docXml(third.bytes);
+  const para = xml.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*Rewritten clause[\s\S]*?<\/w:p>/)[0];
+  assert.ok(para.includes('<w:commentRangeStart w:id="0"/>') && para.includes('<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r>'), 'the comment\'s range and reference are still there');
+  assert.ok(/<w:commentRangeStart w:id="0"\/><w:ins w:id="\d+" w:author="AKLA AI"[^>]*><w:r><w:t xml:space="preserve">Rewritten clause\.<\/w:t><\/w:r><\/w:ins><w:commentRangeEnd/.test(para), 'the new insertion sits inside the range');
+  assert.ok(!xml.includes('Added clause.'));
+  assert.ok(strFromU8(unzipSync(third.bytes)['word/comments.xml']).includes('Confirm this.'));
+  // A bookmark too.
+  const marked = withPart(first.bytes, docXml(first.bytes).replace(`<w:ins w:id="${B}"`, `<w:bookmarkStart w:id="3" w:name="_Ref1"/><w:ins w:id="${B}"`).replace('</w:ins></w:p>', '</w:ins><w:bookmarkEnd w:id="3"/></w:p>'));
+  const v3 = inspectDocx(marked);
+  const again = await applyDocxOps(marked, [{ op: 'replace', p, expected: 'Added clause.', text: 'Rewritten clause.' }], v3.byRef, { idFloor: first.maxId });
+  assert.deepEqual(again.results[0].takesOver, [M, B]);
+  assert.ok(/<w:bookmarkStart w:id="3" w:name="_Ref1"\/><w:ins [^>]*><w:r><w:t xml:space="preserve">Rewritten clause\.<\/w:t><\/w:r><\/w:ins><w:bookmarkEnd w:id="3"\/><\/w:p>/.test(docXml(again.bytes)));
+});
+
+test("the fallback engine's ids are renumbered above the floor", async () => {
+  const para = '<w:p><w:r><w:t xml:space="preserve">Clause 1 pays within</w:t></w:r><w:r><w:t xml:space="preserve"> thirty</w:t><w:footnoteReference w:id="1"/></w:r><w:r><w:t xml:space="preserve"> days.</w:t></w:r></w:p>';
+  const earlier = '<w:p><w:ins w:id="9001" w:author="AKLA AI" w:date="D"><w:r><w:t>Earlier.</w:t></w:r></w:ins></w:p>';
+  const bytes = docFrom(para + earlier, PACKAGE);
+  const view = inspectDocx(bytes);
+  const out = await applyDocxOps(bytes, [{ op: 'replace', p: 1, expected: 'Clause 1 pays within thirty days.', text: 'Clause 1 pays within forty days.' }], view.byRef, { idFloor: 9500 });
+  const r = out.results[0];
+  const xml = docXml(out.bytes);
+  assert.equal(r.via, 'fallback');
+  assert.equal(r.revisionIds.length, 2);
+  assert.ok(r.revisionIds.every((id) => id > 9500), `ids ${r.revisionIds} are above the floor`);
+  for (const id of r.revisionIds) assert.ok(idsOf(xml).includes(id), `id ${id} is in the file as AKLA AI`);
+  assert.deepEqual(idsOf(xml).sort((a, b) => a - b), [9001, ...r.revisionIds].sort((a, b) => a - b), 'no other id appeared');
+  assert.equal(out.maxId, Math.max(...r.revisionIds));
+  assert.ok(xml.includes(earlier), 'the earlier insertion is untouched');
+  assert.ok(xml.includes('<w:footnoteReference w:id="1"/>'));
+  assert.ok(docXml(acceptAllChanges(out.bytes)).includes('forty'));
+});
+
+test('a paragraph mark is written whatever shape the run properties take', async () => {
+  const { applyDecisions } = await import('../changes.js');
+  const cases = [
+    ['<w:pPr><w:pStyle w:val="Normal"/><w:rPr/></w:pPr>', '<w:rPr><w:ins w:id="9003" w:author="AKLA AI" w:date="'],
+    ['<w:pPr><w:pStyle w:val="Normal"/><w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/></w:pPr>', '<w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:ins w:id="9003" w:author="AKLA AI" w:date="'],
+    ['<w:pPr><w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:b/></w:rPr></w:pPr>', '<w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:ins w:id="9003" w:author="AKLA AI" w:date="'],
+    ['<w:pPr/>', '<w:pPr><w:rPr><w:ins w:id="9003" w:author="AKLA AI" w:date="'],
+  ];
+  for (const [pPr, want] of cases) {
+    const bytes = docFrom(`<w:p>${pPr}<w:r><w:t>Anchor.</w:t></w:r></w:p><w:p><w:r><w:t>Next.</w:t></w:r></w:p>`);
+    const view = inspectDocx(bytes);
+    const out = await applyDocxOps(bytes, [
+      { op: 'insert_after', p: 1, expected: 'Anchor.', text: 'Added.' },
+      { op: 'delete', p: 1, expected: 'Anchor.' },
+    ], view.byRef);
+    const xml = docXml(out.bytes);
+    assert.equal(out.applied, 2, pPr);
+    for (const r of out.results) for (const id of r.revisionIds) assert.ok(xml.includes(`w:id="${id}"`), `${pPr}: id ${id} is in the file`);
+    assert.ok(xml.includes(want), `${pPr}: the added paragraph's mark is in its run properties`);
+    assert.ok(!xml.includes('<w:rPr/>') && !xml.includes('<w:pPr/>') || pPr === '<w:pPr/>', pPr);
+    assert.deepEqual(applyDecisions(out.bytes, out.results.map((r) => ({ id: r.kind, part: 'word/document.xml', revisionIds: r.revisionIds, decision: 'rejected' }))).results.map((r) => r.status), ['applied', 'applied'], pPr);
+    assert.deepEqual(textsOf(acceptAllChanges(out.bytes)), ['Added.', 'Next.'], pPr);
+  }
+});
+
+test('a paragraph holding a text box is listed but never written to', async () => {
+  const box = '<w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent><w:p><w:r><w:t>Inner box.</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>';
+  const body = `<w:p><w:r><w:t xml:space="preserve">Outer text </w:t></w:r>${box}<w:r><w:t xml:space="preserve">and more.</w:t></w:r></w:p><w:p><w:r><w:t>Second para.</w:t></w:r></w:p>`;
+  const bytes = docFrom(body, PACKAGE);
+  const view = inspectDocx(bytes);
+  assert.deepEqual([...view.byRef.values()].map((r) => [r.index, r.exactText]), [[1, 'Outer text and more.'], [2, 'Second para.']], 'the box\'s own paragraph is not a paragraph of the document');
+  assert.ok(view.listing.includes('¶1 [text box] Outer text and more.'));
+  const ops = [
+    { op: 'insert_after', p: 1, expected: 'Outer text and more.', text: 'New paragraph.' },
+    { op: 'replace', p: 1, expected: 'Outer text and more.', text: 'Changed text and more.' },
+    { op: 'delete', p: 1, expected: 'Outer text and more.' },
+    { op: 'insert_after', p: 2, expected: 'Second para.', text: 'Third para.' },
+  ];
+  const out = await applyDocxOps(bytes, ops, view.byRef);
+  assert.deepEqual(out.results.map((r) => [r.status, r.reason ?? null]), [['skipped', 'formatting'], ['skipped', 'formatting'], ['skipped', 'formatting'], ['applied', null]]);
+  const xml = docXml(out.bytes);
+  assert.ok(xml.startsWith(`<w:document ${ns}><w:body><w:p><w:r><w:t xml:space="preserve">Outer text </w:t></w:r>${box}<w:r><w:t xml:space="preserve">and more.</w:t></w:r></w:p><w:p><w:r><w:t>Second para.</w:t></w:r></w:p><w:p><w:pPr><w:rPr><w:ins `), 'the text box paragraph is untouched and the new paragraph follows the second');
+  assert.deepEqual(textsOf(out.bytes), ['Outer text and more.', 'Second para.', 'Third para.']);
+  // The same for a drawing written as alternate content, and in a review.
+  const alt = `<w:p><w:r><w:t xml:space="preserve">Lead </w:t></w:r><w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="wps"><w:drawing><w:txbxContent><w:p><w:r><w:t>Box A</w:t></w:r></w:p></w:txbxContent></w:drawing></mc:Choice><mc:Fallback>${box.slice('<w:r>'.length, -'</w:r>'.length)}</mc:Fallback></mc:AlternateContent></w:r></w:p><w:p><w:r><w:t>Tail para.</w:t></w:r></w:p>`;
+  const v2 = inspectDocx(docFrom(alt, PACKAGE));
+  assert.deepEqual([...v2.byRef.values()].map((r) => r.exactText), ['Lead ', 'Tail para.']);
+  const review = applyReviewSuggestions(docFrom(body, PACKAGE), [
+    { id: 'a', original: 'Outer text and more.', suggested: 'Outer text and less.', accepted: false },
+    { id: 'b', original: 'Second para.', suggested: 'Second clause.', accepted: false },
+  ]);
+  assert.deepEqual(review.results.map((r) => [r.status, r.reason ?? null]), [['skipped', 'formatting'], ['applied', null]]);
+});
+
+test('the old preview takes the first place a quote is found', () => {
+  const two = docFrom('<w:p><w:r><w:t>4. The Authority shall pay.</w:t></w:r></w:p><w:p><w:r><w:t>7. The Authority shall notify.</w:t></w:r></w:p>');
+  const change = { id: 'a', original: 'The Authority shall', suggested: 'The Authority must', accepted: false };
+  assert.equal(applyReviewSuggestions(two, [change]).results[0].reason, 'ambiguous');
+  const legacy = applyReviewSuggestions(two, [change], { legacy: true });
+  assert.equal(legacy.results[0].status, 'applied');
+  assert.equal(legacy.results[0].paragraphIndex, 1);
+  const xml = docXml(legacy.bytes);
+  assert.ok(/4\. The Authority <\/w:t><\/w:r><w:del /.test(xml) && xml.includes('<w:t>7. The Authority shall notify.</w:t>'));
+  // The clause still narrows it first.
+  assert.equal(applyReviewSuggestions(two, [{ ...change, clause: '7' }], { legacy: true }).results[0].paragraphIndex, 2);
 });

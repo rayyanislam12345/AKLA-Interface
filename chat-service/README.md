@@ -91,6 +91,46 @@ text and comes back as a Markdown draft.
 **The edge function cannot do any of this** — it has no `docxAgent` — so the
 rollback below is a real downgrade, not just a change of host.
 
+## Review writes into the working file
+
+Review no longer rebuilds a file from the saved version it reviewed. It runs
+on the conversation's working Word document (the lineage root, opened as an
+opening row first if the turn started from a project version, a standard or
+an upload) and writes each suggestion into that file as an `AKLA AI` tracked
+change, exactly as Edit does. Each change is one `redline_suggestions` row
+anchored on `artifact_id` and the Word revision ids it minted; the lawyer
+decides it through `POST /changes/decide`, and `POST /changes/list` and
+`POST /documents/file` read the same head file. So preview, download and
+save are the same bytes. The pure renderer and record module is
+`changes.js`.
+
+Three things keep the list and the file in step. The writes to one working
+document (an Edit copy, a Review copy, a decision) run one after another
+under an in-process lock, from the head check to the counts; the model call
+is outside it. An Edit turn inserts its change rows before its copy, and a
+Review removes its copy if the rows fail, so a copy never exists without
+the rows that name its changes. And every count carries `unlisted`: the
+`AKLA AI` tracked changes in the head file that no row names (a file edited
+before this record existed, or a turn whose rows never landed). While it is
+above zero a clean copy is refused with "This file has N AI changes that are
+not in the Changes list. Decide them in Word first." rather than accepting
+them unseen. A change a later AI change was made inside is `needs_word` with
+"A later change was made inside this one. Decide the later change first."
+
+`/changes/list` returns the head as a summary; `/changes/decide` returns the
+head's artifact row (`head.data.storagePath`, `head.data.changeCounts`),
+which may be a new row or the decision row updated in place.
+
+`REVIEW_IN_FILE=0` in `.env` restores the old branch: list-only rows on a
+saved version, previewed by text match. The legacy preview path
+(`POST /review`, `/review/preview`, `/review/download`) remains in any case
+and is served only for rows that carry `document_version_id`; rows with
+`artifact_id` never go through it.
+
+`changes.js` must stay in all three lists in `deploy.sh` (the `scp` line,
+the `mv` and the `chown`); if it is missing from any of them the service
+fails to import `server.js` on the VM.
+
 ## Deploying
 
 Port 8092 (8090 is ocr-service, 8091 the relay). `.env` needs

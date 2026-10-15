@@ -31,6 +31,17 @@ async function database() {
  await db.exec(readFileSync('supabase/migrations/20260918090100_ai_document_integrity.sql','utf8'));
  await db.exec(readFileSync('supabase/migrations/20260918090300_safe_document_versions.sql','utf8'));
  await db.exec(readFileSync('supabase/migrations/20260918090200_project_search.sql','utf8'));
+ // The change record, stubbed in its live shape (not-null version, the inline
+ // four-value check) so the migration's drop/alter statements are exercised.
+ await db.exec(`
+ create type public.redline_status as enum ('pending','accepted','rejected');
+ create table ai_chat_threads(id uuid primary key default gen_random_uuid(),matter_id uuid references matters(id),document_type_id uuid references document_types(id),created_by uuid);
+ create table ai_chat_messages(id uuid primary key default gen_random_uuid(),thread_id uuid references ai_chat_threads(id) on delete cascade);
+ create table ai_artifacts(id uuid primary key default gen_random_uuid(),thread_id uuid references ai_chat_threads(id) on delete cascade,kind text,title text,data jsonb not null default '{}'::jsonb);
+ create table ai_review_runs(id uuid primary key default gen_random_uuid(),document_version_id uuid not null references document_versions(id) on delete cascade,status text not null default 'running' check (status in ('running','complete','failed')),passes jsonb not null default '{}'::jsonb,coverage jsonb not null default '{}'::jsonb,source_hash text,template_path text,error text,created_by uuid default auth.uid() references auth.users(id),created_at timestamptz not null default now());
+ create table redline_suggestions(id uuid primary key default gen_random_uuid(),document_version_id uuid not null references document_versions(id) on delete cascade,clause_reference text,original_text text,suggested_text text,rationale text,status public.redline_status not null default 'pending',created_at timestamptz not null default now(),review_type text not null default 'content_conflicts' check (review_type in ('legal_clauses','formatting','content_conflicts','chat')),review_run_id uuid references ai_review_runs(id) on delete cascade);
+ `);
+ await db.exec(readFileSync('supabase/migrations/20261015090000_one_change_record.sql','utf8'));
  await db.exec('grant usage on schema public,auth,storage to authenticated; grant select,insert,update,delete on all tables in schema public,storage to authenticated;');
  return db;
 }
@@ -102,5 +113,80 @@ test('project search finds notes, tasks and full document text, with version and
   assert.equal((await query('covenant','document')).length,0);
   await db.exec("select set_config('test.member','false',false)");
   await assert.rejects(query('termination'),/Forbidden/);
+ } finally {await db.close();}
+});
+async function version(db) {
+ const id=randomUUID();
+ await db.query('insert into document_versions(id,version_number,storage_path) values($1,1,$2)',[id,`${project}/${randomUUID()}/x.docx`]);
+ return id;
+}
+async function run(db,anchor) {
+ return (await db.query('insert into ai_review_runs(document_version_id,artifact_id) values($1,$2) returning id',[anchor.versionId??null,anchor.artifactId??null])).rows[0].id;
+}
+async function complete(db,runId,suggestions) {
+ return (await db.query('select * from complete_ai_review($1::uuid,$2::jsonb,$3::jsonb,$4::jsonb)',[runId,JSON.stringify(suggestions),'{}','{}'])).rows;
+}
+test('the old review payload still completes a version-anchored run', async () => {
+ const db=await database();
+ try {
+  const versionId=await version(db),runId=await run(db,{versionId});
+  await db.exec('set role authenticated');
+  const rows=await complete(db,runId,[{clause_reference:'4.2',original_text:'a',suggested_text:'b',rationale:'r',review_type:'legal_clauses'}]);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].document_version_id,versionId);
+  assert.equal(rows[0].artifact_id,null);
+  assert.equal(rows[0].status,'pending');
+  assert.deepEqual(rows[0].revision_ids,[]);
+  assert.equal(rows[0].placement,'placed');
+  assert.equal((await db.query('select status from ai_review_runs where id=$1',[runId])).rows[0].status,'complete');
+ } finally {await db.close();}
+});
+test('a working-document run takes ids and placement', async () => {
+ const db=await database();
+ try {
+  const threadId=(await db.query('insert into ai_chat_threads(matter_id) values($1) returning id',[project])).rows[0].id;
+  const artifactId=(await db.query("insert into ai_artifacts(thread_id,kind,title) values($1,'docx','Agreement') returning id",[threadId])).rows[0].id;
+  const runId=await run(db,{artifactId});
+  await db.exec('set role authenticated');
+  const minted=randomUUID();
+  const rows=await complete(db,runId,[
+   {id:minted,thread_id:threadId,clause_reference:'4.2',original_text:'a',suggested_text:'b',rationale:'r',review_type:'legal_clauses',op:'replace',part:'word/header1.xml',paragraph_index:3,revision_ids:[9001,9002],placement:'placed'},
+   {thread_id:threadId,clause_reference:'7',original_text:'c',suggested_text:'d',rationale:'r',review_type:'formatting',placement:'unplaced',placement_reason:'ambiguous',revision_ids:[]},
+  ]);
+  assert.equal(rows.length,2);
+  // A row that brought its id keeps it; one without gets one.
+  assert.equal(rows[0].id,minted);
+  assert.ok(rows[1].id&&rows[1].id!==minted);
+  assert.ok(rows.every(r=>r.artifact_id===artifactId&&r.document_version_id===null&&r.thread_id===threadId));
+  assert.deepEqual(rows[0].revision_ids,[9001,9002]);
+  assert.equal(rows[0].part,'word/header1.xml');
+  assert.equal(rows[0].paragraph_index,3);
+  assert.equal(rows[0].placement,'placed');
+  assert.deepEqual(rows[1].revision_ids,[]);
+  assert.equal(rows[1].part,'word/document.xml');
+  assert.equal(rows[1].placement,'unplaced');
+  assert.equal(rows[1].placement_reason,'ambiguous');
+  await assert.rejects(run(db,{}),/ai_review_runs_anchor_check/);
+ } finally {await db.close();}
+});
+test('decisions are stamped and cleared', async () => {
+ const db=await database();
+ try {
+  const versionId=await version(db);
+  await db.exec('set role authenticated');
+  const id=(await db.query('insert into redline_suggestions(document_version_id) values($1) returning id',[versionId])).rows[0].id;
+  const row=async()=>(await db.query('select status,decided_at,decided_by from redline_suggestions where id=$1',[id])).rows[0];
+  await db.query("update redline_suggestions set status='accepted' where id=$1",[id]);
+  let r=await row();
+  assert.ok(r.decided_at instanceof Date);
+  assert.equal(r.decided_by,user);
+  await db.query("update redline_suggestions set status='pending' where id=$1",[id]);
+  r=await row();
+  assert.equal(r.decided_at,null);
+  assert.equal(r.decided_by,null);
+  const decided=(await db.query("insert into redline_suggestions(document_version_id,status) values($1,'accepted') returning decided_at",[versionId])).rows[0];
+  assert.ok(decided.decided_at instanceof Date);
+  await db.query("update redline_suggestions set status='accepted' where id=$1",[id]);
+  await assert.rejects(db.query('update redline_suggestions set decided_at=null where id=$1',[id]),/redline_suggestions_decision_check/);
  } finally {await db.close();}
 });

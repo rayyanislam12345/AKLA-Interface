@@ -15,10 +15,35 @@ export type Database = {
   public: {
     Tables: {
       ai_review_runs: {
-        Row: { id: string; document_version_id: string; status: string; passes: Json; coverage: Json; source_hash: string | null; template_path: string | null; error: string | null; created_by: string | null; created_at: string }
-        Insert: { id?: string; document_version_id: string; status?: string; passes?: Json; coverage?: Json; source_hash?: string | null; template_path?: string | null; error?: string | null; created_by?: string | null; created_at?: string }
-        Update: { status?: string; passes?: Json; coverage?: Json; error?: string | null }
-        Relationships: []
+        // A run reviews a saved version (document_version_id, legacy) or a working
+        // Word document in the chat (artifact_id, the lineage root); one of the two
+        // is always set. output_artifact_id is the copy with the suggestions written in.
+        Row: { id: string; document_version_id: string | null; artifact_id: string | null; output_artifact_id: string | null; status: string; passes: Json; coverage: Json; source_hash: string | null; template_path: string | null; error: string | null; created_by: string | null; created_at: string }
+        Insert: { id?: string; document_version_id?: string | null; artifact_id?: string | null; output_artifact_id?: string | null; status?: string; passes?: Json; coverage?: Json; source_hash?: string | null; template_path?: string | null; error?: string | null; created_by?: string | null; created_at?: string }
+        Update: { document_version_id?: string | null; artifact_id?: string | null; output_artifact_id?: string | null; status?: string; passes?: Json; coverage?: Json; error?: string | null }
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_runs_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "ai_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_review_runs_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_review_runs_output_artifact_id_fkey"
+            columns: ["output_artifact_id"]
+            isOneToOne: false
+            referencedRelation: "ai_artifacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ai_artifacts: {
         Row: {
@@ -1323,48 +1348,125 @@ export type Database = {
         Relationships: []
       }
       redline_suggestions: {
+        // One AI change. Legacy rows anchor on document_version_id (text-matched
+        // against a saved version); working-document rows anchor on artifact_id
+        // (the lineage root) and are found again in the Word file by revision_ids.
         Row: {
+          artifact_id: string | null
           clause_reference: string | null
           created_at: string
-          review_run_id: string | null
-          document_version_id: string
+          created_by: string | null
+          decided_at: string | null
+          decided_by: string | null
+          document_version_id: string | null
           id: string
+          message_id: string | null
+          op: string
           original_text: string | null
+          paragraph_index: number | null
+          part: string
+          placement: string
+          placement_reason: string | null
           rationale: string | null
+          review_run_id: string | null
           review_type: string
+          revision_ids: number[]
           status: Database["public"]["Enums"]["redline_status"]
           suggested_text: string | null
+          superseded_by: string | null
+          thread_id: string | null
         }
         Insert: {
-          review_run_id?: string | null
+          artifact_id?: string | null
           clause_reference?: string | null
           created_at?: string
-          document_version_id: string
+          created_by?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          document_version_id?: string | null
           id?: string
+          message_id?: string | null
+          op?: string
           original_text?: string | null
+          paragraph_index?: number | null
+          part?: string
+          placement?: string
+          placement_reason?: string | null
           rationale?: string | null
+          review_run_id?: string | null
           review_type?: string
+          revision_ids?: number[]
           status?: Database["public"]["Enums"]["redline_status"]
           suggested_text?: string | null
+          superseded_by?: string | null
+          thread_id?: string | null
         }
         Update: {
-          review_run_id?: string | null
+          artifact_id?: string | null
           clause_reference?: string | null
           created_at?: string
-          document_version_id?: string
+          created_by?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          document_version_id?: string | null
           id?: string
+          message_id?: string | null
+          op?: string
           original_text?: string | null
+          paragraph_index?: number | null
+          part?: string
+          placement?: string
+          placement_reason?: string | null
           rationale?: string | null
+          review_run_id?: string | null
           review_type?: string
+          revision_ids?: number[]
           status?: Database["public"]["Enums"]["redline_status"]
           suggested_text?: string | null
+          superseded_by?: string | null
+          thread_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "redline_suggestions_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "ai_artifacts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "redline_suggestions_document_version_id_fkey"
             columns: ["document_version_id"]
             isOneToOne: false
             referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redline_suggestions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redline_suggestions_review_run_id_fkey"
+            columns: ["review_run_id"]
+            isOneToOne: false
+            referencedRelation: "ai_review_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redline_suggestions_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "redline_suggestions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redline_suggestions_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_threads"
             referencedColumns: ["id"]
           },
         ]

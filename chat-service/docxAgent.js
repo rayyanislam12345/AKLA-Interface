@@ -36,7 +36,7 @@ export const MAX_LISTING_CHARS = 120_000;
 export const OPS_PROTOCOL = `HOW TO CHANGE THE DOCUMENT. The document is a real Word file and every change you make is applied to that file as a tracked change; nothing is retyped or reformatted. Each paragraph above is numbered ¶n. When you are ready to change it, end your reply with ONE fenced block:
 \`\`\`json
 {"ops": [
-  {"op": "replace", "p": 12, "expected": "Exact current paragraph text", "text": "The full new text of paragraph ¶12."},
+  {"op": "replace", "p": 12, "expected": "Exact current paragraph text", "text": "The full new text of paragraph ¶12.", "why": "one short line on why this change"},
   {"op": "insert_after", "p": 12, "expected": "Exact current anchor text", "text": "One new paragraph, placed after ¶12."},
   {"op": "delete", "p": 14, "expected": "Exact current paragraph text"},
   {"op": "comment", "p": 15, "expected": "Exact current paragraph text", "text": "The Firm notes that the concession period is not yet fixed."}
@@ -50,6 +50,7 @@ Rules:
 - Never type clause numbers — Word numbers headings and list items itself.
 - "comment" puts a Word margin comment, titled "AKLA Comments", on that paragraph and leaves its text as it is. Outstanding matters, gaps, figures to confirm and remarks for the reader go in comments — never into the document's text, and never as footnotes or an end section. A paragraph may take a change and a comment in the same turn.
 - **bold** marks a defined term; use no other markup.
+- "why" is optional on any op: one short line on why this change, shown to the lawyer beside it.
 - Change only what the instruction requires. Everything not listed stays exactly as it is.
 - Before the block, write two or three sentences for the lawyer saying what you changed and anything you could not do. If you need more information first, ask, and send no block.`;
 
@@ -69,7 +70,22 @@ function readZip(bytes) {
   if (!entries["word/document.xml"]) throw new Error("Not a Word file (no word/document.xml)");
   return entries;
 }
-const writeZip = (entries) => zipSync(entries, { level: 6 });
+// One fixed timestamp on every entry, so the same parts always give the same
+// bytes: a hash of the file, or two runs compared, never differ by the clock.
+const ZIP_MTIME = new Date(Date.UTC(2026, 0, 1));
+const writeZip = (entries) => zipSync(entries, { level: 6, mtime: ZIP_MTIME });
+
+// A paragraph element, or an empty self-closing one (<w:p w:rsidR="…"/>),
+// which is matched on its own so it is never mistaken for the opening tag
+// of the paragraph after it. Every paragraph-by-paragraph pass over a part
+// uses this one pattern. (A paragraph holding a text box ends at the box's
+// inner </w:p>; see enumerateParagraphs, which refuses such paragraphs.)
+const PARAGRAPH = /<w:p(?:\s[^>]*)?\/>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
+
+// Word requires every table cell to end with a paragraph. A cell may end in
+// a nested table, so what counts is the element right before each </w:tc>.
+const patchEmptyCells = (xml) =>
+  xml.replace(/(<\/w:p>|<w:p(?:\s[^>]*)?\/>)?(\s*<\/w:tc>)/g, (m, prev, close) => (prev ? m : `<w:p/>${close}`));
 
 // Every w:t in the paragraph that a reader would see: what is inside a
 // tracked deletion is struck through and does not count.
@@ -101,21 +117,46 @@ function headingStyles(stylesXml) {
 
 // Every paragraph of the body in document order, with the number the model
 // uses, whether it sits in a table, and its heading level.
+// A paragraph that holds a text box (a drawing with its own paragraphs
+// inside) is listed with its own words, but no change is written to it:
+// its markup nests paragraphs inside runs, which nothing here can rewrite
+// safely. An operation on it is refused with reason "formatting".
+const NESTED_PARAGRAPHS = /<w:txbxContent[\s>]|<mc:AlternateContent[\s>]/;
+const NESTED_CONTENT = /<w:txbxContent(?:\s[^>]*)?>[\s\S]*?<\/w:txbxContent>|<mc:AlternateContent(?:\s[^>]*)?>[\s\S]*?<\/mc:AlternateContent>/g;
+
 function enumerateParagraphs(documentXml, headings) {
   const paras = [];
   let depth = 0;
   let ordinal = 0;
   const seen = new Map(); // text → count so far, to address duplicates
-  for (const m of documentXml.matchAll(/<w:tbl>|<\/w:tbl>|<w:p(?:\s[^>]*)?\/>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)) {
-    const tok = m[0];
-    if (tok === "<w:tbl>") { depth++; continue; }
-    if (tok === "</w:tbl>") { depth--; continue; }
+  // The paragraph being read: where it starts, and how many paragraphs of a
+  // text box inside it are still open, so that it ends at its own </w:p>.
+  let open = null;
+  const push = (start, end) => {
+    const tok = documentXml.slice(start, end);
     ordinal++;
-    const text = tok.endsWith("/>") ? "" : visibleText(tok);
+    const formatting = NESTED_PARAGRAPHS.test(tok);
+    const text = tok.endsWith("/>") ? "" : visibleText(formatting ? tok.replace(NESTED_CONTENT, "") : tok);
     const styleId = attr(child(child(tok, "w:pPr") ?? "", "w:pStyle") ?? "", "w:val");
     const occurrence = (seen.get(text) ?? 0) + 1;
     seen.set(text, occurrence);
-    paras.push({ index: ordinal, start: m.index, end: m.index + tok.length, text, styleId, headingLevel: styleId ? headings.map.get(styleId) : undefined, inTable: depth > 0, occurrence });
+    paras.push({ index: ordinal, start, end, text, styleId, headingLevel: styleId ? headings.map.get(styleId) : undefined, inTable: depth > 0, occurrence, formatting });
+  };
+  for (const m of documentXml.matchAll(/<w:tbl>|<\/w:tbl>|<w:p(?:\s[^>]*)?\/>|<w:p(?:\s[^>]*)?>|<\/w:p>/g)) {
+    const tok = m[0];
+    if (open) {
+      if (tok === "</w:p>") {
+        if (open.nested) { open.nested--; continue; }
+        push(open.start, m.index + tok.length);
+        open = null;
+      } else if (tok.startsWith("<w:p") && !tok.endsWith("/>")) open.nested++;
+      continue;
+    }
+    if (tok === "<w:tbl>") { depth++; continue; }
+    if (tok === "</w:tbl>") { depth--; continue; }
+    if (tok === "</w:p>") continue;
+    if (tok.endsWith("/>")) { push(m.index, m.index + tok.length); continue; }
+    open = { start: m.index, nested: 0 };
   }
   return paras;
 }
@@ -170,7 +211,7 @@ function inspectPart(bytes, opts = {}) {
   const byRef = new Map();
   for (const p of paras) {
     if (!p.text.trim()) continue;
-    byRef.set(p.index, { index: p.index, exactText: p.text, occurrence: p.occurrence, inTable: p.inTable, headingLevel: p.headingLevel });
+    byRef.set(p.index, { index: p.index, exactText: p.text, occurrence: p.occurrence, inTable: p.inTable, headingLevel: p.headingLevel, formatting: p.formatting });
   }
 
   const budget = opts.budget ?? MAX_LISTING_CHARS;
@@ -193,7 +234,7 @@ function inspectPart(bytes, opts = {}) {
       lines.push(`   … ${hidden} paragraph${hidden === 1 ? "" : "s"} not shown …`);
       hidden = 0;
     }
-    const line = `¶${p.index}${p.headingLevel ? ` [H${p.headingLevel}]` : ""}${p.inTable ? " [table]" : ""} ${p.text}`;
+    const line = `¶${p.index}${p.headingLevel ? ` [H${p.headingLevel}]` : ""}${p.inTable ? " [table]" : ""}${p.formatting ? " [text box]" : ""} ${p.text}`;
     lines.push(line);
     chars += line.length + 1;
     byRef.get(p.index).shown = true;
@@ -223,11 +264,60 @@ export function extractOps(reply) {
 
 // ---------------------------------------------------------------- markup
 
-function revisionStamps(documentXml) {
-  let max = 9000;
-  for (const m of documentXml.matchAll(/<w:(?:ins|del|moveFrom|moveTo)\s[^>]*w:id="(\d+)"/g)) max = Math.max(max, Number(m[1]));
+// The highest w:id in the XML, every kind of id counted: a revision id must
+// never collide with a property change's or a comment anchor's either.
+function maxIdIn(xml, floor = 0) {
+  let max = floor;
+  for (const m of xml.matchAll(/\bw:id="(\d+)"/g)) max = Math.max(max, Number(m[1]));
+  return max;
+}
+
+// One counter for a whole call. `floor` is the caller's highest id so far —
+// across every part of the file and every id ever recorded for this
+// document — so an id is never handed out twice for one working document.
+function revisionStamps(documentXml, floor = 9000) {
+  let max = maxIdIn(documentXml, floor);
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  return (author = DOCX_AUTHOR) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${date}"`;
+  const stamp = (author = DOCX_AUTHOR) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${date}"`;
+  stamp.max = () => max;
+  // A fresh id for the second half of another author's insertion when ours
+  // lands inside it; their name and date stay on it.
+  stamp.foreign = (author, when) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${escapeXml(when ?? date)}"`;
+  return stamp;
+}
+
+// One operation's share of the stamps: every id it mints is recorded on it,
+// and so is any split of another author's insertion it causes.
+function stampFor(stamp, op, author = DOCX_AUTHOR) {
+  const mine = () => {
+    const s = stamp(author);
+    (op.revisionIds ??= []).push(Number(attr(s, "w:id")));
+    return s;
+  };
+  mine.foreign = (who, when, fromId) => {
+    const s = stamp.foreign(who, when);
+    (op.splits ??= []).push({ fromId: fromId ?? null, toId: Number(attr(s, "w:id")), author: who });
+    return s;
+  };
+  return mine;
+}
+
+// The ids on the insertions of a paragraph, paragraph mark first.
+const insertionIds = (pXml) => [...pXml.matchAll(/<w:ins\s[^>]*?\bw:id="(\d+)"/g)].map((m) => Number(m[1]));
+
+// The number a paragraph opens with ("1.", "4.2", "(a)"), or the nearest
+// heading above it in the same part, or nothing. For the lawyer to find
+// the change by, not for the writer to place it.
+const CLAUSE_LEAD = /^\s*(\d+(?:\.\d+)*\.?|\([a-z0-9]{1,4}\)|[a-z]\))\s+/i;
+function clauseFor(byRef, ref) {
+  const lead = CLAUSE_LEAD.exec(ref.exactText)?.[1];
+  if (lead) return lead.replace(/\.$/, "");
+  let heading = null;
+  for (const other of byRef.values()) {
+    if (other.part !== ref.part || other.index >= ref.index || !other.headingLevel) continue;
+    if (!heading || other.index > heading.index) heading = other;
+  }
+  return heading ? heading.exactText.trim().slice(0, 80) : null;
 }
 
 // The children of a paragraph, in order: its runs (with their formatting and
@@ -268,7 +358,23 @@ function tokenize(xml) {
 }
 
 const serialize = (items) =>
-  items.map((it) => (it.kind === "raw" || it.kind === "run" ? it.xml : `${it.open}${serialize(it.items)}${it.close}`)).join("");
+  items.map((it) => (it.kind === "raw" || it.kind === "run" || it.kind === "ourIns" ? it.xml : `${it.open}${serialize(it.items)}${it.close}`)).join("");
+
+// What Word itself does when someone types inside another author's
+// insertion: theirs closes before the new text and reopens after it under a
+// fresh id, so our insertion is always its own element with its own id.
+// A half with nothing in it is not written.
+function splitInsertion(container, items, stamp) {
+  const at = items.findIndex((it) => it.kind === "ourIns");
+  if (at < 0) return [{ ...container, items }];
+  const before = items.slice(0, at);
+  const after = items.slice(at + 1);
+  if (!before.length || !after.length) return [...(before.length ? [{ ...container, items: before }] : []), items[at], ...(after.length ? [{ ...container, items: after }] : [])];
+  const fromId = Number(attr(container.open, "w:id"));
+  const rest = container.open.slice("<w:ins".length, -1).replace(/\s+w:(?:id|author|date)="[^"]*"/g, "");
+  const open = `<w:ins ${stamp.foreign(decodeXml(attr(container.open, "w:author") ?? ""), attr(container.open, "w:date"), fromId)}${rest}>`;
+  return [{ ...container, items: before }, items[at], { ...container, open, items: after }];
+}
 
 // The runs a reader sees, flattened in order, each knowing whether it sits
 // inside one of our insertions (where a deletion has to nest).
@@ -319,12 +425,17 @@ function diffRange(oldText, newText) {
 // rather than leaving an empty line behind.
 function markParagraphMark(pPr, tag, stamp) {
   const mark = `<w:${tag} ${stamp()}/>`;
-  if (!pPr) return `<w:pPr><w:rPr>${mark}</w:rPr></w:pPr>`;
+  if (!pPr || /^<w:pPr(?:\s[^>]*)?\/>$/.test(pPr)) return `<w:pPr><w:rPr>${mark}</w:rPr></w:pPr>`;
   const inner = pPr.replace(/^<w:pPr(?:\s[^>]*)?>/, "").replace(/<\/w:pPr>$/, "");
   const rPr = child(inner, "w:rPr");
-  return rPr
-    ? `<w:pPr>${inner.replace(rPr, rPr.replace(/^<w:rPr>/, `<w:rPr>${mark}`))}</w:pPr>`
-    : `<w:pPr>${inner}<w:rPr>${mark}</w:rPr></w:pPr>`;
+  if (!rPr) return `<w:pPr>${inner}<w:rPr>${mark}</w:rPr></w:pPr>`;
+  // The mark goes first in the run properties, whether they are written
+  // self-closing, with attributes, or already open. A deleted mark follows
+  // an inserted one, which is the order Word writes them in.
+  const marked = /\/>$/.test(rPr)
+    ? rPr.replace(/\s*\/>$/, `>${mark}</w:rPr>`)
+    : rPr.replace(/^(<w:rPr(?:\s[^>]*)?>)((?:<w:ins\s[^>]*?\/>)?)/, (_, open, insMark) => `${open}${tag === "del" ? insMark + mark : mark + insMark}`);
+  return `<w:pPr>${inner.replace(rPr, marked)}</w:pPr>`;
 }
 
 // Runs for new text: **bold** spans take w:b on top of the surrounding run's
@@ -373,12 +484,14 @@ function replaceParagraph(pXml, newText, stamp) {
   // New text goes where the removed text ended — which is the insertion
   // point itself when nothing was removed.
   const insertAt = end;
-  const insXml = (text, rPr, insideIns) =>
-    insideIns ? runsFor(text, rPr) : `<w:ins ${stamp()}>${runsFor(text, rPr)}</w:ins>`;
-  const rewrite = (list, insideIns) =>
+  // Our insertion is marked so that a container it lands inside can be
+  // split around it; it is always its own <w:ins> with its own id.
+  const insXml = (text, rPr) => ({ kind: "ourIns", xml: `<w:ins ${stamp()}>${runsFor(text, rPr)}</w:ins>` });
+  const rewrite = (list) =>
     list.flatMap((it) => {
       if (it.kind === "ins" || it.kind === "hyperlink" || it.kind === "smartTag") {
-        return [{ ...it, items: rewrite(it.items, insideIns || it.kind === "ins") }];
+        const items = rewrite(it.items);
+        return it.kind === "ins" ? splitInsertion(it, items, stamp) : [{ ...it, items }];
       }
       if (it.kind !== "run") return [it];
       const s = offset;
@@ -391,7 +504,7 @@ function replaceParagraph(pXml, newText, stamp) {
         // say, or between two differently formatted spans).
         if (!insertionDone && inserted && (insertAt === s || insertAt === e)) {
           insertionDone = true;
-          const ins = { kind: "raw", xml: insXml(inserted, it.rPr, insideIns) };
+          const ins = insXml(inserted, it.rPr);
           return insertAt === s ? [ins, it] : [it, ins];
         }
         return [it];
@@ -413,16 +526,16 @@ function replaceParagraph(pXml, newText, stamp) {
       else if (middle) out.push({ kind: "raw", xml: delXml(it.rPr, middle, stamp) });
       if (!insertionDone && inserted && end <= e) {
         insertionDone = true;
-        out.push({ kind: "raw", xml: insXml(inserted, it.rPr, insideIns) });
+        out.push(insXml(inserted, it.rPr));
       }
       if (after) out.push({ kind: "raw", xml: runXml(it.rPr, after) });
       return out;
     });
 
-  const rewritten = rewrite(items, false);
+  const rewritten = rewrite(items);
   if (inserted && !insertionDone) {
     const last = runs[runs.length - 1];
-    rewritten.push({ kind: "raw", xml: insXml(inserted, last?.run.rPr ?? "", false) });
+    rewritten.push(insXml(inserted, last?.run.rPr ?? ""));
   }
   return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}${serialize(rewritten)}</w:p>`;
 }
@@ -463,17 +576,47 @@ function insertAfter(anchorXml, text, headings, stamp) {
 // yet. Word does not track the deletion of an unaccepted insertion — it just
 // removes it — and a change to one belongs inside the same insertion rather
 // than as a redline within an addition.
+//
+// It is the AI's own only while every insertion in it — the paragraph mark's
+// and the body's — is by the AI and nothing has been struck out or typed in.
+// Once anyone else has an insertion in it, or text sits outside the AI's,
+// their words are in the paragraph and a change to it is tracked as a
+// redline like any other. Comment anchors, bookmarks and the like are not
+// words and do not count.
 function isOwnInsertion(pXml) {
-  if (!pXml.includes("<w:ins ") || !pXml.includes(`w:author="${DOCX_AUTHOR}"`)) return false;
   if (/<w:del[\s>]/.test(pXml)) return false;
-  const outside = pXml.replace(/<w:ins\s[^>]*>[\s\S]*?<\/w:ins>/g, "");
-  return !/<w:t(?:\s[^>]*)?>[^<]/.test(outside);
+  const marks = [...pXml.matchAll(/<w:ins\s[^>]*?>/g)];
+  if (!marks.length || marks.some((m) => attr(m[0], "w:author") !== DOCX_AUTHOR)) return false;
+  for (const it of ownInsertionBody(pXml)) {
+    if (it.kind === "raw" || it.kind === "ins") continue;
+    if (it.kind === "run" && it.text === "" && it.splittable) continue;
+    return false;
+  }
+  return true;
 }
 
+// The paragraph's body, without its opening tag and properties, in tokens.
+function ownInsertionBody(pXml) {
+  const pPr = child(pXml, "w:pPr") ?? "";
+  return tokenize(pXml.replace(/^<w:p(?:\s[^>]*)?>/, "").replace(/<\/w:p>$/, "").replace(pPr, ""));
+}
+
+// The AI's insertions become one new insertion where the first of them
+// stood; everything else in the body — a comment's range, a bookmark —
+// stays where it is.
 function rewriteOwnInsertion(pXml, text, stamp) {
   const baseRPr = /<w:r(?:\s[^>]*)?>(<w:rPr>[\s\S]*?<\/w:rPr>)?(?:(?!<\/w:r>)[\s\S])*?<w:t/.exec(pXml)?.[1] ?? "";
   const pPr = child(pXml, "w:pPr") ?? "";
-  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}<w:ins ${stamp()}>${runsFor(text.trim(), baseRPr)}</w:ins></w:p>`;
+  const fresh = { kind: "raw", xml: `<w:ins ${stamp()}>${runsFor(text.trim(), baseRPr)}</w:ins>` };
+  let placed = false;
+  const kept = ownInsertionBody(pXml).flatMap((it) => {
+    if (it.kind !== "ins") return [it];
+    if (placed) return [];
+    placed = true;
+    return [fresh];
+  });
+  if (!placed) kept.push(fresh);
+  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}${serialize(kept)}</w:p>`;
 }
 
 // Global paragraph references span the body, headers, footers and notes.
@@ -508,21 +651,34 @@ export function inspectDocx(bytes, opts = {}) {
   return { listing: lines.join('\n\n'), byRef, paragraphCount: byRef.size, shown, partial: shown < byRef.size, hash: createHash('sha256').update(bytes).digest('hex'), quality: inspectPackage(xmlParts(entries)) };
 }
 
-export async function applyDocxOps(bytes, ops, byRef) {
+// The highest id in any story part of the file, or the caller's floor if
+// that is higher: ids recorded for this document earlier may be gone from
+// the file (decided in Word) and must still never be minted again.
+function idFloorOf(entries, idFloor) {
+  let floor = Math.max(9000, Number(idFloor) || 0);
+  for (const part of Object.keys(entries).filter((p) => STORY_PART.test(p))) floor = maxIdIn(dec.decode(entries[part]), floor);
+  return floor;
+}
+
+export async function applyDocxOps(bytes, ops, byRef, { idFloor } = {}) {
   const entries = readZip(bytes); const original = xmlParts(entries);
   const groups = new Map(); const results = []; let applied = 0;
   for (let i = 0; i < ops.length; i++) {
     const raw = ops[i]; const ref = byRef.get(Number(raw?.p));
-    const reject = reason => results.push({ i, kind: raw?.op, p: raw?.p, text: raw?.text, status: 'skipped', reason });
+    // A refused change still says what it was aimed at, so it can be shown.
+    const reject = reason => results.push({ i, kind: raw?.op, p: raw?.p, text: raw?.text, status: 'skipped', reason, original: ref?.exactText ?? (typeof raw?.expected === 'string' ? raw.expected : null) });
     if (!ref || !ref.shown) { reject('Paragraph was not supplied to this turn; request that section first.'); continue; }
     if (typeof raw.expected !== 'string' || raw.expected !== ref.exactText) { reject('Expected paragraph text does not match the source; no change was made.'); continue; }
     if (String(raw.op).toLowerCase() === 'comment' && ref.part !== 'word/document.xml') { reject('Word does not allow comments in headers, footers or notes.'); continue; }
     const list = groups.get(ref.part) ?? [];
-    list.push({ raw: { ...raw, p: ref.localIndex }, ref, i }); groups.set(ref.part, list);
+    list.push({ raw: { ...raw, p: ref.localIndex, clause: clauseFor(byRef, ref) }, ref, i }); groups.set(ref.part, list);
   }
+  // One counter for the whole call, carried from part to part.
+  let maxId = idFloorOf(entries, idFloor);
   for (const [part, work] of groups) {
     const refs = new Map(work.map(w => [w.ref.localIndex, w.ref]));
-    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs);
+    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs, { idFloor: maxId });
+    maxId = Math.max(maxId, output.maxId);
     entries[part] = readZip(output.bytes)['word/document.xml'];
     if (part === 'word/document.xml') writeComments(entries, output.comments ?? []);
     for (const result of output.results) { const w = work[result.i]; results.push({ ...result, i: w.i, p: w.ref.index, part }); }
@@ -532,7 +688,8 @@ export async function applyDocxOps(bytes, ops, byRef) {
   const quality = inspectPackage(xmlParts(entries));
   if (quality.errors.length) throw new Error(`Edited file failed structural checks: ${quality.errors.join('; ')}`);
   const format = compareFormat(xmlParts(entries), original);
-  return { bytes: writeZip(entries), applied, results: results.sort((a,b) => a.i-b.i), validation: { ...quality, format, sourceHash: createHash('sha256').update(bytes).digest('hex'), outputHash: createHash('sha256').update(writeZip(entries)).digest('hex') } };
+  const output = writeZip(entries);
+  return { bytes: output, applied, results: results.sort((a,b) => a.i-b.i), maxId, validation: { ...quality, format, sourceHash: createHash('sha256').update(bytes).digest('hex'), outputHash: createHash('sha256').update(output).digest('hex') } };
 }
 
 // ---------------------------------------------------------------- applying
@@ -542,13 +699,19 @@ export async function applyDocxOps(bytes, ops, byRef) {
  * back — applied, or why not — so the lawyer is told about the ones that
  * could not be made rather than left to find the gap themselves.
  */
-async function applyPartOps(bytes, ops, byRef) {
+async function applyPartOps(bytes, ops, byRef, { idFloor } = {}) {
   const results = [];
   const parsed = [];
   ops.forEach((raw, i) => {
     const op = { i, kind: String(raw?.op ?? "").toLowerCase(), p: Number(raw?.p), text: typeof raw?.text === "string" ? raw.text : "" };
     const ref = byRef.get(op.p);
     if (!ref) return results.push({ ...op, status: "skipped", reason: `¶${raw?.p} is not a paragraph in this document` });
+    // What the change is to, where it sits, and the model's reason for it:
+    // the record of the change carries these, the file does not.
+    op.original = op.kind === "insert_after" ? "" : ref.exactText;
+    if (op.kind === "insert_after") op.anchor = ref.exactText;
+    op.clause = typeof raw?.clause === "string" ? raw.clause : null;
+    op.why = typeof raw?.why === "string" ? raw.why.slice(0, 300) : null;
     if (op.kind === "replace") {
       if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "replace needs text (use delete to remove a paragraph)" });
       // The space a paragraph starts or ends with is formatting, not
@@ -563,7 +726,9 @@ async function applyPartOps(bytes, ops, byRef) {
       if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "insert_after needs text" });
     } else if (op.kind === "comment") {
       if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "comment needs text" });
-    } else if (op.kind !== "delete") {
+    } else if (op.kind === "delete") {
+      op.modified = "";
+    } else {
       return results.push({ ...op, status: "skipped", reason: `unknown op "${raw?.op}"` });
     }
     parsed.push({ op, ref });
@@ -573,11 +738,13 @@ async function applyPartOps(bytes, ops, byRef) {
   let applied = 0;
   const fallback = [];
   const comments = [];
+  let maxId = Math.max(9000, Number(idFloor) || 0);
+  const done = (op, extra = {}) => results.push({ ...op, revisionIds: op.revisionIds ?? [], via: "inline", status: "applied", ...extra });
 
   if (parsed.length) {
     let documentXml = dec.decode(entries["word/document.xml"]);
     const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
-    const stamp = revisionStamps(documentXml);
+    const stamp = revisionStamps(documentXml, maxId);
     const byIndex = new Map(enumerateParagraphs(documentXml, headings).map((p) => [p.index, p]));
 
     // Bottom of the document upwards, so an edit never moves a paragraph
@@ -589,6 +756,10 @@ async function applyPartOps(bytes, ops, byRef) {
       const group = work.get(index);
       if (!para) {
         group.forEach((op) => results.push({ ...op, status: "skipped", reason: `¶${index} not found` }));
+        continue;
+      }
+      if (para.formatting) {
+        group.forEach((op) => results.push({ ...op, status: "skipped", reason: "formatting" }));
         continue;
       }
       const paraXml = documentXml.slice(para.start, para.end);
@@ -604,12 +775,31 @@ async function applyPartOps(bytes, ops, byRef) {
       );
 
       let replacement = paraXml;
-      if (edit?.kind === "delete") replacement = own ? "" : deleteParagraph(paraXml, stamp);
-      else if (edit?.kind === "replace") replacement = own ? rewriteOwnInsertion(paraXml, edit.modified, stamp) : replaceParagraph(paraXml, edit.modified, stamp);
+      if (edit?.kind === "delete" && own) {
+        // Word does not track the removal of an unaccepted insertion: the
+        // paragraph simply goes, and the change that added it is withdrawn.
+        replacement = "";
+        edit.removedIds = insertionIds(paraXml);
+        edit.revisionIds = [];
+      } else if (edit?.kind === "delete") {
+        replacement = deleteParagraph(paraXml, stampFor(stamp, edit));
+        edit.markId = edit.revisionIds[0];
+      } else if (edit?.kind === "replace" && own) {
+        // Rewriting a paragraph the AI added earlier takes that change over:
+        // the paragraph mark keeps its id, the body gets a new one, and the
+        // earlier change is replaced by this one rather than left to decide.
+        edit.takesOver = insertionIds(paraXml);
+        const markId = insertionIds(child(paraXml, "w:pPr") ?? "")[0];
+        if (markId !== undefined) { edit.markId = markId; edit.revisionIds = [markId]; }
+        replacement = rewriteOwnInsertion(paraXml, edit.modified, stampFor(stamp, edit));
+      } else if (edit?.kind === "replace") {
+        replacement = replaceParagraph(paraXml, edit.modified, stampFor(stamp, edit));
+      }
 
       if (edit && replacement === null) {
         // Markup this cannot safely rewrite; the redline engine gets it.
         replacement = paraXml;
+        delete edit.revisionIds; delete edit.splits;
         fallback.push({
           op: edit,
           lib: edit.kind === "replace"
@@ -617,7 +807,7 @@ async function applyPartOps(bytes, ops, byRef) {
             : { type: "delete", target: { exactText: para.text, occurrence: para.occurrence } },
         });
       } else if (edit) {
-        results.push({ ...edit, status: "applied" });
+        done(edit);
         applied++;
       }
 
@@ -629,44 +819,85 @@ async function applyPartOps(bytes, ops, byRef) {
           comments.push({ key, text: op.text.trim() });
           const open = /^<w:p(?:\s[^>]*)?>(?:<w:pPr>[\s\S]*?<\/w:pPr>)?/.exec(replacement)[0];
           replacement = `${open}<w:commentRangeStart w:id="${key}"/>${replacement.slice(open.length, -"</w:p>".length)}<w:commentRangeEnd w:id="${key}"/><w:r><w:commentReference w:id="${key}"/></w:r></w:p>`;
-          results.push({ ...op, status: "applied" });
+          done(op);
           applied++;
         }
       } else {
         notes.forEach((op) => results.push({ ...op, status: "skipped", reason: replacement ? `¶${index} has no text to comment on` : `¶${index} was removed, so it cannot take a comment` }));
       }
 
-      const added = additions.map((op) => insertAfter(paraXml, op.text, headings, stamp)).join("");
+      const added = additions.map((op) => {
+        const xml = insertAfter(paraXml, op.text, headings, stampFor(stamp, op));
+        op.markId = op.revisionIds[0];
+        return xml;
+      }).join("");
       documentXml = documentXml.slice(0, para.start) + replacement + added + documentXml.slice(para.end);
       additions.forEach((op) => {
-        results.push({ ...op, status: "applied" });
+        done(op);
         applied++;
       });
     }
-    entries["word/document.xml"] = enc.encode(documentXml);
+    entries["word/document.xml"] = enc.encode(patchEmptyCells(documentXml));
+    maxId = stamp.max();
   }
 
   let out = applied ? writeZip(entries) : bytes;
-  if (fallback.length) {
-    const res = await openDocx(out).applyOperations(fallback.map((x) => x.lib), {
+  // The engine mints its own ids, so each change runs alone and the ids
+  // that appeared are its own. It counts from the highest id in this part
+  // alone, which may already be recorded for another part or for a change
+  // decided away, so each new id is renumbered from this call's counter.
+  for (const { op, lib } of fallback) {
+    const before = revisionIdsIn(out);
+    const res = await openDocx(out).applyOperations([lib], {
       author: DOCX_AUTHOR, atomic: false, validate: true, strictTargets: true, continueOnError: true,
     });
-    fallback.forEach(({ op }, k) => {
-      const r = (res.results ?? [])[k];
-      if (r && (r.status === "applied" || r.status === "ok")) {
-        applied++;
-        results.push({ ...op, status: "applied" });
-      } else {
-        // A batch the engine refuses outright comes back with no per-operation
-        // result at all; saying nothing would hide the change from the lawyer.
-        results.push({ ...op, status: "skipped", reason: r?.error?.message ?? r?.error?.code ?? res.error?.message ?? "this paragraph's formatting could not be edited safely" });
+    const r = (res.results ?? [])[0];
+    if (r?.status === "applied") {
+      if (res.written) out = res.toBuffer();
+      const fresh = [...revisionIdsIn(out)].filter((id) => !before.has(id)).sort((a, b) => a - b);
+      const renumbered = new Map(fresh.map((id) => [id, ++maxId]));
+      if (fresh.length) {
+        const part = readZip(out);
+        const xml = dec.decode(part["word/document.xml"]).replace(/<w:(ins|del)(\s[^>]*?)\bw:id="(\d+)"/g, (m, tag, pre, id) =>
+          renumbered.has(Number(id)) ? `<w:${tag}${pre}w:id="${renumbered.get(Number(id))}"` : m);
+        part["word/document.xml"] = enc.encode(xml);
+        out = writeZip(part);
       }
-    });
-    if (res.written) out = res.toBuffer();
+      const receipt = r.receipt?.revisionItems?.filter((x) => x.kind === "ins" || x.kind === "del").map((x) => Number(x.id)).filter((id) => Number.isFinite(id) && renumbered.has(id));
+      const revisionIds = (receipt?.length ? receipt : fresh).map((id) => renumbered.get(id));
+      applied++;
+      results.push({ ...op, status: "applied", revisionIds, via: "fallback" });
+    } else if (r?.status === "no_change") {
+      results.push({ ...op, status: "skipped", reason: "no_change" });
+    } else {
+      // A batch the engine refuses outright comes back with no per-operation
+      // result at all; saying nothing would hide the change from the lawyer.
+      results.push({ ...op, status: "skipped", reason: r?.error?.message ?? r?.error?.code ?? res.error?.message ?? "this paragraph's formatting could not be edited safely" });
+    }
   }
+  if (fallback.length) maxId = maxIdIn(dec.decode(readZip(out)["word/document.xml"]), maxId);
 
   results.sort((a, b) => a.i - b.i);
-  return { bytes: out, results, applied, comments };
+  adoptSplits(results);
+  return { bytes: out, results, applied, comments, maxId };
+}
+
+// When one change of a call lands inside an insertion another change of the
+// same call made, the second half of that insertion gets a fresh id; the
+// earlier change still owns those words, so the id is its as well.
+function adoptSplits(results) {
+  for (const r of results) {
+    for (const s of r.splits ?? []) {
+      const owner = results.find((o) => o !== r && o.status === "applied" && (o.revisionIds ?? []).includes(Number(s.fromId)));
+      if (owner && !owner.revisionIds.includes(Number(s.toId))) owner.revisionIds.push(Number(s.toId));
+    }
+  }
+}
+
+// Every revision id in a part, for telling the engine's new ones apart.
+function revisionIdsIn(bytes) {
+  const xml = dec.decode(readZip(bytes)["word/document.xml"]);
+  return new Set([...xml.matchAll(/<w:(?:ins|del)\s[^>]*?\bw:id="(\d+)"/g)].map((m) => Number(m[1])));
 }
 
 const COMMENTS_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
@@ -718,7 +949,7 @@ export function acceptAllChanges(bytes) {
   // dropping the paragraph is what Word shows and what the lawyer means.
   // The mark is the w:del inside the paragraph properties' own w:rPr — a
   // deletion anywhere else in the paragraph is ordinary struck-out text.
-  xml = xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, (p) => {
+  xml = xml.replace(PARAGRAPH, (p) => {
     const pPr = child(p, "w:pPr");
     const rPr = pPr && child(pPr, "w:rPr");
     if (rPr && /<w:del[\s/>]/.test(rPr)) {
@@ -731,8 +962,7 @@ export function acceptAllChanges(bytes) {
     .replace(/<w:del\b[\s\S]*?<\/w:del>/g, "")
     .replace(/<w:ins\s[^>]*\/>/g, "")
     .replace(/<w:ins\s[^>]*>([\s\S]*?)<\/w:ins>/g, "$1");
-  xml = xml.replace(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g, cell => /<w:p(?:\s|>|\/)/.test(cell) ? cell : cell.replace('</w:tc>', '<w:p/></w:tc>'));
-  entries[part] = enc.encode(xml);
+  entries[part] = enc.encode(patchEmptyCells(xml));
   }
   validateXml(entries);
   return writeZip(entries);
@@ -778,7 +1008,8 @@ function findLoose(hay, needle, from = 0) {
   if (at < 0) return null;
   const endLoose = at + want.length - 1;
   let end = map[endLoose] + 1;
-  return { start: map[at], end };
+  // `next` is where to look from for a further occurrence.
+  return { start: map[at], end, next: at + 1 };
 }
 
 const REVIEW_ACCEPTED_AUTHOR = "AKLA AI (accepted)";
@@ -827,40 +1058,75 @@ function wordHunks(oldText, newText) {
   return merged;
 }
 
+// Every place the quoted paragraphs occur, a second occurrence inside one
+// paragraph included. Each candidate is the list of paragraph slices the
+// quote covers. The caller decides what more than one means.
 function locateQuote(paras, before) {
+  const found = [];
+  const slice = (para, hit) => ({ para, start: hit.start, end: hit.end });
   for (let k = 0; k < paras.length; k++) {
-    const first = findLoose(paras[k].text, before[0]);
-    if (!first) continue;
-    if (before.length === 1) return [{ para: paras[k], ...first }];
-    if (paras[k].text.slice(first.end).trim()) continue;
-    const list = [{ para: paras[k], ...first }];
-    let q = k;
-    let ok = true;
-    for (let j = 1; j < before.length; j++) {
-      // Empty paragraphs between the quoted ones are not in the quote.
-      q++;
-      while (paras[q] && !paras[q].text.trim()) q++;
-      const para = paras[q];
-      const hit = para && findLoose(para.text, before[j]);
-      const whole = para && para.text.trim().replace(/\s+/g, " ") === before[j].replace(/\s+/g, " ");
-      const lastStartsHere = hit && j === before.length - 1 && !para.text.slice(0, hit.start).trim();
-      if (!hit || !(whole || lastStartsHere)) { ok = false; break; }
-      list.push({ para, ...hit });
+    let from = 0;
+    for (let first = findLoose(paras[k].text, before[0]); first; first = findLoose(paras[k].text, before[0], from)) {
+      from = first.next;
+      if (before.length === 1) { found.push([slice(paras[k], first)]); continue; }
+      // A quote that runs on must start at the end of this paragraph.
+      if (paras[k].text.slice(first.end).trim()) break;
+      const list = [slice(paras[k], first)];
+      let q = k;
+      let ok = true;
+      for (let j = 1; j < before.length; j++) {
+        // Empty paragraphs between the quoted ones are not in the quote.
+        q++;
+        while (paras[q] && !paras[q].text.trim()) q++;
+        const para = paras[q];
+        const hit = para && findLoose(para.text, before[j]);
+        const whole = para && para.text.trim().replace(/\s+/g, " ") === before[j].replace(/\s+/g, " ");
+        const lastStartsHere = hit && j === before.length - 1 && !para.text.slice(0, hit.start).trim();
+        if (!hit || !(whole || lastStartsHere)) { ok = false; break; }
+        list.push(slice(para, hit));
+      }
+      if (ok) found.push(list);
+      break;
     }
-    if (ok) return list;
   }
-  return null;
+  return found;
+}
+
+// Does the clause the suggestion names point at this spot? The spot's own
+// number, or the nearest numbered or heading paragraph above it, has to
+// carry the clause's number or one of its words.
+const CLAUSE_NOISE = new Set(["clause", "clauses", "section", "article", "para", "paragraph", "item", "sub", "the", "and", "of"]);
+function clauseMatches(paras, hitIndex, clause) {
+  const tokens = String(clause).toLowerCase().match(/\d+(?:\.\d+)*|[a-z]{3,}/g) ?? [];
+  const numbers = tokens.filter((t) => /^\d/.test(t));
+  const words = tokens.filter((t) => !/^\d/.test(t) && !CLAUSE_NOISE.has(t));
+  if (!numbers.length && !words.length) return true;
+  let anchor = null;
+  for (let k = hitIndex; k >= 0 && !anchor; k--) {
+    if (CLAUSE_LEAD.test(paras[k].text) || paras[k].headingLevel) anchor = paras[k];
+  }
+  if (!anchor) return false;
+  const text = anchor.text.toLowerCase();
+  const lead = CLAUSE_LEAD.exec(anchor.text)?.[1]?.replace(/[().]/g, "").toLowerCase();
+  return numbers.some((n) => n === lead || new RegExp(`(^|[^\\d.])${n.replace(/\./g, "\\.")}(?![\\d.])`).test(text))
+    || words.some((w) => new RegExp(`\\b${w}\\b`).test(text));
 }
 
 /**
- * Writes review suggestions into the Word file. A pending suggestion becomes
- * a tracked change; an accepted one is written in and its revision accepted,
- * so the page shows the new wording plainly. Revisions already in the file
- * are left as they are — the lawyer's own redline stays visible alongside.
+ * Writes review suggestions into the Word file as tracked changes by the
+ * AI. Revisions already in the file are left as they are — the lawyer's own
+ * redline stays visible alongside. A quote found in more than one place is
+ * refused rather than guessed at, unless the clause named narrows it to one.
  *
- * changes: [{ id, original, suggested, accepted }]
+ * changes: [{ id, original, suggested, accepted, clause? }]
+ * Each result says which part and paragraph it landed in, the document's
+ * own words before and after, and the revision ids it minted.
+ *
+ * `legacy: true` is the old preview path only: an `accepted` suggestion is
+ * written under a transient author and then accepted, so the page shows
+ * the new wording plainly.
  */
-export function applyReviewSuggestions(bytes, changes) {
+export function applyReviewSuggestions(bytes, changes, { idFloor, legacy = false } = {}) {
   const entries = readZip(bytes);
   const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
   // The body first, then notes, headers and footers: a suggestion about a
@@ -870,16 +1136,25 @@ export function applyReviewSuggestions(bytes, changes) {
     .sort((x, y) => (x === "word/document.xml" ? -1 : y === "word/document.xml" ? 1 : x.localeCompare(y)));
   const parts = new Map(partNames.map((name) => [name, dec.decode(entries[name])]));
   const pristine = new Map([...parts].map(([name, xml]) => [name, enumerateParagraphs(xml, headings)]));
-  let maxId = 9000;
-  for (const xml of parts.values()) for (const m of xml.matchAll(/<w:(?:ins|del|moveFrom|moveTo)\s[^>]*w:id="(\d+)"/g)) maxId = Math.max(maxId, Number(m[1]));
-  const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  const stampAs = (author) => () => `w:id="${++maxId}" w:author="${escapeXml(author)}" w:date="${date}"`;
+  // Paragraphs are numbered on from one part to the next, as the listing
+  // the Edit path shows numbers them.
+  const offsets = new Map();
+  let count = 0;
+  for (const [name, paras] of pristine) {
+    offsets.set(name, count);
+    const last = paras.filter((p) => p.text.trim()).pop();
+    if (last) count += last.index;
+  }
+  const stamp = revisionStamps("", idFloorOf(entries, idFloor));
   const results = [];
 
   for (const change of changes) {
-    const skip = (reason) => results.push({ id: change.id, status: "skipped", reason });
+    const record = { id: change.id, part: null, paragraphIndex: null, clause: change.clause ?? null, original: null, suggested: null, revisionIds: [] };
+    const skip = (reason) => results.push({ ...record, status: "skipped", reason });
     let before = suggestionParagraphs(change.original);
     let after = suggestionParagraphs(change.suggested);
+    record.original = before.join("\n");
+    record.suggested = after.join("\n");
     if (!before.length) { skip("missing_text"); continue; }
     if (before.length !== after.length) {
       if (after.length <= 1) {
@@ -892,20 +1167,29 @@ export function applyReviewSuggestions(bytes, changes) {
     }
     if (before.join("\n").replace(/\s+/g, " ") === after.join("\n").replace(/\s+/g, " ")) { skip("formatting_only"); continue; }
 
-    let found = null;
+    let candidates = [];
     for (const [name, xml] of parts) {
-      const edits = locateQuote(enumerateParagraphs(xml, headings), before);
-      if (edits) { found = { name, edits }; break; }
+      const paras = enumerateParagraphs(xml, headings);
+      for (const edits of locateQuote(paras, before)) candidates.push({ name, paras, edits });
     }
-    if (!found) {
+    if (!candidates.length) {
       // Present in the file as it arrived, gone now: an earlier suggestion
       // already rewrote these words.
-      const overlaps = [...pristine.values()].some((paras) => locateQuote(paras, before));
+      const overlaps = [...pristine.values()].some((paras) => locateQuote(paras, before).length);
       skip(overlaps ? "overlaps_another_suggestion" : "not_found");
       continue;
     }
+    if (candidates.length > 1 && change.clause) candidates = candidates.filter((c) => clauseMatches(c.paras, c.edits[0].para.index - 1, change.clause));
+    // The old preview took the first place a quote was found; it still does.
+    if (candidates.length > 1 && legacy) candidates = [candidates[0]];
+    if (candidates.length !== 1) { skip("ambiguous"); continue; }
+    const found = candidates[0];
+    record.part = found.name;
+    record.paragraphIndex = offsets.get(found.name) + found.edits[0].para.index;
+    record.original = found.edits.map((e) => e.para.text.slice(e.start, e.end)).join("\n");
+    record.suggested = after.join("\n");
 
-    const stamp = change.accepted ? stampAs(REVIEW_ACCEPTED_AUTHOR) : stampAs(DOCX_AUTHOR);
+    const mark = stampFor(stamp, record, legacy && change.accepted ? REVIEW_ACCEPTED_AUTHOR : DOCX_AUTHOR);
     let xml = parts.get(found.name);
     const rewrites = [];
     let failed = false;
@@ -913,34 +1197,42 @@ export function applyReviewSuggestions(bytes, changes) {
       if (failed) return;
       const newText = e.para.text.slice(0, e.start) + (after[n] ?? "") + e.para.text.slice(e.end);
       if (newText === e.para.text) return;
+      if (e.para.formatting) { failed = true; return; }
       let pXml = xml.slice(e.para.start, e.para.end);
       if (isOwnInsertion(pXml)) {
-        pXml = rewriteOwnInsertion(pXml, newText, stamp);
+        // A paragraph the AI added earlier: this change takes it over, the
+        // paragraph mark keeping its id and the body getting a new one.
+        (record.takesOver ??= []).push(...insertionIds(pXml));
+        const markId = insertionIds(child(pXml, "w:pPr") ?? "")[0];
+        if (markId !== undefined) record.revisionIds.push(markId);
+        pXml = rewriteOwnInsertion(pXml, newText, mark);
       } else {
         // Right to left, so each change leaves the offsets of the ones
         // before it where they were.
         for (const h of wordHunks(e.para.text, newText).reverse()) {
           const current = visibleText(pXml);
-          const next = replaceParagraph(pXml, current.slice(0, h.start) + h.inserted + current.slice(h.end), stamp);
+          const next = replaceParagraph(pXml, current.slice(0, h.start) + h.inserted + current.slice(h.end), mark);
           if (next === null) { failed = true; return; }
           pXml = next;
         }
       }
       rewrites.push({ para: e.para, out: pXml });
     });
-    if (failed) { skip("formatting"); continue; }
+    if (failed) { record.revisionIds = []; delete record.splits; delete record.takesOver; skip("formatting"); continue; }
     if (!rewrites.length) { skip("no_change"); continue; }
     for (const r of rewrites.sort((x, y) => y.para.start - x.para.start)) {
       xml = xml.slice(0, r.para.start) + r.out + xml.slice(r.para.end);
     }
     parts.set(found.name, xml);
-    results.push({ id: change.id, status: "applied" });
+    results.push({ ...record, status: "applied" });
   }
+  for (const name of partNames) adoptSplits(results.filter((r) => r.part === name));
 
-  // Accepted suggestions: keep the new words, drop the old, no markup.
+  // The old preview only: accepted suggestions keep the new words, drop the
+  // old, and leave no markup.
   const author = escapeRegExp(escapeXml(REVIEW_ACCEPTED_AUTHOR));
   for (const [name, xml] of parts) {
-    const clean = xml
+    const clean = !legacy ? xml : xml
       .replace(new RegExp(`<w:del\\b[^>]*w:author="${author}"[^>]*>[\\s\\S]*?<\\/w:del>`, "g"), "")
       .replace(new RegExp(`<w:ins\\b[^>]*w:author="${author}"[^>]*>([\\s\\S]*?)<\\/w:ins>`, "g"), "$1");
     entries[name] = enc.encode(clean);
@@ -948,7 +1240,7 @@ export function applyReviewSuggestions(bytes, changes) {
   validateXml(entries);
   const quality = inspectPackage(xmlParts(entries));
   if (quality.errors.length) throw new Error(`Redlined file failed structural checks: ${quality.errors.join("; ")}`);
-  return { bytes: writeZip(entries), results };
+  return { bytes: writeZip(entries), results, maxId: stamp.max() };
 }
 
 // The AI's own tracked changes accepted, and nothing else: revisions already
@@ -965,7 +1257,7 @@ export function acceptChangesBy(bytes, author = DOCX_AUTHOR) {
     if (!xml.includes(`w:author="${escapeXml(author)}"`)) continue;
     // Paragraph marks first: a paragraph this author deleted goes, one this
     // author inserted simply stays.
-    xml = xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, (p) => {
+    xml = xml.replace(PARAGRAPH, (p) => {
       const pPr = child(p, "w:pPr");
       const rPr = pPr && child(pPr, "w:rPr");
       if (rPr && delMark.test(rPr)) {
@@ -977,8 +1269,7 @@ export function acceptChangesBy(bytes, author = DOCX_AUTHOR) {
     xml = xml
       .replace(new RegExp(`<w:del\\b[^>]*w:author="${who}"[^>]*>[\\s\\S]*?<\\/w:del>`, "g"), "")
       .replace(new RegExp(`<w:ins\\b[^>]*w:author="${who}"[^>]*>([\\s\\S]*?)<\\/w:ins>`, "g"), "$1");
-    xml = xml.replace(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g, (cell) => (/<w:p(?:\s|>|\/)/.test(cell) ? cell : cell.replace("</w:tc>", "<w:p/></w:tc>")));
-    entries[part] = enc.encode(xml);
+    entries[part] = enc.encode(patchEmptyCells(xml));
   }
   validateXml(entries);
   return writeZip(entries);
@@ -995,3 +1286,7 @@ export function describeResults(results) {
     ...(r.reason ? { reason: r.reason } : {}),
   }));
 }
+
+// The pieces other modules build on: reading and writing the package,
+// walking its XML, and the words a review suggestion quotes.
+export { readZip, writeZip, validateXml, child, attr, STORY_PART, PARAGRAPH, patchEmptyCells, visibleText, suggestionParagraphs, xmlParts };

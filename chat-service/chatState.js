@@ -42,9 +42,21 @@ const titleWords = (text) => new Set(String(text ?? '').toLowerCase().replace(/\
  */
 export function chooseWorkingDocument(artifacts, { message = '', workingArtifactId = null } = {}) {
   const byPath = new Map(artifacts.filter((a) => a.data?.storagePath).map((a) => [a.data.storagePath, a]));
+  const byId = new Map(artifacts.map((a) => [a.id, a]));
+  // Copies the service wrote name their document outright. When the row
+  // named is not in the thread, the oldest copy carrying that name stands
+  // in for it, so the document still resolves to one root.
+  const oldestNaming = new Map();
+  for (const a of artifacts) {
+    const w = a.data?.workingDocumentId;
+    if (w && !oldestNaming.has(w)) oldestNaming.set(w, a);
+  }
   const rootOf = (a) => {
     let cur = a;
     for (let guard = 0; guard < 50; guard++) {
+      const w = cur.data?.workingDocumentId;
+      if (w) return byId.get(w) ?? oldestNaming.get(w);
+      // Older copies only know their parent: follow the chain.
       const parent = cur.data?.sourceStoragePath ? byPath.get(cur.data.sourceStoragePath) : null;
       if (!parent || parent === cur) return cur;
       cur = parent;
