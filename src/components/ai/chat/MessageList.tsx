@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronDown, ChevronRight, FileText, Landmark, Paperclip, Play, Scale } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FileText, Paperclip, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import MarkdownMessage from "@/components/ai/chat/MarkdownMessage";
+import { CitationChip, SourceViewer, SourcesFootnote, type OpenedSource } from "@/components/ai/chat/SourceCitations";
 import { messageMetadata, type ChatArtifact, type ChatAttachment, type ChatMessage, type ChatSource, type StreamingState } from "@/hooks/useChat";
-import { cn } from "@/lib/utils";
+import { buildThreadSourceMap, resolveCitation, type ThreadSourceEntry } from "@/lib/chatCitations";
+
+type ThreadSourceMap = Map<number, ThreadSourceEntry<ChatSource>>;
+type OpenSource = (opened: OpenedSource) => void;
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -38,6 +42,25 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
     setStickToBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   };
 
+  // Chat-wide source numbers: [Source n] in any reply resolves against every
+  // passage registered in the thread so far, the streaming turn's included.
+  const threadSources = useMemo<ThreadSourceMap>(
+    () =>
+      buildThreadSourceMap<ChatSource>([
+        ...messages.filter((m) => m.role === "assistant").map((m) => ({ messageId: m.id, sources: messageMetadata(m).sources })),
+        ...(pending ? [{ messageId: "streaming", sources: stream.sources }] : []),
+      ]),
+    [messages, pending, stream.sources],
+  );
+  const [viewer, setViewer] = useState<OpenedSource | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const openSource = useCallback<OpenSource>((opened) => {
+    setViewer(opened);
+    setViewerOpen(true);
+  }, []);
+  const streamingText = stream.text.replace(/<artifact[\s\S]*$/, "");
+  const renderStreamingCitation = useCitationRenderer(stream.sources, undefined, threadSources, streamingText, openSource);
+
   const showEmpty = !messages.length && !pending && !stream.text;
   // The chat function stores the lawyer's message before it streams, and a
   // brand-new thread's URL change refetches messages mid-turn — so the
@@ -61,6 +84,8 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
               activeArtifactId={activeArtifactId}
               onOpenArtifact={onOpenArtifact}
               onResume={!pending && onResume ? onResume : undefined}
+              threadSources={threadSources}
+              onOpenSource={openSource}
             />
           ))}
         {showPendingBubble && (
@@ -73,10 +98,11 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
             ))}
             {stream.text ? (
               <MarkdownMessage
-                content={stream.text.replace(/<artifact[\s\S]*$/, "")}
+                content={streamingText}
                 artifacts={artifacts}
                 onOpenArtifact={onOpenArtifact}
                 inProgress
+                renderCitation={renderStreamingCitation}
               />
             ) : (
               <ThinkingDots />
@@ -100,7 +126,31 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
         )}
         <div ref={endRef} />
       </div>
+      <SourceViewer opened={viewer} open={viewerOpen} onOpenChange={setViewerOpen} />
     </div>
+  );
+}
+
+// [Source n] in one reply: resolved against that reply's own sources (an
+// older reply numbers them 1..k) or the thread's chat-wide numbers, and
+// muted when the server flagged it or nothing matches.
+function useCitationRenderer(
+  ownSources: ChatSource[] | undefined,
+  unverified: number[] | undefined,
+  threadSources: ThreadSourceMap,
+  replyText: string,
+  onOpenSource: OpenSource,
+) {
+  return useCallback(
+    (n: number) => (
+      <CitationChip
+        n={n}
+        source={resolveCitation(n, ownSources, threadSources)}
+        unverified={!!unverified?.includes(n)}
+        onOpen={(source, num, isUnverified) => onOpenSource({ source, n: num, replyText, unverified: isUnverified })}
+      />
+    ),
+    [ownSources, unverified, threadSources, replyText, onOpenSource],
   );
 }
 
@@ -110,14 +160,19 @@ function MessageRow({
   activeArtifactId,
   onOpenArtifact,
   onResume,
+  threadSources,
+  onOpenSource,
 }: {
   message: ChatMessage;
   artifacts: Map<string, ChatArtifact>;
   activeArtifactId: string | null;
   onOpenArtifact: (artifact: ChatArtifact) => void;
   onResume?: (message: ChatMessage) => void;
+  threadSources: ThreadSourceMap;
+  onOpenSource: OpenSource;
 }) {
   const meta = messageMetadata(message);
+  const renderCitation = useCitationRenderer(meta.sources, meta.unverifiedCitations, threadSources, message.content, onOpenSource);
   if (message.role === "user") {
     return (
       <>
@@ -139,8 +194,21 @@ function MessageRow({
   }
   return (
     <div className="min-w-0" data-testid="assistant-message">
-      <MarkdownMessage content={message.content} artifacts={artifacts} onOpenArtifact={onOpenArtifact} activeArtifactId={activeArtifactId} />
-      {!!meta.sources?.length && <SourcesFootnote sources={meta.sources} />}
+      <MarkdownMessage
+        content={message.content}
+        artifacts={artifacts}
+        onOpenArtifact={onOpenArtifact}
+        activeArtifactId={activeArtifactId}
+        renderCitation={renderCitation}
+      />
+      {(!!meta.sources?.length || !!meta.cited?.length) && (
+        <SourcesFootnote
+          sources={meta.sources ?? []}
+          cited={meta.cited}
+          resolve={(n) => resolveCitation(n, meta.sources, threadSources)}
+          onOpen={(source, n) => onOpenSource({ source, n, replyText: message.content, unverified: n != null && !!meta.unverifiedCitations?.includes(n) })}
+        />
+      )}
       {meta.incomplete && onResume && (
         <div className="mt-3 flex items-center gap-3">
           <Button size="sm" variant="secondary" onClick={() => onResume(message)} data-testid="resume-reply">
@@ -182,55 +250,6 @@ function ThinkingDots() {
       <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
       <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
       <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60" />
-    </div>
-  );
-}
-
-function scopeMeta(s: ChatSource) {
-  switch (s.scope) {
-    case "statute":
-      return { Icon: Scale, label: s.act_name ?? "Statute" };
-    case "precedent":
-      return { Icon: BookOpen, label: s.filename ?? "Precedent" };
-    default:
-      return { Icon: Landmark, label: s.filename ?? "Project document" };
-  }
-}
-
-// What the reply was grounded in, collapsed by default — the same numbered
-// [Source n] labels the model cites.
-export function SourcesFootnote({ sources }: { sources: ChatSource[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mt-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-      >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {sources.length} source{sources.length === 1 ? "" : "s"} used for this answer
-      </button>
-      {open && (
-        <ol className="mt-2 space-y-1.5">
-          {sources.map((s, i) => {
-            const { Icon, label } = scopeMeta(s);
-            return (
-              <li key={s.id} className="flex items-start gap-2 text-xs">
-                <span className="w-5 shrink-0 text-muted-foreground">{i + 1}.</span>
-                <Icon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="min-w-0">
-                  <span className={cn("font-medium", s.scope === "statute" && "text-amber-800 dark:text-amber-300")}>{label}</span>
-                  {s.url && /^https:\/\//.test(s.url) && <a className="ml-2 underline" href={s.url} target="_blank" rel="noopener noreferrer">Open source</a>}
-                  {s.fetchedAt && <span className="block text-muted-foreground">Retrieved {new Date(s.fetchedAt).toLocaleDateString()}</span>}
-                  {s.applicability === "candidate" && <span className="block text-muted-foreground">Potentially relevant — applicability needs review</span>}
-                  <span className="block truncate text-muted-foreground">{s.content}</span>
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
     </div>
   );
 }

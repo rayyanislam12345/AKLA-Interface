@@ -85,20 +85,33 @@ export interface ActiveSkill {
 }
 
 export interface ChatSource {
+  // Chat-wide source number, stable across turns: what "[Source n]" in any
+  // reply of the thread points at. Older replies have none and number their
+  // own sources 1..k.
+  n?: number;
   url?: string | null;
   fetchedAt?: string | null;
   applicability?: string | null;
   id: string;
-  scope: "matter" | "precedent" | "statute";
-  similarity: number;
+  scope: "matter" | "precedent" | "statute" | "attachment";
+  similarity: number | null;
+  // Display name: "Companies Act, 2017 s.199", a file name, …
+  label?: string | null;
   filename: string | null;
   act_name: string | null;
+  section?: string | null;
+  // The passage itself (up to ~6,000 chars); `content` is the older 240-char preview.
+  excerpt?: string | null;
   content: string;
 }
 
 export interface MessageMetadata {
   attachments?: ChatAttachment[];
   sources?: ChatSource[];
+  // The source numbers this reply actually cites, and those it cites that
+  // do not match a passage retrieved in this chat.
+  cited?: number[];
+  unverifiedCitations?: number[];
   artifacts?: string[];
   skill?: { key: SkillKey; documentTypeId?: string; customSkillId?: string; documentVersionId?: string; matterDocumentId?: string } | null;
   // The chat function saved this reply before it was finished (it ran out

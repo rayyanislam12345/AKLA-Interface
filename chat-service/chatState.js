@@ -11,8 +11,14 @@ export function inferDraftSkill(message, types) {
   const matches = types.filter(t => normalized.includes(' ' + t.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' '));
   return matches.length === 1 ? { key: 'draft', documentTypeId: matches[0].id } : null;
 }
-export function citationIssues(text, sourceCount) {
-  return [...new Set([...text.matchAll(/\[Source\s+(\d+)\]/gi)].map(m => Number(m[1])).filter(n => n < 1 || n > sourceCount))];
+// The source numbers a reply cites that no passage carries. `valid` is the
+// count of this turn's sources (numbered from 1) or, in a chat whose sources
+// are numbered for the whole conversation, the set of numbers in use.
+// "[Sources 3, 5]" and "[Source 3 and 7]" are read as well as "[Source 3]".
+export function citationIssues(text, valid) {
+  const ok = valid instanceof Set ? (n) => valid.has(n) : (n) => n >= 1 && n <= valid;
+  const cited = [...String(text ?? '').matchAll(/\[Sources?\s+(\d+(?:\s*(?:,|and|&|;)\s*\d+)*)\]/gi)].flatMap(m => m[1].match(/\d+/g).map(Number));
+  return [...new Set(cited.filter(n => !ok(n)))];
 }
 
 // A message that only asks for the review to run ("review it", "please check

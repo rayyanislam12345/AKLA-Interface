@@ -1,7 +1,10 @@
-import ReactMarkdown from "react-markdown";
+import { Fragment, useMemo, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { Parent, PhrasingContent, Root, RootContent } from "mdast";
 import { FileText, ScanSearch, StickyNote } from "lucide-react";
 import type { ChatArtifact } from "@/hooks/useChat";
+import { parseCitations } from "@/lib/chatCitations";
 import { cn } from "@/lib/utils";
 
 interface MarkdownMessageProps {
@@ -13,7 +16,51 @@ interface MarkdownMessageProps {
   // True only for the reply currently streaming. A stored partial with an
   // open artifact tag is "cut short", not "being written".
   inProgress?: boolean;
+  // Draws one cited source number. When given, "[Source n]" tokens in the
+  // reply's prose become whatever this returns (code and links untouched).
+  renderCitation?: (n: number) => ReactNode;
 }
+
+// Turns "[Source 3]" / "[Sources 3 and 5]" in prose text nodes into a span
+// carrying the numbers, which the span renderer below swaps for chips. Text
+// inside links is left alone; inline code and code blocks are not text
+// nodes, so they are never touched.
+function remarkCitations() {
+  return (tree: Root) => {
+    walk(tree);
+  };
+}
+
+function walk(node: Parent) {
+  if (node.type === "link" || node.type === "linkReference") return;
+  const out: RootContent[] = [];
+  let changed = false;
+  for (const child of node.children as RootContent[]) {
+    if (child.type === "text") {
+      const parts = parseCitations(child.value);
+      if (!parts.some((p) => p.type === "cite")) {
+        out.push(child);
+        continue;
+      }
+      changed = true;
+      for (const p of parts) {
+        if (p.type === "text") out.push({ type: "text", value: p.text });
+        else
+          out.push({
+            type: "citation",
+            data: { hName: "span", hProperties: { dataCite: p.nums.join(",") }, hChildren: [{ type: "text", value: p.raw }] },
+          } as unknown as PhrasingContent);
+      }
+    } else {
+      if ("children" in child) walk(child as Parent);
+      out.push(child);
+    }
+  }
+  if (changed) (node as { children: RootContent[] }).children = out;
+}
+
+const PLAIN_PLUGINS = [remarkGfm];
+const CITATION_PLUGINS = [remarkGfm, remarkCitations];
 
 const ARTIFACT_MARKER = /\[\[artifact:([0-9a-f-]{36})\]\]/g;
 // A reply saved mid-generation still holds the raw opening tag of the document
@@ -31,7 +78,26 @@ export function artifactIcon(kind: string) {
 // document the model produced shown as a clickable card (the chat function
 // stores those as [[artifact:id]] markers where the block was) rather than
 // inline in the bubble.
-export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false }: MarkdownMessageProps) {
+export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false, renderCitation }: MarkdownMessageProps) {
+  const components = useMemo<Components | undefined>(
+    () =>
+      renderCitation
+        ? {
+            span: ({ node, ...props }) => {
+              const cite = (props as Record<string, unknown>)["data-cite"];
+              if (typeof cite !== "string") return <span {...props} />;
+              return (
+                <span className="whitespace-nowrap">
+                  {cite.split(",").map((n) => (
+                    <Fragment key={n}>{renderCitation(Number(n))}</Fragment>
+                  ))}
+                </span>
+              );
+            },
+          }
+        : undefined,
+    [renderCitation],
+  );
   const writingDocument = UNTERMINATED_ARTIFACT.test(content);
   // A stray closing tag (the model sometimes closes an artifact twice) is
   // markup, not prose — older stored replies still carry a few.
@@ -51,7 +117,7 @@ export default function MarkdownMessage({ content, artifacts, onOpenArtifact, ac
       {parts.map((part, i) =>
         part.type === "md" ? (
           <div key={i} className="prose prose-sm dark:prose-invert max-w-none break-words prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={renderCitation ? CITATION_PLUGINS : PLAIN_PLUGINS} components={components}>{part.text}</ReactMarkdown>
           </div>
         ) : (
           <ArtifactCard

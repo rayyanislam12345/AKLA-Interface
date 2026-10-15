@@ -204,9 +204,12 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
         if (!['act','rules','regulation','notification','amendment'].includes(candidate.kind) || typeof candidate.title !== 'string' || /\bbill\b/i.test(candidate.title)) throw new Error('Unsupported or proposed authority');
         const inLibrary = findInLibrary(candidate.title, library ?? []);
         if (inLibrary) {
-          const { data: chunks, error: chunkError } = await supabase.from('documents').select('id, content, metadata').eq('is_statute', true).eq('metadata->>act_name', inLibrary.act_name).order('id').limit(80);
+          // In the Act's own order: ordering by id (a uuid) read its passages
+          // shuffled, so a cut at MAX_LIBRARY_CHARS kept random sections.
+          const { data: chunks, error: chunkError } = await supabase.from('documents').select('id, content, metadata').eq('is_statute', true).eq('metadata->>act_name', inLibrary.act_name).limit(1000);
           if (chunkError) throw chunkError;
-          const text = (chunks ?? []).map((c) => c.content).join('\n\n').slice(0, MAX_LIBRARY_CHARS);
+          const ordered = [...(chunks ?? [])].sort((a, b) => Number(a.metadata?.chunk_index ?? 0) - Number(b.metadata?.chunk_index ?? 0));
+          const text = ordered.map((c) => c.content).join('\n\n').slice(0, MAX_LIBRARY_CHARS);
           if (!text.trim()) throw new Error('In the law library, but its text is empty');
           const metadata = { act_name: inLibrary.act_name, source: 'law-library', source_url: inLibrary.source_url ?? null, research_run_id: run.id, applicability: 'candidate' };
           sources.push({ id: `library:${inLibrary.act_name}`, scope: 'statute', similarity: 1, content: text, metadata, reason: String(candidate.reason ?? '') });
