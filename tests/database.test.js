@@ -574,3 +574,57 @@ test('indexing: Try again re-queues a failed version for members only; a stoppin
   assert.equal((await db.query('select touch_index_job($1,$2) r',[job.id,job.run_id])).rows[0].r,null,'a released run cannot renew its lock');
  } finally {await db.close();}
 });
+
+// ------------------------------------------------------- checks and changes
+// 20261018090000_checks_and_changes.sql on top of the indexing pipeline.
+const checksSql=()=>readFileSync('supabase/migrations/20261018090000_checks_and_changes.sql','utf8');
+
+test('checks and changes: the columns exist, only the worker writes them, a stale run writes nothing', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec(checksSql());
+  await db.exec(checksSql()); // a second run changes nothing
+  const cols=(await db.query("select column_name,data_type from information_schema.columns where table_name='document_versions' and column_name in ('proof_check','changes_from_previous','compared_with_version_id') order by column_name")).rows;
+  assert.deepEqual(cols.map(c=>[c.column_name,c.data_type]),[['changes_from_previous','jsonb'],['compared_with_version_id','uuid'],['proof_check','jsonb']]);
+  const fn=(await db.query("select prosecdef from pg_proc where proname='record_version_checks'")).rows;
+  assert.equal(fn.length,1); assert.equal(fn[0].prosecdef,true);
+  const canExec=async(role)=>(await db.query("select has_function_privilege($1,'public.record_version_checks(uuid,uuid,jsonb,jsonb,uuid)','execute') ok",[role])).rows[0].ok;
+  assert.equal(await canExec('service_role'),true);
+  assert.equal(await canExec('authenticated'),false);
+  assert.equal(await canExec('anon'),false);
+
+  await db.exec('set role authenticated');
+  const doc=randomUUID(),p1=await staged(db,doc),v1=await save(db,doc,p1);
+  const p2=await staged(db,doc),v2=await save(db,doc,p2,{create:false,expected:v1.versionId});
+  await assert.rejects(db.query('select record_version_checks($1,$2,$3,$4,$5)',[v2.versionId,null,'{}','{}',v1.versionId]),/permission denied/);
+  // Members read the new columns like any other; null until the worker writes.
+  const unread=(await db.query('select proof_check,changes_from_previous,compared_with_version_id from document_versions where id=$1',[v2.versionId])).rows[0];
+  assert.deepEqual(unread,{proof_check:null,changes_from_previous:null,compared_with_version_id:null});
+  await db.exec('reset role');
+
+  await db.exec('grant usage on schema public to service_role');
+  await db.query("update document_index_jobs set created_at=now()-interval '1 day' where document_version_id=$1",[v2.versionId]);
+  const job=await claimJob(db);
+  assert.equal(job.document_version_id,v2.versionId);
+  await db.exec('set role service_role');
+  const proof={version:1,counts:{placeholders:2},total:2,items:[]};
+  const changes={version:1,previous:{version_id:v1.versionId,version_number:1},counts:{changed:1},items:[{where:'Clause 2.1',kind:'changed',nature:'numbers_dates_names',before:'thirty (30)',after:'sixty (60)'}]};
+  assert.equal((await db.query('select record_version_checks($1,$2,$3,$4,$5) r',[v2.versionId,randomUUID(),JSON.stringify({total:99}),null,null])).rows[0].r,false,'not this version\'s latest run');
+  assert.equal((await db.query('select record_version_checks($1,$2,$3,$4,$5) r',[v2.versionId,job.run_id,JSON.stringify(proof),JSON.stringify(changes),v1.versionId])).rows[0].r,true);
+  await db.exec('reset role');
+  let row=(await db.query('select proof_check,changes_from_previous,compared_with_version_id from document_versions where id=$1',[v2.versionId])).rows[0];
+  assert.equal(row.proof_check.total,2);
+  assert.equal(row.changes_from_previous.items[0].nature,'numbers_dates_names');
+  assert.equal(row.compared_with_version_id,v1.versionId);
+  // An error is stored in place of a result; a first version has nothing to compare with.
+  await db.exec('set role service_role');
+  assert.equal((await db.query('select record_version_checks($1,$2,$3,$4,$5) r',[v1.versionId,null,JSON.stringify({error:'The checks could not be run on this file.'}),null,null])).rows[0].r,true);
+  await db.exec('reset role');
+  row=(await db.query('select proof_check,changes_from_previous,compared_with_version_id from document_versions where id=$1',[v1.versionId])).rows[0];
+  assert.equal(row.proof_check.error,'The checks could not be run on this file.'); assert.equal(row.changes_from_previous,null); assert.equal(row.compared_with_version_id,null);
+  // Deleting the earlier version leaves the comparison, without the link.
+  await db.query('delete from document_versions where id=$1',[v1.versionId]);
+  row=(await db.query('select changes_from_previous,compared_with_version_id from document_versions where id=$1',[v2.versionId])).rows[0];
+  assert.equal(row.compared_with_version_id,null); assert.equal(row.changes_from_previous.counts.changed,1);
+ } finally {await db.close();}
+});

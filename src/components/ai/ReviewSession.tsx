@@ -7,7 +7,6 @@ import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, Sca
 import { supabase } from "@/integrations/supabase/client";
 import { lawUpdateTypeLabel, buildRevisePrompt, type LawUpdate } from "@/hooks/useLawUpdates";
 import {
-  fetchMatterDocumentTypeId,
   useApplyRedlinesPreview,
   useLatestDocumentVersion,
   useReviewRun,
@@ -22,7 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { saveBlobToProject } from "@/lib/documentSave";
+import { formatSaveDate } from "@/lib/documentSaveRules";
 import { cn, sanitizeStorageFilename } from "@/lib/utils";
 
 // The three-pass AI review of one matter document — suggestions grouped by
@@ -415,17 +415,21 @@ export default function ReviewSession({
     setSaving(true);
     try {
       if (!version) throw new Error("The version under review could not be found. Reopen the review and try again.");
-      // The new version keeps the document's type as it is stored now — none
-      // for an untyped document. A type is optional on a document, so it is
-      // never a reason to refuse saving a review.
-      const documentTypeId = await fetchMatterDocumentTypeId(matterDocumentId);
-      const title = matterDocument?.title ?? version.file_name;
-      const result = await saveDraftToMatter({ matterId, documentTypeId, documentTypeName: title, blob: previewBlob,
-        matterDocumentId, title, expectedVersionId: version.id });
-      toast({ title: `Saved as v${result.versionNumber}`, description: result.indexed ? result.fileName : "Saved, but it couldn't be prepared for search. Open the project and press Try again." });
+      // The one save the chat panels use: the next version of the reviewed
+      // document, its type read as stored now (none for an untyped document,
+      // never a reason to refuse), based on the version under review.
+      const result = await saveBlobToProject({
+        matterId,
+        blob: previewBlob,
+        mode: "next-version",
+        matterDocumentId,
+        expectedVersionId: version.id,
+        label: `AI review with tracked changes — ${formatSaveDate(new Date())}`,
+      });
+      toast({ title: result.message, description: result.note ?? result.fileName });
       navigate(`/matters/${matterId}`);
-    } catch (err: any) {
-      toast({ title: "Failed to save version", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Couldn't save the version", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }

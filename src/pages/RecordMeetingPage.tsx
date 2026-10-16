@@ -1,4 +1,4 @@
-import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { plainSaveError, saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
 import { Mic, Square, Wand2, FileText, Download, Upload, Languages, FileUp, FileAudio, MonitorSpeaker, ScanSearch, Save, Sparkles } from "lucide-react";
@@ -422,8 +422,9 @@ export default function RecordMeetingPage() {
         title: `${title} saved to project`,
         description: [result.indexed ? "Ready for search." : "Saved; it will be searchable shortly.", documentTypeId ? null : `Filed without a document type — the "${UPLOAD_DOCUMENT_TYPE_NAME[format]}" type isn't set up; an administrator can add it.`].filter(Boolean).join(" "),
       });
-    } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    } catch (err) {
+      // The same wording as every other save to a project.
+      toast({ title: "Couldn't save to the project", description: plainSaveError(err), variant: "destructive" });
     } finally {
       setUploadingFormat(null);
     }

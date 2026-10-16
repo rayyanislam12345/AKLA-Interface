@@ -15,9 +15,10 @@ import { fetchTemplateDocxBytes, useDocumentTypeTemplate } from "@/hooks/useDocu
 import type { LawUpdate } from "@/hooks/useLawUpdates";
 import { buildFirmDocxBlob, type PMNode } from "@/lib/firmDocx";
 import { buildTemplateDocxBlob } from "@/lib/templateDocx";
-import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { patchArtifactKeys, saveBlobToProject } from "@/lib/documentSave";
+import { headerFacts, waitingOf, type WorkingDocData } from "@/lib/documentSaveRules";
+import { useWorkingDocument } from "@/hooks/useDocumentChanges";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchMatterDocumentTypeId } from "@/hooks/useRedline";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,27 +43,29 @@ interface ArtifactPanelProps {
 // document under review.
 export default function ArtifactPanel({ matterId, matterName, standard, artifact, lawUpdate, onClose }: ArtifactPanelProps) {
   const Icon = artifactIcon(artifact.kind);
-  const incomplete = (artifact.data as { truncated?: boolean } | null)?.truncated === true;
+  // A Word document is shown as its working document: the newest copy, its
+  // Changes list and where it stands. Other kinds pass straight through.
+  const working = useWorkingDocument(artifact);
+  const shown = working.head;
+  const incomplete = (shown.data as { truncated?: boolean } | null)?.truncated === true;
+  // The one line that says where the document stands: the project, the
+  // version it was opened from, whether it is saved (and as which version),
+  // and how many changes are waiting.
+  const waiting = waitingOf(working.counts);
+  const facts = artifact.kind === "review"
+    ? []
+    : standard
+      ? [`standard for ${standard.documentTypeName}`, ...((shown.data as { publishedAsStandardAt?: string } | null)?.publishedAsStandardAt ? ["set as the standard"] : []), ...(waiting ? [`${waiting} waiting`] : [])]
+      : artifact.kind === "docx"
+        ? headerFacts({ data: shown.data as WorkingDocData, projectName: matterName, inProject: !!matterId, waiting })
+        : draftFacts(artifact, matterId, matterName);
   return (
     <div className="flex h-full min-w-0 flex-col bg-background" data-testid="artifact-panel">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1 truncate text-sm" title={artifact.title}>
-          <span className="font-medium">{artifact.title}</span>
-          {/* The working document names where it came from and where it stands:
-              the project, the version it was opened from, and whether it has
-              been saved back — the one line the workflow proposal asks for. */}
-          {artifact.kind !== "review" && (() => {
-            const d = (artifact.data ?? {}) as any;
-            const es = d.editSource;
-            const origin = es
-              ? es.standard
-                ? "from the firm's standard"
-                : `${d.original ? "as uploaded" : "edited"} · ${es.versionNumber ? `v${es.versionNumber} of ${es.title}` : es.title}`
-              : matterName ?? "not in a project";
-            const saved = d.savedVersion ? `saved as v${d.savedVersion}` : matterId ? "not saved to the project yet" : "not saved yet";
-            return <span className="ml-2 text-xs text-muted-foreground">{origin} · {saved}</span>;
-          })()}
+        <div className="min-w-0 flex-1 truncate text-sm" title={[shown.title, ...facts].join(" · ")}>
+          <span className="font-medium">{shown.title}</span>
+          {facts.length > 0 && <span className="ml-2 text-xs text-muted-foreground" data-testid="artifact-status">{facts.join(" · ")}</span>}
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close panel">
           <X className="h-4 w-4" />
@@ -81,7 +84,7 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
         {artifact.kind === "review" ? (
           <ReviewArtifact matterId={matterId} artifact={artifact} lawUpdate={lawUpdate ?? null} />
         ) : artifact.kind === "docx" ? (
-          <DocxArtifact key={artifact.id} matterId={matterId} standard={standard} artifact={artifact} />
+          <DocxArtifact key={working.workingDocumentId ?? artifact.id} matterId={matterId} standard={standard} working={working} />
         ) : artifact.kind === "file" ? (
           <FileArtifact key={artifact.id} artifact={artifact} matterId={matterId} />
         ) : (
@@ -90,6 +93,20 @@ export default function ArtifactPanel({ matterId, matterName, standard, artifact
       </div>
     </div>
   );
+}
+
+// Where a Markdown draft or memo stands: it has no Word file of its own
+// until it is exported, so only its origin and saved version are known.
+function draftFacts(artifact: ChatArtifact, matterId?: string, matterName?: string): string[] {
+  const d = (artifact.data ?? {}) as WorkingDocData;
+  const es = d.editSource;
+  const origin = es
+    ? es.standard
+      ? "from the firm's standard"
+      : `${d.original ? "as uploaded" : "edited"} · ${es.versionNumber ? `v${es.versionNumber} of ${es.title}` : es.title}`
+    : matterName ?? "not in a project";
+  const saved = d.savedVersion ? `saved as v${d.savedVersion}` : matterId ? "not saved to the project yet" : "not saved yet";
+  return [origin, saved];
 }
 
 // A review belongs to the project the reviewed document is in. Started from
@@ -246,35 +263,30 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
     setSaving(true);
     try {
       const blob = await buildBlob();
-      if (!blob) throw new Error("Editor is not ready yet");
-      const savedMatterDocumentId = (artifact.data as { savedMatterDocumentId?: string } | null)?.savedMatterDocumentId;
-      const target = saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? savedMatterDocumentId ?? editSource?.matterDocumentId;
-      // A new version keeps the document's own type as stored now (none for
-      // an untyped document); the database accepts no other.
-      const typeId = target ? await fetchMatterDocumentTypeId(target) : documentTypeId ?? null;
-      const result = await saveDraftToMatter({
+      if (!blob) throw new Error("The editor isn't ready yet. Try again in a moment.");
+      const d = (artifact.data ?? {}) as WorkingDocData;
+      const target = saveMode === "new" ? undefined : lastSave?.matterDocumentId ?? d.savedMatterDocumentId ?? editSource?.matterDocumentId;
+      // A new version keeps the document's own type as stored now (read at
+      // save time); a new document takes the type chosen here, or none.
+      const result = await saveBlobToProject({
         matterId: targetMatterId,
-        documentTypeId: typeId,
-        documentTypeName,
         blob,
-        title: editSource ? editSource.title : artifact.kind === "draft" ? undefined : artifact.title,
+        mode: target ? "next-version" : "new-document",
         matterDocumentId: target,
-        expectedVersionId: lastSave?.versionId ?? (artifact.data as any)?.savedVersionId ?? editSource?.documentVersionId,
+        expectedFrom: lastSave ? { ...d, savedVersionId: lastSave.versionId, savedVersion: lastSave.versionNumber } : d,
+        title: editSource ? editSource.title : artifact.kind === "draft" ? `${documentTypeName} (AI draft)` : artifact.title,
+        documentTypeId: documentTypeId ?? null,
+        queryClient,
       });
-      setLastSave({ ...result, documentTypeId: typeId ?? undefined, matterId: targetMatterId });
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
-      queryClient.invalidateQueries({ queryKey: ["project-search"] });
-      await updateArtifact.mutateAsync({
-        id: artifact.id,
-        data: { ...(artifact.data as object), documentTypeId: typeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId },
-      }).catch(() => toast({ title: "File saved; chat link could not update", description: "Your version is available in the project Documents section." }));
+      const typeId = result.documentTypeId;
+      setLastSave({ ...result, documentTypeId: typeId ?? undefined, matterId: result.matterId });
+      await patchArtifactKeys(artifact.id, { documentTypeId: typeId, savedMatterDocumentId: result.matterDocumentId, savedVersion: result.versionNumber, savedVersionId: result.versionId, savedAt: new Date().toISOString() })
+        .then(() => queryClient.invalidateQueries({ queryKey: ["chat-artifacts", artifact.thread_id] }))
+        .catch(() => toast({ title: "Saved; the chat couldn't record it", description: "Your version is in the project's Documents." }));
       setSaveMode("version");
-      toast({
-        title: `Saved to the project as v${result.versionNumber}`,
-        description: result.indexed ? result.fileName : `${result.fileName} — saved, but it couldn't be prepared for search. Open the project and press Try again.`,
-      });
-    } catch (err: any) {
-      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+      toast({ title: result.message, description: result.note ?? result.fileName });
+    } catch (err) {
+      toast({ title: "Couldn't save to the project", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }

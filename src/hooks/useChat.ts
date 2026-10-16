@@ -5,6 +5,8 @@ import { useAuth } from "@/hooks/useAuth";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { sanitizeStorageFilename } from "@/lib/utils";
 import { findSavedInProject, saveFileToProject, sourceKey, type SaveFileResult } from "@/lib/saveFileToProject";
+import { autoSaveOn, scheduleAutoSave } from "@/lib/documentSave";
+import { autoSaveEligible, type WorkingDocData } from "@/lib/documentSaveRules";
 
 // Data layer for the AI Workspace chat: threads per matter, their messages,
 // the streaming send, custom skills and artifacts. The `chat` edge function
@@ -540,6 +542,26 @@ interface SendInput {
 const MAX_CONTINUATION_ROUNDS = 12;
 
 type RoundResult = { threadId: string | null; assistantMessageId: string | null; incomplete: boolean; generatedChars: number };
+// The turn's key (which can change mid-round, see adopt) and the Word copies
+// its rounds produced, for the automatic save once it is over.
+type TurnRef = { current: string; docx: ChatArtifact[] };
+
+/**
+ * After a turn in a project chat: each Word copy it wrote that came from a
+ * project document is saved as that document's next version, unless the
+ * chat's "Save AI drafts automatically" switch is off. One save per
+ * document, of its newest copy.
+ */
+function autoSaveTurnCopies(copies: ChatArtifact[], matterId: string | undefined, queryClient: ReturnType<typeof useQueryClient>) {
+  if (!matterId || !copies.length) return;
+  const newest = new Map<string, ChatArtifact>();
+  for (const a of copies) newest.set((a.data as WorkingDocData | null)?.workingDocumentId ?? a.id, a);
+  for (const artifact of newest.values()) {
+    if (!autoSaveEligible(artifact.data as WorkingDocData, { inProject: true })) continue;
+    if (!autoSaveOn(artifact.thread_id, true)) continue;
+    scheduleAutoSave({ artifact, matterId: artifact.matter_id ?? matterId, queryClient });
+  }
+}
 
 // Turns of the conversation: POST to the chat endpoint, consume its SSE
 // stream, and expose the partial reply as per-thread state so the message
@@ -584,7 +606,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const runRound = useCallback(
     async (
       scopeKey: string,
-      keyRef: { current: string },
+      keyRef: TurnRef,
       payload: Record<string, unknown>,
       signal: AbortSignal,
       isFirstRound: boolean,
@@ -650,6 +672,13 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
               queryClient.invalidateQueries({ queryKey: ["redline-suggestions"] });
               queryClient.invalidateQueries({ queryKey: ["review-run"] });
             }
+            // A Word copy is stored before this event is sent: its working
+            // document's Changes list and the chat's artifacts are out of date.
+            if (data?.kind === "docx") {
+              queryClient.invalidateQueries({ queryKey: ["document-changes", (data.data as WorkingDocData | null)?.workingDocumentId ?? data.id] });
+              if (data.thread_id) queryClient.invalidateQueries({ queryKey: ["chat-artifacts", data.thread_id] });
+              keyRef.docx.push(data as ChatArtifact);
+            }
             onArtifact?.(data);
             break;
           case "title":
@@ -700,7 +729,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
   const continueUntilDone = useCallback(
     async (
       scope: ChatScope,
-      keyRef: { current: string },
+      keyRef: TurnRef,
       threadId: string,
       first: RoundResult,
       skillPayload: Record<string, unknown> | null,
@@ -777,7 +806,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
       controllers.current.set(key, controller);
-      const keyRef = { current: key };
+      const keyRef: TurnRef = { current: key, docx: [] };
       setTurns((all) => ({
         ...all,
         [key]: { key, threadId, pending: { content: message, attachments }, stream: { ...EMPTY_STREAM, threadId }, resumingMessageId: null, inFlight: true },
@@ -825,9 +854,10 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         }
       } finally {
         await finishTurn(scopeKey, keyRef.current);
+        if (!controller.signal.aborted) autoSaveTurnCopies(keyRef.docx, matterId, queryClient);
       }
     },
-    [session, runRound, continueUntilDone, finishTurn, patchStream],
+    [session, runRound, continueUntilDone, finishTurn, patchStream, queryClient],
   );
 
   // Picks up a reply that was left half-written — the tab was closed, the
@@ -842,7 +872,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       if (controllers.current.has(key)) throw new Error("A reply is still being written in this chat");
       const controller = new AbortController();
       controllers.current.set(key, controller);
-      const keyRef = { current: key };
+      const keyRef: TurnRef = { current: key, docx: [] };
       const meta = messageMetadata(message);
       const skillPayload = meta.skill ?? null;
       setTurns((all) => ({
@@ -871,9 +901,10 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
         }
       } finally {
         await finishTurn(chatScopeKey(scope), keyRef.current);
+        if (!controller.signal.aborted) autoSaveTurnCopies(keyRef.docx, matterId, queryClient);
       }
     },
-    [session, continueUntilDone, finishTurn, patchStream],
+    [session, continueUntilDone, finishTurn, patchStream, queryClient],
   );
 
   const clearError = useCallback((threadId: string | null) => {
