@@ -24,11 +24,13 @@ ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/
 
 echo "Copying the service files and the version stamp…"
 scp -i "$KEY" server.js libraryTools.js agreement.js agreementFlow.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js changes.js indexWorker.js package.json "$STAMP" "$HOST:/tmp/"
-# The index worker's reader (indexing/*.js) and its systemd unit.
+# The index worker's reader (indexing/*.js) and its systemd unit. The unit is
+# copied with install + restorecon, not mv: SELinux is enforcing and a file
+# moved from /tmp keeps its user_tmp_t label, which systemd refuses to read.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/indexing && mkdir -p /tmp/indexing"
 scp -i "$KEY" indexing/*.js "$HOST:/tmp/indexing/"
 scp -i "$KEY" index-worker.service "$HOST:/tmp/index-worker.service"
-ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST/indexing && sudo chown -R opc:opc $DEST/indexing && sudo mv /tmp/index-worker.service /etc/systemd/system/index-worker.service && sudo chown root:root /etc/systemd/system/index-worker.service && sudo chmod 644 /etc/systemd/system/index-worker.service && sudo systemctl daemon-reload && sudo systemctl enable index-worker >/dev/null 2>&1 && echo '  index worker unit installed'"
+ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST/indexing && sudo chown -R opc:opc $DEST/indexing && sudo install -m 644 -o root -g root /tmp/index-worker.service /etc/systemd/system/index-worker.service && sudo rm -f /tmp/index-worker.service && sudo restorecon /etc/systemd/system/index-worker.service && sudo systemctl daemon-reload && sudo systemctl enable index-worker >/dev/null 2>&1 && echo '  index worker unit installed'"
 # The reader shells out to poppler (pdfinfo, pdftotext, pdftoppm) and tesseract.
 ssh -i "$KEY" "$HOST" "for t in pdfinfo pdftotext pdftoppm tesseract; do command -v \$t >/dev/null || echo \"  WARNING: \$t is not installed; the index worker needs it\"; done"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
