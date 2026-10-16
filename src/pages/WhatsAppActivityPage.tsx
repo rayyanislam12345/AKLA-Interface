@@ -1,15 +1,23 @@
 import { Fragment, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { marked } from "marked";
-import { ChevronDown, ChevronRight, Download, FileText, MessageCircle, MessageSquareText, Send } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronDown, ChevronRight, Download, FileText, FolderPlus, Loader2, MessageCircle, MessageSquareText, Send } from "lucide-react";
 import {
   useWhatsAppMatters,
   useWhatsAppDocuments,
   useLinkWhatsAppMatter,
   openWhatsAppDocument,
   downloadWhatsAppDocument,
+  useWhatsAppDocumentsInProject,
+  addWhatsAppDocumentToProject,
+  addAllWhatsAppDocumentsToProject,
+  isVoiceNote,
+  type WhatsAppDocument,
   type WhatsAppMatter,
 } from "@/hooks/useWhatsAppMatters";
+import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
+import { describeIndexing, describeSave } from "@/lib/saveFileToProject";
 import {
   useWhatsAppStatus,
   useLinkMyWhatsApp,
@@ -72,6 +80,80 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
 function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatter }) {
   const { data: files, isLoading } = useWhatsAppDocuments(whatsappMatter.id);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: matters } = useMatters();
+  const linkedId = whatsappMatter.matter_id;
+  const linkedName = whatsappMatter.matter_name ?? "the project";
+  // Linked: which files are already among the project's documents, from the
+  // database. Unlinked: each file asks which project, and where it went is
+  // remembered here for the visit.
+  const { data: inProject } = useWhatsAppDocumentsInProject(linkedId, files);
+  const [addedElsewhere, setAddedElsewhere] = useState<Record<string, { matterId: string; name: string }>>({});
+  const [adding, setAdding] = useState<Set<string>>(new Set());
+  const [addingAll, setAddingAll] = useState(false);
+  const [pickFor, setPickFor] = useState<WhatsAppDocument | null>(null);
+
+  const refreshProject = (matterId: string) => {
+    queryClient.invalidateQueries({ queryKey: ["whatsapp-documents-in-project", matterId] });
+    queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+  };
+
+  const addOne = async (file: WhatsAppDocument, matterId: string) => {
+    if (adding.has(file.id)) return;
+    const name = matterId === linkedId ? linkedName : (matters?.find((m) => m.id === matterId)?.name ?? "the project");
+    setAdding((prev) => new Set(prev).add(file.id));
+    try {
+      const result = await addWhatsAppDocumentToProject(file, matterId);
+      if (matterId !== linkedId) setAddedElsewhere((prev) => ({ ...prev, [file.id]: { matterId, name } }));
+      refreshProject(matterId);
+      toast(describeSave(result, name));
+      result.indexing?.then((outcome) => {
+        refreshProject(matterId);
+        const note = describeIndexing(outcome, result.title);
+        if (note) toast({ title: "Added, with a note", description: note });
+      });
+    } catch (err) {
+      toast({ title: `Could not add "${file.filename}"`, description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setAdding((prev) => {
+        const next = new Set(prev);
+        next.delete(file.id);
+        return next;
+      });
+    }
+  };
+
+  const addAll = async () => {
+    if (!linkedId || !files?.length || addingAll) return;
+    setAddingAll(true);
+    try {
+      const outcome = await addAllWhatsAppDocumentsToProject(files, linkedId);
+      refreshProject(linkedId);
+      const parts = [
+        outcome.saved.length ? `${outcome.saved.length} added` : "Nothing new to add",
+        outcome.already ? `${outcome.already} already there` : "",
+        outcome.voiceNotes ? `${outcome.voiceNotes} voice note${outcome.voiceNotes === 1 ? "" : "s"} left out (add one by one if needed)` : "",
+      ].filter(Boolean);
+      toast({ title: `${linkedName}: project documents`, description: `${parts.join("; ")}.` });
+      if (outcome.failed.length) {
+        toast({ title: `${outcome.failed.length} file${outcome.failed.length === 1 ? " was" : "s were"} not added`, description: outcome.failed.join(" "), variant: "destructive" });
+      }
+      const unread = outcome.saved.map((r) => r.indexing?.then((o) => (o === false ? r.title : null)) ?? Promise.resolve(null));
+      Promise.all(unread).then((titles) => {
+        refreshProject(linkedId);
+        const failedReads = titles.filter(Boolean);
+        if (failedReads.length) {
+          toast({ title: "Added, with a note", description: `The assistant could not read ${failedReads.map((t) => `"${t}"`).join(", ")} yet. The project's documents page tries again on its own, and has a Try again button.` });
+        }
+      });
+    } catch (err) {
+      toast({ title: "Could not add the documents", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setAddingAll(false);
+    }
+  };
+
+  const remaining = linkedId && files ? files.filter((f) => !isVoiceNote(f) && !inProject?.has(f.id)).length : 0;
 
   const timeline = Object.entries(whatsappMatter.chat_history)
     .flatMap(([chat, entries]) => entries.map((e) => ({ chat, ...e })))
@@ -121,8 +203,24 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
       ) : !files?.length ? (
         <p className="text-sm text-muted-foreground">No documents captured for this project.</p>
       ) : (
+        <div className="space-y-2">
+        {linkedId && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={addAll} disabled={addingAll || remaining === 0} data-testid="whatsapp-add-all">
+              {addingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+              {addingAll ? "Adding…" : "Add all to project documents"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {remaining === 0 ? `Every file here is already in ${linkedName}'s documents.` : `Copies files not yet in ${linkedName}'s documents; voice notes are left out.`}
+            </span>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          {files.map((file) => (
+          {files.map((file) => {
+            const there = linkedId ? inProject?.get(file.id) : undefined;
+            const elsewhere = addedElsewhere[file.id];
+            const busy = adding.has(file.id) || (addingAll && !there);
+            return (
             <div key={file.id} className="flex items-center gap-0.5 border rounded-md">
               <Button
                 variant="ghost"
@@ -142,10 +240,45 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
               >
                 <Download className="h-3.5 w-3.5" />
               </Button>
+              {there || elsewhere ? (
+                <span
+                  className="flex h-8 items-center gap-1 border-l px-2 text-xs text-emerald-700 dark:text-emerald-400"
+                  title={there ? `In ${linkedName}'s documents as "${there.title}"` : `Added to ${elsewhere!.name}'s documents`}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {there ? "In project" : `Added to ${elsewhere!.name}`}
+                </span>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={linkedId ? `Add to ${linkedName}'s documents` : "Add to a project's documents"}
+                  disabled={busy}
+                  onClick={() => (linkedId ? addOne(file, linkedId) : setPickFor(file))}
+                  className="h-8 gap-1 rounded-l-none border-l px-2 text-xs"
+                  data-testid="whatsapp-add-to-project"
+                >
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+                  {busy ? "Adding…" : "Add to project documents"}
+                </Button>
+              )}
             </div>
-          ))}
+            );
+          })}
+        </div>
         </div>
       )}
+      <ProjectPickerDialog
+        open={!!pickFor}
+        onOpenChange={(open) => !open && setPickFor(null)}
+        title="Add to which project?"
+        description={pickFor ? `"${pickFor.filename}" will be copied into that project's documents. This WhatsApp project stays unlinked.` : undefined}
+        onPick={(id) => {
+          const file = pickFor;
+          setPickFor(null);
+          if (file) void addOne(file, id);
+        }}
+      />
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { sanitizeStorageFilename } from "@/lib/utils";
+import { findSavedInProject, saveFileToProject, sourceKey, type SaveFileResult } from "@/lib/saveFileToProject";
 
 // Data layer for the AI Workspace chat: threads per matter, their messages,
 // the streaming send, custom skills and artifacts. The `chat` edge function
@@ -283,6 +284,76 @@ export async function uploadChatFile(scope: ChatScope | string, file: File): Pro
   const { error } = await supabase.storage.from("ai-chat-files").upload(path, file, { contentType: file.type || undefined });
   if (error) throw error;
   return { bucket: "ai-chat-files", path, name: file.name, size: file.size, type: file.type };
+}
+
+// ------------------------------------------------ saving a chat file to a project
+
+// "Save to project" on a file in the chat copies it from ai-chat-files into
+// the project's documents (see saveFileToProject). Which files have been
+// saved, and where, is kept here for the session, so the chip in the
+// composer and the same file's chip on the sent message agree. It is not
+// written to the message: the database is the record — in a project chat
+// each chip asks whether its file is already a document of that project, so
+// "Saved to …" survives a reload there; in a general chat it shows for the
+// session, and saving the same file to the same project again later finds
+// the document already there instead of adding it twice.
+export interface ChatFileSave { matterId: string; matterName: string; matterDocumentId: string; title: string }
+type ChatFileSaveState = { saving?: true; saved?: ChatFileSave };
+let chatFileSaves: Record<string, ChatFileSaveState> = {};
+const chatFileSaveListeners = new Set<() => void>();
+function setChatFileSave(path: string, state: ChatFileSaveState) {
+  chatFileSaves = { ...chatFileSaves, [path]: state };
+  chatFileSaveListeners.forEach((l) => l());
+}
+function subscribeChatFileSaves(listener: () => void) {
+  chatFileSaveListeners.add(listener);
+  return () => chatFileSaveListeners.delete(listener);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The project a chat upload belongs to, from its path ("<matterId>/…"); none for general chats and standardisation sessions. */
+export function projectOfChatFile(path: string): string | undefined {
+  const first = path.split("/")[0];
+  return UUID_RE.test(first) ? first : undefined;
+}
+
+/** Whether a chat file is being saved, or has been saved, to a project. */
+export function useChatFileSaveState(attachment: ChatAttachment) {
+  const state = useSyncExternalStore(subscribeChatFileSaves, () => chatFileSaves[attachment.path]);
+  const projectId = attachment.bucket === "ai-chat-files" ? projectOfChatFile(attachment.path) : undefined;
+  const { data: inProject } = useQuery({
+    queryKey: ["chat-file-in-project", attachment.path, projectId],
+    enabled: !!projectId && !state?.saved,
+    staleTime: 5 * 60_000,
+    queryFn: async () => (await findSavedInProject([{ kind: "chat", path: attachment.path }], projectId!)).get(sourceKey({ kind: "chat", path: attachment.path })) ?? null,
+  });
+  return {
+    saving: !!state?.saving,
+    saved: state?.saved ?? (inProject && projectId ? { matterId: projectId, matterName: "", matterDocumentId: inProject.matterDocumentId, title: inProject.title } : undefined),
+  };
+}
+
+/**
+ * Saves a chat upload to a project as a document of its own. A second call
+ * for the same file while the first is running is refused, and saving a file
+ * the project already has adds nothing and reports status "already".
+ */
+export async function saveChatFileToProject(attachment: ChatAttachment, matterId: string, matterName: string): Promise<SaveFileResult | null> {
+  if (attachment.bucket !== "ai-chat-files") throw new Error("Only files added to this chat can be saved from here.");
+  const prev = chatFileSaves[attachment.path];
+  if (prev?.saving) return null;
+  setChatFileSave(attachment.path, { ...prev, saving: true });
+  try {
+    const result = await saveFileToProject({
+      source: { kind: "chat", path: attachment.path }, storagePath: attachment.path,
+      fileName: attachment.name, mimeType: attachment.type, matterId,
+    });
+    setChatFileSave(attachment.path, { saved: { matterId, matterName, matterDocumentId: result.matterDocumentId, title: result.title } });
+    return result;
+  } catch (err) {
+    setChatFileSave(attachment.path, { saved: prev?.saved });
+    throw err;
+  }
 }
 
 // ------------------------------------------------------------------ edit

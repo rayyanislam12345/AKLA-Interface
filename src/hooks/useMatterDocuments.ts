@@ -2,6 +2,8 @@ import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Enums } from "@/integrations/supabase/types";
+import { parseFileName, versionLabel } from "@/lib/fileNames";
+import { sha256 } from "@/components/documents/collectFiles";
 
 export type DocumentStatus = Enums<"document_status">;
 
@@ -187,6 +189,9 @@ export function useUploadDocumentVersion() {
         title: file.name.replace(/\.[^.]+$/, ""), blob: file,
         expectedVersionId: stored ? (latest?.id ?? null) : expectedVersionId,
         isAiGenerated: false, extension, skipIndex: true });
+      // The same label and fingerprint a bulk upload records, so either way in
+      // the version says what the file name says and is recognised if re-sent.
+      await saveVersionDetails(result.versionId, { label: versionLabel(parseFileName(file.name)) || null, contentHash: await sha256(file) }).catch(() => undefined);
       return { matterId, matterDocumentId, documentTypeId: stored ? stored.document_type_id : documentTypeId, fileType: file.type, ...result };
     },
     // Awaited, so the real version row is on screen before the
@@ -287,4 +292,64 @@ export function useUpdateVersionLabel() {
       queryClient.invalidateQueries({ queryKey: ["project-search"] });
     },
   });
+}
+
+// ---- content hash (migration 20261016120000_document_content_hash) ----
+// The column may not exist yet where the migration has not been applied, and
+// the generated types do not know it. The first "no such column" answer is
+// remembered for the rest of the session and nothing tries again; the bulk
+// upload then recognises files already in the project by name and size.
+let contentHashColumn: "unknown" | "present" | "missing" = "unknown";
+
+function isMissingHashColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "42703" || error.code === "PGRST204" || /content_hash/i.test(error.message ?? "");
+}
+
+/** Each version in the project that has a stored hash: version id → hash. Null when hashes can't be read. */
+export async function fetchProjectContentHashes(matterId: string): Promise<Map<string, string> | null> {
+  if (contentHashColumn === "missing") return null;
+  const { data, error } = await supabase
+    .from("document_versions")
+    .select("id, content_hash, matter_documents!inner(matter_id)")
+    .eq("matter_documents.matter_id", matterId)
+    .not("content_hash", "is", null);
+  if (error) {
+    if (isMissingHashColumn(error)) contentHashColumn = "missing";
+    return null;
+  }
+  contentHashColumn = "present";
+  const map = new Map<string, string>();
+  for (const row of (data ?? []) as unknown as Array<{ id: string; content_hash: string | null }>) {
+    if (row.content_hash) map.set(row.id, row.content_hash);
+  }
+  return map;
+}
+
+/** After a save: the version's label from its file name, and its content hash when the column exists. */
+export async function saveVersionDetails(versionId: string, details: { label?: string | null; contentHash?: string | null }) {
+  if (details.label) {
+    await supabase.from("document_versions").update({ label: details.label }).eq("id", versionId);
+  }
+  if (details.contentHash && contentHashColumn !== "missing") {
+    const { error } = await supabase
+      .from("document_versions")
+      .update({ content_hash: details.contentHash } as never)
+      .eq("id", versionId);
+    if (isMissingHashColumn(error)) contentHashColumn = "missing";
+    else if (!error) contentHashColumn = "present";
+  }
+}
+
+/** Sizes of the stored files of one document, by storage path. Empty if the listing is refused. */
+export async function fetchStoredFileSizes(matterId: string, matterDocumentId: string): Promise<Map<string, number>> {
+  const folder = `${matterId}/${matterDocumentId}`;
+  const { data, error } = await supabase.storage.from("matter-documents").list(folder, { limit: 1000 });
+  const sizes = new Map<string, number>();
+  if (error) return sizes;
+  for (const object of data ?? []) {
+    const size = (object.metadata as { size?: number } | null)?.size;
+    if (typeof size === "number") sizes.set(`${folder}/${object.name}`, size);
+  }
+  return sizes;
 }

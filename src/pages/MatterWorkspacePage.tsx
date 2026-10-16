@@ -2,7 +2,7 @@ import { indexStoredVersion } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileText, Gavel, Loader2, MessageCircle, MessageSquare, MoreHorizontal, Pencil, Plus, ScanSearch, Search, Sparkles, Tag, Trash2, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileArchive, FileText, FolderUp, Gavel, Loader2, MessageCircle, MessageSquare, MoreHorizontal, Pencil, Plus, ScanSearch, Search, Sparkles, Tag, Trash2, Upload, Wand2, X } from "lucide-react";
 import {
   useMatter,
   useMatterStages,
@@ -62,6 +62,13 @@ import {
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
 import { MatterTimeslips } from "@/components/MatterTimeslips";
+import { DocumentDropZone } from "@/components/documents/DocumentDropZone";
+import { DocumentIntakePanel } from "@/components/documents/DocumentIntakePanel";
+import { useDocumentIntake, type IntakeDocument } from "@/components/documents/useDocumentIntake";
+import { DocumentPreviewSheet, type PreviewTarget, type PreviewVersion } from "@/components/documents/DocumentPreviewSheet";
+import { downloadZip, todayLabel, versionDownloadName, type ZipEntry, type ZipProgress } from "@/components/documents/zipDownload";
+import { plainUploadError } from "@/components/documents/uploadErrors";
+import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -120,6 +127,8 @@ function statusVariant(status: string): "default" | "secondary" | "outline" {
 
 const STAGE_CYCLE = ["not_started", "in_progress", "complete"] as const;
 
+const NO_DOCUMENTS: IntakeDocument[] = [];
+
 // Whether search and Ask AI can read a version, in words a lawyer can act
 // on. "unknown" (versions saved before the status was recorded) and a
 // "pending" that has sat for more than ten minutes are treated as failed:
@@ -148,18 +157,6 @@ const READ_STATE_HINT: Record<ReadState, string> = {
   failed: "The file is saved, but search and Ask AI can't read it yet. Press Try again.",
   unsupported: "This file type can't be read for search. The file is saved and can be downloaded.",
 };
-
-// Turns a failed upload into a sentence a lawyer can act on.
-function plainUploadError(err: unknown): string {
-  const message = err instanceof Error ? err.message : typeof err === "object" && err && "message" in err ? String((err as { message: unknown }).message) : String(err ?? "");
-  const m = message.toLowerCase();
-  if (m.includes("failed to fetch") || m.includes("network") || m.includes("load failed")) return "The file couldn't be sent. Check your connection and try again.";
-  if (m.includes("maximum allowed size") || m.includes("too large") || m.includes("payload")) return "This file is too large to upload.";
-  if (m.includes("newer document version")) return "A colleague added a version of this document a moment ago. Try the upload again.";
-  if (m.includes("does not belong to this project and type")) return "This document's type was changed while you were uploading. Try the upload again.";
-  if (m.includes("jwt") || m.includes("not authenticated") || m.includes("forbidden")) return "Your sign-in has expired. Sign in again, then retry the upload.";
-  return message || "Something went wrong. Please try again.";
-}
 
 // Every mutation on this page used to fire with no error handling: a failed
 // add, tick, status change or dismiss simply did nothing, and the lawyer was
@@ -736,6 +733,13 @@ export default function MatterWorkspacePage() {
   }, [location.key, location.hash, matterDocuments, tasks, notes, expandedDocId]);
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [editingLabelDraft, setEditingLabelDraft] = useState("");
+  // Bulk intake, bulk download and the preview panel.
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(() => new Set());
+  const [zipProgress, setZipProgress] = useState<(ZipProgress & { what: string }) | null>(null);
+  const [preview, setPreview] = useState<{ openId: string; docId: string; versionId: string } | null>(null);
+  const [showPlaceholderRow, setShowPlaceholderRow] = useState(false);
 
   const triggerUpload = (matterDocumentId: string, title: string, documentTypeId: string | null, expectedVersionId: string | null) => {
     if (uploadingDocs[matterDocumentId]) return;
@@ -754,6 +758,77 @@ export default function MatterWorkspacePage() {
     queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
     queryClient.invalidateQueries({ queryKey: ["project-search"] });
   };
+
+  // Many files at once: dropped on the Documents card, picked, or a folder.
+  const intake = useDocumentIntake({
+    matterId,
+    documents: matterDocuments ?? NO_DOCUMENTS,
+    onSaved: refreshDocuments,
+    onReading: markReading,
+  });
+
+  const takeFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length) intake.addFiles(files);
+  };
+
+  type DocVersion = { id: string; version_number: number; storage_path: string; file_name: string | null; label: string | null; created_at: string };
+  const latestOf = (versions: DocVersion[] | null | undefined) =>
+    (versions ?? []).reduce<DocVersion | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
+
+  // One zip, files fetched one at a time, with progress on the card.
+  const runZip = async (what: string, entries: ZipEntry[], zipName: string) => {
+    if (zipProgress) return;
+    if (!entries.length) {
+      toast({ title: "Nothing to download", description: "None of these documents has a file yet." });
+      return;
+    }
+    setZipProgress({ what, phase: "fetching", done: 0, total: entries.length, percent: 0 });
+    try {
+      const { failed } = await downloadZip(entries, zipName, (p) => setZipProgress({ what, ...p }));
+      if (failed.length) {
+        toast({
+          title: `${failed.length} file${failed.length === 1 ? "" : "s"} couldn't be added to the zip`,
+          description: `${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""}. The rest were downloaded.`,
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't make the zip", description: plainUploadError(err), variant: "destructive" });
+    } finally {
+      setZipProgress(null);
+    }
+  };
+
+  const downloadLatestOf = (docs: Array<{ title: string; versions?: DocVersion[] | null }>, what: string) =>
+    runZip(
+      what,
+      docs.flatMap((d) => {
+        const v = latestOf(d.versions);
+        return v ? [{ storagePath: v.storage_path, name: versionDownloadName(d.title, v) }] : [];
+      }),
+      `${matter?.name ?? "Project"} - documents - ${todayLabel()}.zip`,
+    );
+
+  const downloadAllVersions = (doc: { title: string; versions?: DocVersion[] | null }) =>
+    runZip(
+      `every version of "${doc.title}"`,
+      [...(doc.versions ?? [])]
+        .sort((a, b) => a.version_number - b.version_number)
+        .map((v) => ({ storagePath: v.storage_path, name: versionDownloadName(doc.title, v) })),
+      `${doc.title} - all versions - ${todayLabel()}.zip`,
+    );
+
+  const toggleSelected = (docId: string, on: boolean) =>
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(docId); else next.delete(docId);
+      return next;
+    });
+
+  const openPreview = (docId: string, versionId: string) =>
+    setPreview({ openId: crypto.randomUUID(), docId, versionId });
 
   // Reads a saved version for search. Quiet when it is the automatic retry;
   // otherwise says how it went.
@@ -1032,6 +1107,19 @@ export default function MatterWorkspacePage() {
     );
   }
 
+  // Only documents still in the project count (one may have been removed since it was ticked).
+  const selectedDocs = (matterDocuments ?? []).filter((d) => selectedDocIds.has(d.id));
+  const previewDoc = preview ? (matterDocuments ?? []).find((d) => d.id === preview.docId) : undefined;
+  const previewTarget: PreviewTarget | null =
+    preview && previewDoc && (previewDoc.versions?.length ?? 0) > 0
+      ? {
+          openId: preview.openId,
+          document: { id: previewDoc.id, title: previewDoc.title },
+          versions: (previewDoc.versions ?? []) as PreviewVersion[],
+          versionId: preview.versionId,
+        }
+      : null;
+
   const cycleStage = (stageId: string, current: string) => {
     const next = STAGE_CYCLE[(STAGE_CYCLE.indexOf(current as any) + 1) % STAGE_CYCLE.length];
     setStageStatus.mutate({ stageId, status: next, matterId: matterId! }, onFail(toast, "Couldn't update the stage"));
@@ -1099,13 +1187,34 @@ export default function MatterWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
+        <DocumentDropZone className="md:col-span-2" onDrop={intake.addDrop} disabled={!matterId}>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap space-y-0">
             <CardTitle className="text-base">Documents</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=draft`)}>
-              <Sparkles className="h-4 w-4 mr-2" />
-              Draft with AI
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button size="sm" onClick={() => bulkFileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload files
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => folderInputRef.current?.click()}>
+                <FolderUp className="h-4 w-4 mr-2" />
+                Upload a folder
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!!zipProgress || !(matterDocuments ?? []).some((d) => (d.versions?.length ?? 0) > 0)}
+                onClick={() => downloadLatestOf(matterDocuments ?? [], "all documents")}
+                title="The latest version of every document, as one .zip file"
+              >
+                <FileArchive className="h-4 w-4 mr-2" />
+                Download all
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=draft`)}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Draft with AI
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <input
@@ -1115,6 +1224,54 @@ export default function MatterWorkspacePage() {
               className="hidden"
               onChange={handleFileSelected}
             />
+            <input ref={bulkFileInputRef} type="file" multiple className="hidden" onChange={takeFiles} />
+            <input
+              ref={(el) => {
+                folderInputRef.current = el;
+                // Not in React's typings; lets the picker choose a whole folder.
+                el?.setAttribute("webkitdirectory", "");
+              }}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={takeFiles}
+            />
+            <p className="text-xs text-muted-foreground">
+              Drag files, folders or .zip files onto this card, or use Upload files. Each file becomes its own
+              document, named from its file name; a file that matches a document already here is offered as its
+              next version. Nothing is uploaded until you press Start.
+            </p>
+            <DocumentIntakePanel intake={intake} />
+            {zipProgress && (
+              <div className="rounded-md border px-3 py-2 space-y-1.5" aria-live="polite">
+                <p className="text-xs">
+                  {zipProgress.phase === "fetching"
+                    ? `Collecting ${zipProgress.what}: ${zipProgress.done} of ${zipProgress.total} file${zipProgress.total === 1 ? "" : "s"}…`
+                    : `Packing the .zip file…`}
+                </p>
+                <Progress value={zipProgress.percent} className="h-2" />
+              </div>
+            )}
+            {selectedDocs.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap rounded-md bg-muted/50 px-3 py-2">
+                <span className="text-xs font-medium">
+                  {selectedDocs.length} document{selectedDocs.length === 1 ? "" : "s"} selected
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={!!zipProgress}
+                  onClick={() => void downloadLatestOf(selectedDocs, `${selectedDocs.length} selected document${selectedDocs.length === 1 ? "" : "s"}`)}
+                >
+                  <FileArchive className="h-3.5 w-3.5 mr-1.5" />
+                  Download selected
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedDocIds(new Set())}>
+                  Clear selection
+                </Button>
+              </div>
+            )}
             <LoadState
               isLoading={documentsLoading}
               error={documentsError}
@@ -1154,6 +1311,13 @@ export default function MatterWorkspacePage() {
                   <div
                     className="flex items-center gap-3 flex-wrap"
                   >
+                    <Checkbox
+                      className="shrink-0"
+                      checked={selectedDocIds.has(doc.id)}
+                      disabled={!versions.length}
+                      onCheckedChange={(checked) => toggleSelected(doc.id, checked === true)}
+                      aria-label={`Select "${doc.title}" for download`}
+                    />
                     <button
                       type="button"
                       className="shrink-0 text-muted-foreground hover:text-foreground"
@@ -1165,10 +1329,11 @@ export default function MatterWorkspacePage() {
                     <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                     <button
                       type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                      className="min-w-0 flex-1 text-left group"
+                      title={latest ? "Open a preview" : "Show versions"}
+                      onClick={() => (latest ? openPreview(doc.id, latest.id) : setExpandedDocId(isExpanded ? null : doc.id))}
                     >
-                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      <p className="text-sm font-medium truncate group-hover:underline">{doc.title}</p>
                       <p className="text-xs text-muted-foreground">
                         {typeName || "No type"} ·{" "}
                         {versions.length || 0} version
@@ -1261,6 +1426,13 @@ export default function MatterWorkspacePage() {
                             <Tag className="mr-2 h-4 w-4" />
                             Change type
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={!versions.length || !!zipProgress}
+                            onSelect={() => void downloadAllVersions(doc)}
+                          >
+                            <FileArchive className="mr-2 h-4 w-4" />
+                            Download all versions
+                          </DropdownMenuItem>
                           {canRemove && (
                             <>
                               <DropdownMenuSeparator />
@@ -1302,12 +1474,14 @@ export default function MatterWorkspacePage() {
                               id={`version-${v.id}`}
                               className="flex items-center gap-2 flex-wrap text-sm bg-muted/40 rounded-md px-2 py-1.5 target:ring-2 target:ring-primary scroll-mt-20"
                             >
-                              <span
-                                className="text-xs font-medium truncate flex-1 min-w-[8rem]"
-                                title={v.file_name ?? undefined}
+                              <button
+                                type="button"
+                                className="text-xs font-medium truncate flex-1 min-w-[8rem] text-left hover:underline"
+                                title={v.file_name ? `${v.file_name}. Open a preview` : "Open a preview"}
+                                onClick={() => openPreview(doc.id, v.id)}
                               >
                                 {v.file_name || `Version ${v.version_number}`}
-                              </span>
+                              </button>
                               <Badge
                                 variant="outline"
                                 className={cn("text-[10px] gap-1", state === "failed" && "border-amber-500 text-amber-700 dark:text-amber-400")}
@@ -1422,8 +1596,19 @@ export default function MatterWorkspacePage() {
               </div>
             </LoadState>
 
+            {!showPlaceholderRow ? (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto px-0 text-xs text-muted-foreground"
+                onClick={() => setShowPlaceholderRow(true)}
+              >
+                Add a document you don't have a file for yet
+              </Button>
+            ) : (
             <div className="flex gap-2 pt-2 flex-wrap">
               <Input
+                autoFocus
                 placeholder="Document title"
                 value={newDocTitle}
                 onChange={(e) => setNewDocTitle(e.target.value)}
@@ -1454,13 +1639,25 @@ export default function MatterWorkspacePage() {
                   }, onFail(toast, "Couldn't add the document"));
                   setNewDocTitle("");
                   setNewDocTypeId("");
+                  setShowPlaceholderRow(false);
                 }}
               >
                 <Plus className="h-4 w-4" />
               </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowPlaceholderRow(false)}>Cancel</Button>
             </div>
+            )}
           </CardContent>
         </Card>
+        </DocumentDropZone>
+
+        <DocumentPreviewSheet
+          target={previewTarget}
+          onClose={() => setPreview(null)}
+          onDownload={(v) => handleDownloadVersion(v.storage_path, v.file_name || `${previewTarget?.document.title ?? "Document"}-v${v.version_number}`)}
+          onOpenInAi={(docId, versionId) => navigate(`/matters/${matterId}/ai?mode=ask&doc=${docId}&version=${versionId}`)}
+          onReview={(docId, versionId) => navigate(`/matters/${matterId}/ai?mode=review&doc=${docId}&version=${versionId}`)}
+        />
 
         <AlertDialog open={!!confirmDelete} onOpenChange={(next) => { if (!next) setConfirmDelete(null); }}>
           <AlertDialogContent>

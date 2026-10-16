@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { findSavedInProject, saveFileToProject, sourceKey, type SaveFileResult } from "@/lib/saveFileToProject";
 
 export interface WhatsAppMatter {
   id: string;
@@ -83,6 +84,7 @@ export interface WhatsAppDocument {
   sender: string | null;
   message_at: string | null;
   storage_path: string;
+  kind: string | null;
 }
 
 export function useWhatsAppDocuments(whatsappMatterId: string | null) {
@@ -91,7 +93,7 @@ export function useWhatsAppDocuments(whatsappMatterId: string | null) {
     queryFn: async (): Promise<WhatsAppDocument[]> => {
       const { data, error } = await supabase
         .from("whatsapp_documents")
-        .select("id, filename, mimetype, chat_name, sender, message_at, storage_path")
+        .select("id, filename, mimetype, chat_name, sender, message_at, storage_path, kind")
         .eq("whatsapp_matter_id", whatsappMatterId!)
         .order("message_at", { ascending: false });
       if (error) throw error;
@@ -135,4 +137,68 @@ export async function downloadWhatsAppDocument(path: string, fileName: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// ------------------------------------------- adding captured files to a project
+
+// A captured file becomes a project document by copying it into the
+// project's documents (see saveFileToProject). Which ones are already there
+// is asked of the database: the document made from a captured file has an id
+// derived from that file and the project, so there is no separate record to
+// keep and nothing is added twice. The browser does the copy itself — the
+// whatsapp-documents bucket lets the capturing lawyer read their files, and
+// the whole firm once the WhatsApp matter is linked to a project.
+
+const sourceOf = (doc: WhatsAppDocument) => ({ kind: "whatsapp" as const, id: doc.id });
+
+/** Of a WhatsApp matter's files, the ones already among the project's documents, by WhatsApp document id. */
+export function useWhatsAppDocumentsInProject(matterId: string | null, docs: WhatsAppDocument[] | undefined) {
+  return useQuery({
+    queryKey: ["whatsapp-documents-in-project", matterId, (docs ?? []).map((d) => d.id).join(",")],
+    enabled: !!matterId && !!docs?.length,
+    queryFn: async () => {
+      const found = await findSavedInProject(docs!.map(sourceOf), matterId!);
+      const byDoc = new Map<string, { matterDocumentId: string; title: string }>();
+      for (const d of docs!) {
+        const hit = found.get(sourceKey(sourceOf(d)));
+        if (hit) byDoc.set(d.id, hit);
+      }
+      return byDoc;
+    },
+  });
+}
+
+export function addWhatsAppDocumentToProject(doc: WhatsAppDocument, matterId: string): Promise<SaveFileResult> {
+  return saveFileToProject({ source: sourceOf(doc), storagePath: doc.storage_path, fileName: doc.filename, mimeType: doc.mimetype, matterId });
+}
+
+export interface AddAllOutcome {
+  saved: SaveFileResult[];
+  already: number;
+  voiceNotes: number;
+  failed: string[];
+}
+
+/**
+ * Adds every captured file of a WhatsApp matter to the project's documents,
+ * one at a time, skipping the ones already there. Voice notes are left out:
+ * they are not documents, and can still be added one by one.
+ */
+export const isVoiceNote = (d: WhatsAppDocument) => d.kind === "audio" || (d.mimetype ?? "").startsWith("audio/");
+
+export async function addAllWhatsAppDocumentsToProject(docs: WhatsAppDocument[], matterId: string): Promise<AddAllOutcome> {
+  const candidates = docs.filter((d) => !isVoiceNote(d));
+  const there = await findSavedInProject(candidates.map(sourceOf), matterId);
+  const outcome: AddAllOutcome = { saved: [], already: 0, voiceNotes: docs.length - candidates.length, failed: [] };
+  for (const d of candidates) {
+    if (there.has(sourceKey(sourceOf(d)))) { outcome.already++; continue; }
+    try {
+      const result = await addWhatsAppDocumentToProject(d, matterId);
+      if (result.status === "saved") outcome.saved.push(result);
+      else outcome.already++;
+    } catch (err) {
+      outcome.failed.push((err as Error).message);
+    }
+  }
+  return outcome;
 }

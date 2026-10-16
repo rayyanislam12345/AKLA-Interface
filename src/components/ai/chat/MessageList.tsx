@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Paperclip, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import MarkdownMessage from "@/components/ai/chat/MarkdownMessage";
+import SaveAttachmentToProject from "@/components/ai/chat/SaveAttachmentToProject";
 import { CitationChip, SourceViewer, SourcesFootnote, type OpenedSource } from "@/components/ai/chat/SourceCitations";
 import { messageMetadata, type ChatArtifact, type ChatAttachment, type ChatMessage, type ChatSource, type StreamingState } from "@/hooks/useChat";
 import { buildThreadSourceMap, resolveCitation, type ThreadSourceEntry } from "@/lib/chatCitations";
@@ -231,6 +232,7 @@ function UserBubble({ content, attachments }: { content: string; attachments: Ch
             <span key={`${a.bucket}/${a.path}`} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs">
               <Paperclip className="h-3 w-3" />
               <span className="max-w-[220px] truncate">{a.name}</span>
+              <SaveAttachmentToProject attachment={a} />
             </span>
           ))}
         </div>

@@ -15,15 +15,25 @@ interface SaveDraftInput {
   // Return as soon as the version is saved and leave reading it for search to
   // the caller, so a plain upload can show the new version straight away.
   skipIndex?: boolean;
+  // What the stored file is named after, when that differs from the title:
+  // a bulk upload titles the document "USP Memorandum" but keeps the firm's
+  // full file name ("KPT5.7 - USP Memorandum [For Boss Review]...") on the file.
+  fileStem?: string;
+}
+
+// The file-name stem a saved version is stored under (the database adds
+// "-v<n>.<ext>"). Exported so a bulk upload can recognise a file already saved.
+export function storageStem(text: string): string {
+  return sanitizeStorageFilename(text.replace(/[^\w\s-]+/g, " ").trim().replace(/[\s-]+/g, "-")).slice(0, 180) || "Document";
 }
 
 export const SEARCHABLE_EXTENSIONS = ["pdf", "docx", "xlsx", "xls", "pptx", "txt"];
 
 // Uploads use a unique path, then the database atomically checks the base
 // version and allocates a number. Indexing failure must not undo a saved file.
-export async function saveDraftToMatter({ matterId, documentTypeId, documentTypeName, blob, matterDocumentId, title, expectedVersionId, isAiGenerated = true, extension = "docx", skipIndex = false }: SaveDraftInput) {
+export async function saveDraftToMatter({ matterId, documentTypeId, documentTypeName, blob, matterDocumentId, title, expectedVersionId, isAiGenerated = true, extension = "docx", skipIndex = false, fileStem }: SaveDraftInput) {
   const docId = matterDocumentId ?? crypto.randomUUID();
-  const stem = sanitizeStorageFilename((title ?? documentTypeName).replace(/[^\w\s-]+/g, " ").trim().replace(/[\s-]+/g, "-")).slice(0, 180) || "Document";
+  const stem = storageStem(fileStem ?? title ?? documentTypeName);
   const storagePath = `${matterId}/${docId}/${crypto.randomUUID()}-${stem}.${extension}`;
   const { error: uploadError } = await supabase.storage.from("matter-documents").upload(storagePath, blob, { contentType: blob.type || "application/octet-stream" });
   if (uploadError) throw uploadError;

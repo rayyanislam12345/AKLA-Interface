@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookMarked, FileSignature, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
-import { type ActiveSkill, type ChatAttachment, type ChatScope, type EditTarget, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
+import { type ActiveSkill, type ChatAttachment, type ChatScope, type EditTarget, saveChatFileToProject, useCustomSkills, uploadChatFile } from "@/hooks/useChat";
+import { useMatters } from "@/hooks/useMatters";
+import { useQueryClient } from "@tanstack/react-query";
+import { describeIndexing } from "@/lib/saveFileToProject";
 import { useAuth } from "@/hooks/useAuth";
 // The file types the chat uploader accepts. Lived in DocumentUploadCard until
 // that card stopped being rendered anywhere; the constant was all Composer used.
@@ -10,6 +13,8 @@ import AddFromMatterDialog from "@/components/ai/chat/AddFromMatterDialog";
 import AddFromLibraryDialog from "@/components/ai/chat/AddFromLibraryDialog";
 import EditDocumentDialog from "@/components/ai/chat/EditDocumentDialog";
 import SkillsDialog from "@/components/ai/chat/SkillsDialog";
+import SaveAttachmentToProject from "@/components/ai/chat/SaveAttachmentToProject";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
@@ -90,6 +95,13 @@ export default function Composer({
   const [addFromMatterOpen, setAddFromMatterOpen] = useState(false);
   const [addFromLibraryOpen, setAddFromLibraryOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
+  // In a project chat, files sent with a message are also saved as project
+  // documents unless the lawyer unticks this. Only the chat's own uploads
+  // count: a project document or a precedent attached here already has a home.
+  const [alsoSave, setAlsoSave] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: matters } = useMatters();
+  const projectChat = !!matterId && !standard;
   // Uploads sit under the conversation's own prefix: the project, the standard,
   // or — with neither — the user's general chats.
   const { user } = useAuth();
@@ -162,12 +174,44 @@ export default function Composer({
   // request, or drafts untyped. The select below stays as a way to be specific.
   const canSend = !sending && !uploading && (text.trim().length > 0 || attachments.length > 0);
 
+  const chatUploads = attachments.filter((a) => a.bucket === "ai-chat-files" && !a.uploading);
+
+  // Runs alongside the turn: the message is not held up while the files are
+  // copied, and each outcome is told in one toast at the end.
+  const saveSentFiles = async (files: ChatAttachment[]) => {
+    if (!matterId || !files.length) return;
+    const matterName = matters?.find((m) => m.id === matterId)?.name ?? "the project";
+    const outcomes = await Promise.all(
+      files.map((a) => saveChatFileToProject(a, matterId, matterName).then((result) => ({ a, result, error: null as string | null }), (err: Error) => ({ a, result: null, error: err.message }))),
+    );
+    const saved = outcomes.filter((o) => o.result?.status === "saved");
+    const failed = outcomes.filter((o) => o.error);
+    if (saved.length) {
+      queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+      toast({
+        title: saved.length === 1 ? `Saved to ${matterName}` : `Saved ${saved.length} files to ${matterName}`,
+        description: `Added to its documents as ${saved.map((o) => `"${o.result!.title}"`).join(", ")}.`,
+      });
+      for (const o of saved) {
+        o.result!.indexing?.then((outcome) => {
+          queryClient.invalidateQueries({ queryKey: ["matter-documents", matterId] });
+          const note = outcome === false ? describeIndexing(outcome, o.result!.title) : null;
+          if (note) toast({ title: "Saved, with a note", description: note });
+        });
+      }
+    }
+    if (failed.length) {
+      toast({ title: failed.length === 1 ? "A file was not saved to the project" : `${failed.length} files were not saved to the project`, description: failed.map((o) => o.error).join(" "), variant: "destructive" });
+    }
+  };
+
   const submit = async () => {
     if (!canSend) return;
     const message = text.trim();
     const ready = attachments.filter((a) => !a.uploading);
     setText("");
     setAttachments([]);
+    if (projectChat && alsoSave) void saveSentFiles(ready.filter((a) => a.bucket === "ai-chat-files"));
     await onSend({ message, attachments: ready, skill });
     textareaRef.current?.focus();
   };
@@ -248,12 +292,20 @@ export default function Composer({
               <span key={a.path} className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-xs" data-testid="attachment-chip">
                 {a.uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : a.versionId ? <FileText className="h-3 w-3" /> : <Paperclip className="h-3 w-3" />}
                 <span className="max-w-[200px] truncate">{a.name}</span>
+                {!a.uploading && <SaveAttachmentToProject attachment={a} canOpen={false} />}
                 <button type="button" aria-label={`Remove ${a.name}`} className="ml-0.5 rounded hover:bg-background" onClick={() => removeAttachment(a.path)}>
                   <X className="h-3 w-3" />
                 </button>
               </span>
             ))}
           </div>
+        )}
+
+        {projectChat && chatUploads.length > 0 && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 px-4 pt-2 text-xs text-muted-foreground" data-testid="also-save-to-project">
+            <Checkbox checked={alsoSave} onCheckedChange={(v) => setAlsoSave(v === true)} className="h-3.5 w-3.5" />
+            Also save to the project
+          </label>
         )}
 
         {needsDocType && (

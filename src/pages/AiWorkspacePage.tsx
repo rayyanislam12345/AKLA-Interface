@@ -72,6 +72,8 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
   const activeThreadId = searchParams.get("chat");
   const mode = searchParams.get("mode");
   const docParam = searchParams.get("doc") ?? undefined;
+  // A version chosen in the document preview; without it the latest is used.
+  const versionParam = searchParams.get("version") ?? undefined;
   const lawUpdateId = searchParams.get("update") ?? undefined;
 
   const { data: threads } = useChatThreads(scope);
@@ -182,7 +184,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
   // cites the amended Act — if several do, the lawyer picks via Add from matter.
   const affected = (citingDocs ?? []).filter((d) => reviewableIds.has(d.matter_document_id));
   const seedDocId = docParam ?? (lawUpdateId && affected.length === 1 ? affected[0].matter_document_id : undefined);
-  const { data: seedVersion } = useLatestDocumentVersion(seedDocId);
+  const { data: seedVersion } = useLatestDocumentVersion(seedDocId, seedDocId === docParam ? versionParam : undefined);
   const seedDoc = matterDocuments?.find((d) => d.id === seedDocId);
 
   const seedAttachments = useMemo<ChatAttachment[] | undefined>(() => {
