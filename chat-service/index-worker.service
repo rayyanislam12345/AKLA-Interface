@@ -1,0 +1,29 @@
+[Unit]
+Description=AKLA Project Hub index worker (reads project files for search)
+After=network.target
+
+[Service]
+Type=simple
+User=opc
+WorkingDirectory=/opt/chat-service
+# Same secrets as chat-service: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+# VOYAGE_API_KEY, ANTHROPIC_API_KEY.
+EnvironmentFile=/opt/chat-service/.env
+ExecStart=/usr/bin/node --max-old-space-size=640 /opt/chat-service/indexWorker.js
+# One vCPU shared with chat-service, ocr-service and the relay: OCR runs at a
+# lower priority so a live chat reply or transcription is never starved.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryMax=900M
+# Tesseract threads only add overhead on one core.
+Environment=OMP_THREAD_LIMIT=1
+Restart=always
+RestartSec=10
+# SIGTERM: it finishes the step it is on (an OCR page is ~12 s), hands the
+# job back and exits.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

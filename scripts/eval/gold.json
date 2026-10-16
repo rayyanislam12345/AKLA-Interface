@@ -1,0 +1,1046 @@
+{
+  "version": 1,
+  "created": "2026-10-16",
+  "description": "Retrieval gold set for the AKLA Project Hub (RAG audit finding 18). Each question lists ACCEPTABLE answers: any one in the top k is a hit. Built and verified read-only against the live index; see each question's notes. Run with scripts/eval/run.mjs; see scripts/eval/README.md.",
+  "counts": {
+    "statute_section": 5,
+    "statute_concept": 15,
+    "precedent_clause": 24,
+    "project_fact": 11,
+    "which_document": 5
+  },
+  "questions": [
+    {
+      "id": "S01",
+      "kind": "statute_section",
+      "question": "what does section 208 of the companies act 2017 say about related party transactions",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Companies Act, 2017",
+          "section": "208"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Companies Act, 2017 s.208 (“Related party transactions”) located by readSection in 1 of 1 library copy rebuilt from 198 chunks."
+    },
+    {
+      "id": "S02",
+      "kind": "statute_concept",
+      "question": "does a company need a special resolution before investing in an associated company?",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Companies Act, 2017",
+          "section": "199"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Companies Act, 2017 s.199 (“Investments in associated companies and undertaking”) located by readSection in 1 of 1 library copy rebuilt from 198 chunks."
+    },
+    {
+      "id": "S03",
+      "kind": "statute_section",
+      "question": "contract act sectoin 73 compensation for loss caused by breach",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Contract Act, 1872",
+          "section": "73"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Contract Act, 1872 s.73 (“Compensation for loss or damage caused by breach of contract”) located by readSection in 1 of 1 library copy rebuilt from 37 chunks."
+    },
+    {
+      "id": "S04",
+      "kind": "statute_concept",
+      "question": "is a liquidated damages clause enforceable in pakistan or will the court treat it as a penalty",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Contract Act, 1872",
+          "section": "74"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Contract Act, 1872 s.74 (“Compensation for breach of contract where penalty stipulated for”) located by readSection in 1 of 1 library copy rebuilt from 37 chunks."
+    },
+    {
+      "id": "S05",
+      "kind": "statute_concept",
+      "question": "frustration - contract becomes impossible to perform after it is signed, is it void?",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Contract Act, 1872",
+          "section": "56"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Contract Act, 1872 s.56 (“Agreement to do impossible act”) located by readSection in 1 of 1 library copy rebuilt from 37 chunks."
+    },
+    {
+      "id": "S06",
+      "kind": "statute_concept",
+      "question": "is a non compete covenant in a shareholders agreement void as restraint of trade",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Contract Act, 1872",
+          "section": "27"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Contract Act, 1872 s.27 (“Agreement in restraint of trade void”) located by readSection in 1 of 1 library copy rebuilt from 37 chunks."
+    },
+    {
+      "id": "S07",
+      "kind": "statute_concept",
+      "question": "when will a court refuse specific performance of a contract",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Specific Relief Act, 1877",
+          "section": "21"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Specific Relief Act, 1877 s.21 (“Contracts not specifically enforceable”) located by readSection in 1 of 1 library copy rebuilt from 19 chunks."
+    },
+    {
+      "id": "S08",
+      "kind": "statute_section",
+      "question": "arbitration act 1940 s.34 stay of legal proceedings where there is an arbitration agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Arbitration Act, 1940",
+          "section": "34"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Arbitration Act, 1940 s.34 (“Power to stay legal proceedings where there is an arbitration agreement”) located by readSection in 1 of 1 library copy rebuilt from 10 chunks."
+    },
+    {
+      "id": "S09",
+      "kind": "statute_concept",
+      "question": "grounds on which an award can be set aside under the 1940 arbitration act",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Arbitration Act, 1940",
+          "section": "30"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Arbitration Act, 1940 s.30 (“Grounds for setting aside award”) located by readSection in 1 of 1 library copy rebuilt from 10 chunks."
+    },
+    {
+      "id": "S10",
+      "kind": "statute_concept",
+      "question": "how do we enforce a foreign arbitral award in pakistan (new york convention)",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Recognition and Enforcement (Arbitration Agreement and Foreign Arbitral) Act, 2011",
+          "section": "6"
+        },
+        {
+          "match": "act_section",
+          "act": "Recognition and Enforcement (Arbitration Agreement and Foreign Arbitral) Act, 2011",
+          "section": "7"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Recognition and Enforcement (Arbitration Agreement and Foreign Arbitral) Act, 2011 s.6 (“Enforcement of foreign arbitral award.⸻(1) Unless the Court pursuant to section 7, refuses the application seeking recog”) located by readSection in 1 of 1 library copy rebuilt from 4 chunks. Recognition and Enforcement (Arbitration Agreement and Foreign Arbitral) Act, 2011 s.7 (“Unenforceable foreign arbitral awards.⸻ The recognition and enforcement of a foreign arbitral award shall not be refused”) located by readSection in 1 of 1 library copy rebuilt from 4 chunks."
+    },
+    {
+      "id": "S11",
+      "kind": "statute_section",
+      "question": "PPRA rules 2004 rule 36 - single stage two envelope procedure",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "PPRA Rules 2004",
+          "section": "36"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. PPRA Rules 2004 s.36 (“Procedures of open competitive bidding”) located by readSection in 2 of 2 library copies rebuilt from 20 chunks."
+    },
+    {
+      "id": "S12",
+      "kind": "statute_concept",
+      "question": "alternative methods of procurement under the PPRA rules, e.g. direct contracting and petty purchases",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "PPRA Rules 2004",
+          "section": "42"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. PPRA Rules 2004 s.42 (“Alternative methods of procurements”) located by readSection in 2 of 2 library copies rebuilt from 20 chunks."
+    },
+    {
+      "id": "S13",
+      "kind": "statute_concept",
+      "question": "procurement between 500k and 3 million rupees - does it have to be advertised on the PPRA website?",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_contains",
+          "act": "PPRA Rules 2004",
+          "contains": "shall be advertised on the Authority's website"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. “shall be advertised on the Authority's website” found in 2 of 2 copies of PPRA Rules 2004. The phrase sits in rule 12 (Methods of advertisement); this question checks the act_contains match for a passage that may not be placed in a rule."
+    },
+    {
+      "id": "S14",
+      "kind": "statute_concept",
+      "question": "under the public private partnership authority act how are disputes between the implementing agency and the private party settled",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Public Private Partnership Authority Act, 2017.",
+          "section": "18",
+          "contains": "All disputes arising between an implementing agency"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Public Private Partnership Authority Act, 2017. s.18 (“Settlement of disputes”) located by readSection in 1 of 1 library copy rebuilt from 7 chunks; section body contains “All disputes arising between an implementing agency”. Data issue: the library entry named exactly 'Public Private Partnership Authority Act, 2017' (30 chunks, 3 copies) has as its longest copy a file whose text is the State-Owned Enterprises (Governance and Operations) Act, 2023, so read_act_section/actText on that name read the SOE Act. The phrase guards against matching the SOE Act's own s.18."
+    },
+    {
+      "id": "S15",
+      "kind": "statute_concept",
+      "question": "can an implementing agency negotiate a PPP project directly without competitive bidding under the P3A act",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Public Private Partnership Authority Act, 2017.",
+          "section": "20",
+          "contains": "negotiated procurement"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Public Private Partnership Authority Act, 2017. s.20 (“Negotiated procurement of project”) located by readSection in 1 of 1 library copy rebuilt from 7 chunks; section body contains “negotiated procurement”. Same mislabelled-copy issue as S14; the phrase keeps the SOE Act's s.20 from counting."
+    },
+    {
+      "id": "S16",
+      "kind": "statute_concept",
+      "question": "which documents must be compulsorily registered, e.g. a lease of immovable property for more than a year",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Registration Act, 1908",
+          "section": "17"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Registration Act, 1908 s.17 (“Documents of which registration is compulsory”) located by readSection in 1 of 1 library copy rebuilt from 21 chunks."
+    },
+    {
+      "id": "S17",
+      "kind": "statute_concept",
+      "question": "is an unstamped or insufficiently stamped agreement admissible in evidence",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Stamp Act, 1899",
+          "section": "35"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Stamp Act, 1899 s.35 (“Instruments not duly stamped in admissible is evidence, etc”) located by readSection in 1 of 1 library copy rebuilt from 32 chunks."
+    },
+    {
+      "id": "S18",
+      "kind": "statute_concept",
+      "question": "pre-emptive rights of existing shareholders on a further issue of shares",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Companies Act, 2017",
+          "section": "83"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Companies Act, 2017 s.83 (“Further issue of capital”) located by readSection in 1 of 1 library copy rebuilt from 198 chunks."
+    },
+    {
+      "id": "S19",
+      "kind": "statute_concept",
+      "question": "when does an acquisition of shares need competition commission merger approval",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Competition Act, 2010",
+          "section": "11"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Competition Act, 2010 s.11 (“Approval of mergers”) located by readSection in 1 of 1 library copy rebuilt from 15 chunks."
+    },
+    {
+      "id": "S20",
+      "kind": "statute_section",
+      "question": "companies act 2017 s 183 powers of the board - can the board sell the undertaking without the general meeting",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "act_section",
+          "act": "Companies Act, 2017",
+          "section": "183"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Companies Act, 2017 s.183 (“Powers of board”) located by readSection in 1 of 1 library copy rebuilt from 198 chunks."
+    },
+    {
+      "id": "C01",
+      "kind": "precedent_clause",
+      "question": "deadlock resolution mechanism in SHA0522",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/5e9cc07f-3e44-4ba5-854a-336db9948e94/1788590751052-SHA0522 _Execution Version_.docx",
+          "contains": "There is a deadlock if a resolution to approve a matter"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): SHA0522 (Execution Version).docx [Shareholders Agreement] ci=12."
+    },
+    {
+      "id": "C02",
+      "kind": "precedent_clause",
+      "question": "example of a drag along clause in a joint venture agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/922e305f-4e64-4784-a1cb-b7c7922aff04/1788588823526-12. JVA.pdf",
+          "contains": "Drag-Along Notice"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/922e305f-4e64-4784-a1cb-b7c7922aff04/1788590408853-9. Joint Venture Agreement dated 20 April 2017.pdf",
+          "contains": "Drag-Along Notice"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 6 precedent chunk(s) across 2 file path(s): 12. JVA.pdf [Joint Venture Agreement] ci=31/67/68; 9. Joint Venture Agreement dated 20 April 2017.pdf [Joint Venture Agreement] ci=31/67/68. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included). Both JVAs (2017 and '12. JVA') carry the CDC drag-along clause 30."
+    },
+    {
+      "id": "C03",
+      "kind": "precedent_clause",
+      "question": "tag along right where a shareholder holding more than 30% sells to a third party buyer",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788590582147-Equity Subscription And Shareholding Agreement_AKLADraft__December 18_2025_.docx",
+          "contains": "holding more than thirty (30) percent of the Project Company Shares"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): Equity Subscription And Shareholding Agreement[AKLADraft][December 18,2025].docx [Equity Subscription and Shareholders Agreement] ci=5. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C04",
+      "kind": "precedent_clause",
+      "question": "reserved matters needing prior written consent of all shareholders - SSA precedent",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517316967-4. MM - Orion ES_SA ML-50 _AKLA Draft May 05_ 2026_ _Latest Markup Recieved_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517394569-MM - Orion ES_SA ML-50 _AKLA Draft March 31_ 2026_ _RAD 15042026_ .docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517476032-10. Equity Subcription And Shareholding Agreement _AKLA Amended__Clean__December 05_ 2025_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517028443-5. MCC - Equity Subscription And Shareholders Agreement _AKLA__First WD__March 12_ 2026_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517076824-7. MM11 - ES_SA _AKLA__March 13_ 2026_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517124065-9. MM12 - ES_SA _AKLA__March 31_ 2026_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517161848-2. MM - Orion ES_SA ML-50 _AKLA Draft March 31_ 2026_ _RAD 15042026_.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517235839-AK v13 SSA.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/c51f33c9-ce80-4b37-9491-4c52bed6c366/1788517276996-AK v15 SSA.docx",
+          "contains": "with respect to the Reserved Matters without first obtaining the prior written consent of all the Shareholders"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 10 precedent chunk(s) across 9 file path(s): 4. MM - Orion ES&SA ML-50 [AKLA Draft May 05, 2026) [Latest Markup Recieved].docx [Equity Subscription and Shareholders Agreement] ci=10/11; MM - Orion ES&SA ML-50 [AKLA Draft March 31, 2026] (RAD 15042026) .docx [Equity Subscription and Shareholders Agreement] ci=10; 10. Equity Subcription And Shareholding Agreement [AKLA Amended][Clean][December 05, 2025].docx [Equity Subscription and Shareholders Agreement] ci=7; 5. MCC - Equity Subscription And Shareholders Agreement [AKLA][First WD][March 12, 2026].docx [Equity Subscription and Shareholders Agreement] ci=10; 7. MM11 - ES&SA [AKLA][March 13, 2026].docx [Equity Subscription and Shareholders Agreement] ci=11; 9. MM12 - ES&SA [AKLA][March 31, 2026].docx [Equity Subscription and Shareholders Agreement] ci=11; 2. MM - Orion ES&SA ML-50 [AKLA Draft March 31, 2026] (RAD 15042026).docx [Equity Subscription and Shareholders Agreement] ci=10; AK v13 SSA.docx [Equity Subscription and Shareholders Agreement] ci=8; AK v15 SSA.docx [Equity Subscription and Shareholders Agreement] ci=8. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C05",
+      "kind": "precedent_clause",
+      "question": "right of first refusal on transfer of shares at the same price as the third party offer, subject to lock-in",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/5e9cc07f-3e44-4ba5-854a-336db9948e94/1788518117363-13. Term Sheet For SHA Track _AKLA Response_ _January 29_ 2026_.docx",
+          "contains": "shall first offer such shares to the other Party, at the same price"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): 13. Term Sheet For SHA Track [AKLA Response] [January 29, 2026].docx [Shareholders Agreement] ci=3. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C06",
+      "kind": "precedent_clause",
+      "question": "lock-in period restriction on investing parties transferring or pledging their shares in the HoldCo",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/922e305f-4e64-4784-a1cb-b7c7922aff04/1788589703036-7. Joint Venture Agreement - Execution.docx",
+          "contains": "During the lock-in period, the Investing Parties shall not"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): 7. Joint Venture Agreement - Execution.docx [Joint Venture Agreement] ci=7. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C07",
+      "kind": "precedent_clause",
+      "question": "lenders step-in rights under a direct agreement with KPT - definition of step-in period",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/0d44332d-48da-45f5-a48e-49b6a04fe3d1/1787821240093-7. KGTL-Direct Agreement _OMID_ _HP _ FKM Draft_ _Clean_ _Dec. 13_ 2025_ _v5_.docx",
+          "contains": "Step-In Period means the period from the Step-In Date to the Step-Out Date"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/0d44332d-48da-45f5-a48e-49b6a04fe3d1/1787821389062-8. KGTML-Direct Agreement _MPCTA_ _HP FKM Draft_ _Clean_ _Dec. 13_ 2025_ _v5_ - KARACHI GATEWAY TERMINAL MULTIPURPOSE _PRIVATE_ LIMITED.docx",
+          "contains": "Step-In Period means the period from the Step-In Date to the Step-Out Date"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/0d44332d-48da-45f5-a48e-49b6a04fe3d1/1788342167362-2. KPT - Direct Agreement - MPCTA - KARACHI GATEWAY TERMINAL MULTIPURPOSE _PRIVATE_ LIMITED.pdf",
+          "contains": "Step-In Period means the period from the Step-In Date to the Step-Out Date"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/0d44332d-48da-45f5-a48e-49b6a04fe3d1/1788342621291-4. KPT- Direct Agreement - OMID - KARACHI GATEWAY TERMINAL _PRIVATE_ LIMITED.pdf",
+          "contains": "Step-In Period means the period from the Step-In Date to the Step-Out Date"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 8 precedent chunk(s) across 4 file path(s): 7. KGTL-Direct Agreement (OMID) [HP _ FKM Draft] [Clean] [Dec. 13, 2025] [v5].docx [Concession Direct Agreement] ci=2/3; 8. KGTML-Direct Agreement (MPCTA) [HP FKM Draft] [Clean] [Dec. 13, 2025] [v5] - KARACHI GATEWAY TERMINAL MULTIPURPOSE (PRIVATE) LIMITED.docx [Concession Direct Agreement] ci=2/3; 2. KPT - Direct Agreement - MPCTA - KARACHI GATEWAY TERMINAL MULTIPURPOSE (PRIVATE) LIMITED.pdf [Concession Direct Agreement] ci=3/2; 4. KPT- Direct Agreement - OMID - KARACHI GATEWAY TERMINAL (PRIVATE) LIMITED.pdf [Concession Direct Agreement] ci=2/3. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C08",
+      "kind": "precedent_clause",
+      "question": "termination for convenience by the employer under an EPC contract - contractor's lost profit if works re-awarded",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/a42c43ed-58d1-4dd4-809d-1ea957dd2333/1787823191540-3. BCEM-Pak Cables-Onshore EPC Contract _HP  FKM Draft_ _March 2_ 2026_ _AKLA__Tracked__Draft V.1__May 19_ 2026_ - V1.docx",
+          "contains": "terminate for convenience and subsequently award the same or substantially similar Works"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): 3. BCEM-Pak Cables-Onshore EPC Contract [HP  FKM Draft] [March 2, 2026] [AKLA][Tracked][Draft V.1][May 19, 2026] - V1.docx [EPC Contract] ci=59. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included). Distractor: dozens of precedents say 'headings are for convenience'; those do not answer the question."
+    },
+    {
+      "id": "C09",
+      "kind": "precedent_clause",
+      "question": "definition of change in law in an EPC contract",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/a42c43ed-58d1-4dd4-809d-1ea957dd2333/1787823191540-3. BCEM-Pak Cables-Onshore EPC Contract _HP  FKM Draft_ _March 2_ 2026_ _AKLA__Tracked__Draft V.1__May 19_ 2026_ - V1.docx",
+          "contains": "bringing into effect, promulgation, modification, repeal or reinterpretation"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 2 precedent chunk(s) across 1 file path(s): 3. BCEM-Pak Cables-Onshore EPC Contract [HP  FKM Draft] [March 2, 2026] [AKLA][Tracked][Draft V.1][May 19, 2026] - V1.docx [EPC Contract] ci=1/0. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C10",
+      "kind": "precedent_clause",
+      "question": "change in law definition in a concession agreement - events on or after the reference date",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788345367656-EWPL - Concession Agreement _Clean_ _Execution Version_ _November 29_ 2023_.docx",
+          "contains": "Change in Law means the occurrence of any of the following events on or after the Reference Date"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): EWPL - Concession Agreement [Clean] [Execution Version] [November 29, 2023].docx [Concession Agreement] ci=4. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C11",
+      "kind": "precedent_clause",
+      "question": "aggregate cap on delay damgaes in a construction agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788339798274-3. Concession Agreement - Execution Version - MEW _1_.docx",
+          "contains": "Construction Period Damages shall not exceed, in aggregate"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788343159631-PR100 - Concession Agreement - Execution Version - MEW.docx",
+          "contains": "Construction Period Damages shall not exceed, in aggregate"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788344663665-Concession Agreement - Execution Version - MEW.docx",
+          "contains": "Construction Period Damages shall not exceed, in aggregate"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788344848127-Draft Concession Agreement - Carbon Credits Balochistan _November 1_ 2025_.docx",
+          "contains": "Construction Period Damages shall not exceed, in aggregate"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/a42c43ed-58d1-4dd4-809d-1ea957dd2333/1787817801938-5. MEW - Construction Agreement  _Execution Version February 2_ 2022_.docx",
+          "contains": "Construction Period Damages shall not exceed, in aggregate"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 10 precedent chunk(s) across 5 file path(s): 3. Concession Agreement - Execution Version - MEW (1).docx [Concession Agreement] ci=53/52; PR100 - Concession Agreement - Execution Version - MEW.docx [Concession Agreement] ci=53/52; Concession Agreement - Execution Version - MEW.docx [Concession Agreement] ci=53/52; Draft Concession Agreement - Carbon Credits Balochistan [November 1, 2025].docx [Concession Agreement] ci=53/54; 5. MEW - Construction Agreement  [Execution Version February 2, 2022].docx [EPC Contract] ci=31/32. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C12",
+      "kind": "precedent_clause",
+      "question": "delay liquidated damages cap linked to performance security in a railway concession",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1787823462986-DCA 07022022.docx",
+          "contains": "subject to a maximum of the Performance Security Amounts"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1787823571164-DCA 07022022.docx",
+          "contains": "subject to a maximum of the Performance Security Amounts"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 4 precedent chunk(s) across 2 file path(s): DCA 07022022.docx [Concession Agreement] ci=20/21; DCA 07022022.docx [Concession Agreement] ci=20/21. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C13",
+      "kind": "precedent_clause",
+      "question": "governing law and seat of arbitration in the KPT berths 11-17c concession agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1789734319535-1. KPT Outsourcing of Operation _Berths 11-17c_ Concession Agreement.pdf",
+          "contains": "The place and seat of arbitration shall be London"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): 1. KPT Outsourcing of Operation (Berths 11-17c) Concession Agreement.pdf [Concession Agreement] ci=25."
+    },
+    {
+      "id": "C14",
+      "kind": "precedent_clause",
+      "question": "MOU with SIAC arbitration seated in singapore",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518181040-1. 260414_MOU_Memorandum of Understanding_ POSCO_Sojitz.docx",
+          "contains": "The place and the seat of the arbitration shall be Singapore"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518214187-3. MOU___20260414 _AKLA__Draft V.1__Tracked__April 27_ 2026_.docx",
+          "contains": "The place and the seat of the arbitration shall be Singapore"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518245277-4. 260414_MOU_Memorandum of Understanding_ POSCO_Sojitz R1_AKLA__Draft V.1__Tracked__April 27_ 2026_.docx",
+          "contains": "The place and the seat of the arbitration shall be Singapore"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 3 precedent chunk(s) across 3 file path(s): 1. 260414_MOU(Memorandum of Understanding) POSCO_Sojitz.docx [Memorandum of Understanding (MOU)] ci=1; 3. MOU比較表20260414 [AKLA][Draft V.1][Tracked][April 27, 2026].docx [Memorandum of Understanding (MOU)] ci=1; 4. 260414_MOU(Memorandum of Understanding) POSCO_Sojitz R1[AKLA][Draft V.1][Tracked][April 27, 2026].docx [Memorandum of Understanding (MOU)] ci=1. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C15",
+      "kind": "precedent_clause",
+      "question": "JVA where the seat of arbitration is london with three arbitrators",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/922e305f-4e64-4784-a1cb-b7c7922aff04/1788588823526-12. JVA.pdf",
+          "contains": "The seat of the arbitration shall be London, the United Kingdom"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/922e305f-4e64-4784-a1cb-b7c7922aff04/1788590408853-9. Joint Venture Agreement dated 20 April 2017.pdf",
+          "contains": "The seat of the arbitration shall be London, the United Kingdom"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 2 precedent chunk(s) across 2 file path(s): 12. JVA.pdf [Joint Venture Agreement] ci=49; 9. Joint Venture Agreement dated 20 April 2017.pdf [Joint Venture Agreement] ci=49. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C16",
+      "kind": "precedent_clause",
+      "question": "mining SHA dispute resolution with an umpire and seat in karachi",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/5e9cc07f-3e44-4ba5-854a-336db9948e94/1788518084913-1. Mining SHA Draft _First Draft Received From Master_ _November 06_ 2025_.docx",
+          "contains": "The seat of arbitration shall be Karachi, Pakistan and the award shall be final"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): 1. Mining SHA Draft [First Draft Received From Master] [November 06, 2025].docx [Shareholders Agreement] ci=3. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C17",
+      "kind": "precedent_clause",
+      "question": "concessionaire right to terminate if politcal force majuere continues for 120 days",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788344797959-Draft Balochistan Mangrove Concession Agreement _4 November 2025_.docx",
+          "contains": "Political Force Majeure Event prevents BFWD from performing any of its obligations under this Agreement for a continuous period of one hundred twenty (120) days"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 2 precedent chunk(s) across 1 file path(s): Draft Balochistan Mangrove Concession Agreement [4 November 2025].docx [Concession Agreement] ci=54/53. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C18",
+      "kind": "precedent_clause",
+      "question": "definition of pakistan political force majeure event in an energy purchase agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/d33368e6-9013-4c01-8160-0691c126f551/1788596889872-ZPL - EPA  Sch 1.docx",
+          "contains": "Pakistan Political Force Majeure Event"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/d33368e6-9013-4c01-8160-0691c126f551/1788594733530-3. ZPL - EPA - Final Execution Version April 07_ 2017.docx",
+          "contains": "Pakistan Political Force Majeure Event"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/d33368e6-9013-4c01-8160-0691c126f551/1788596933673-ZPL - EPA - Final Execution Version April 07_ 2017.docx",
+          "contains": "Pakistan Political Force Majeure Event"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 6 precedent chunk(s) across 3 file path(s): ZPL - EPA  Sch 1.docx [Energy Purchase Agreement (EPA)] ci=1/2; 3. ZPL - EPA - Final Execution Version April 07, 2017.docx [Energy Purchase Agreement (EPA)] ci=7/42; ZPL - EPA - Final Execution Version April 07, 2017.docx [Energy Purchase Agreement (EPA)] ci=42/7. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C19",
+      "kind": "precedent_clause",
+      "question": "construction performance security - bank guarantee from a scheduled bank with minimum AA- rating",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1787823897980-4. Clean DCA - Parking Plaza _January 02_ 2025_.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788339798274-3. Concession Agreement - Execution Version - MEW _1_.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788343159631-PR100 - Concession Agreement - Execution Version - MEW.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788344663665-Concession Agreement - Execution Version - MEW.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788344848127-Draft Concession Agreement - Carbon Credits Balochistan _November 1_ 2025_.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/6fed9b6e-6ddc-482e-abd5-88feeda35046/1788345367656-EWPL - Concession Agreement _Clean_ _Execution Version_ _November 29_ 2023_.docx",
+          "contains": "till the Construction Performance Security Expiry Date, in the form of a bank guarantee"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 10 precedent chunk(s) across 6 file path(s): 4. Clean DCA - Parking Plaza [January 02, 2025].docx [Concession Agreement] ci=3; 3. Concession Agreement - Execution Version - MEW (1).docx [Concession Agreement] ci=3/4; PR100 - Concession Agreement - Execution Version - MEW.docx [Concession Agreement] ci=4/3; Concession Agreement - Execution Version - MEW.docx [Concession Agreement] ci=3/4; Draft Concession Agreement - Carbon Credits Balochistan [November 1, 2025].docx [Concession Agreement] ci=4/5; EWPL - Concession Agreement [Clean] [Execution Version] [November 29, 2023].docx [Concession Agreement] ci=6. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C20",
+      "kind": "precedent_clause",
+      "question": "financial completion conditions in a common terms agreement - historic DSCR of at least 1.25",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/79ac18b5-b074-41df-853f-082dd126a765/1788345565128-1. Common Terms Agreement.pdf",
+          "contains": "demonstrated a Historic DSCR of at least 1.25:1.00"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/79ac18b5-b074-41df-853f-082dd126a765/1788345634184-b. Common Terms Agreement.pdf",
+          "contains": "demonstrated a Historic DSCR of at least 1.25:1.00"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 4 precedent chunk(s) across 2 file path(s): 1. Common Terms Agreement.pdf [Common Terms Agreement (CTA)] ci=7/6; b. Common Terms Agreement.pdf [Common Terms Agreement (CTA)] ci=7/6. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C21",
+      "kind": "precedent_clause",
+      "question": "track access agreement: railway liable for delay damages if train delayed more than 3 hours",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/bc23dcda-b447-4399-9af0-b63023fabd0b/1788593269959-PR41 - Track Access Agreement - RDMC _PR__First Draft__September 08_ 2025_.docx",
+          "contains": "is delayed on arrival by more than 3 hours"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/bc23dcda-b447-4399-9af0-b63023fabd0b/1788593636341-PR70 - Track Access Agreement - RDMC _RB__First Draft__September 11_ 2025_.docx",
+          "contains": "is delayed on arrival by more than 3 hours"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/bc23dcda-b447-4399-9af0-b63023fabd0b/1788593739590-3. PR41 - Track Access Agreement - RDMC _PR__First Draft__September 08_ 2025_.docx",
+          "contains": "is delayed on arrival by more than 3 hours"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 3 precedent chunk(s) across 3 file path(s): PR41 - Track Access Agreement - RDMC [PR][First Draft][September 08, 2025].docx [Track Access Agreement] ci=23; PR70 - Track Access Agreement - RDMC [RB][First Draft][September 11, 2025].docx [Track Access Agreement] ci=23; 3. PR41 - Track Access Agreement - RDMC [PR][First Draft][September 08, 2025].docx [Track Access Agreement] ci=23. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C22",
+      "kind": "precedent_clause",
+      "question": "non-binding clause in an MOU - which clauses stay binding",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518150009-3. MOU_Memorandum of Understanding_ Shougang_NSCL_Sojitz 5 Jan 2026_SJ R.docx",
+          "contains": "nothing in this MOU creates any binding obligation"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518181040-1. 260414_MOU_Memorandum of Understanding_ POSCO_Sojitz.docx",
+          "contains": "nothing in this MOU creates any binding obligation"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518214187-3. MOU___20260414 _AKLA__Draft V.1__Tracked__April 27_ 2026_.docx",
+          "contains": "nothing in this MOU creates any binding obligation"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/7d68bde4-51d2-421c-b421-a0a808a36185/1788518245277-4. 260414_MOU_Memorandum of Understanding_ POSCO_Sojitz R1_AKLA__Draft V.1__Tracked__April 27_ 2026_.docx",
+          "contains": "nothing in this MOU creates any binding obligation"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 7 precedent chunk(s) across 4 file path(s): 3. MOU(Memorandum of Understanding) Shougang_NSCL_Sojitz 5 Jan 2026_SJ R.docx [Memorandum of Understanding (MOU)] ci=0; 1. 260414_MOU(Memorandum of Understanding) POSCO_Sojitz.docx [Memorandum of Understanding (MOU)] ci=0/1; 3. MOU比較表20260414 [AKLA][Draft V.1][Tracked][April 27, 2026].docx [Memorandum of Understanding (MOU)] ci=1/0; 4. 260414_MOU(Memorandum of Understanding) POSCO_Sojitz R1[AKLA][Draft V.1][Tracked][April 27, 2026].docx [Memorandum of Understanding (MOU)] ci=1/0. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C23",
+      "kind": "precedent_clause",
+      "question": "carbon credits definition in an EPA precedent",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/d33368e6-9013-4c01-8160-0691c126f551/1788594733530-3. ZPL - EPA - Final Execution Version April 07_ 2017.docx",
+          "contains": "other greenhouse gases not produced as a result of generation of energy"
+        },
+        {
+          "match": "storage_path",
+          "value": "precedent/d33368e6-9013-4c01-8160-0691c126f551/1788596933673-ZPL - EPA - Final Execution Version April 07_ 2017.docx",
+          "contains": "other greenhouse gases not produced as a result of generation of energy"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 2 precedent chunk(s) across 2 file path(s): 3. ZPL - EPA - Final Execution Version April 07, 2017.docx [Energy Purchase Agreement (EPA)] ci=2; ZPL - EPA - Final Execution Version April 07, 2017.docx [Energy Purchase Agreement (EPA)] ci=2. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "C24",
+      "kind": "precedent_clause",
+      "question": "change in control after lock-in requires ministry approval - implementation agreement",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/6b50a2ea-0290-4eb7-9902-b907d153bcf0/1788593932137-Project Implementation Agreement _Pakistan Genome Program__AKLA__Preliminary Draft__March 24_ 2026_.docx",
+          "contains": "shall require the Ministry's approval, which shall not be unreasonably withheld"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found (case/whitespace-normalised) in 1 precedent chunk(s) across 1 file path(s): Project Implementation Agreement [Pakistan Genome Program][AKLA][Preliminary Draft][March 24, 2026].docx [Implementation Agreement] ci=18. Every precedent holding the clause is an acceptable answer (copies of one agreement at several paths included)."
+    },
+    {
+      "id": "P01",
+      "kind": "project_fact",
+      "question": "what is the concession period under the term sheet",
+      "scope": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/bba858b4-2ce9-4319-a65a-35bd78fb35f0/26c1eab1-93d3-4fd8-96e0-1c3b0bcd3275-8-Term-Sheet-M6-Concession-Agreement-September-16-2026.docx",
+          "contains": "concession period of twenty-five (25) years"
+        },
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/bba858b4-2ce9-4319-a65a-35bd78fb35f0/d7679d12-6582-4059-b03e-d981f1d1a96f-8-Term-Sheet-M6-Concession-Agreement-September-16-2026.docx",
+          "contains": "concession period of twenty-five (25) years"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 8-Term-Sheet-M6-Concession-Agreement-September-16-2026-v3.docx ci=0; 8-Term-Sheet-M6-Concession-Agreement-September-16-2026-v2.docx ci=0. v2 and v3 of the term sheet have identical text, so either version counts."
+    },
+    {
+      "id": "P02",
+      "kind": "project_fact",
+      "question": "indicative project cost of the motorway including IDC",
+      "scope": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/e31365ba-3c0f-4c47-8cad-741978e23693/v1-Transaction-Structure-Report-Draft_07-09-26.pdf",
+          "contains": "PKR 190 billion including IDC"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: Transaction Structure Report (Draft_07-09-26).pdf ci=3/4."
+    },
+    {
+      "id": "P03",
+      "kind": "project_fact",
+      "question": "construction period for section I and section II",
+      "scope": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/e31365ba-3c0f-4c47-8cad-741978e23693/v1-Transaction-Structure-Report-Draft_07-09-26.pdf",
+          "contains": "Section I: 30 months; Section II: 24 months"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: Transaction Structure Report (Draft_07-09-26).pdf ci=3/4."
+    },
+    {
+      "id": "P04",
+      "kind": "project_fact",
+      "question": "how much VGF is the government expected to provide",
+      "scope": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/e31365ba-3c0f-4c47-8cad-741978e23693/v1-Transaction-Structure-Report-Draft_07-09-26.pdf",
+          "contains": "around 40% VGF"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: Transaction Structure Report (Draft_07-09-26).pdf ci=3/4."
+    },
+    {
+      "id": "P05",
+      "kind": "project_fact",
+      "question": "what is the term of the full services agreement",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/8952c842-b6b7-4091-8915-88b3b5225fa8/bb467e86-fb45-44da-ac96-333223ff80cd-111013-Full-Services-Agreement.pdf",
+          "contains": "eight (8) consecutive Agreement Years"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 111013-Full-Services-Agreement-v1.pdf ci=7/8."
+    },
+    {
+      "id": "P06",
+      "kind": "project_fact",
+      "question": "seller's total liablity cap per year under the FSA",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/8952c842-b6b7-4091-8915-88b3b5225fa8/bb467e86-fb45-44da-ac96-333223ff80cd-111013-Full-Services-Agreement.pdf",
+          "contains": "shall not exceed the Annual Contract Price"
+        },
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/9e6bf2bb-15ea-4c5c-8c19-8148b159a7a5/50661ad5-964d-44d3-8426-ea2ed016bdf3-140520-FSA-Supplemental-Agreement.pdf",
+          "contains": "shall not exceed the Annual Contract Price"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 111013-Full-Services-Agreement-v1.pdf ci=14; 140520-FSA-Supplemental-Agreement-v1.pdf ci=5."
+    },
+    {
+      "id": "P07",
+      "kind": "project_fact",
+      "question": "is the termination amount on early termination paid as liquidated damages or a penalty",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/510e60c3-4b09-4161-8fcb-5368e20552b3/76ac6322-06b5-4cae-ac22-ec288d785f8e-251202-FSA-4th-Amendment-Executed.pdf",
+          "contains": "Termination Amount shall be paid as liquidated damages in lieu of all such actual damages"
+        },
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/8952c842-b6b7-4091-8915-88b3b5225fa8/bb467e86-fb45-44da-ac96-333223ff80cd-111013-Full-Services-Agreement.pdf",
+          "contains": "Termination Amount shall be paid as liquidated damages in lieu of all such actual damages"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 251202-FSA-4th-Amendment-Executed-v1.pdf ci=1; 111013-Full-Services-Agreement-v1.pdf ci=9/10."
+    },
+    {
+      "id": "P08",
+      "kind": "project_fact",
+      "question": "from what date is the fourth amendment effective",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/510e60c3-4b09-4161-8fcb-5368e20552b3/76ac6322-06b5-4cae-ac22-ec288d785f8e-251202-FSA-4th-Amendment-Executed.pdf",
+          "contains": "effective from October 1, 2025"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 251202-FSA-4th-Amendment-Executed-v1.pdf ci=0."
+    },
+    {
+      "id": "P09",
+      "kind": "project_fact",
+      "question": "what return is the unsolicited proposal offering KPT",
+      "scope": "96401024-f152-4ba2-b8ad-b98475067569",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "96401024-f152-4ba2-b8ad-b98475067569/da7fb127-73d5-4ca6-9cfb-2a1512ce0e83/95cd96e8-1e18-478c-a8d4-262845cdbd86-KPT5-Chinese-USP-Memorandum-On-USP-Submission-Requirements-AKLA-2nd-Draft-September-22-2026.docx",
+          "contains": "up to two percent (2%) of an undefined"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: KPT5-Chinese-USP-Memorandum-On-USP-Submission-Requirements-AKLA-2nd-Draft-September-22-2026-v1.docx ci=0."
+    },
+    {
+      "id": "P10",
+      "kind": "project_fact",
+      "question": "is section 3.2 of the EPA a covenant to share carbon credit proceeds with CPPA",
+      "scope": "c5bc1387-df6f-4b04-b342-389d164d7d15",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "c5bc1387-df6f-4b04-b342-389d164d7d15/c9dc0fa9-c4cc-420c-9595-854afc99b582/v11-Zorlu-Legal-Opinion-Carbon-Credits-under-EPA-Section-3.2-AKLA-September-02-2026-2.docx",
+          "contains": "is framed as an acknowledgement rather than as a covenant"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: Zorlu  Legal Opinion  Carbon Credits under EPA Section 3.2  AKLA  September 02 2026 (2).docx ci=2."
+    },
+    {
+      "id": "P11",
+      "kind": "project_fact",
+      "question": "governing law of the FSA",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/0a30b3f7-b815-4ed2-afa3-b8b71f65e628/dfc24137-62ec-4ced-8358-1cf3f2e688fe-190204-FSA-Second-Supplemental-Agreement.pdf",
+          "contains": "governed by and construed in accordance with the laws of England and Wales"
+        },
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/8952c842-b6b7-4091-8915-88b3b5225fa8/bb467e86-fb45-44da-ac96-333223ff80cd-111013-Full-Services-Agreement.pdf",
+          "contains": "governed by and construed in accordance with the laws of England and Wales"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 190204-FSA-Second-Supplemental-Agreement-v1.pdf ci=0/1; 111013-Full-Services-Agreement-v1.pdf ci=24/25."
+    },
+    {
+      "id": "W01",
+      "kind": "which_document",
+      "question": "which document novated the FSA",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/cb839296-7469-4c6f-8b99-28e0111f3003/e55aec80-112c-4b0e-9774-f3ab6493b424-180629-SWPCL-GE-FSA-Novation-Executed.pdf"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Target file indexed in this matter: 180629-SWPCL-GE-FSA-Novation-Executed-v1.pdf (3 chunks); any passage of it counts."
+    },
+    {
+      "id": "W02",
+      "kind": "which_document",
+      "question": "where is our risk allocation matrix for the O&M agreement",
+      "scope": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/bf50903e-08e1-412d-80cd-7ef45a53a01d/5078586d-d23a-4c6e-8e11-59d24625b5cd-SP28-FSA-Risk-Allocation-Matrix-O-M-AKLA-October-2-2026.docx"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Target file indexed in this matter: SP28-FSA-Risk-Allocation-Matrix-O-M-AKLA-October-2-2026-v4.docx (2 chunks); any passage of it counts."
+    },
+    {
+      "id": "W03",
+      "kind": "which_document",
+      "question": "which document has the instructions to bidders and the bid validity period",
+      "scope": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd/ac999f57-63a3-4351-828b-20b2135dd983/3a3bdbca-e8bc-4f6e-a6f4-06ec78430fbf-Standard-Request-for-Proposal-RFP-AKLA-Volume-I-Tender-Procedure-Federal-PPP-AKLA-September-16-2026-tracked-changes-v1-tracked-changes-1.docx"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Target file indexed in this matter: Standard-Request-for-Proposal-RFP-AKLA-Volume-I-Tender-Procedure-Federal-PPP-AKLA-September-16-2026-tracked-changes-v1-tracked-changes-1-v5.docx (21 chunks); any passage of it counts."
+    },
+    {
+      "id": "W04",
+      "kind": "which_document",
+      "question": "do we have the 2006 renewable energy policy for power generation on this project",
+      "scope": "c5bc1387-df6f-4b04-b342-389d164d7d15",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "c5bc1387-df6f-4b04-b342-389d164d7d15/c9dc0fa9-c4cc-420c-9595-854afc99b582/v8-RE-Policy-for-Development-of-Power-Generation-2006.pdf"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Target file indexed in this matter: RE Policy for Development of Power Generation 2006.pdf (20 chunks); any passage of it counts."
+    },
+    {
+      "id": "W05",
+      "kind": "which_document",
+      "question": "find the 2016 freight customer track access contract precedent",
+      "scope": "general",
+      "expected": [
+        {
+          "match": "storage_path",
+          "value": "precedent/bc23dcda-b447-4399-9af0-b63023fabd0b/1788593414605-PR59 - Frieght Customer Track Access Contract - 2016 _September 09_ 2025_.pdf"
+        }
+      ],
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Target precedent indexed: PR59 - Frieght Customer Track Access Contract - 2016 [September 09, 2025].pdf (35 chunks); any passage of it counts."
+    }
+  ]
+}

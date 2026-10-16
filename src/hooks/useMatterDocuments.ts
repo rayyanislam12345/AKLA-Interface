@@ -67,29 +67,73 @@ export function useDeleteDocumentType() {
   });
 }
 
+// The documents list. The index worker's version columns
+// (20261017090000_indexing_pipeline.sql) are asked for too; until that
+// migration is applied PostgREST rejects them, the list notices once and asks
+// without them, and the page keeps its old reading behaviour.
+const DOCUMENTS_SELECT =
+  "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by, indexing_status)";
+const DOCUMENTS_SELECT_WITH_INDEXING =
+  "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by, indexing_status, indexing_error, indexing_attempts, indexing_started_at)";
+let indexingColumnsMissing = false;
+
+const isMissingColumn = (error: { code?: string; message?: string } | null) =>
+  !!error && (error.code === "42703" || error.code === "PGRST204" || /indexing_(error|attempts|started_at)/.test(error.message ?? ""));
+
+const loadDocuments = (matterId: string, select: typeof DOCUMENTS_SELECT) =>
+  supabase
+    .from("matter_documents")
+    .select(select)
+    .eq("matter_id", matterId)
+    .order("created_at", { ascending: false })
+    .order("version_number", { ascending: false, foreignTable: "document_versions" });
+
+type DocumentRow = NonNullable<Awaited<ReturnType<typeof loadDocuments>>["data"]>[number];
+export type MatterDocumentVersion = DocumentRow["versions"][number] & {
+  // Present once the indexing migration is applied (undefined before).
+  indexing_error?: string | null;
+  indexing_attempts?: number | null;
+  indexing_started_at?: string | null;
+};
+export type MatterDocumentRow = Omit<DocumentRow, "versions"> & { versions: MatterDocumentVersion[] };
+
 export function useMatterDocuments(matterId: string | undefined) {
   return useQuery({
     queryKey: ["matter-documents", matterId],
     enabled: !!matterId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("matter_documents")
-        .select(
-          "*, document_type:document_types(name), versions:document_versions(id, version_number, created_at, storage_path, file_name, label, is_ai_generated, uploaded_by, indexing_status)"
-        )
-        .eq("matter_id", matterId!)
-        .order("created_at", { ascending: false })
-        .order("version_number", { ascending: false, foreignTable: "document_versions" });
+    queryFn: async (): Promise<MatterDocumentRow[]> => {
+      if (!indexingColumnsMissing) {
+        // Not in the generated types until the migration is applied.
+        const { data, error } = await loadDocuments(matterId!, DOCUMENTS_SELECT_WITH_INDEXING as unknown as typeof DOCUMENTS_SELECT);
+        if (!error) return data;
+        if (!isMissingColumn(error)) throw error;
+        indexingColumnsMissing = true;
+      }
+      const { data, error } = await loadDocuments(matterId!, DOCUMENTS_SELECT);
       if (error) throw error;
       return data;
     },
-    // While any version is still being read for search (by this browser or a
-    // colleague's), check every 15 seconds so its badge moves on by itself.
-    refetchInterval: (query) =>
-      (query.state.data ?? []).some((d) =>
-        (d.versions ?? []).some((v) => v.indexing_status === "pending" && Date.now() - new Date(v.created_at).getTime() < 10 * 60 * 1000))
-        ? 15_000
-        : false,
+    // While any version is waiting or being read (by this browser, a
+    // colleague's or the index worker), check again so its badge moves on by
+    // itself: every 10 seconds for a fresh one, every minute for one that has
+    // been in the queue a while (a long scanned PDF). Before the index worker,
+    // only for ten minutes, as the old in-request reading could not take longer.
+    refetchInterval: (query) => {
+      let interval: number | false = false;
+      for (const d of query.state.data ?? []) {
+        for (const v of d.versions ?? []) {
+          if (v.indexing_status !== "pending") continue;
+          const age = Date.now() - new Date(v.indexing_started_at ?? v.created_at).getTime();
+          if (v.indexing_attempts === undefined) {
+            if (age < 10 * 60 * 1000) interval = 15_000;
+          } else {
+            const next = age < 15 * 60 * 1000 ? 10_000 : 60_000;
+            interval = interval === false ? next : Math.min(interval, next);
+          }
+        }
+      }
+      return interval;
+    },
   });
 }
 

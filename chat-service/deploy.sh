@@ -23,11 +23,18 @@ echo "Backing up the running copy…"
 ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
 echo "Copying the service files and the version stamp…"
-scp -i "$KEY" server.js libraryTools.js agreement.js agreementFlow.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js changes.js package.json "$STAMP" "$HOST:/tmp/"
+scp -i "$KEY" server.js libraryTools.js agreement.js agreementFlow.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js changes.js indexWorker.js package.json "$STAMP" "$HOST:/tmp/"
+# The index worker's reader (indexing/*.js) and its systemd unit.
+ssh -i "$KEY" "$HOST" "rm -rf /tmp/indexing && mkdir -p /tmp/indexing"
+scp -i "$KEY" indexing/*.js "$HOST:/tmp/indexing/"
+scp -i "$KEY" index-worker.service "$HOST:/tmp/index-worker.service"
+ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST/indexing && sudo chown -R opc:opc $DEST/indexing && sudo mv /tmp/index-worker.service /etc/systemd/system/index-worker.service && sudo chown root:root /etc/systemd/system/index-worker.service && sudo chmod 644 /etc/systemd/system/index-worker.service && sudo systemctl daemon-reload && sudo systemctl enable index-worker >/dev/null 2>&1 && echo '  index worker unit installed'"
+# The reader shells out to poppler (pdfinfo, pdftotext, pdftoppm) and tesseract.
+ssh -i "$KEY" "$HOST" "for t in pdfinfo pdftotext pdftoppm tesseract; do command -v \$t >/dev/null || echo \"  WARNING: \$t is not installed; the index worker needs it\"; done"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/akla && mkdir -p /tmp/akla"
 scp -i "$KEY" akla/build_docx.py akla/akla-logo.png akla/requirements.txt "$HOST:/tmp/akla/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/libraryTools.js /tmp/agreement.js /tmp/agreementFlow.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/changes.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/libraryTools.js $DEST/agreement.js $DEST/agreementFlow.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/changes.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/libraryTools.js /tmp/agreement.js /tmp/agreementFlow.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/changes.js /tmp/indexWorker.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/libraryTools.js $DEST/agreement.js $DEST/agreementFlow.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/changes.js $DEST/indexWorker.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every
@@ -69,6 +76,10 @@ fi
 
 echo "Restarting…"
 ssh -i "$KEY" "$HOST" "sudo systemctl restart chat-service && sleep 2 && systemctl is-active chat-service"
+# The worker hands back the file it is reading (release_index_job) and picks
+# it up again on start; it waits quietly if the migration is not applied yet.
+echo "Restarting the index worker…"
+ssh -i "$KEY" "$HOST" "sudo systemctl restart index-worker && sleep 2 && systemctl is-active index-worker && sudo journalctl -u index-worker -n 3 --no-pager -o cat"
 
 echo "Running version:"
 ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8092/health"

@@ -1,4 +1,4 @@
-import { indexStoredVersion } from "@/lib/saveDraftToMatter";
+import { indexViaEdgeFunction, requestIndexing } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -134,18 +134,40 @@ const NO_DOCUMENTS: IntakeDocument[] = [];
 // "pending" that has sat for more than ten minutes are treated as failed:
 // they get the one automatic retry and a Try again button, never a spinner
 // that turns forever.
+//
+// With the index worker (20261017090000_indexing_pipeline.sql) the server owns
+// the state: a version is waiting in the queue, being read, searchable, or
+// failed with a reason (indexing_error) after three tries. The worker retries
+// on its own, so no timeout or automatic retry is needed here; the version
+// rows then carry indexing_attempts, which is how this page tells the two
+// apart before and after the migration.
 const READING_TIMEOUT_MS = 10 * 60 * 1000;
-type ReadState = "searchable" | "reading" | "failed" | "unsupported";
+type ReadState = "searchable" | "waiting" | "reading" | "failed" | "unsupported";
+type VersionIndexing = {
+  indexing_status: string;
+  created_at: string;
+  indexing_error?: string | null;
+  indexing_attempts?: number | null;
+  indexing_started_at?: string | null;
+};
+const MAX_READ_ATTEMPTS = 3;
 
-function versionReadState(v: { indexing_status: string; created_at: string }, now: number): ReadState {
+const hasIndexQueue = (v: VersionIndexing) => v.indexing_attempts !== undefined;
+
+function versionReadState(v: VersionIndexing, now: number): ReadState {
   if (v.indexing_status === "indexed") return "searchable";
   if (v.indexing_status === "unsupported") return "unsupported";
+  if (hasIndexQueue(v)) {
+    if (v.indexing_status === "pending") return v.indexing_started_at ? "reading" : "waiting";
+    return "failed";
+  }
   if (v.indexing_status === "pending" && now - new Date(v.created_at).getTime() < READING_TIMEOUT_MS) return "reading";
   return "failed";
 }
 
 const READ_STATE_LABEL: Record<ReadState, string> = {
   searchable: "Searchable",
+  waiting: "Waiting to be read",
   reading: "Reading…",
   failed: "Couldn't be read",
   unsupported: "Not searchable (file type)",
@@ -153,10 +175,23 @@ const READ_STATE_LABEL: Record<ReadState, string> = {
 
 const READ_STATE_HINT: Record<ReadState, string> = {
   searchable: "Search and Ask AI can read this version.",
-  reading: "Reading the text so search and Ask AI can use it. This usually takes under a minute.",
+  waiting: "In the queue. Files are read one at a time on the server; you can carry on working.",
+  reading: "Reading the text so search and Ask AI can use it. A long scanned PDF can take a while.",
   failed: "The file is saved, but search and Ask AI can't read it yet. Press Try again.",
   unsupported: "This file type can't be read for search. The file is saved and can be downloaded.",
 };
+
+// The badge's hint, with the server's reason when there is one.
+function readStateHint(v: VersionIndexing, state: ReadState): string {
+  if (state === "failed" && v.indexing_error) return `${v.indexing_error} The file is saved and can be downloaded.`;
+  if (state === "failed" && hasIndexQueue(v) && v.indexing_status === "unknown") {
+    return "Saved before files were read automatically. Press Try again to read it now.";
+  }
+  if (state === "reading" && (v.indexing_attempts ?? 0) > 1) {
+    return `Reading it again (attempt ${v.indexing_attempts} of ${MAX_READ_ATTEMPTS}) after a problem last time.`;
+  }
+  return READ_STATE_HINT[state];
+}
 
 // Every mutation on this page used to fire with no error handling: a failed
 // add, tick, status change or dismiss simply did nothing, and the lawyer was
@@ -831,16 +866,33 @@ export default function MatterWorkspacePage() {
     setPreview({ openId: crypto.randomUUID(), docId, versionId });
 
   // Reads a saved version for search. Quiet when it is the automatic retry;
-  // otherwise says how it went.
+  // otherwise says how it went. With the index worker this only queues the
+  // version (the list's badge follows the server); before the migration it
+  // runs the old in-request reading.
   const readVersion = async (
     version: { id: string; storage_path: string; file_name: string | null },
     documentTypeId: string | null,
-    opts: { quiet?: boolean; label?: string; fileType?: string } = {},
+    opts: { quiet?: boolean; label?: string; fileType?: string; announce?: boolean } = {},
   ) => {
     if (!matterId) return;
+    let queued: Awaited<ReturnType<typeof requestIndexing>> | "error";
+    try {
+      queued = await requestIndexing(version.id);
+    } catch {
+      queued = "error";
+    }
+    if (queued !== "missing") {
+      if (queued === "error" && !opts.quiet) {
+        toast({ title: `Couldn't ask for ${opts.label ?? "this version"} to be read`, description: "Check your connection and press Try again.", variant: "destructive" });
+      } else if (queued === "queued" && opts.announce) {
+        toast({ title: `Reading ${opts.label ?? "this version"} again`, description: "It will show as Searchable when it is done; you can carry on working." });
+      }
+      refreshDocuments();
+      return;
+    }
     markReading(version.id, true);
     try {
-      const indexed = await indexStoredVersion({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document', fileType: opts.fileType });
+      const indexed = await indexViaEdgeFunction({ versionId: version.id, matterId, documentTypeId, storagePath: version.storage_path, fileName: version.file_name ?? version.storage_path.split('/').pop() ?? 'document', fileType: opts.fileType });
       if (!opts.quiet) {
         toast(indexed
           ? { title: `${opts.label ?? "This version"} is now searchable`, description: "Search and Ask AI can read it." }
@@ -894,12 +946,15 @@ export default function MatterWorkspacePage() {
   // A version that couldn't be read (including ones saved before the status
   // was recorded, and ones left "Reading…" for over ten minutes) is retried
   // once on its own, one at a time, so the usual transient failure never
-  // needs a lawyer to notice a badge and press a button.
+  // needs a lawyer to notice a badge and press a button. With the index
+  // worker the server does its own retries; only versions it has never seen
+  // ('unknown', saved before the queue existed) are queued from here.
   const autoRetryQueue = useRef(Promise.resolve());
   useEffect(() => {
     for (const d of matterDocuments ?? []) {
       for (const v of d.versions ?? []) {
-        if (versionReadState(v, now) === "failed" && !autoRetried.current.has(v.id)) {
+        const due = hasIndexQueue(v) ? v.indexing_status === "unknown" : versionReadState(v, now) === "failed";
+        if (due && !autoRetried.current.has(v.id)) {
           autoRetried.current.add(v.id);
           autoRetryQueue.current = autoRetryQueue.current.then(() => readVersion(v, d.document_type_id ?? null, { quiet: true }));
         }
@@ -1293,6 +1348,9 @@ export default function MatterWorkspacePage() {
                     is_ai_generated: boolean;
                     uploaded_by: string | null;
                     indexing_status: string;
+                    indexing_error?: string | null;
+                    indexing_attempts?: number | null;
+                    indexing_started_at?: string | null;
                   }>;
                   const isExpanded = expandedDocId === doc.id;
                   const uploadingFile = uploadingDocs[doc.id];
@@ -1485,17 +1543,22 @@ export default function MatterWorkspacePage() {
                               <Badge
                                 variant="outline"
                                 className={cn("text-[10px] gap-1", state === "failed" && "border-amber-500 text-amber-700 dark:text-amber-400")}
-                                title={READ_STATE_HINT[state]}
+                                title={readStateHint(v, state)}
                               >
                                 {state === "reading" && <Loader2 className="h-3 w-3 animate-spin" />}
                                 v{v.version_number} · {READ_STATE_LABEL[state]}
                               </Badge>
+                              {state === "failed" && v.indexing_error && (
+                                <span className="text-[11px] text-amber-700 dark:text-amber-400 basis-full sm:basis-auto order-last sm:order-none">
+                                  {v.indexing_error}
+                                </span>
+                              )}
                               {state === "failed" && (
                                 <Button
                                   size="sm"
                                   variant="ghost"
                                   className="h-7 text-xs"
-                                  onClick={() => readVersion(v, doc.document_type_id, { label: `v${v.version_number} of "${doc.title}"` })}
+                                  onClick={() => readVersion(v, doc.document_type_id, { label: `v${v.version_number} of "${doc.title}"`, announce: true })}
                                 >
                                   Try again
                                 </Button>

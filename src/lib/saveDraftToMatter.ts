@@ -27,10 +27,14 @@ export function storageStem(text: string): string {
   return sanitizeStorageFilename(text.replace(/[^\w\s-]+/g, " ").trim().replace(/[\s-]+/g, "-")).slice(0, 180) || "Document";
 }
 
-export const SEARCHABLE_EXTENSIONS = ["pdf", "docx", "xlsx", "xls", "pptx", "txt"];
+// The file types the index worker reads (chat-service/indexing/extract.js and
+// index_supported_extension() in 20261017090000_indexing_pipeline.sql).
+export const SEARCHABLE_EXTENSIONS = ["pdf", "docx", "xlsx", "xls", "pptx", "txt", "md", "csv"];
 
 // Uploads use a unique path, then the database atomically checks the base
 // version and allocates a number. Indexing failure must not undo a saved file.
+// `indexed` is true once the file is searchable or queued for the server's
+// index worker (`queued`); reading it no longer happens inside this request.
 export async function saveDraftToMatter({ matterId, documentTypeId, documentTypeName, blob, matterDocumentId, title, expectedVersionId, isAiGenerated = true, extension = "docx", skipIndex = false, fileStem }: SaveDraftInput) {
   const docId = matterDocumentId ?? crypto.randomUUID();
   const stem = storageStem(fileStem ?? title ?? documentTypeName);
@@ -51,16 +55,70 @@ export async function saveDraftToMatter({ matterId, documentTypeId, documentType
   const result = data as { matterDocumentId: string; versionId: string; versionNumber: number; fileName: string };
   if (!SEARCHABLE_EXTENSIONS.includes(extension.toLowerCase())) {
     await supabase.from("document_versions").update({ indexing_status: "unsupported" }).eq("id", result.versionId);
-    return { ...result, storagePath, indexed: false, unsupported: true };
+    return { ...result, storagePath, indexed: false, queued: false, unsupported: true };
   }
-  if (skipIndex) return { ...result, storagePath, indexed: false, unsupported: false };
-  const indexed = await indexStoredVersion({ versionId: result.versionId, matterId, documentTypeId, storagePath, fileName: result.fileName, fileType: blob.type }).catch(() => false);
-  return { ...result, storagePath, indexed, unsupported: false };
+  if (skipIndex) return { ...result, storagePath, indexed: false, queued: false, unsupported: false };
+  // Saving the version queued it for the index worker (a trigger on
+  // document_versions). Confirming the job is enough: the file is read on the
+  // server, and if that fails the project page shows why and offers Try again.
+  const queued = await requestIndexing(result.versionId).catch(() => "error" as const);
+  if (queued === "queued") return { ...result, storagePath, indexed: true, queued: true, unsupported: false };
+  if (queued === "unsupported") return { ...result, storagePath, indexed: false, queued: false, unsupported: true };
+  // The queue exists but could not be confirmed (a dropped connection): the
+  // trigger has queued the file already, so do not read it a second way.
+  if (queued === "error") return { ...result, storagePath, indexed: false, queued: false, unsupported: false };
+  const indexed = await indexViaEdgeFunction({ versionId: result.versionId, matterId, documentTypeId, storagePath, fileName: result.fileName, fileType: blob.type }).catch(() => false);
+  return { ...result, storagePath, indexed, queued: false, unsupported: false };
 }
 
-export async function indexStoredVersion({ versionId, matterId, documentTypeId, storagePath, fileName, fileType }: {
-  versionId: string; matterId: string; documentTypeId: string | null; storagePath: string; fileName: string; fileType?: string;
-}) {
+type IndexArgs = { versionId: string; matterId: string; documentTypeId: string | null; storagePath: string; fileName: string; fileType?: string };
+
+// PostgREST's answer when a function is not in the schema (the indexing
+// migration has not been applied yet).
+function isMissingFunction(error: { code?: string; message?: string } | null) {
+  return !!error && (error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(error.message ?? ""));
+}
+
+/**
+ * Asks the index worker to (re)read a saved version: "Try again", or a file
+ * saved before the queue existed. A job already waiting or running is left
+ * alone. "missing" means the queue is not installed yet; use the old path.
+ */
+export async function requestIndexing(versionId: string): Promise<"queued" | "unsupported" | "missing"> {
+  // Not in the generated types until the migration is applied.
+  const rpc = supabase.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ data: { state?: string } | null; error: { code?: string; message?: string } | null }>;
+  const { data, error } = await rpc("enqueue_index_job", { p_version_id: versionId });
+  if (isMissingFunction(error)) return "missing";
+  if (error) throw error;
+  return data?.state === "unsupported" ? "unsupported" : "queued";
+}
+
+const WAIT_POLL_MS = 3_000;
+const WAIT_LIMIT_MS = 150_000;
+
+/**
+ * Reads a saved version for search and says whether it is searchable.
+ * With the index worker: queue it, then wait (up to about two and a half
+ * minutes, as the old in-request path took) for the server's answer. A long
+ * scanned PDF can take longer; it is still being read, and the project page
+ * shows its progress. Without the worker: the old process-document call.
+ */
+export async function indexStoredVersion(args: IndexArgs, { wait = true }: { wait?: boolean } = {}) {
+  const queued = await requestIndexing(args.versionId).catch(() => "missing" as const);
+  if (queued === "missing") return indexViaEdgeFunction(args);
+  if (queued === "unsupported" || !wait) return false;
+  const until = Date.now() + WAIT_LIMIT_MS;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+    const { data } = await supabase.from("document_versions").select("indexing_status").eq("id", args.versionId).maybeSingle();
+    if (data?.indexing_status === "indexed") return true;
+    if (data?.indexing_status === "failed" || !data) return false;
+  }
+  return false;
+}
+
+/** The pre-queue path: the process-document edge function, inside this request. */
+export async function indexViaEdgeFunction({ versionId, matterId, documentTypeId, storagePath, fileName, fileType }: IndexArgs) {
   const { data: processData, error: processError } = await supabase.functions.invoke("process-document", {
     body: { filePath: storagePath, fileName, fileType, bucket: "matter-documents", matterId, documentTypeId, isPrecedent: false },
   });

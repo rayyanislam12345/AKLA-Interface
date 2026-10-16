@@ -254,3 +254,71 @@ export async function extractTextFromFile(fileData, fileName) {
 
   throw new Error(`Unsupported file type: ${fileExtension}`);
 }
+
+// ---------------------------------------------------------------------------
+// Page-by-page PDF reading for the index worker (chat-service/indexing/).
+// Chat attachments keep using extractTextFromFile above, unchanged.
+
+/** Thrown when the PDF needs a password to open. */
+export class PdfPasswordError extends Error {
+  constructor() {
+    super("The PDF is password-protected.");
+    this.name = "PdfPasswordError";
+  }
+}
+
+const PDFINFO_TIMEOUT_MS = 60_000;
+
+/**
+ * Page count and encryption state from poppler's pdfinfo.
+ * @param {string} pdfPath a file on disk
+ * @returns {Promise<{ pages: number|null, encrypted: boolean }>}
+ */
+export async function pdfInfo(pdfPath) {
+  try {
+    const { stdout } = await execFileAsync("pdfinfo", [pdfPath], { timeout: PDFINFO_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    const pages = Number(/^Pages:\s+(\d+)/m.exec(stdout)?.[1]);
+    return { pages: Number.isFinite(pages) ? pages : null, encrypted: /^Encrypted:\s+yes/m.test(stdout) };
+  } catch (err) {
+    const message = `${err?.stderr ?? ""} ${err?.message ?? ""}`;
+    if (/Incorrect password|password/i.test(message)) throw new PdfPasswordError();
+    throw err;
+  }
+}
+
+/**
+ * The text of each page, in order, from `pdftotext -layout` (pages are
+ * separated by form feeds), with unpdf's per-page text as the fallback.
+ * @param {string} pdfPath a file on disk
+ * @param {{ maxPages?: number }} [options]
+ * @returns {Promise<{ pages: string[], extractor: 'pdftotext'|'unpdf' }>}
+ */
+export async function extractPdfPageTexts(pdfPath, { maxPages = 400 } = {}) {
+  const dir = await mkdtemp(join(tmpdir(), "pdfpages-"));
+  try {
+    const output = join(dir, "out.txt");
+    await execFileAsync("pdftotext", ["-layout", "-enc", "UTF-8", "-l", String(maxPages), pdfPath, output], {
+      timeout: 10 * 60_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const text = await readFile(output, "utf8");
+    const pages = text.split("\f");
+    // pdftotext ends the last page with a form feed too.
+    if (pages.length > 1 && pages[pages.length - 1].trim() === "") pages.pop();
+    return { pages, extractor: "pdftotext" };
+  } catch (err) {
+    const message = `${err?.stderr ?? ""} ${err?.message ?? ""}`;
+    if (/Incorrect password/i.test(message)) throw new PdfPasswordError();
+    console.error("pdftotext could not read this PDF, trying unpdf:", err?.message ?? err);
+    const bytes = new Uint8Array(await readFile(pdfPath));
+    try {
+      const { text } = await unpdfExtractText(bytes, { mergePages: false });
+      return { pages: (Array.isArray(text) ? text : [String(text ?? "")]).slice(0, maxPages), extractor: "unpdf" };
+    } catch (unpdfErr) {
+      if (/password/i.test(String(unpdfErr?.name ?? "") + String(unpdfErr?.message ?? ""))) throw new PdfPasswordError();
+      throw unpdfErr;
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

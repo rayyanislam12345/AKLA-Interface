@@ -354,3 +354,223 @@ test('quick wins (e): on a database without author timeslip policies, authors ge
   assert.equal(await deleted(db,'delete from matter_timeslips where hours=2',[]),1);
  } finally {await db.close();}
 });
+
+// ---------------------------------------------------------- indexing pipeline
+// 20261017090000_indexing_pipeline.sql on the stub schema. PGlite is a single
+// connection, so FOR UPDATE SKIP LOCKED cannot be raced here; the claim tests
+// cover what a second worker sees: a held lock (running, locked_until in the
+// future) is skipped, an expired one is taken over.
+const indexingSql=()=>readFileSync('supabase/migrations/20261017090000_indexing_pipeline.sql','utf8');
+async function indexingDatabase(seed=async()=>{}) {
+ const db=await database();
+ await db.exec(`
+ do $$ begin if not exists(select 1 from pg_roles where rolname='anon') then create role anon; end if; if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role; end if; end $$;
+ create or replace function auth.uid() returns uuid language sql stable as $$ select coalesce(nullif(current_setting('test.uid',true),''),'${user}')::uuid $$;
+ alter table documents add column if not exists is_precedent boolean not null default false, add column if not exists is_statute boolean not null default false;
+ `);
+ await seed(db);
+ await db.exec(indexingSql());
+ await db.exec(indexingSql()); // a second run changes nothing
+ return db;
+}
+const jobOf=async(db,versionId)=>(await db.query('select * from document_index_jobs where document_version_id=$1',[versionId])).rows[0];
+const versionRow=async(db,id)=>(await db.query('select indexing_status,indexing_error,indexing_attempts,page_count,card,indexing_started_at,indexing_finished_at from document_versions where id=$1',[id])).rows[0];
+const claimJob=async(db,worker='w1')=>(await db.query('select * from claim_index_job($1)',[worker])).rows[0]??null;
+async function addPassages(db,{versionId=null,runId=null,path,count=2,matter=project}) {
+ for(let i=0;i<count;i++) await db.query('insert into documents(matter_id,content,metadata,document_version_id,ingest_run_id) values($1,$2,$3,$4,$5)',[matter,`passage ${i} of ${runId??'legacy'}`,JSON.stringify({storage_path:path}),versionId,runId]);
+}
+
+test('indexing: saving a readable file queues one job; other files and direct writes do not', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec('set role authenticated');
+  const doc=randomUUID();
+  const v1=await save(db,doc,await staged(db,doc));
+  const job=await jobOf(db,v1.versionId);
+  assert.equal(job.state,'queued');
+  assert.equal(job.kind,'project');
+  assert.equal(job.bucket,'matter-documents');
+  assert.equal(job.attempts,0);
+  // A picture is saved but never queued.
+  const pic=randomUUID();
+  const vPic=await save(db,pic,await staged(db,pic,randomUUID()+'.jpg'));
+  assert.equal(await jobOf(db,vPic.versionId),undefined);
+  // Members can see the queue but not write to it.
+  assert.equal((await db.query('select * from document_index_jobs')).rows.length,1);
+  await assert.rejects(db.query("insert into document_index_jobs(bucket,storage_path) values('matter-documents','x.pdf')"),/permission denied/);
+  await assert.rejects(db.query("update document_index_jobs set state='done'"),/permission denied/);
+  await assert.rejects(db.query("select * from claim_index_job('sneaky')"),/permission denied/);
+ } finally {await db.close();}
+});
+
+test('indexing: existing project passages are linked to their version by storage path', async () => {
+ let v, path;
+ const db=await indexingDatabase(async(db)=>{
+  const doc=randomUUID(); path=await staged(db,doc); v=await save(db,doc,path);
+  for(let i=0;i<3;i++) await db.query('insert into documents(matter_id,content,metadata) values($1,$2,$3)',[project,`passage ${i}`,JSON.stringify({storage_path:path})]);
+  await db.query('insert into documents(matter_id,content,metadata) values(null,$1,$2)',['a precedent',JSON.stringify({storage_path:path})]);
+ });
+ try {
+  const rows=(await db.query("select document_version_id,version_number from documents where metadata->>'storage_path'=$1 and matter_id is not null",[path])).rows;
+  assert.equal(rows.length,3);
+  assert.ok(rows.every(r=>r.document_version_id===v.versionId&&r.version_number===1));
+  assert.equal((await db.query("select document_version_id from documents where matter_id is null")).rows[0].document_version_id,null,'library rows are left alone');
+  const tsv=(await db.query("select tsv::text from documents where matter_id is not null limit 1")).rows[0].tsv;
+  assert.match(tsv,/'passag'/);
+ } finally {await db.close();}
+});
+
+test('indexing: claim takes the oldest due job, skips held locks and backoff, takes over an expired lock', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec('set role authenticated');
+  const ids=[];
+  for(let i=0;i<3;i++){ const doc=randomUUID(); ids.push((await save(db,doc,await staged(db,doc))).versionId); }
+  await db.exec('reset role');
+  await db.query("update document_index_jobs set created_at=now()-($2||' minutes')::interval where document_version_id=$1",[ids[0],'30']);
+  await db.query("update document_index_jobs set created_at=now()-($2||' minutes')::interval where document_version_id=$1",[ids[1],'20']);
+  await db.query("update document_index_jobs set created_at=now()-($2||' minutes')::interval, locked_until=now()+interval '5 minutes' where document_version_id=$1",[ids[2],'40']);
+  const a=await claimJob(db,'w1');
+  assert.equal(a.document_version_id,ids[0],'oldest due job first; the backed-off one waits');
+  assert.equal(a.state,'running'); assert.equal(a.attempts,1); assert.ok(a.run_id); assert.equal(a.worker,'w1');
+  assert.ok(new Date(a.locked_until)>new Date(Date.now()+19*60_000));
+  const va=await versionRow(db,ids[0]);
+  assert.equal(va.indexing_status,'pending'); assert.equal(va.indexing_attempts,1); assert.ok(va.indexing_started_at);
+  const b=await claimJob(db,'w2');
+  assert.equal(b.document_version_id,ids[1],'a job another worker holds is skipped');
+  assert.equal(await claimJob(db,'w3'),null,'nothing else is due');
+  // A bulk re-read (priority -1) waits behind a file someone has just added, however old it is.
+  await db.exec('set role authenticated');
+  const fresh=randomUUID(),freshV=(await save(db,fresh,await staged(db,fresh))).versionId;
+  const bulk=randomUUID(),bulkV=(await save(db,bulk,await staged(db,bulk))).versionId;
+  await db.exec('reset role');
+  await db.query("update document_index_jobs set priority=-1, created_at=now()-interval '1 day' where document_version_id=$1",[bulkV]);
+  assert.equal((await claimJob(db,'w5')).document_version_id,freshV);
+  assert.equal((await claimJob(db,'w6')).document_version_id,bulkV);
+  // w1 dies mid-run: its lock lapses, its half-written passages go, w3 takes over with a new run.
+  await addPassages(db,{versionId:ids[0],runId:a.run_id,path:a.storage_path});
+  await db.query("update document_index_jobs set locked_until=now()-interval '1 second' where id=$1",[a.id]);
+  const again=await claimJob(db,'w3');
+  assert.equal(again.id,a.id); assert.equal(again.attempts,2); assert.notEqual(again.run_id,a.run_id);
+  assert.equal((await db.query('select * from documents where ingest_run_id=$1',[a.run_id])).rows.length,0);
+  // A worker that died on the last allowed attempt: the job fails instead of looping.
+  await db.query("update document_index_jobs set attempts=3, locked_until=now()-interval '1 second' where id=$1",[b.id]);
+  assert.equal(await claimJob(db,'w4'),null);
+  assert.equal((await db.query('select state from document_index_jobs where id=$1',[b.id])).rows[0].state,'failed');
+  const vb=await versionRow(db,ids[1]);
+  assert.equal(vb.indexing_status,'failed'); assert.match(vb.indexing_error,/kept stopping/);
+ } finally {await db.close();}
+});
+
+test('indexing: publish swaps old passages for the new run in one step; a stale run changes nothing', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec('set role authenticated');
+  const doc=randomUUID(),path=await staged(db,doc),v=await save(db,doc,path);
+  const otherDoc=randomUUID(),otherPath=await staged(db,otherDoc),other=await save(db,otherDoc,otherPath);
+  await db.exec('reset role');
+  await addPassages(db,{path,count:2});                                   // the old edge-function rows
+  await addPassages(db,{versionId:v.versionId,runId:randomUUID(),path});  // an earlier worker run
+  await addPassages(db,{versionId:other.versionId,runId:randomUUID(),path:otherPath}); // another file
+  const job=await claimJob(db);
+  assert.equal(job.document_version_id,v.versionId);
+  await assert.rejects(db.query('select publish_index_run($1,$2)',[job.id,job.run_id]),/No passages were written/);
+  await addPassages(db,{versionId:v.versionId,runId:job.run_id,path,count:3});
+  // Not this run: refused, and nothing is deleted.
+  await assert.rejects(db.query('select publish_index_run($1,$2)',[job.id,randomUUID()]),/no longer current/);
+  assert.equal((await db.query("select count(*)::int n from documents where metadata->>'storage_path'=$1",[path])).rows[0].n,7);
+  const result=(await db.query('select publish_index_run($1,$2,$3,$4) r',[job.id,job.run_id,12,JSON.stringify({summary:'A lease.',has_tracked_changes:true})])).rows[0].r;
+  assert.deepEqual(result,{passages:3,removed:4});
+  const left=(await db.query("select ingest_run_id from documents where metadata->>'storage_path'=$1",[path])).rows;
+  assert.equal(left.length,3); assert.ok(left.every(r=>r.ingest_run_id===job.run_id));
+  assert.equal((await db.query("select count(*)::int n from documents where metadata->>'storage_path'=$1",[otherPath])).rows[0].n,2,'other files untouched');
+  const row=await versionRow(db,v.versionId);
+  assert.equal(row.indexing_status,'indexed'); assert.equal(row.page_count,12); assert.equal(row.card.summary,'A lease.');
+  assert.equal(row.indexing_error,null); assert.ok(row.indexing_finished_at);
+  const done=await jobOf(db,v.versionId);
+  assert.equal(done.state,'done'); assert.equal(done.locked_until,null);
+  await assert.rejects(db.query('select publish_index_run($1,$2)',[job.id,job.run_id]),/no longer current/,'a run publishes once');
+ } finally {await db.close();}
+});
+
+test('indexing: a failure backs off 2 then 4 minutes, then gives up with the reason; a permanent one gives up at once', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec('set role authenticated');
+  const doc=randomUUID(),path=await staged(db,doc),v=await save(db,doc,path);
+  const doc2=randomUUID(),v2=await save(db,doc2,await staged(db,doc2));
+  await db.exec('reset role');
+  await db.query("update document_index_jobs set created_at=now()-interval '1 hour' where document_version_id=$1",[v.versionId]);
+  const lockMinutes=async(id)=>(await db.query("select extract(epoch from (locked_until-now()))/60 m,state,last_error from document_index_jobs where id=$1",[id])).rows[0];
+  let job=await claimJob(db);
+  await addPassages(db,{versionId:v.versionId,runId:job.run_id,path});
+  assert.equal((await db.query('select fail_index_job($1,$2,true,$3) r',[job.id,'The search service did not respond.',job.run_id])).rows[0].r,'queued');
+  let j=await lockMinutes(job.id);
+  assert.equal(j.state,'queued'); assert.ok(j.m>1.9&&j.m<=2.01,`backoff ${j.m}`);
+  assert.equal((await db.query('select * from documents where ingest_run_id=$1',[job.run_id])).rows.length,0,'half-written passages removed');
+  let row=await versionRow(db,v.versionId);
+  assert.equal(row.indexing_status,'pending'); assert.equal(row.indexing_error,null,'no reason shown while it will be retried');
+  // Not due yet: the other file is claimed instead.
+  const otherJob=await claimJob(db);
+  assert.equal(otherJob.document_version_id,v2.versionId);
+  await db.query("update document_index_jobs set locked_until=now()-interval '1 second' where id=$1",[job.id]);
+  job=await claimJob(db); assert.equal(job.attempts,2);
+  await db.query('select fail_index_job($1,$2,true,$3)',[job.id,'Timed out.',job.run_id]);
+  j=await lockMinutes(job.id); assert.ok(j.m>3.9&&j.m<=4.01,`backoff ${j.m}`);
+  // A stale worker's report for an old run is ignored.
+  assert.equal((await db.query('select fail_index_job($1,$2,false,$3) r',[job.id,'late',randomUUID()])).rows[0].r,'stale');
+  await db.query("update document_index_jobs set locked_until=now()-interval '1 second' where id=$1",[job.id]);
+  job=await claimJob(db); assert.equal(job.attempts,3);
+  assert.equal((await db.query('select fail_index_job($1,$2,true,$3) r',[job.id,'No readable text, even after OCR.',job.run_id])).rows[0].r,'failed');
+  row=await versionRow(db,v.versionId);
+  assert.equal(row.indexing_status,'failed'); assert.equal(row.indexing_error,'No readable text, even after OCR.'); assert.equal(row.indexing_attempts,3);
+  assert.equal((await jobOf(db,v.versionId)).state,'failed');
+  assert.equal(await claimJob(db),null,'a failed job is not picked up again');
+  // Permanent on the first attempt.
+  assert.equal((await db.query('select fail_index_job($1,$2,false,$3) r',[otherJob.id,'The PDF is password-protected.',otherJob.run_id])).rows[0].r,'failed');
+  assert.equal((await versionRow(db,v2.versionId)).indexing_error,'The PDF is password-protected.');
+ } finally {await db.close();}
+});
+
+test('indexing: Try again re-queues a failed version for members only; a stopping worker hands its job back', async () => {
+ const db=await indexingDatabase();
+ try {
+  await db.exec('set role authenticated');
+  const doc=randomUUID(),path=await staged(db,doc),v=await save(db,doc,path);
+  await db.exec('reset role');
+  let job=await claimJob(db);
+  await db.query('select fail_index_job($1,$2,false,$3)',[job.id,'The PDF is password-protected.',job.run_id]);
+  await db.exec('set role authenticated');
+  const queued=(await db.query('select enqueue_index_job($1) r',[v.versionId])).rows[0].r;
+  assert.equal(queued.state,'queued');
+  const row=await versionRow(db,v.versionId);
+  assert.equal(row.indexing_status,'pending'); assert.equal(row.indexing_error,null); assert.equal(row.indexing_attempts,0);
+  const reset=await jobOf(db,v.versionId);
+  assert.equal(reset.attempts,0); assert.equal(reset.last_error,null); assert.equal(reset.locked_until,null);
+  // Pressing it again while queued changes nothing.
+  assert.equal((await db.query('select enqueue_index_job($1) r',[v.versionId])).rows[0].r.state,'queued');
+  // A file saved before the queue existed gets a job on request.
+  await db.exec('reset role');
+  const legacyDoc=randomUUID(); await db.query("insert into matter_documents(id,matter_id,title) values($1,$2,'Old')",[legacyDoc,project]);
+  await db.exec('alter table document_versions disable trigger document_versions_enqueue_index');
+  const legacy=(await db.query("insert into document_versions(matter_document_id,version_number,storage_path,indexing_status) values($1,1,$2,'unknown') returning id",[legacyDoc,`${project}/${legacyDoc}/old.pdf`])).rows[0].id;
+  await db.exec('alter table document_versions enable trigger document_versions_enqueue_index');
+  await db.exec('set role authenticated');
+  assert.equal((await db.query('select enqueue_index_job($1) r',[legacy])).rows[0].r.state,'queued');
+  assert.equal((await versionRow(db,legacy)).indexing_status,'pending');
+  await db.exec("select set_config('test.member','false',false)");
+  await assert.rejects(db.query('select enqueue_index_job($1)',[v.versionId]),/Forbidden/);
+  await db.exec("select set_config('test.member','true',false)");
+  // A deploy stops the worker mid-job: queued again, attempt not counted, partial rows gone.
+  await db.exec('reset role');
+  await db.query("update document_index_jobs set created_at=now()-interval '1 day' where document_version_id=$1",[v.versionId]);
+  job=await claimJob(db);
+  assert.equal(job.document_version_id,v.versionId); assert.equal(job.attempts,1);
+  await addPassages(db,{versionId:v.versionId,runId:job.run_id,path});
+  assert.equal((await db.query('select release_index_job($1,$2) r',[job.id,job.run_id])).rows[0].r,true);
+  const back=await jobOf(db,v.versionId);
+  assert.equal(back.state,'queued'); assert.equal(back.attempts,0); assert.equal(back.run_id,null);
+  assert.equal((await db.query('select * from documents where ingest_run_id=$1',[job.run_id])).rows.length,0);
+  assert.equal((await db.query('select touch_index_job($1,$2) r',[job.id,job.run_id])).rows[0].r,null,'a released run cannot renew its lock');
+ } finally {await db.close();}
+});
