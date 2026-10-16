@@ -1,0 +1,727 @@
+// One search for everything the assistant looks up: the chat's automatic
+// search, its library tools (search_law_library, search_precedents,
+// search_project_documents), and the evidence a review is given.
+//
+// Until now each path embedded the question once and took the nearest rows
+// from match_documents: no words matched, a superseded draft answered as
+// readily as the current one, one long file could fill every slot, and a
+// source was labelled with a file name alone. retrieve() does, for one scope
+// ("project" | "precedent" | "statute"):
+//
+//   1. For a precedent or statute question (not a pasted document), a quick
+//      model call rewrites it into two or three phrasings in the words the
+//      clause or the statute would use ("is an LD clause a penalty" →
+//      "compensation for breach of contract where penalty stipulated for").
+//      Cached per question.
+//   2. One embedding call for all the phrasings (voyage-law-2, query).
+//   3. search_passages (supabase/migrations/20261017120000_hybrid_search.sql)
+//      per phrasing: meaning, words and file names, fused by reciprocal
+//      rank in SQL, current versions only, at most three passages a file.
+//   4. The phrasings' lists merged (each passage keeps its best fused
+//      score), repeated text dropped, three a file again, and the best ~30
+//      reranked by Voyage rerank-2 against the question; on any rerank
+//      failure the fused order stands.
+//   5. Each passage labelled for citation: "Term Sheet v3, 4.2 Concession
+//      Period", "12. JVA.docx, cl. 9.1", "Contract Act, 1872, s.74".
+//
+// A question that names a section of an Act it can identify ("section 208 of
+// the Companies Act 2017") also gets that section's full text first, read the
+// way read_act_section reads it.
+//
+// Deploying this before the migration is safe: when search_passages is not
+// in the database, the same flow runs on match_documents (meaning only) and
+// the current-version filter is applied here instead.
+//
+// The VM runs Node 20: nothing newer is used.
+
+import { findPassages, sectionAt, actText, listActs, sameLaw, readActSection, parseSection } from "./libraryTools.js";
+import { paragraphsOf, termHits, queryTerms } from "./precedentSearch.js";
+import { parseLabel } from "./indexing/chunk.js";
+import { actKey } from "./research.js";
+
+export const SCOPES = new Set(["project", "precedent", "statute"]);
+export const RRF_K = 60;
+export const FILE_CAP = 3;
+export const CANDIDATES = 40;
+export const RERANK_POOL = 30;
+// The rerank-2 score under which a passage found automatically (the chat's
+// own search, review evidence) is left out, so a message with nothing
+// relevant in a library is not handed that library's nearest unrelated text.
+// A first setting, not yet calibrated: the retrieval evaluation records each
+// passage's score (scripts/eval/run.mjs --adapter retrieve), so set it from
+// the scores of passages that answer and those that do not. The tools ask
+// with no floor: the assistant chose to look.
+export const MIN_RELEVANCE = 0.2;
+// A passage longer than this is shown as its best window.
+export const MAX_TEXT = 4_000;
+const WINDOW = 3_000;
+// Longer than this, a query is a document (a review segment, a long chat
+// turn), not a question: it is not rewritten, and its keyword search uses
+// its most telling words.
+const MAX_QUESTION_CHARS = 600;
+const LONG_QUERY = 300;
+const REWRITE_TIMEOUT_MS = 6_000;
+const CACHE_MS = 30 * 60 * 1000;
+const MAX_CACHE = 300;
+const MISSING_RETRY_MS = 60 * 1000;
+const EMBED_URL = "https://api.voyageai.com/v1/embeddings";
+const RERANK_URL = "https://api.voyageai.com/v1/rerank";
+const PATH_SEPARATOR = " › ";
+
+export const SECTION_RE = /\b(?:sections?|sectoin|sec\.?|s\.|s|rule|article|art\.)\s*(\d{1,4}[A-Za-z]?)\b/i;
+
+const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+// ---------------------------------------------------------------------------
+// Caches: embeddings and rewrites, per text, for half an hour.
+
+const embedCache = new Map();
+const rewriteCache = new Map();
+let hybridMissingUntil = 0;
+
+function remember(cache, key, value) {
+  cache.set(key, { at: Date.now(), value });
+  while (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value);
+  return value;
+}
+function recall(cache, key) {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > CACHE_MS) { cache.delete(key); return undefined; }
+  return hit.value;
+}
+
+/** Forget cached embeddings, rewrites and the "migration not applied" note (tests). */
+export function clearRetrieveCaches() {
+  embedCache.clear();
+  rewriteCache.clear();
+  hybridMissingUntil = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Fusion, caps and labels: pure
+
+export const rrfOf = (rank) => (Number.isInteger(rank) && rank > 0 ? 1 / (RRF_K + rank) : 0);
+
+/**
+ * Several ranked lists of the same passages (one per phrasing) as one list:
+ * each passage keeps its best fused score (`rrf`) and its best leg ranks;
+ * a passage found by more phrasings wins a tie (`rrfSum`), then the earlier
+ * list and position.
+ */
+export function fuseLists(lists) {
+  const byKey = new Map();
+  let order = 0;
+  for (const list of lists ?? []) {
+    for (const c of list ?? []) {
+      if (!c || c.key == null) continue;
+      const score = typeof c.rrf === "number" && Number.isFinite(c.rrf) ? c.rrf : 0;
+      const have = byKey.get(c.key);
+      if (!have) {
+        byKey.set(c.key, { ...c, rrf: score, rrfSum: score, phrasings: 1, order: order++ });
+        continue;
+      }
+      have.rrfSum += score;
+      have.phrasings += 1;
+      const min = (a, b) => (a == null ? b ?? null : b == null ? a : Math.min(a, b));
+      have.vectorRank = min(have.vectorRank, c.vectorRank);
+      have.keywordRank = min(have.keywordRank, c.keywordRank);
+      have.nameRank = min(have.nameRank, c.nameRank);
+      if (score > have.rrf) have.rrf = score;
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b.rrf - a.rrf || b.rrfSum - a.rrfSum || a.order - b.order);
+}
+
+/** At most `cap` passages from one file, order kept. */
+export function capPerFile(items, cap = FILE_CAP, fileOf = (c) => c.fileKey ?? c.key) {
+  if (!Number.isFinite(cap)) return [...items];
+  const seen = new Map();
+  const out = [];
+  for (const c of items) {
+    const f = fileOf(c);
+    const n = seen.get(f) ?? 0;
+    if (n >= cap) continue;
+    seen.set(f, n + 1);
+    out.push(c);
+  }
+  return out;
+}
+
+/** The same words twice (two copies of an Act, a precedent filed twice): the first is kept. */
+export function dedupeByText(items) {
+  const seen = new Set();
+  return items.filter((c) => {
+    const t = norm(c.content ?? c.text).toLowerCase().slice(0, 300);
+    if (!t) return true;
+    if (seen.has(t)) return false;
+    seen.add(t);
+    return true;
+  });
+}
+
+/** "Article 14 Termination › 14.2 Termination for convenience" → its last two entries, at most ~100 characters. */
+export function shortHeading(path) {
+  const parts = String(path ?? "").split(PATH_SEPARATOR).map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return "";
+  let out = parts.slice(-2).join(PATH_SEPARATOR);
+  if (out.length > 100) out = parts[parts.length - 1];
+  return out.length > 100 ? `${out.slice(0, 97).trimEnd()}…` : out;
+}
+
+/** A section number from a statute passage's heading path ("Part VI › 73. Compensation …" → "73"). */
+export function sectionFromHeading(path) {
+  const parts = String(path ?? "").split(PATH_SEPARATOR).map((s) => s.trim()).filter(Boolean).reverse();
+  for (const p of parts) {
+    const m = /^(?:sections?\s+|s\.\s*)?(\d{1,4}[A-Z]{0,3})\.?(?:\s|$)/i.exec(p);
+    if (m && !/^(?:part|chapter|schedule)\b/i.test(p)) return m[1].toUpperCase();
+  }
+  return null;
+}
+
+/** The clause a precedent paragraph opens with: "cl. 9.1", "Article 14", or null. */
+export function clauseOf(text) {
+  const first = String(text ?? "").trim().split(/\n/)[0].slice(0, 200);
+  const label = parseLabel(first);
+  if (!label) return null;
+  if (label.kind === "clause") return `cl. ${label.label.replace(/\.$/, "")}`;
+  if (label.kind === "article" || label.kind === "part") return label.label;
+  return null;
+}
+
+/**
+ * How a passage is cited:
+ *   project   → "<document title> v<N>, <heading path or p. N>"
+ *   precedent → "<file name>, <heading path or clause>"
+ *   statute   → "<Act>, s.<N>"
+ */
+export function buildLabel(p) {
+  if (p.scope === "statute") {
+    const act = p.act_name || "Statute";
+    return p.section ? `${act}, s.${p.section}` : act;
+  }
+  if (p.scope === "project") {
+    const title = p.title || p.filename || "Project document";
+    const head = `${title}${p.version_number ? ` v${p.version_number}` : ""}`;
+    const where = shortHeading(p.heading_path) || (p.page ? `p. ${p.page}` : "");
+    return where ? `${head}, ${where}` : head;
+  }
+  const name = p.filename || p.title || "Precedent";
+  const where = shortHeading(p.heading_path) || clauseOf(p.text ?? p.content);
+  return where ? `${name}, ${where}` : name;
+}
+
+const STOP = new Set(("the a an of and or to in for on by with that this these those is are be been as at from any all shall may will such "
+  + "which who whom whose it its their there here hereby herein hereof hereto hereunder thereof therein thereto than then into upon under "
+  + "other others including include includes provided provide pursuant accordance respect each every not no nor but if so also "
+  + "party parties agreement agreements clause clauses section sections document documents").split(" "));
+
+/** The words a long text is searched for by keyword: its dozen most telling, in order of first use. */
+export function keywordText(query, max = 12) {
+  const q = norm(query);
+  if (q.length <= LONG_QUERY) return q;
+  const counts = new Map();
+  const first = new Map();
+  let i = 0;
+  for (const m of q.toLowerCase().matchAll(/[a-z][a-z0-9-]{2,}/g)) {
+    const w = m[0];
+    if (STOP.has(w)) continue;
+    counts.set(w, (counts.get(w) ?? 0) + 1);
+    if (!first.has(w)) first.set(w, i++);
+  }
+  return [...counts.entries()]
+    .map(([w, n]) => ({ w, score: n * Math.log(w.length) }))
+    .sort((a, b) => b.score - a.score || first.get(a.w) - first.get(b.w))
+    .slice(0, max)
+    .sort((a, b) => first.get(a.w) - first.get(b.w))
+    .map((x) => x.w)
+    .join(" ");
+}
+
+/**
+ * What the model reads of a passage: all of it, or the best window of a long
+ * one — where the words of the question, or of whichever phrasing matches
+ * it best, cluster.
+ */
+export function passageText(content, queries) {
+  const text = norm(content);
+  if (text.length <= MAX_TEXT) return { text, anchorText: text.slice(0, 200) };
+  let best = null;
+  for (const q of Array.isArray(queries) ? queries : [queries]) {
+    const [w] = findPassages(text, q, { max: 1, window: WINDOW });
+    if (w && (!best || w.score > best.score)) best = w;
+  }
+  if (best) return { text: text.slice(best.start, best.end), anchorText: text.slice(best.anchor, best.anchor + 200) };
+  return { text: text.slice(0, WINDOW), anchorText: text.slice(0, 200) };
+}
+
+/** Whether an RPC error means search_passages is not (fully) in the database yet. */
+export function isMissingFunction(err) {
+  if (!err) return false;
+  const code = String(err.code ?? "");
+  const msg = String(err.dbMessage ?? err.message ?? "");
+  if (code === "PGRST202" || code === "42883" || code === "42703") return true;
+  return /search_passages/i.test(msg) && /could not find|does not exist|schema cache/i.test(msg);
+}
+
+/**
+ * The library Act a question names, from `names`: every subject word of the
+ * name in the question ("companies act 2017", "PPRA rules"), its year agreeing
+ * when the question gives one. Null when none or the match is unclear.
+ */
+export function namedAct(query, names) {
+  const q = ` ${String(query ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+  const askedYears = q.match(/ (?:18|19|20)\d{2} /g)?.map((y) => y.trim()) ?? [];
+  let best = null;
+  for (const name of names ?? []) {
+    const key = actKey(name);
+    const words = key.words.filter((w) => !["act", "ordinance", "rules", "regulations", "order", "code"].includes(w));
+    const aliases = [...String(name).matchAll(/\(([A-Za-z]{2,8})\)/g)].map((m) => m[1].toLowerCase());
+    const aliasHit = aliases.some((a) => q.includes(` ${a} `));
+    if (!aliasHit && (!words.length || !words.every((w) => q.includes(` ${w} `)))) continue;
+    if (askedYears.length && key.years.length && !key.years.some((y) => askedYears.includes(y))) continue;
+    const score = words.length + (key.years.some((y) => askedYears.includes(y)) ? 1 : 0) + (aliasHit ? 1 : 0);
+    if (!best || score > best.score) best = { name, score };
+  }
+  return best?.name ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// The services
+
+async function embedQueries(voyageKey, texts, { fetchImpl, signal }) {
+  if (!voyageKey) throw new Error("no embedding key");
+  const keys = texts.map((t) => String(t).slice(0, 8000));
+  const missing = [...new Set(keys.filter((t) => recall(embedCache, t) === undefined))];
+  if (missing.length) {
+    const call = (async () => {
+      const resp = await fetchImpl(EMBED_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${voyageKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "voyage-law-2", input: missing, input_type: "query" }),
+        signal,
+      });
+      if (!resp.ok) throw new Error(`the search service did not respond (${resp.status})`);
+      const rows = [...((await resp.json())?.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      if (rows.length !== missing.length) throw new Error("the search service returned the wrong number of embeddings");
+      return rows.map((r) => r.embedding);
+    })();
+    missing.forEach((t, i) => remember(embedCache, t, call.then((v) => v[i])));
+    // A failed call is not remembered.
+    call.catch(() => missing.forEach((t) => embedCache.delete(t)));
+  }
+  return Promise.all(keys.map((t) => recall(embedCache, t)));
+}
+
+const REWRITE_SYSTEM = {
+  precedent: "You rewrite a lawyer's search over a Pakistani law firm's precedent agreements (concession, EPC, power and energy purchase, financing, shareholder, joint venture and track access agreements, MOUs). Reply with ONLY a JSON array of 2 or 3 strings, each a different search phrasing in the words a drafter writes in the clause itself: first the plain core term on its own (e.g. \"extension of time\"), then one or two short phrasings of the clause's operative wording (e.g. \"entitled to an extension of the time for completion\"). Expand abbreviations the way project and construction contracts use them — LD/LDs = liquidated damages, FM = force majeure, CP = conditions precedent, COD = commercial operations date, EoT = extension of time, DSCR = debt service coverage ratio, PPA = power purchase agreement, EPA = energy purchase agreement, SHA = shareholders agreement, JVA = joint venture agreement — never from another field. Correct misspellings. Keep any party, project or file name the query gives. No commentary.",
+  statute: "You rewrite a lawyer's question for a search over the text of Pakistani statutes (Acts, Ordinances, Rules, Regulations). Reply with ONLY a JSON array of 2 or 3 strings, each a phrasing in the words the statute itself would use for the rule that answers the question — e.g. for \"can my agent hand the work to someone else\": [\"sub-agent\", \"agent cannot lawfully employ another to perform acts which he has expressly or impliedly undertaken to perform personally\"]. Use statutory vocabulary, correct misspellings, name the Act only when you are sure of it, and never invent section numbers. No commentary.",
+};
+
+/** Two or three phrasings of a question in the words a clause or statute would use; [] when no model is at hand. */
+export async function rewriteQuery({ anthropicJson, query, scope, signal }) {
+  if (!anthropicJson || !REWRITE_SYSTEM[scope]) return [];
+  const q = norm(query);
+  const key = `${scope}\u0000${q}`;
+  const cached = recall(rewriteCache, key);
+  if (cached !== undefined) return cached;
+  const call = (async () => {
+    let timer;
+    try {
+      const reply = await Promise.race([
+        anthropicJson({
+          model: process.env.RESEARCH_MODEL ?? "claude-haiku-4-5-20251001",
+          max_tokens: 300,
+          system: REWRITE_SYSTEM[scope],
+          messages: [{ role: "user", content: q.slice(0, MAX_QUESTION_CHARS) }],
+        }, signal),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("rewrite timed out")), REWRITE_TIMEOUT_MS); }),
+      ]);
+      const text = (reply?.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      const parsed = JSON.parse(/\[[\s\S]*\]/.exec(text)?.[0] ?? "[]");
+      if (!Array.isArray(parsed)) return [];
+      const lower = q.toLowerCase();
+      return [...new Set(parsed.filter((p) => typeof p === "string").map(norm).filter((p) => p.length > 1 && p.length <= 300 && p.toLowerCase() !== lower))].slice(0, 3);
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  remember(rewriteCache, key, call);
+  try {
+    return await call;
+  } catch (err) {
+    rewriteCache.delete(key);
+    if (signal?.aborted) throw err;
+    console.error(`query rewrite skipped: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Voyage rerank-2 over the passages against the question: the best `k`, each
+ * with `rerankScore`. Any failure keeps the order given (`reranked: false`).
+ */
+export async function rerankPassages({ voyageKey, query, passages, k, fetchImpl = globalThis.fetch, signal }) {
+  const keep = { passages: passages.slice(0, k), reranked: false };
+  if (!voyageKey || passages.length < 2) return keep;
+  try {
+    const resp = await fetchImpl(RERANK_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${voyageKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "rerank-2",
+        query: String(query).slice(0, 8000),
+        documents: passages.map((p) => `${p.label ? `${p.label}\n\n` : ""}${p.text ?? ""}`.slice(0, 8000)),
+        top_k: Math.min(k, passages.length),
+        truncation: true,
+      }),
+      signal,
+    });
+    if (!resp.ok) throw new Error(`rerank failed (${resp.status})`);
+    const rows = (await resp.json())?.data;
+    if (!Array.isArray(rows) || !rows.length) throw new Error("rerank returned nothing");
+    const seen = new Set();
+    const picked = [];
+    for (const r of rows) {
+      const i = Number(r?.index);
+      const score = Number(r?.relevance_score);
+      if (!Number.isInteger(i) || i < 0 || i >= passages.length || seen.has(i) || !Number.isFinite(score)) continue;
+      seen.add(i);
+      picked.push({ ...passages[i], rerankScore: score });
+    }
+    if (!picked.length) throw new Error("rerank returned no usable result");
+    picked.sort((a, b) => b.rerankScore - a.rerankScore);
+    return { passages: picked.slice(0, k), reranked: true };
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    console.error(`rerank skipped, keeping the fused order: ${err.message}`);
+    return keep;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Searching
+
+const fileKeyOf = (scope, c) => {
+  if (scope === "statute") return c.act_name ?? c.storage_path ?? c.documentId;
+  if (scope === "project") return c.document_version_id ?? c.storage_path ?? c.documentId;
+  return c.storage_path ?? c.documentId;
+};
+
+/** A search_passages row as a candidate. */
+export function toCandidate(row, scope) {
+  const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const ordinal = meta.passage_ordinal;
+  const c = {
+    // precedent:<storage path>:<row>:<paragraph> — the shape the tools'
+    // precedent ids have always had (the evaluation reads the path from it).
+    key: scope === "precedent" && ordinal != null ? `precedent:${meta.storage_path ?? meta.filename ?? row.id}:${row.id}:${ordinal}` : String(row.id),
+    documentId: row.id,
+    scope,
+    content: String(row.content ?? ""),
+    metadata: meta,
+    heading_path: row.heading_path ?? meta.heading_path ?? null,
+    page: row.page ?? meta.page ?? null,
+    document_version_id: row.document_version_id ?? null,
+    matter_document_id: row.matter_document_id ?? null,
+    version_number: row.version_number ?? null,
+    storage_path: meta.storage_path ?? null,
+    filename: meta.filename ?? null,
+    title: meta.document_title ?? null,
+    act_name: meta.act_name ?? null,
+    url: meta.source_url ?? meta.pdf_url ?? null,
+    vectorRank: row.vector_rank ?? null,
+    keywordRank: row.keyword_rank ?? null,
+    nameRank: row.name_rank ?? null,
+    rrf: typeof row.rrf_score === "number" ? row.rrf_score : Number(row.rrf_score) || 0,
+  };
+  c.fileKey = fileKeyOf(scope, c);
+  return c;
+}
+
+async function hybridSearch(supabase, params) {
+  let r = await supabase.rpc("search_passages", params);
+  if (r.error && /statement timeout/i.test(r.error.message ?? "")) r = await supabase.rpc("search_passages", params);
+  if (r.error) {
+    const err = new Error(`The search failed: ${r.error.message}`);
+    err.code = r.error.code;
+    err.dbMessage = r.error.message;
+    throw err;
+  }
+  return (r.data ?? []).map((row) => toCandidate(row, params.scope));
+}
+
+// The current version of each project document, by storage path, for the
+// match_documents fallback (search_passages does this in SQL). Null when it
+// cannot be read: nothing is filtered then.
+async function projectVersions(supabase, matterId) {
+  try {
+    const { data, error } = await supabase
+      .from("matter_documents")
+      .select("id, title, versions:document_versions(id, version_number, storage_path, is_ai_generated, file_name)")
+      .eq("matter_id", matterId);
+    if (error) throw new Error(error.message);
+    const byPath = new Map();
+    for (const doc of data ?? []) {
+      const versions = [...(doc.versions ?? [])].sort((a, b) => b.version_number - a.version_number);
+      const current = versions.find((v) => !v.is_ai_generated);
+      for (const v of versions) byPath.set(v.storage_path, { versionId: v.id, versionNumber: v.version_number, documentId: doc.id, title: doc.title, current: v === current });
+    }
+    return byPath;
+  } catch (err) {
+    console.error(`could not read project versions for the search: ${err.message}`);
+    return null;
+  }
+}
+
+// The paragraph of a whole-agreement precedent row that holds most of the
+// question's words (its first when none does).
+function bestParagraph(content, terms) {
+  const paragraphs = paragraphsOf(String(content ?? "").slice(0, 1_500_000));
+  let best = null;
+  for (const p of paragraphs) {
+    const hits = termHits(p.text, terms).count;
+    if (!best || hits > best.hits) best = { ...p, hits };
+  }
+  return best;
+}
+
+async function vectorFallback(supabase, { scope, embedding, matterId, actNames, documentTypeId, allVersions, excludeDocumentId, candidates, terms, versions }) {
+  const params = { query_embedding: embedding, match_threshold: 0.3, match_count: candidates };
+  if (scope === "project") params.filter_matter_id = matterId;
+  if (scope === "precedent") params.precedent_only = true;
+  if (scope === "statute") {
+    params.statute_only = true;
+    if (actNames?.length) params.filter_act_names = actNames;
+  }
+  if (documentTypeId) params.filter_document_type_id = documentTypeId;
+  let r = await supabase.rpc("match_documents", params);
+  if (r.error && /statement timeout/i.test(r.error.message ?? "")) r = await supabase.rpc("match_documents", params);
+  if (r.error) throw new Error(`The search failed: ${r.error.message}`);
+  const out = [];
+  for (const row of r.data ?? []) {
+    const meta = row.metadata ?? {};
+    let content = String(row.content ?? "");
+    let key = String(row.id);
+    let extra = {};
+    if (scope === "project" && versions) {
+      const v = versions.get(meta.storage_path);
+      if (!v) continue; // a passage of a version that no longer exists
+      if (!allVersions && !v.current) continue;
+      if (excludeDocumentId && v.documentId === excludeDocumentId) continue;
+      extra = { document_version_id: v.versionId, matter_document_id: v.documentId, version_number: v.versionNumber, document_title: v.title };
+    }
+    if (scope === "precedent") {
+      const p = bestParagraph(content, terms);
+      if (p) { content = p.text; key = `precedent:${meta.storage_path ?? meta.filename ?? row.id}:${row.id}:o${p.offset}`; }
+    }
+    const rank = out.length + 1;
+    const c = toCandidate({
+      id: row.id, content, metadata: { ...meta, ...(extra.document_title ? { document_title: extra.document_title } : {}) },
+      document_version_id: extra.document_version_id ?? null, matter_document_id: extra.matter_document_id ?? null, version_number: extra.version_number ?? null,
+      vector_rank: rank, keyword_rank: null, name_rank: null, rrf_score: rrfOf(rank),
+    }, scope);
+    c.key = key;
+    c.similarity = typeof row.similarity === "number" ? row.similarity : null;
+    out.push(c);
+  }
+  return out;
+}
+
+// The copies of each named law the library holds ("Companies Act, 2017" may
+// be held under two titles).
+async function expandActs(supabase, names) {
+  try {
+    const acts = await listActs(supabase);
+    return [...new Set(names.flatMap((n) => sameLaw(n, acts)))];
+  } catch {
+    return names;
+  }
+}
+
+// Statute passages placed in their sections: from the heading path, else by
+// finding the passage in its Act's rebuilt text (as search_law_library does),
+// for the first three Acts involved.
+async function placeSections(supabase, passages) {
+  for (const p of passages) if (!p.section) p.section = sectionFromHeading(p.heading_path);
+  const needing = [...new Set(passages.filter((p) => !p.section && p.act_name).map((p) => p.act_name))].slice(0, 3);
+  for (const name of needing) {
+    try {
+      const doc = await actText(supabase, name);
+      if (!doc) continue;
+      for (const p of passages) {
+        if (p.act_name !== name || p.section) continue;
+        const at = doc.text.indexOf(norm(p.anchorText ?? p.text.slice(0, 200)));
+        if (at >= 0) p.section = sectionAt(doc.index, at);
+      }
+    } catch (err) {
+      console.error(`could not place passages of ${name} in sections: ${err.message}`);
+    }
+  }
+}
+
+// The section a question names, read whole, when the Act it names is known.
+async function sectionLead(supabase, query, actNames) {
+  const m = SECTION_RE.exec(query);
+  if (!m || !parseSection(m[1])) return null;
+  let names = actNames ?? [];
+  if (!names.length) {
+    try { names = (await listActs(supabase)).map((a) => a.act_name); } catch { return null; }
+  }
+  const act = namedAct(query, names) ?? (actNames?.length === 1 ? actNames[0] : null);
+  if (!act) return null;
+  try {
+    const s = await readActSection(supabase, { act, section: m[1] });
+    return {
+      key: s.id, documentId: null, scope: "statute", content: s.text, text: s.text, act_name: s.act_name, section: s.section,
+      heading_path: s.heading ? `${s.section}. ${s.heading}` : null, url: s.source_url ?? null, lead: true, metadata: { act_name: s.act_name, source_url: s.source_url ?? null },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** A finished passage, as every caller receives it. */
+function toPassage(c) {
+  return {
+    id: c.key,
+    documentId: c.documentId ?? null,
+    scope: c.scope,
+    label: c.label,
+    text: c.text,
+    title: c.title ?? null,
+    filename: c.filename ?? c.title ?? null,
+    act_name: c.act_name ?? null,
+    section: c.section ?? null,
+    heading_path: c.heading_path ?? null,
+    page: c.page ?? null,
+    storage_path: c.storage_path ?? null,
+    document_version_id: c.document_version_id ?? null,
+    matter_document_id: c.matter_document_id ?? null,
+    version_number: c.version_number ?? null,
+    url: c.url ?? null,
+    similarity: typeof c.rerankScore === "number" ? c.rerankScore : typeof c.rrf === "number" ? Math.round(c.rrf * 1e6) / 1e6 : null,
+    rerankScore: typeof c.rerankScore === "number" ? c.rerankScore : null,
+    rrf: c.rrf ?? null,
+    vectorRank: c.vectorRank ?? null,
+    keywordRank: c.keywordRank ?? null,
+    nameRank: c.nameRank ?? null,
+    lead: !!c.lead,
+    metadata: c.metadata ?? {},
+  };
+}
+
+/**
+ * The search, with what it did: { passages, phrasings, engine: "hybrid" |
+ * "vector" | null, reranked }. See retrieve().
+ */
+export async function retrieveDetailed({
+  supabase, voyageKey, anthropicJson = null, query, scope,
+  matterId = null, actNames = null, documentTypeId = null, allVersions = false,
+  excludeDocumentId = null, excludeStoragePath = null,
+  k = 8, rewrite = true, rerank = true, minScore = 0, candidates = CANDIDATES,
+  signal, fetchImpl = globalThis.fetch,
+}) {
+  if (!SCOPES.has(scope)) throw new Error(`retrieve: scope must be project, precedent or statute, not ${scope}`);
+  const q = norm(query);
+  const out = { passages: [], phrasings: [q], engine: null, reranked: false };
+  if (q.length < 2 || (scope === "project" && !matterId)) return out;
+
+  const named = (actNames ?? []).filter(Boolean);
+  const acts = scope === "statute" && named.length ? await expandActs(supabase, named) : [];
+  const question = q.length <= MAX_QUESTION_CHARS;
+  const sectionAsked = scope === "statute" && question && SECTION_RE.test(q);
+
+  if (rewrite && anthropicJson && question && !sectionAsked && (scope === "precedent" || scope === "statute")) {
+    out.phrasings = [q, ...(await rewriteQuery({ anthropicJson, query: q, scope, signal }))].slice(0, 4);
+  }
+
+  let embeddings = null;
+  try {
+    embeddings = await embedQueries(voyageKey, out.phrasings, { fetchImpl, signal });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    console.error(`query embedding failed, searching by words only: ${err.message}`);
+  }
+
+  let lists = null;
+  if (Date.now() >= hybridMissingUntil) {
+    try {
+      lists = await Promise.all(out.phrasings.map((p, i) => hybridSearch(supabase, {
+        query_text: i === 0 ? keywordText(p) : p,
+        query_embedding: embeddings?.[i] ?? null,
+        scope,
+        matter_id: scope === "project" ? matterId : null,
+        act_names: scope === "statute" && acts.length ? acts : null,
+        document_type_id: documentTypeId ?? null,
+        all_versions: !!allVersions,
+        exclude_document_id: excludeDocumentId ?? null,
+        k: candidates,
+      })));
+      out.engine = "hybrid";
+    } catch (err) {
+      if (!isMissingFunction(err)) throw err;
+      hybridMissingUntil = Date.now() + MISSING_RETRY_MS;
+      console.warn(`search_passages is not in the database yet (${err.dbMessage ?? err.message}); searching with match_documents`);
+    }
+  }
+  if (!lists) {
+    if (!embeddings) throw new Error("The search service did not respond, so the library could not be searched.");
+    const versions = scope === "project" ? await projectVersions(supabase, matterId) : null;
+    const terms = queryTerms(q, out.phrasings.slice(1));
+    lists = await Promise.all(out.phrasings.map((_, i) => vectorFallback(supabase, {
+      scope, embedding: embeddings[i], matterId, actNames: acts, documentTypeId, allVersions, excludeDocumentId, candidates, terms, versions,
+    })));
+    out.engine = "vector";
+  }
+
+  let pool = fuseLists(lists);
+  if (excludeStoragePath) pool = pool.filter((c) => c.storage_path !== excludeStoragePath);
+  pool = dedupeByText(pool);
+  pool = capPerFile(pool, scope === "statute" && acts.length ? Infinity : FILE_CAP).slice(0, RERANK_POOL);
+  const windowQueries = [question ? q : keywordText(q), ...out.phrasings.slice(1)];
+  for (const c of pool) {
+    Object.assign(c, passageText(c.content, windowQueries));
+    if (scope === "statute") c.section = sectionFromHeading(c.heading_path);
+    c.label = buildLabel(c);
+  }
+
+  let final = pool.slice(0, k);
+  if (rerank) {
+    const r = await rerankPassages({ voyageKey, query: q, passages: pool, k, fetchImpl, signal });
+    final = r.passages;
+    out.reranked = r.reranked;
+    // A floor on the reranker's score, for callers that would rather have
+    // nothing than a weak passage (review evidence). Unreranked passages
+    // have no comparable score and are kept.
+    if (r.reranked && minScore > 0) final = final.filter((c) => c.rerankScore >= minScore);
+  }
+
+  if (scope === "statute") {
+    await placeSections(supabase, final);
+    if (sectionAsked) {
+      const lead = await sectionLead(supabase, q, named.length ? acts : null);
+      if (lead) final = [lead, ...final.filter((p) => !(p.act_name === lead.act_name && p.section === lead.section))].slice(0, k);
+    }
+  }
+  for (const c of final) c.label = buildLabel(c);
+  out.passages = final.map(toPassage);
+  return out;
+}
+
+/**
+ * Passages for a question from one scope, best first, each with a citation
+ * label: [{ id, scope, label, text, title, filename, act_name, section,
+ * heading_path, page, storage_path, document_version_id, version_number,
+ * url, similarity, ... }]. `similarity` is the rerank score, or the fused
+ * score when reranking was not possible.
+ *
+ * Options: matterId (project), actNames (statute: only these laws),
+ * documentTypeId, allVersions (project: superseded and AI versions too),
+ * excludeDocumentId / excludeStoragePath (leave one document out), k,
+ * rewrite (model phrasings for precedent and statute questions; needs
+ * anthropicJson), rerank, minScore (drop reranked passages scoring below).
+ */
+export async function retrieve(options) {
+  return (await retrieveDetailed(options)).passages;
+}

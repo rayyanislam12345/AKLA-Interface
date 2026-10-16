@@ -574,3 +574,177 @@ test('indexing: Try again re-queues a failed version for members only; a stoppin
   assert.equal((await db.query('select touch_index_job($1,$2) r',[job.id,job.run_id])).rows[0].r,null,'a released run cannot renew its lock');
  } finally {await db.close();}
 });
+
+// ------------------------------------------------- hybrid search (C2)
+// PGlite has no pgvector, so `vector` is stubbed as a float8[] domain with a
+// SQL cosine distance behind `<=>`: the vector leg runs for real on tiny
+// three-number embeddings. The HNSW index and its settings are not
+// exercised here (set_config on hnsw.* is a harmless placeholder in PGlite).
+const hybridSql=()=>readFileSync('supabase/migrations/20261017120000_hybrid_search.sql','utf8');
+const vec=(a)=>(a?`{${a.join(',')}}`:null);
+async function hybridDatabase() {
+ const db=await indexingDatabase(async(db)=>{
+  await db.exec(`
+  create domain public.vector as float8[];
+  create function public.vector_cosine_stub(a float8[], b float8[]) returns float8 language sql immutable as $$
+   select 1 - (select sum(x*y) from unnest(a,b) u(x,y)) / nullif(sqrt((select sum(x*x) from unnest(a) x)) * sqrt((select sum(y*y) from unnest(b) y)),0) $$;
+  create operator public.<=> (leftarg=float8[], rightarg=float8[], function=public.vector_cosine_stub);
+  alter table documents add column if not exists document_type_id uuid, add column if not exists embedding vector;
+  `);
+ });
+ await db.exec(readFileSync('supabase/migrations/20260921090000_precedent_passages.sql','utf8'));
+ await db.exec(hybridSql());
+ await db.exec(hybridSql()); // a second run changes nothing
+ return db;
+}
+// A project document with versions; returns { docId, versions: [{ id, path }] }.
+async function projectDoc(db,title,versions) {
+ const docId=randomUUID();
+ await db.query('insert into matter_documents(id,matter_id,title) values($1,$2,$3)',[docId,project,title]);
+ await db.exec('alter table document_versions disable trigger document_versions_enqueue_index');
+ const out=[];
+ for(const [i,v] of versions.entries()) {
+  const path=`${project}/${docId}/${v.file??`v${i+1}.docx`}`;
+  const id=(await db.query('insert into document_versions(matter_document_id,version_number,storage_path,file_name,is_ai_generated) values($1,$2,$3,$4,$5) returning id',[docId,i+1,path,v.file??`v${i+1}.docx`,!!v.ai])).rows[0].id;
+  out.push({id,path});
+ }
+ await db.exec('alter table document_versions enable trigger document_versions_enqueue_index');
+ return {docId,versions:out};
+}
+// A project passage: linked to its version, or (legacy) only by storage path.
+async function passage(db,{version=null,docId=null,path,content,embedding=[1,0,0],legacy=false,filename=null}) {
+ return (await db.query(`insert into documents(matter_id,content,metadata,embedding,document_version_id,matter_document_id,heading_path)
+  values($1,$2,$3,$4,$5,$6,$7) returning id`,[project,content,JSON.stringify({storage_path:path,filename:filename??path.split('/').pop()}),vec(embedding),legacy?null:version,legacy?null:docId,null])).rows[0].id;
+}
+const search=async(db,args)=>(await db.query(`select * from search_passages(query_text=>$1,query_embedding=>$2,scope=>$3,matter_id=>$4,act_names=>$5,document_type_id=>$6,all_versions=>$7,exclude_document_id=>$8,k=>$9)`,
+ [args.q,vec(args.emb),args.scope??'project','matter' in args?args.matter:project,args.acts??null,args.type??null,args.all??false,args.exclude??null,args.k??40])).rows;
+
+test('hybrid search: only the current, human-written version of a project document is searched unless all versions are asked for', async () => {
+ const db=await hybridDatabase();
+ try {
+  const term=await projectDoc(db,'Term Sheet',[{},{},{ai:true}]);
+  const [v1,v2,v3]=term.versions;
+  await passage(db,{version:v1.id,docId:term.docId,path:v1.path,content:'The concession period is twenty (20) years.'});
+  const legacyV2=await passage(db,{path:v2.path,content:'The concession period is twenty-five (25) years.',legacy:true});
+  const linkedV2=await passage(db,{version:v2.id,docId:term.docId,path:v2.path,content:'Termination: the concession period ends early on default.'});
+  await passage(db,{version:v3.id,docId:term.docId,path:v3.path,content:'AI draft: the concession period is thirty (30) years.'});
+  const other=await projectDoc(db,'Opinion',[{}]);
+  await passage(db,{version:other.versions[0].id,docId:other.docId,path:other.versions[0].path,content:'Our opinion on the concession period.'});
+
+  const rows=await search(db,{q:'concession period'});
+  const ids=rows.map(r=>r.id);
+  assert.ok(ids.includes(legacyV2),'a legacy passage of the current version is found by its storage path');
+  assert.ok(ids.includes(linkedV2));
+  assert.ok(!rows.some(r=>/twenty \(20\)|thirty/.test(r.content)),'neither the superseded v1 nor the AI-generated v3 is searched');
+  const legacyRow=rows.find(r=>r.id===legacyV2);
+  assert.equal(legacyRow.version_number,2,'the version is found for a legacy passage too');
+  assert.equal(legacyRow.document_version_id,v2.id);
+  assert.equal(legacyRow.metadata.document_title,'Term Sheet');
+
+  const every=await search(db,{q:'concession period',all:true});
+  assert.equal(every.filter(r=>r.matter_document_id===term.docId).length,4,'all versions: v1, both v2 passages and the AI v3 (a file is a version)');
+  assert.ok(every.some(r=>/twenty \(20\)/.test(r.content))&&every.some(r=>/thirty/.test(r.content)));
+
+  const excluded=await search(db,{q:'concession period',exclude:term.docId});
+  assert.deepEqual(excluded.map(r=>r.content),['Our opinion on the concession period.'],'exclude_document_id drops every version of that document, legacy passages included');
+  assert.deepEqual(await search(db,{q:'concession period',matter:null}),[],'a project search needs a project');
+  await db.exec('set role authenticated');
+  assert.deepEqual((await search(db,{q:'concession period'})).map(r=>r.id).sort(),ids.slice().sort(),'a signed-in member runs it (security invoker, granted to authenticated)');
+  await db.exec('reset role');
+  await assert.rejects(search(db,{q:'x',scope:'everything'}),/scope must be/);
+ } finally {await db.close();}
+});
+
+test('hybrid search: at most three passages come from one file, and the fused ranks are reported', async () => {
+ const db=await hybridDatabase();
+ try {
+  const big=await projectDoc(db,'Agreement',[{}]);
+  for(let i=0;i<6;i++) await passage(db,{version:big.versions[0].id,docId:big.docId,path:big.versions[0].path,content:i===0?'Clause 0: liquidated damages for delay; liquidated damages for delay are capped.':`Clause ${i}: liquidated damages for delay are capped.`,embedding:[1,i/10,0]});
+  const small=await projectDoc(db,'Side Letter',[{}]);
+  await passage(db,{version:small.versions[0].id,docId:small.docId,path:small.versions[0].path,content:'Liquidated damages for delay in the side letter.',embedding:[0,1,0]});
+  const rows=await search(db,{q:'liquidated damages delay',emb:[1,0,0]});
+  assert.equal(rows.filter(r=>r.matter_document_id===big.docId).length,3);
+  assert.equal(rows.filter(r=>r.matter_document_id===small.docId).length,1);
+  const top=rows[0];
+  assert.match(top.content,/Clause 0/,'nearest in meaning and a keyword hit: first');
+  assert.equal(top.vector_rank,1);
+  assert.ok(top.keyword_rank>=1);
+  assert.ok(Math.abs(top.rrf_score-(1/61+1/(60+top.keyword_rank)))<1e-9,'rrf is 1/(60+rank) summed over the legs');
+  for(let i=1;i<rows.length;i++) assert.ok(rows[i-1].rrf_score>=rows[i].rrf_score,'ordered by fused score');
+  // No embedding (the embedding service is down): the keyword leg still answers.
+  const words=await search(db,{q:'liquidated damages delay'});
+  assert.ok(words.length>=2&&words.every(r=>r.vector_rank===null&&r.keyword_rank!==null));
+ } finally {await db.close();}
+});
+
+test('hybrid search: when fewer than five passages hold every word, any of the words will do, most words first', async () => {
+ const db=await hybridDatabase();
+ try {
+  // Each passage in its own file, so the per-file cap does not interfere.
+  const add=async(content)=>{const d=await projectDoc(db,'Report',[{}]);return passage(db,{version:d.versions[0].id,docId:d.docId,path:d.versions[0].path,content});};
+  const both=await add('The indicative project cost is PKR 190 billion including IDC.');
+  const one=await add('IDC is interest during construction.');
+  const none=await add('The weather in Karachi.');
+  // "motorway" is in no passage, so the every-word query finds nothing.
+  const rows=await search(db,{q:'indicative project cost of the motorway including IDC'});
+  const ids=rows.map(r=>r.id);
+  assert.ok(ids.includes(both)&&ids.includes(one));
+  assert.ok(!ids.includes(none));
+  assert.ok(ids.indexOf(both)<ids.indexOf(one),'the passage holding more of the words ranks first');
+  // Five or more passages with every word: only those are keyword hits.
+  for(let i=0;i<5;i++) await add(`Clause ${i}: the motorway cost includes IDC.${' '.repeat(i)}`);
+  const strict=await search(db,{q:'motorway cost IDC'});
+  assert.ok(strict.length>=5);
+  assert.ok(strict.every(r=>/motorway/i.test(r.content)),'the every-word query is used when it finds five');
+ } finally {await db.close();}
+});
+
+test('hybrid search: a file named for the question is found by its name', async () => {
+ const db=await hybridDatabase();
+ try {
+  const nov=await projectDoc(db,'Novation',[{file:'180629-SWPCL-GE-FSA-Novation-Executed.pdf'}]);
+  await passage(db,{version:nov.versions[0].id,docId:nov.docId,path:nov.versions[0].path,content:'THIS DEED is made on 29 June 2018 between the parties.',embedding:[0,0,1]});
+  const fsa=await projectDoc(db,'FSA',[{file:'111013-Full-Services-Agreement.pdf'}]);
+  await passage(db,{version:fsa.versions[0].id,docId:fsa.docId,path:fsa.versions[0].path,content:'The Full Services Agreement term is eight years.',embedding:[1,0,0]});
+  const rows=await search(db,{q:'which document novated the FSA',emb:[1,0,0]});
+  const hit=rows.find(r=>r.matter_document_id===nov.docId);
+  assert.ok(hit,'the novation is found although no passage says "novated"');
+  assert.equal(hit.name_rank,1);
+  // One word naming one file is enough; a word in many names is not.
+  const sha=await projectDoc(db,'SHA',[{file:'1788590751052-SHA0522 _Execution Version_.docx'}]);
+  await passage(db,{version:sha.versions[0].id,docId:sha.docId,path:sha.versions[0].path,content:'Recitals.',embedding:[0,1,0]});
+  const byName=await search(db,{q:'deadlock resolution mechanism in SHA0522',emb:[1,0,0]});
+  assert.equal(byName.find(r=>r.name_rank!==null)?.matter_document_id,sha.docId);
+  assert.equal(byName.filter(r=>r.name_rank!==null).length,1);
+ } finally {await db.close();}
+});
+
+test('hybrid search: precedents are searched by paragraph, statutes within the named Acts', async () => {
+ const db=await hybridDatabase();
+ try {
+  const body='<p>1. Definitions</p><p>Drag-Along Notice means a notice served by the Majority Shareholder under Clause 9.</p><p>9.1 The Majority Shareholder may require the minority to sell on the same terms (drag along).</p>';
+  const prec=(await db.query(`insert into documents(content,metadata,is_precedent,embedding) values($1,$2,true,$3) returning id`,[body,JSON.stringify({storage_path:'precedent/x/JVA.docx',filename:'12. JVA.docx'}),vec([0,1,0])])).rows[0].id;
+  const rows=await search(db,{q:'drag along clause',scope:'precedent',matter:null,emb:[0,1,0]});
+  assert.ok(rows.length>=1&&rows.length<=3);
+  assert.ok(rows.every(r=>r.id===prec));
+  assert.ok(rows.every(r=>!r.content.includes('<p>')),'a paragraph, not the whole row');
+  assert.ok(rows.some(r=>/drag along/i.test(r.content)));
+  assert.ok(rows.every(r=>Number.isInteger(r.metadata.passage_ordinal)));
+  for(let i=0;i<5;i++) await db.query(`insert into documents(content,metadata,is_statute) values($1,$2,true)`,[`${70+i}. Compensation for breach of contract.— text ${i}`,JSON.stringify({act_name:'Contract Act, 1872'})]);
+  await db.query(`insert into documents(content,metadata,is_statute) values($1,$2,true)`,['5. Compensation for breach.',JSON.stringify({act_name:'Other Act'})]);
+  const named=await search(db,{q:'compensation breach',scope:'statute',matter:null,acts:['Contract Act, 1872']});
+  assert.equal(named.length,5,'one Act named: every passage that ranks, no per-Act cap');
+  assert.ok(named.every(r=>r.metadata.act_name==='Contract Act, 1872'));
+  const any=await search(db,{q:'compensation breach',scope:'statute',matter:null});
+  assert.equal(any.filter(r=>r.metadata.act_name==='Contract Act, 1872').length,3,'no Act named: at most three from one Act');
+  assert.equal(any.filter(r=>r.metadata.act_name==='Other Act').length,1);
+ } finally {await db.close();}
+});
+
+test('hybrid search: the migration refuses to run before the indexing pipeline migration', async () => {
+ const db=await database();
+ try {
+  await db.exec('create domain public.vector as float8[]');
+  await assert.rejects(db.exec(hybridSql()),/Apply 20261017090000_indexing_pipeline.sql first/);
+ } finally {await db.close();}
+});

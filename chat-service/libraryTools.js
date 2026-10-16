@@ -22,7 +22,8 @@
 // keys as arguments. The VM runs Node 20, so nothing newer than it is used.
 
 import { actKey, findInLibrary } from "./research.js";
-import { queryTerms, searchPrecedents } from "./precedentSearch.js";
+import { queryTerms } from "./precedentSearch.js";
+import { retrieve } from "./retrieve.js";
 
 const CACHE_MS = 10 * 60 * 1000;
 const MAX_CACHED_ACTS = 8;
@@ -410,112 +411,33 @@ export function clearCaches() {
   actCache.clear();
 }
 
-async function embedQuery(voyageKey, text, signal) {
-  const resp = await fetch("https://api.voyageai.com/v1/embeddings", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${voyageKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "voyage-law-2", input: [String(text).slice(0, 8000)], input_type: "query" }),
-    signal,
-  });
-  if (!resp.ok) throw new Error(`the search service did not respond (${resp.status})`);
-  return (await resp.json()).data[0].embedding;
-}
-
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 
-/** The best window of a chunk for the query, or its opening. */
-function windowOf(content, query) {
-  const text = norm(content);
-  const [best] = findPassages(text, query, { max: 1 });
-  if (best) return { text: text.slice(best.start, best.end), anchor: best.anchor - best.start };
-  return { text: text.slice(0, WINDOW), anchor: 0 };
-}
-
 /**
- * Law passages for a question: words matched in the Act's own text (or in
- * every statute's chunks when no Act is named), and passages close in
- * meaning. Up to six: { id, act_name, section, text, source_url, similarity }.
+ * Law passages for a question, through the one search (retrieve.js): the
+ * words and the meaning of the question, in the named Act (and its other
+ * copies) or in every statute, reranked, each placed in its section where
+ * that can be told. Up to six: { id, act_name, section, label, text,
+ * source_url, similarity }. A query that names a section of the Act gets that
+ * section whole, first.
  */
-export async function searchLaw(supabase, voyageKey, { query, act = null }, { signal } = {}) {
+export async function searchLaw(supabase, voyageKey, { query, act = null }, { signal, anthropicJson = null } = {}) {
   const q = norm(query);
   if (q.length < 2) throw new Error("Say what to search the law library for.");
-  const acts = await listActs(supabase);
   let resolved = null;
   if (act) {
+    const acts = await listActs(supabase);
     resolved = resolveAct(act, acts);
     if (!resolved) {
       const close = suggestActs(act, acts);
       throw new Error(`The law library holds no law matching "${act}".${close.length ? ` Closest held: ${close.join("; ")}.` : ""} Search without naming an Act, or name one the library holds.`);
     }
   }
-  const terms = termsFor(q);
-
-  const keyword = async () => {
-    if (resolved) {
-      const doc = await actText(supabase, resolved.act_name);
-      if (!doc) return [];
-      return findPassages(doc.text, q).map((p) => ({
-        id: `act:${doc.act_name}@${p.start}`, act_name: doc.act_name, section: sectionAt(doc.index, p.anchor),
-        text: doc.text.slice(p.start, p.end), source_url: doc.source_url, similarity: null, score: p.score,
-      }));
-    }
-    if (!terms.length) return [];
-    // Every statute chunk holding the longest words, then the best window of each.
-    const strongest = [...terms].sort((a, b) => b.length - a.length).slice(0, 3);
-    let request = supabase.from("documents").select("id, content, metadata").eq("is_statute", true);
-    for (const t of strongest) request = request.ilike("content", `%${t}%`);
-    let { data, error } = await request.limit(40);
-    if (error) throw new Error(`The law library search failed: ${error.message}`);
-    if (!data?.length && strongest.length > 1) {
-      ({ data, error } = await supabase.from("documents").select("id, content, metadata").eq("is_statute", true).ilike("content", `%${strongest[0]}%`).limit(40));
-      if (error) throw new Error(`The law library search failed: ${error.message}`);
-    }
-    const out = [];
-    for (const row of data ?? []) {
-      const text = norm(row.content);
-      const [best] = findPassages(text, q, { max: 1 });
-      if (!best) continue;
-      out.push({ id: row.id, act_name: row.metadata?.act_name ?? null, section: null, text: text.slice(best.start, best.end), anchorText: text.slice(best.anchor, best.anchor + 200), source_url: row.metadata?.source_url ?? row.metadata?.pdf_url ?? null, similarity: null, score: best.score });
-    }
-    return out.sort((a, b) => b.score - a.score);
-  };
-
-  const semantic = async () => {
-    const embedding = await embedQuery(voyageKey, q, signal);
-    const params = { query_embedding: embedding, match_threshold: 0.3, match_count: MAX_PASSAGES, statute_only: true };
-    if (resolved) params.filter_act_names = sameLaw(resolved.act_name, acts);
-    const { data, error } = await supabase.rpc("match_documents", params);
-    if (error) throw new Error(`The law library search failed: ${error.message}`);
-    return (data ?? []).map((row) => {
-      const w = windowOf(row.content, q);
-      return { id: row.id, act_name: row.metadata?.act_name ?? null, section: null, text: w.text, anchorText: w.text.slice(w.anchor, w.anchor + 200), source_url: row.metadata?.source_url ?? row.metadata?.pdf_url ?? null, similarity: typeof row.similarity === "number" ? row.similarity : null };
-    });
-  };
-
-  const [k, s] = await Promise.all([keyword(), semantic().catch((err) => { if (signal?.aborted) throw err; console.error("law vector search failed:", err.message); return []; })]);
-  // Alternate the two lists, best first, dropping a passage already taken.
-  const out = [];
-  const taken = (p) => out.some((o) => o.id === p.id || (o.act_name === p.act_name && o.text.slice(0, 300) === p.text.slice(0, 300)));
-  for (let i = 0; out.length < MAX_PASSAGES && (i < k.length || i < s.length); i++) {
-    for (const p of [k[i], s[i]]) if (p && !taken(p) && out.length < MAX_PASSAGES) out.push(p);
-  }
-  // Name the section a chunk's passage sits in, from the rebuilt text of its
-  // Act, for the few Acts involved.
-  const needing = [...new Set(out.filter((p) => !p.section && p.act_name).map((p) => p.act_name))].slice(0, 3);
-  for (const name of needing) {
-    try {
-      const doc = await actText(supabase, name);
-      if (!doc) continue;
-      for (const p of out) {
-        if (p.act_name !== name || p.section) continue;
-        const at = doc.text.indexOf(norm(p.anchorText ?? p.text.slice(0, 200)));
-        if (at >= 0) p.section = sectionAt(doc.index, at);
-      }
-    } catch (err) {
-      console.error(`could not place passages of ${name} in sections:`, err.message);
-    }
-  }
-  return out.map(({ score: _s, anchorText: _a, ...p }) => p);
+  const passages = await retrieve({
+    supabase, voyageKey, anthropicJson, query: q, scope: "statute",
+    actNames: resolved ? [resolved.act_name] : null, k: MAX_PASSAGES, signal,
+  });
+  return passages.map((p) => ({ id: p.id, act_name: p.act_name, section: p.section, label: p.label, text: p.text, source_url: p.url, similarity: p.similarity }));
 }
 
 /** The full text of one section: { id, act_name, section, heading, text, source_url } or throws a plain reason. */
@@ -535,39 +457,36 @@ export async function readActSection(supabase, { act, section }) {
   return { id: `act:${resolved.act_name}#s${found.section}`, act_name: resolved.act_name, section: found.section, heading: found.heading, text: found.text, truncated: found.truncated, source_url: doc.source_url };
 }
 
-/** Precedent passages for a question, one per agreement: { id, filename, text, documentTypeName }. */
+/**
+ * Precedent passages for a question, through the one search: paragraphs of
+ * the firm's precedents, at most three from one agreement, each labelled with
+ * its file and clause: { id, filename, label, text, documentTypeName, similarity }.
+ */
 export async function searchPrecedentsTool(supabase, voyageKey, anthropicJson, { query, document_type = null }, { signal } = {}) {
-  let documentTypeId = null;
+  let type = null;
   if (document_type) {
     const { data: types } = await supabase.from("document_types").select("id, name");
     const want = String(document_type).toLowerCase().trim();
-    const type = (types ?? []).find((t) => t.name.toLowerCase() === want) ?? (types ?? []).find((t) => t.name.toLowerCase().includes(want) || want.includes(t.name.toLowerCase()));
-    documentTypeId = type?.id ?? null;
+    type = (types ?? []).find((t) => t.name.toLowerCase() === want) ?? (types ?? []).find((t) => t.name.toLowerCase().includes(want) || want.includes(t.name.toLowerCase())) ?? null;
   }
-  const { results } = await searchPrecedents({ supabase, voyageKey, anthropicJson, query, documentTypeId, signal });
-  return results.slice(0, MAX_PASSAGES).map((f) => {
-    const first = f.excerpts[0] ?? {};
-    let text = "";
-    for (const e of f.excerpts) {
-      if (text.length >= WINDOW) break;
-      text += (text ? "\n…\n" : "") + e.text;
-    }
-    return {
-      id: `precedent:${f.storagePath ?? f.filename}:${first.chunkIndex ?? 0}:${first.offset ?? 0}`,
-      filename: f.filename, documentTypeName: f.documentTypeName ?? null, text: text.slice(0, WINDOW + 200), similarity: typeof f.score === "number" ? Math.round(f.score * 1000) / 1000 : null,
-    };
-  });
+  const q = norm(query);
+  if (q.length < 2) throw new Error("Type what you are looking for, e.g. liquidated damages.");
+  const passages = await retrieve({ supabase, voyageKey, anthropicJson, query: q, scope: "precedent", documentTypeId: type?.id ?? null, k: MAX_PASSAGES, signal });
+  return passages.map((p) => ({ id: p.id, filename: p.filename ?? "Precedent", label: p.label, documentTypeName: type?.name ?? null, text: p.text, storage_path: p.storage_path, similarity: p.similarity }));
 }
 
-/** Passages from this project's own indexed documents: { id, filename, text, similarity }. */
-export async function searchProject(supabase, voyageKey, { matterId, query }, { signal } = {}) {
+/**
+ * Passages from this project's own documents, through the one search: the
+ * current version of each document only (not superseded or AI-generated
+ * drafts), labelled with the document, its version and where in it:
+ * { id, filename, label, text, similarity }.
+ */
+export async function searchProject(supabase, voyageKey, { matterId, query }, { signal, anthropicJson = null } = {}) {
   if (!matterId) throw new Error("This chat is not inside a project, so there are no project documents to search.");
   const q = norm(query);
   if (q.length < 2) throw new Error("Say what to search the project's documents for.");
-  const embedding = await embedQuery(voyageKey, q, signal);
-  const { data, error } = await supabase.rpc("match_documents", { query_embedding: embedding, match_threshold: 0.3, match_count: MAX_PASSAGES, filter_matter_id: matterId });
-  if (error) throw new Error(`The project search failed: ${error.message}`);
-  return (data ?? []).map((row) => ({ id: row.id, filename: row.metadata?.filename ?? "Project document", text: windowOf(row.content, q).text, similarity: typeof row.similarity === "number" ? row.similarity : null }));
+  const passages = await retrieve({ supabase, voyageKey, anthropicJson, query: q, scope: "project", matterId, k: MAX_PASSAGES, signal });
+  return passages.map((p) => ({ id: p.id, filename: p.filename ?? "Project document", label: p.label, text: p.text, storage_path: p.storage_path, version_number: p.version_number, similarity: p.similarity }));
 }
 
 // ---------------------------------------------------------------------------
@@ -724,7 +643,7 @@ export function chatTools({ project = false, online = false } = {}) {
   const tools = [
     {
       name: "search_law_library",
-      description: "Search the firm's law library — the Pakistani Acts, Ordinances, Rules and Regulations the firm holds — for passages on a legal question. Use it whenever an answer turns on what a law says and the passages already in front of you do not settle it, and before ever telling the lawyer the library lacks a law or asking them to supply one. Name the law in `act` when you know it (e.g. \"Companies Act, 2017\") to search only that law; leave it out to search every law held. Matches both the words of the query and its meaning. Returns up to 6 passages, each numbered [Source n] for citation, with the section it sits in where that can be told.",
+      description: "Search the firm's law library — the Pakistani Acts, Ordinances, Rules and Regulations the firm holds — for passages on a legal question. Use it whenever an answer turns on what a law says and the passages already in front of you do not settle it, and before ever telling the lawyer the library lacks a law or asking them to supply one. Name the law in `act` when you know it (e.g. \"Companies Act, 2017\") to search only that law; leave it out to search every law held. Matches both the words of the query and its meaning. Returns up to 6 passages, each numbered [Source n] for citation and labelled with the Act and the section it sits in where that can be told; a query naming a section of the Act returns that section whole, first.",
       input_schema: {
         type: "object",
         properties: {
@@ -750,7 +669,7 @@ export function chatTools({ project = false, online = false } = {}) {
     },
     {
       name: "search_precedents",
-      description: "Search the firm's precedent library — agreements and documents the firm has drafted before — for clauses or passages on a point (e.g. \"liquidated damages for delay\"). Optionally limit to one document type by name (e.g. \"Concession Agreement\"). Returns up to 6 passages, one per document, each numbered [Source n].",
+      description: "Search the firm's precedent library — agreements and documents the firm has drafted before — for clauses or passages on a point (e.g. \"liquidated damages for delay\"). Optionally limit to one document type by name (e.g. \"Concession Agreement\"). Returns up to 6 clause-level passages, at most 3 from one document, each numbered [Source n] and labelled with the file and clause.",
       input_schema: {
         type: "object",
         properties: {
@@ -777,7 +696,7 @@ export function chatTools({ project = false, online = false } = {}) {
   if (project) {
     tools.push({
       name: "search_project_documents",
-      description: "Search this project's own documents (everything uploaded to the project and indexed) for passages on a point. Use it when the answer depends on what this project's documents say and they are not attached in full above. Returns up to 6 passages, each numbered [Source n].",
+      description: "Search this project's own documents (everything uploaded to the project and indexed) for passages on a point. Only the current version of each document is searched, not superseded versions or AI-generated drafts. Use it when the answer depends on what this project's documents say and they are not attached in full above. Returns up to 6 passages, at most 3 from one document, each numbered [Source n] and labelled with the document, its version and the clause or page.",
       input_schema: {
         type: "object",
         properties: { query: { type: "string", description: "What to look for." } },
@@ -814,7 +733,7 @@ export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = 
         if (!query) throw new Error("A query is needed.");
         const act = str(input.act, 200);
         notice(act ? `Searching ${act} for “${query}”…` : `Searching the law library for “${query}”…`);
-        const passages = await searchLaw(supabase, voyageKey, { query, act }, { signal });
+        const passages = await searchLaw(supabase, voyageKey, { query, act }, { signal, anthropicJson });
         return show(passages, "statute", "Passages from the firm's law library") ?? `Nothing in the law library matched “${query}”${act ? ` in ${act}` : ""}. Try other words, or another law.`;
       }
       case "read_act_section": {
@@ -839,7 +758,7 @@ export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = 
         if (!query) throw new Error("A query is needed.");
         if (!matterId) throw new Error("This chat is not inside a project.");
         notice(`Searching this project's documents for “${query}”…`);
-        const passages = await searchProject(supabase, voyageKey, { matterId, query }, { signal });
+        const passages = await searchProject(supabase, voyageKey, { matterId, query }, { signal, anthropicJson });
         return show(passages, "matter", "Passages from this project's documents") ?? `Nothing in this project's documents matched “${query}”.`;
       }
       case "look_up_law_online": {

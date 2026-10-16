@@ -7,6 +7,8 @@
 //   node scripts/eval/run.mjs --adapter baseline            today's automatic search
 //   node scripts/eval/run.mjs --adapter tools               the assistant's library tools
 //   node scripts/eval/run.mjs --adapter tools --route kind  tools, with the right tool picked for each question
+//   node scripts/eval/run.mjs --adapter retrieve             the one search (chat-service/retrieve.js), routed like tools
+//   node scripts/eval/run.mjs --adapter retrieve --route kind  the one search, the question's kind picking the scope
 //   node scripts/eval/run.mjs --adapter fake                checks the scorer itself; no network
 //   node scripts/eval/run.mjs --check-gold                  checks every expected answer still exists in the index
 //
@@ -335,6 +337,62 @@ export function toolsAdapter({ supabase, voyageKey, anthropicJson, lib, place, r
   };
 }
 
+// (d) The one search, chat-service/retrieve.js, as the tools and the chat's
+// automatic search now call it: hybrid search_passages (or match_documents
+// before that migration), Haiku phrasings for precedent and statute
+// questions, rerank-2. Routed like the tools adapter: with --route auto the
+// scopes are picked from the question's words (statute when it names an Act
+// or reads like law, the project inside a project, precedents outside one)
+// and their lists interleaved, a section the question names read first;
+// with --route kind the gold's kind picks the scope. Each scope returns its
+// best K_MAX.
+export function retrieveAdapter({ supabase, voyageKey, anthropicJson, lib, place, route, retrieveMod }) {
+  let actsPromise = null;
+  const acts = () => (actsPromise ??= lib.listActs(supabase));
+  const kindOf = { project: "matter", precedent: "precedent", statute: "statute" };
+  const run = async (question, scope, extra) => {
+    const out = await retrieveMod.retrieve({ supabase, voyageKey, anthropicJson, query: question, scope, k: K_MAX, ...extra });
+    return Promise.all(out.map(async (p) => {
+      const placed = p.scope === "statute" && !p.lead ? await place(p.act_name, p.text) : [];
+      return {
+        kind: kindOf[p.scope], id: p.id, similarity: p.similarity ?? null, act_name: p.act_name ?? null,
+        sections: placed.length ? placed : p.section ? [p.section] : [], storage_path: p.storage_path ?? null,
+        filename: p.label ?? p.filename ?? null, text: p.text, lead: !!p.lead,
+      };
+    }));
+  };
+  const interleave = (lists) => {
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; lists.some((l) => i < l.length); i++) {
+      for (const l of lists) if (l[i] && !seen.has(l[i].id)) { seen.add(l[i].id); out.push(l[i]); }
+    }
+    return out;
+  };
+  return {
+    name: "retrieve",
+    async retrieve(question, scope, gold = {}) {
+      const act = detectAct(question, await acts());
+      const lawish = !!act || LAWISH.test(question);
+      const kind = gold.kind;
+      let plan;
+      if (route === "kind" && kind) {
+        if (kind.startsWith("statute")) plan = ["statute"];
+        else if (kind === "precedent_clause") plan = ["precedent"];
+        else plan = isMatter(scope) ? ["project"] : ["precedent"];
+      } else if (isMatter(scope)) plan = ["project", ...(lawish ? ["statute"] : [])];
+      else plan = lawish ? ["statute", "precedent"] : ["precedent", "statute"];
+      const lists = await Promise.all(plan.map((s) => run(question, s, {
+        ...(s === "project" ? { matterId: scope } : {}),
+        ...(s === "statute" && act ? { actNames: [act] } : {}),
+      })));
+      // A section read whole leads, as read_act_section's answer does for the tools.
+      const lead = lists.flat().filter((p) => p.lead);
+      return [...lead, ...interleave(lists).filter((p) => !p.lead)];
+    },
+  };
+}
+
 // (c) A fake adapter for checking the scorer without the network: for each
 // question it plants an acceptable answer at a known rank (1, 3, 7 or
 // nowhere) among near-misses built to fail — the wrong section, the right
@@ -430,7 +488,7 @@ async function pool(items, n, fn) {
   return out;
 }
 
-const HELP = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 24).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+const HELP = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 26).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -483,8 +541,11 @@ async function main() {
 
   if (args.adapter === "baseline") adapter = baselineAdapter({ ...ctx, order: args.baselineOrder });
   else if (args.adapter === "tools") adapter = toolsAdapter({ ...ctx, route: args.route });
-  else if (args.adapter === "fake") adapter = fakeAdapter();
-  else throw new Error(`Unknown adapter "${args.adapter}" (baseline, tools, fake).`);
+  else if (args.adapter === "retrieve") {
+    const retrieveMod = await import(pathToFileURL(join(ctx.chatDir, "retrieve.js")).href);
+    adapter = retrieveAdapter({ ...ctx, route: args.route, retrieveMod });
+  } else if (args.adapter === "fake") adapter = fakeAdapter();
+  else throw new Error(`Unknown adapter "${args.adapter}" (baseline, tools, retrieve, fake).`);
 
   const started = new Date();
   const rows = await pool(questions, args.concurrency, async (q) => {
@@ -513,7 +574,7 @@ async function main() {
   });
 
   const summary = summarise(rows);
-  const label = args.label ?? `${adapter.name}${args.adapter === "tools" && args.route !== "auto" ? `-route-${args.route}` : ""}`;
+  const label = args.label ?? `${adapter.name}${(args.adapter === "tools" || args.adapter === "retrieve") && args.route !== "auto" ? `-route-${args.route}` : ""}`;
   console.log(`\n${formatTable(summary, `${label} — ${rows.length} questions, ${started.toISOString()}`)}`);
 
   let selfCheck = null;
