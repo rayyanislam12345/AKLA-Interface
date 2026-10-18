@@ -184,6 +184,8 @@ line for every refusal with its reason.
    `/etc/caddy/Caddyfile` on the VM with the one in `chat-service/Caddyfile`
    (the `@connector` matcher sends `/mcp`, `/oauth/*` and the two
    `.well-known` paths to 8095; everything else stays on 8092). Then:
+   One command does this, with a backup and a validate: `bash chat-service/caddy-connector.sh`.
+   Otherwise, by hand:
    `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 4. **Check.** `curl -s https://aklachat.duckdns.org/.well-known/oauth-authorization-server`
    should return the JSON with `"issuer":"https://aklachat.duckdns.org"`;
