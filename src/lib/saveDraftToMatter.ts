@@ -1,5 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import { sanitizeStorageFilename } from "@/lib/utils";
+import { plainSaveError } from "@/lib/documentSaveRules";
+
+export { plainSaveError };
+
+// A failed save, worded for the lawyer. The database's own error stays on
+// `cause` (and its code on `code`) for anyone who needs to tell cases apart.
+function saveError(raw: unknown): Error {
+  const code = (raw as { code?: unknown } | null)?.code;
+  return Object.assign(new Error(plainSaveError(raw)), { cause: raw }, code !== undefined ? { code } : {});
+}
 
 interface SaveDraftInput {
   matterId: string;
@@ -40,7 +50,7 @@ export async function saveDraftToMatter({ matterId, documentTypeId, documentType
   const stem = storageStem(fileStem ?? title ?? documentTypeName);
   const storagePath = `${matterId}/${docId}/${crypto.randomUUID()}-${stem}.${extension}`;
   const { error: uploadError } = await supabase.storage.from("matter-documents").upload(storagePath, blob, { contentType: blob.type || "application/octet-stream" });
-  if (uploadError) throw uploadError;
+  if (uploadError) throw saveError(uploadError);
   const args = {
     p_matter_id: matterId, p_document_type_id: documentTypeId, p_document_id: docId,
     p_create_new: !matterDocumentId, p_expected_version_id: expectedVersionId ?? null,
@@ -50,7 +60,7 @@ export async function saveDraftToMatter({ matterId, documentTypeId, documentType
   if (error && !error.code) ({ data, error } = await supabase.rpc("save_document_version", args));
   if (error) {
     // Retain the staged upload: a lost response may follow a committed transaction.
-    throw error;
+    throw saveError(error);
   }
   const result = data as { matterDocumentId: string; versionId: string; versionNumber: number; fileName: string };
   if (!SEARCHABLE_EXTENSIONS.includes(extension.toLowerCase())) {

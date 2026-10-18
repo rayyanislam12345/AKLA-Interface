@@ -925,10 +925,10 @@
         {
           "match": "storage_path",
           "value": "1632e9f0-dbb1-448c-80f8-3f5e5242d3af/510e60c3-4b09-4161-8fcb-5368e20552b3/76ac6322-06b5-4cae-ac22-ec288d785f8e-251202-FSA-4th-Amendment-Executed.pdf",
-          "contains": "effective from October 1, 2025"
+          "contains": "Fourth Amendment Effective Date"
         }
       ],
-      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 251202-FSA-4th-Amendment-Executed-v1.pdf ci=0."
+      "notes": "Verified 2026-10-16, read-only, against live public.documents. Phrase found in this matter's index: 251202-FSA-4th-Amendment-Executed-v1.pdf ci=0. 16 Oct: after the OCR re-read the date reads 'October 1\", 2025' (superscript st), so the answer is keyed on the defined term instead."
     },
     {
       "id": "P09",

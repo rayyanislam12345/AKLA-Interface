@@ -113,7 +113,9 @@ export async function buildCard({ apiKey, fetchImpl = fetch, log = () => {}, tit
           headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
           body: JSON.stringify({
             model: CARD_MODEL,
-            max_tokens: 2000,
+            // 2,000 cut off the answer for a long proposal with many dates and
+            // defined terms (16 Oct); the card is a few hundred words at most.
+            max_tokens: 4096,
             temperature: 0,
             system: SYSTEM,
             messages: [{ role: "user", content: cardPrompt({ title, fileName, text, outline, documentTypes, side, pageCount }) }],
@@ -130,6 +132,7 @@ export async function buildCard({ apiKey, fetchImpl = fetch, log = () => {}, tit
       return resp.json();
     }, { attempts: 4, onRetry: ({ attempt, delay, error }) => log(`card retry ${attempt} in ${delay}ms: ${error.message}`) });
     if (data?.stop_reason === "refusal") return { ...known, card_error: "The summary model declined this document" };
+    if (data?.stop_reason === "max_tokens") log("card answer reached its length limit; keeping what parses");
     const answer = (data?.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("");
     const card = parseCardJson(answer, { documentTypeIds: (documentTypes ?? []).map((t) => t.id) });
     return { ...card, ...known };

@@ -4,11 +4,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { extensionFor } from "./zipDownload";
+import { VersionChecksPanel } from "./VersionChecksPanel";
+import { VersionChangesPanel } from "./VersionChangesPanel";
+import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
 
 // Look at a project document without downloading it: Word files are drawn
 // in the page, PDFs and images shown as they are, anything else offered as a
 // download. Opens from the right; fills the screen on a phone.
+//
+// Beside the document: Checks (blanks, references to nothing, numbers whose
+// words and figures disagree, terms, numbering) and What changed (this
+// version against the one before, clause by clause), both written by the
+// server when it reads the version.
+
+type Tab = "document" | "checks" | "changes";
+const CHECKABLE_EXTENSIONS = ["docx", "pdf", "txt", "md"];
 
 export interface PreviewVersion {
   id: string;
@@ -60,12 +72,35 @@ export function DocumentPreviewSheet({
   const [picked, setPicked] = useState<{ openId: string; id: string } | null>(null);
   const [state, setState] = useState<{ loading: boolean; error: string | null; url: string | null }>({ loading: false, error: null, url: null });
   const docxRef = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<Tab>("document");
 
   const versions = [...(target?.versions ?? [])].sort((a, b) => b.version_number - a.version_number);
   const versionId = picked && picked.openId === target?.openId ? picked.id : target?.versionId;
   const version = versions.find((v) => v.id === versionId) ?? versions[0] ?? null;
   const latest = versions[0] ?? null;
   const kind = version ? kindOf(version) : "none";
+  const insights = useVersionInsights(target && version ? version.id : undefined);
+  const checkable = version ? CHECKABLE_EXTENSIONS.includes(extensionFor(version)) : false;
+  const earlier = version ? versions.filter((v) => v.version_number < version.version_number) : [];
+  const checkTotal = insights.data?.proofCheck?.total;
+  const comparedWith = insights.data?.changes?.previous?.version_number ?? earlier[0]?.version_number ?? null;
+
+  // A new preview opens on the document.
+  useEffect(() => {
+    setTab("document");
+  }, [target?.openId]);
+
+  // The server may have finished reading since the preview opened.
+  const { reload } = insights;
+  useEffect(() => {
+    if (tab !== "document") reload();
+  }, [tab, reload]);
+
+  // Show a finding in the Word preview: switch to it, then find the words.
+  const findInDocument = (text: string) => {
+    setTab("document");
+    return scrollPreviewTo(docxRef.current, text);
+  };
 
   useEffect(() => {
     if (!version) return;
@@ -141,9 +176,50 @@ export function DocumentPreviewSheet({
                   Open in AI and Review will use this older version (v{version.version_number}), not the latest (v{latest.version_number}).
                 </p>
               )}
+              {checkable && (
+                <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+                  <TabsList className="h-9 w-full sm:w-auto justify-start overflow-x-auto">
+                    <TabsTrigger value="document" className="text-xs">Document</TabsTrigger>
+                    <TabsTrigger value="checks" className="text-xs">
+                      Checks{typeof checkTotal === "number" ? ` (${checkTotal})` : ""}
+                    </TabsTrigger>
+                    <TabsTrigger value="changes" className="text-xs">
+                      What changed{comparedWith !== null ? ` (vs v${comparedWith})` : ""}
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
             </div>
 
-            <div className="relative flex-1 min-h-0 overflow-auto bg-muted/40">
+            {checkable && tab === "checks" && (
+              <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
+                <VersionChecksPanel
+                  versionId={version.id}
+                  versionNumber={version.version_number}
+                  checkable={checkable}
+                  insights={insights.data}
+                  loading={insights.loading}
+                  loadError={insights.error}
+                  onFind={kind === "docx" && !state.error ? findInDocument : undefined}
+                />
+              </div>
+            )}
+            {checkable && tab === "changes" && (
+              <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
+                <VersionChangesPanel
+                  documentTitle={target.document.title}
+                  version={version}
+                  versions={versions}
+                  comparable={checkable}
+                  insights={insights.data}
+                  loading={insights.loading}
+                  loadError={insights.error}
+                />
+              </div>
+            )}
+
+            {/* Kept mounted on the other tabs so the drawn Word file survives a tab switch. */}
+            <div className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${tab === "document" || !checkable ? "" : " hidden"}`}>
               {state.loading && (
                 <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />Opening…

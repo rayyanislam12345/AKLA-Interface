@@ -1,10 +1,15 @@
 // One index job, start to finish:
 //   load the version and its project -> download the file -> read it
 //   (extract.js) -> passages (chunk.js) -> embeddings (embed.js) -> insert the
-//   passages under this run's id -> card (card.js) -> publish_index_run, which
-//   swaps the old passages for the new ones in one transaction.
+//   passages under this run's id -> card (card.js) -> the proof check and the
+//   comparison with the previous version (../proofCheck.js,
+//   ../versionCompare.js) -> publish_index_run, which swaps the old passages
+//   for the new ones in one transaction -> record_version_checks.
 // Any failure goes to fail_index_job with a sentence a lawyer can act on;
-// passages half-written by this run are removed there.
+// passages half-written by this run are removed there. The checks and the
+// comparison never fail a reading: what went wrong is stored in their place.
+import { runProofCheck } from "../proofCheck.js";
+import { COMPARABLE_EXTENSIONS, compareVersions, readForCompare } from "../versionCompare.js";
 import { buildCard } from "./card.js";
 import { chunkDocument, contextualHeader, embeddingInput, textHash } from "./chunk.js";
 import { embedDocuments } from "./embed.js";
@@ -12,6 +17,11 @@ import { extensionOf, extractForIndex, PermanentError, StopRequested } from "./e
 
 const MAX_FILE_BYTES = Number(process.env.INDEX_MAX_FILE_MB ?? 150) * 1024 * 1024;
 const INSERT_BATCH = 50;
+// Reading the previous version again for the comparison gets this long; a
+// scan that needs OCR page after page is left uncompared rather than holding
+// up the queue.
+const COMPARE_BUDGET_MS = Number(process.env.INDEX_COMPARE_MINUTES ?? 10) * 60_000;
+const CHECKED_FORMATS = ["docx", "pdf", "txt", "md"];
 
 /** The sentence stored on the version when reading fails for good. */
 export function plainError(err) {
@@ -63,6 +73,104 @@ async function noteRelevantLaws(db, matterId, names, log) {
     } catch (err) {
       log(`relevant law "${name}" not recorded: ${err?.message ?? err}`);
     }
+  }
+}
+
+class CompareTooLong extends Error {}
+
+/** The version saved just before this one (numbers can skip: v1, v2, v4). */
+async function previousVersion(db, version) {
+  const { data, error } = await db
+    .from("document_versions")
+    .select("id, version_number, storage_path, file_name")
+    .eq("matter_document_id", version.matter_document_id)
+    .lt("version_number", version.version_number)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * The proof check on this reading and the comparison with the previous
+ * version, read again here with the same reader (nothing is kept between
+ * jobs). Never throws, except to stop the worker; a failure is stored as
+ * { error } or { skipped } in place of the result.
+ */
+export async function checkAndCompare(db, job, version, read, { log = () => {}, checkStop = () => {}, heartbeat = async () => {} } = {}) {
+  let proofCheck;
+  if (!CHECKED_FORMATS.includes(read.format)) {
+    proofCheck = { skipped: "Checks run on Word, PDF and text files only." };
+  } else {
+    try {
+      proofCheck = runProofCheck(read);
+    } catch (err) {
+      log(`proof check failed: ${err?.message ?? err}`);
+      proofCheck = { error: "The checks could not be run on this file." };
+    }
+  }
+
+  let prev = null;
+  let changes = null;
+  try {
+    prev = await previousVersion(db, version);
+  } catch (err) {
+    log(`previous version lookup failed: ${err?.message ?? err}`);
+    changes = { error: "The previous version could not be looked up, so this one was not compared." };
+  }
+  if (prev) {
+    const previous = { version_id: prev.id, version_number: prev.version_number, file_name: prev.file_name ?? null };
+    const name = `v${prev.version_number}`;
+    const prevExt = extensionOf(prev.storage_path) || extensionOf(prev.file_name);
+    try {
+      if (!COMPARABLE_EXTENSIONS.includes(read.format)) {
+        changes = { skipped: "Only Word, PDF and text files are compared.", previous };
+      } else if (!COMPARABLE_EXTENSIONS.includes(prevExt)) {
+        changes = { skipped: `The previous version (${name}) is a kind of file that cannot be compared.`, previous };
+      } else {
+        const deadline = Date.now() + COMPARE_BUDGET_MS;
+        const stopOrBudget = () => {
+          checkStop();
+          if (Date.now() > deadline) throw new CompareTooLong();
+        };
+        const bytes = await download(db, job.bucket, prev.storage_path);
+        stopOrBudget();
+        const prevRead = await readForCompare(bytes, `file.${prevExt}`, { checkStop: stopOrBudget, onProgress: () => heartbeat() });
+        await heartbeat();
+        changes = { ...compareVersions(prevRead, read), previous };
+        if (prevRead.format !== read.format) {
+          changes.notes.push("The two versions are different kinds of file (for example Word and PDF), so differences in line breaks may show as changes.");
+        }
+      }
+    } catch (err) {
+      if (err instanceof StopRequested) throw err;
+      if (err instanceof CompareTooLong) {
+        changes = { skipped: `The previous version (${name}) took too long to read again (it is probably a scan), so it was not compared.`, previous };
+      } else {
+        log(`compare with ${name} failed: ${err?.message ?? err}`);
+        changes = { error: err?.permanent ? `The previous version (${name}) could not be read: ${err.message}` : `The previous version (${name}) could not be read for a comparison.`, previous };
+      }
+    }
+  }
+  return { proofCheck, changes, comparedWith: prev?.id ?? null };
+}
+
+/** Stores the checks after publishing. Best effort: the reading is already done. */
+export async function recordChecks(db, job, versionId, checks, log = () => {}) {
+  try {
+    const { error } = await db.rpc("record_version_checks", {
+      p_version_id: versionId,
+      p_run_id: job.run_id,
+      p_proof_check: checks.proofCheck ?? null,
+      p_changes: checks.changes ?? null,
+      p_compared_with: checks.comparedWith ?? null,
+    });
+    if (error) log(`checks not saved: ${error.message}`);
+    return !error;
+  } catch (err) {
+    log(`checks not saved: ${err?.message ?? err}`);
+    return false;
   }
 }
 
@@ -187,6 +295,10 @@ export async function processJob(job, ctx) {
   });
 
   checkStop();
+  const checks = await checkAndCompare(db, job, version, read, { log, checkStop, heartbeat });
+  await heartbeat();
+
+  checkStop();
   const { error: publishError } = await db.rpc("publish_index_run", {
     p_job_id: job.id,
     p_run_id: job.run_id,
@@ -194,6 +306,11 @@ export async function processJob(job, ctx) {
     p_card: card,
   });
   if (publishError) throw new Error(`Publishing failed: ${publishError.message}`);
+
+  await recordChecks(db, job, version.id, checks, log);
+  const found = checks.proofCheck?.total;
+  const changed = checks.changes?.shown;
+  log(`checks=${found ?? (checks.proofCheck?.error ? "error" : "skipped")} compared_with=${checks.changes?.previous ? `v${checks.changes.previous.version_number}` : "-"} changes=${changed ?? (checks.changes ? (checks.changes.error ? "error" : checks.changes.unrelated ? "unrelated" : "skipped") : "-")}`);
 
   if (doc.matter_id && card.statutes_mentioned?.length) {
     await noteRelevantLaws(db, doc.matter_id, card.statutes_mentioned, log);

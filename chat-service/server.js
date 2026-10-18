@@ -33,6 +33,8 @@ import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
 import { QUESTIONNAIRES, startQuestionnaire, readAnswer, advance, answerInstruction } from "./questionnaire.js";
 import { parseSkillZip, publishSkill, unpublishSkill, uploadInputFile, downloadOutputFile, runSkillTurn, MAX_SKILL_BYTES } from "./claudeSkills.js";
+import { runProofCheck } from "./proofCheck.js";
+import { COMPARABLE_EXTENSIONS, compareVersions, readForCompare } from "./versionCompare.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -3693,6 +3695,79 @@ async function handlePrecedentSearch(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// On-demand checks and comparisons for the project page's preview. The index
+// worker stores both for every version it reads (proof_check and
+// changes_from_previous on document_versions); these two read-only routes
+// run the same code when the lawyer wants something the worker did not
+// store: a version not read yet, or a comparison with an older version than
+// the one just before.
+//   GET /documents/check?versionId=…
+//   GET /documents/compare?from=<earlier version id>&to=<version id>
+const ON_DEMAND_READ_MS = 2 * 60_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function handleDocumentInsight(req, res, url) {
+  const json = (status, body) => {
+    if (res.headersSent) return;
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  const { error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
+
+  const compare = url.pathname === "/documents/compare";
+  const ids = compare ? [url.searchParams.get("from"), url.searchParams.get("to")] : [url.searchParams.get("versionId")];
+  if (ids.some((id) => !id || !UUID_RE.test(id))) return json(400, { error: compare ? "from and to must be document version ids" : "versionId is required" });
+  if (compare && ids[0] === ids[1]) return json(400, { error: "Pick two different versions to compare." });
+
+  const { data: rows, error: rowsError } = await db
+    .from("document_versions")
+    .select("id, version_number, storage_path, file_name, matter_document_id")
+    .in("id", ids);
+  if (rowsError) return json(500, { error: "Could not look up the version." });
+  const versions = ids.map((id) => (rows ?? []).find((r) => r.id === id));
+  if (versions.some((v) => !v)) return json(404, { error: "Document version not found" });
+  if (compare && versions[0].matter_document_id !== versions[1].matter_document_id) return json(400, { error: "Both versions must belong to the same document." });
+
+  const clientGone = new AbortController();
+  res.on("close", () => { if (!res.writableFinished) clientGone.abort(); });
+  const deadline = Date.now() + ON_DEMAND_READ_MS;
+  const checkStop = () => {
+    if (clientGone.signal.aborted) throw new Error("client gone");
+    if (Date.now() > deadline) throw Object.assign(new Error("too long"), { tooLong: true });
+  };
+  try {
+    const reads = [];
+    for (const v of versions) {
+      const ext = (/\.([A-Za-z0-9]+)$/.exec(v.storage_path)?.[1] ?? "").toLowerCase();
+      if (!COMPARABLE_EXTENSIONS.includes(ext)) return json(422, { error: `v${v.version_number} is not a Word, PDF or text file, so it cannot be ${compare ? "compared" : "checked"}.` });
+      const { data: file, error: downloadError } = await db.storage.from("matter-documents").download(v.storage_path);
+      if (downloadError || !file) return json(404, { error: `The file for v${v.version_number} is missing from storage.` });
+      checkStop();
+      reads.push(await readForCompare(new Uint8Array(await file.arrayBuffer()), `file.${ext}`, { checkStop }));
+    }
+    if (compare) {
+      const [from, to] = versions;
+      const result = compareVersions(reads[0], reads[1]);
+      result.previous = { version_id: from.id, version_number: from.version_number, file_name: from.file_name ?? null };
+      console.log(`compare v${from.version_number} -> v${to.version_number} (${to.matter_document_id}): ${result.shown} shown, ${result.hidden} hidden`);
+      return json(200, result);
+    }
+    const result = runProofCheck(reads[0]);
+    console.log(`proof check v${versions[0].version_number} (${versions[0].id}): ${result.total} findings`);
+    return json(200, result);
+  } catch (err) {
+    if (clientGone.signal.aborted) return;
+    if (err?.tooLong) return json(422, { error: "This file takes too long to read here (it is probably a scan). The server reads it in the background; its checks appear when that finishes." });
+    if (err?.permanent) return json(422, { error: err.message });
+    console.error(`document ${compare ? "compare" : "check"} failed:`, err);
+    return json(500, { error: "The file could not be read." });
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 // Requests still being answered. A restart in the middle of one cuts a
 // lawyer's draft off with nothing saved, so the deploy script waits for this
@@ -3721,6 +3796,18 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/version")) {
     res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "chat-service", ...deployedVersion, inFlight }));
+    return;
+  }
+  if (req.method === "GET" && (url.pathname === "/documents/check" || url.pathname === "/documents/compare")) {
+    handleDocumentInsight(req, res, url).catch((err) => {
+      console.error("document insight handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
     return;
   }
   if (req.method === "POST" && (url.pathname === "/skills/upload" || url.pathname === "/skills/delete")) {

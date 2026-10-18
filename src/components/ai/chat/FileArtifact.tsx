@@ -5,7 +5,7 @@ import { Download, FileText, FolderKanban, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useChatFile } from "@/hooks/useDocumentTypeTemplates";
-import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { saveBlobToProject } from "@/lib/documentSave";
 import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 import type { ChatArtifact } from "@/hooks/useChat";
 
@@ -56,13 +56,13 @@ export default function FileArtifact({ artifact, matterId }: { artifact: ChatArt
       const dot = data.fileName.lastIndexOf(".");
       const extension = dot > 0 ? data.fileName.slice(dot + 1).toLowerCase() : "bin";
       const title = dot > 0 ? data.fileName.slice(0, dot) : data.fileName;
-      const result = await saveDraftToMatter({ matterId: targetMatterId, documentTypeId: null, documentTypeName: "Document", blob, title, extension });
-      setSaved({ matterId: targetMatterId, versionNumber: result.versionNumber });
-      queryClient.invalidateQueries({ queryKey: ["matter-documents", targetMatterId] });
-      queryClient.invalidateQueries({ queryKey: ["project-search"] });
-      toast({ title: `Saved to the project as v${result.versionNumber}`, description: result.indexed ? result.fileName : `${result.fileName} — saved; this file type isn't searchable by text.` });
-    } catch (err: any) {
-      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+      // The same save every chat panel uses: a new project document, its
+      // version labelled as an AI draft from the chat.
+      const result = await saveBlobToProject({ matterId: targetMatterId, blob, mode: "new-document", title, documentTypeId: null, extension, queryClient });
+      setSaved({ matterId: result.matterId, versionNumber: result.versionNumber });
+      toast({ title: result.message, description: result.note ?? result.fileName });
+    } catch (err) {
+      toast({ title: "Couldn't save to the project", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }
