@@ -33,6 +33,14 @@ scp -i "$KEY" index-worker.service "$HOST:/tmp/index-worker.service"
 ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST/indexing && sudo chown -R opc:opc $DEST/indexing && sudo install -m 644 -o root -g root /tmp/index-worker.service /etc/systemd/system/index-worker.service && sudo rm -f /tmp/index-worker.service && sudo restorecon /etc/systemd/system/index-worker.service && sudo systemctl daemon-reload && sudo systemctl enable index-worker >/dev/null 2>&1 && echo '  index worker unit installed'"
 # The reader shells out to poppler (pdfinfo, pdftotext, pdftoppm) and tesseract.
 ssh -i "$KEY" "$HOST" "for t in pdfinfo pdftotext pdftoppm tesseract; do command -v \$t >/dev/null || echo \"  WARNING: \$t is not installed; the index worker needs it\"; done"
+# The claude.ai connector (connector/*.js) and its unit, the same way: it
+# imports libraryTools.js, retrieve.js and indexing/ from $DEST, so it ships
+# in the same deploy. Port 8094; Caddy routes /mcp, /oauth/* and the
+# .well-known documents to it (see Caddyfile and docs/claude-ai-connector.md).
+ssh -i "$KEY" "$HOST" "rm -rf /tmp/connector && mkdir -p /tmp/connector"
+scp -i "$KEY" connector/*.js "$HOST:/tmp/connector/"
+scp -i "$KEY" hub-connector.service "$HOST:/tmp/hub-connector.service"
+ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/connector && sudo mv /tmp/connector $DEST/connector && sudo chown -R opc:opc $DEST/connector && sudo install -m 644 -o root -g root /tmp/hub-connector.service /etc/systemd/system/hub-connector.service && sudo rm -f /tmp/hub-connector.service && sudo restorecon /etc/systemd/system/hub-connector.service && sudo systemctl daemon-reload && sudo systemctl enable hub-connector >/dev/null 2>&1 && echo '  hub connector unit installed'"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/akla && mkdir -p /tmp/akla"
 scp -i "$KEY" akla/build_docx.py akla/akla-logo.png akla/requirements.txt "$HOST:/tmp/akla/"
@@ -83,6 +91,18 @@ ssh -i "$KEY" "$HOST" "sudo systemctl restart chat-service && sleep 2 && systemc
 echo "Restarting the index worker…"
 ssh -i "$KEY" "$HOST" "sudo systemctl restart index-worker && sleep 2 && systemctl is-active index-worker && sudo journalctl -u index-worker -n 3 --no-pager -o cat"
 
+# The connector keeps no session (one MCP server per request), so a restart
+# costs a lawyer's claude.ai at most one retried call.
+echo "Restarting the hub connector…"
+ssh -i "$KEY" "$HOST" "sudo systemctl restart hub-connector && sleep 2 && systemctl is-active hub-connector && sudo journalctl -u hub-connector -n 3 --no-pager -o cat"
+
 echo "Running version:"
 ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8092/health"
 echo
+echo "Connector:"
+ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8094/health"
+echo
+# Caddy is not touched here: when the Caddyfile changed, copy its aklachat
+# block into /etc/caddy/Caddyfile by hand and `sudo systemctl reload caddy`
+# (docs/claude-ai-connector.md, "Deploying").
+ssh -i "$KEY" "$HOST" "grep -q '127.0.0.1:8094' /etc/caddy/Caddyfile || echo '  NOTE: /etc/caddy/Caddyfile does not route to the connector yet; see docs/claude-ai-connector.md'"
