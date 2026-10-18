@@ -10,7 +10,7 @@ WorkingDirectory=/opt/chat-service
 # SUPABASE_PUBLISHABLE_KEY, ANTHROPIC_API_KEY, VOYAGE_API_KEY. PORT in that
 # file is chat-service's; the connector listens on CONNECTOR_PORT.
 EnvironmentFile=/opt/chat-service/.env
-Environment=CONNECTOR_PORT=8094
+Environment=CONNECTOR_PORT=8095
 Environment=CONNECTOR_ISSUER=https://aklachat.duckdns.org
 # Where a registered client may send the lawyer back to after sign-in
 # (default claude.ai,claude.com and their subdomains). Never set

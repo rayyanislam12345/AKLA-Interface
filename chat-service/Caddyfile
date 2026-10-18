@@ -1,14 +1,14 @@
 # The aklachat block of /etc/caddy/Caddyfile on the VM, alongside aklaocr
-# (8090 = ocr-service) and aklarelay (8091 = transcription-relay). After a
+# (8090 = ocr-service), aklarelay (8091 = transcription-relay) and aklacaselaw (8094, not ours to touch). After a
 # change: copy this block over the one on the box, `caddy validate --config
 # /etc/caddy/Caddyfile`, then `sudo systemctl reload caddy`.
 #
-# 8092 = chat-service (the Hub's assistant). 8094 = the claude.ai connector
+# 8092 = chat-service (the Hub's assistant). 8095 = the claude.ai connector
 # (chat-service/connector): the MCP endpoint, its OAuth pages and the two
 # discovery documents claude.ai reads before signing in. Anything else on
 # this host is chat-service, as before.
 aklachat.duckdns.org {
 	@connector path /mcp /mcp/* /oauth /oauth/* /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
-	reverse_proxy @connector 127.0.0.1:8094
+	reverse_proxy @connector 127.0.0.1:8095
 	reverse_proxy 127.0.0.1:8092
 }

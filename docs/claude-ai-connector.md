@@ -61,7 +61,7 @@ It uses the assistant's own search (`chat-service/libraryTools.js`,
 
 ```
 claude.ai ──https──> Caddy (aklachat.duckdns.org)
-                        ├─ /mcp, /oauth/*, /.well-known/oauth-* ──> hub-connector  127.0.0.1:8094
+                        ├─ /mcp, /oauth/*, /.well-known/oauth-* ──> hub-connector  127.0.0.1:8095
                         └─ everything else                       ──> chat-service   127.0.0.1:8092
 ```
 
@@ -157,7 +157,7 @@ chat-service, index-worker). To make every lawyer sign in afresh, run the
 `delete from public.connector_clients;` (cascades to codes and tokens);
 each lawyer then removes and re-adds the connector in claude.ai.
 
-**Settings** (`hub-connector.service`): `CONNECTOR_PORT` (8094),
+**Settings** (`hub-connector.service`): `CONNECTOR_PORT` (8095),
 `CONNECTOR_ISSUER` (`https://aklachat.duckdns.org`; the issuer in the
 discovery documents and the resource claude.ai asks for),
 `CONNECTOR_REDIRECT_HOSTS` (comma-separated; default `claude.ai,claude.com`)
@@ -183,7 +183,7 @@ line for every refusal with its reason.
 3. **Caddy.** Replace the `aklachat.duckdns.org` block in
    `/etc/caddy/Caddyfile` on the VM with the one in `chat-service/Caddyfile`
    (the `@connector` matcher sends `/mcp`, `/oauth/*` and the two
-   `.well-known` paths to 8094; everything else stays on 8092). Then:
+   `.well-known` paths to 8095; everything else stays on 8092). Then:
    `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 4. **Check.** `curl -s https://aklachat.duckdns.org/.well-known/oauth-authorization-server`
    should return the JSON with `"issuer":"https://aklachat.duckdns.org"`;

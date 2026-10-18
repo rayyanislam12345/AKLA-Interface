@@ -1,11 +1,11 @@
 // AKLA Hub for claude.ai: a read-only MCP connector with its own OAuth,
-// served on 127.0.0.1:8094 behind Caddy at https://aklachat.duckdns.org/mcp.
+// served on 127.0.0.1:8095 behind Caddy at https://aklachat.duckdns.org/mcp.
 //
 //   node connector/connector.js         (systemd: hub-connector.service)
 //
 // Reads /opt/chat-service/.env, the same file as chat-service: SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY, ANTHROPIC_API_KEY,
-// VOYAGE_API_KEY. Its own settings, all optional: CONNECTOR_PORT (8094),
+// VOYAGE_API_KEY. Its own settings, all optional: CONNECTOR_PORT (8095),
 // CONNECTOR_ISSUER (https://aklachat.duckdns.org), CONNECTOR_REDIRECT_HOSTS
 // (comma-separated hosts a client may be sent back to after sign-in;
 // claude.ai,claude.com) and CONNECTOR_ALLOW_LOOPBACK=1 (also http://localhost,
@@ -29,7 +29,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const VOYAGE_KEY = process.env.VOYAGE_API_KEY;
-const PORT = Number(process.env.CONNECTOR_PORT ?? 8094);
+const PORT = Number(process.env.CONNECTOR_PORT ?? 8095);
 const ISSUER = (process.env.CONNECTOR_ISSUER ?? "https://aklachat.duckdns.org").replace(/\/+$/, "");
 const REDIRECT_HOSTS = String(process.env.CONNECTOR_REDIRECT_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
 const ALLOW_LOOPBACK = /^(1|true|yes)$/i.test(String(process.env.CONNECTOR_ALLOW_LOOPBACK ?? ""));

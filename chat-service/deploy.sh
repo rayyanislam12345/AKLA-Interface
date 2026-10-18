@@ -35,7 +35,7 @@ ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST
 ssh -i "$KEY" "$HOST" "for t in pdfinfo pdftotext pdftoppm tesseract; do command -v \$t >/dev/null || echo \"  WARNING: \$t is not installed; the index worker needs it\"; done"
 # The claude.ai connector (connector/*.js) and its unit, the same way: it
 # imports libraryTools.js, retrieve.js and indexing/ from $DEST, so it ships
-# in the same deploy. Port 8094; Caddy routes /mcp, /oauth/* and the
+# in the same deploy. Port 8095; Caddy routes /mcp, /oauth/* and the
 # .well-known documents to it (see Caddyfile and docs/claude-ai-connector.md).
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/connector && mkdir -p /tmp/connector"
 scp -i "$KEY" connector/*.js "$HOST:/tmp/connector/"
@@ -100,9 +100,9 @@ echo "Running version:"
 ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8092/health"
 echo
 echo "Connector:"
-ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8094/health"
+ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8095/health"
 echo
 # Caddy is not touched here: when the Caddyfile changed, copy its aklachat
 # block into /etc/caddy/Caddyfile by hand and `sudo systemctl reload caddy`
 # (docs/claude-ai-connector.md, "Deploying").
-ssh -i "$KEY" "$HOST" "grep -q '127.0.0.1:8094' /etc/caddy/Caddyfile || echo '  NOTE: /etc/caddy/Caddyfile does not route to the connector yet; see docs/claude-ai-connector.md'"
+ssh -i "$KEY" "$HOST" "grep -q '127.0.0.1:8095' /etc/caddy/Caddyfile || echo '  NOTE: /etc/caddy/Caddyfile does not route to the connector yet; see docs/claude-ai-connector.md'"
