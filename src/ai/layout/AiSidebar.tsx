@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   SquarePen,
+  Star,
   Wand2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -29,7 +30,8 @@ import SkillsDialog from "@/components/ai/chat/SkillsDialog";
 import { LoadState } from "@/components/LoadState";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import AiSearchDialog from "@/ai/components/AiSearchDialog";
+import { useStarredMatters } from "@/hooks/useMatterStars";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,7 +69,12 @@ export default function AiSidebar({ variant }: { variant: "rail" | "sheet" }) {
   const writing = chat.busyThreadIds.size > 0;
   const recents = useRecentChats({ running: writing });
   const { data: matters, isLoading: mattersLoading, error: mattersError, refetch: refetchMatters } = useMatters({ openOnly: true });
-  const projects = useMemo(() => (matters ?? []).slice(0, PROJECTS_SHOWN), [matters]);
+  const { data: starred } = useStarredMatters();
+  // Starred projects first, then the rest, as the scope picker orders them.
+  const projects = useMemo(() => {
+    const all = matters ?? [];
+    return [...all.filter((m) => starred?.has(m.id)), ...all.filter((m) => !starred?.has(m.id))].slice(0, PROJECTS_SHOWN);
+  }, [matters, starred]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
 
@@ -83,53 +90,12 @@ export default function AiSidebar({ variant }: { variant: "rail" | "sheet" }) {
   }, []);
 
   const activeThreadId = location.pathname.startsWith("/ai/c/") ? location.pathname.slice("/ai/c/".length) : null;
+  const activeMatterId = location.pathname.startsWith("/ai/p/") ? location.pathname.slice("/ai/p/".length) : null;
 
   const statusOf = (t: ChatThreadWithMatter) =>
     chatStatus({ questionnaire: t.questionnaire, busy: chat.busyThreadIds.has(t.id), failed: !!chat.turnFor(t.id)?.stream.error });
 
-  const search = (
-    <CommandDialog open={searchOpen} onOpenChange={setSearchOpen}>
-      <CommandInput placeholder="Search chats and projects…" />
-      <CommandList>
-        <CommandEmpty>Nothing matches.</CommandEmpty>
-        {!!recents.data?.length && (
-          <CommandGroup heading="Chats">
-            {recents.data.map((t) => (
-              <CommandItem
-                key={t.id}
-                value={`${t.title ?? "New chat"} ${t.matter?.name ?? ""}`}
-                onSelect={() => {
-                  setSearchOpen(false);
-                  navigate(`/ai/c/${t.id}`);
-                }}
-              >
-                <SquarePen className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span className="truncate">{t.title || "New chat"}</span>
-                {t.matter?.name && <span className="ml-2 truncate text-xs text-muted-foreground">{t.matter.name}</span>}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-        {!!matters?.length && (
-          <CommandGroup heading="Projects">
-            {matters.map((m) => (
-              <CommandItem
-                key={m.id}
-                value={`${m.name} ${m.client?.name ?? ""}`}
-                onSelect={() => {
-                  setSearchOpen(false);
-                  navigate(`/ai?project=${m.id}`);
-                }}
-              >
-                <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span className="truncate">{m.name}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-      </CommandList>
-    </CommandDialog>
-  );
+  const search = <AiSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />;
 
   if (collapsed) {
     return (
@@ -189,11 +155,13 @@ export default function AiSidebar({ variant }: { variant: "rail" | "sheet" }) {
             {projects.map((m) => (
               <li key={m.id}>
                 <Link
-                  to={`/ai?project=${m.id}`}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-accent"
-                  title={`Start a chat in ${m.name}`}
+                  to={`/ai/p/${m.id}`}
+                  className={cn("flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-accent", m.id === activeMatterId && "bg-sidebar-accent")}
+                  title={`Open ${m.name}`}
                 >
-                  <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  {starred?.has(m.id)
+                    ? <Star className="h-4 w-4 shrink-0 fill-[hsl(var(--gold))] text-[hsl(var(--gold))]" />
+                    : <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   <span className="truncate">{m.name}</span>
                 </Link>
               </li>

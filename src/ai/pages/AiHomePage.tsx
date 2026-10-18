@@ -1,36 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/useAuth";
+import { Link, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useMyProfile } from "@/hooks/useProfiles";
-import { type ActiveSkill, type ChatAttachment, type EditTarget, openDocumentForEdit, useRecentChats } from "@/hooks/useChat";
+import { type ActiveSkill, type ChatAttachment, useRecentChats } from "@/hooks/useChat";
 import { seedSkillFor } from "@/lib/threadSkill";
 import { chatStatus, greeting, relativeDay } from "@/lib/chatStatus";
-import { openParam } from "@/lib/aiLinks";
-import { NEW_CHAT_PATH, useAiPageTitle, useAiWorkspace } from "@/ai/AiWorkspaceContext";
-import ScopePill, { type ChatScopeChoice } from "@/ai/components/ScopePill";
+import { useAiPageTitle, useAiWorkspace } from "@/ai/AiWorkspaceContext";
+import { type ChatScopeChoice } from "@/ai/components/ScopePill";
+import HomePrompt from "@/ai/components/HomePrompt";
 import ActionTiles, { type ActionTileKey } from "@/ai/components/ActionTiles";
 import StatusDot from "@/ai/components/StatusDot";
-import Composer from "@/components/ai/chat/Composer";
 import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 import { LoadState } from "@/components/LoadState";
 
 const TABLE_SEED = "Make a table across these documents: one row per document, columns for ";
 const RECENTS_SHOWN = 6;
 
-// Home (/ai): the composer, what the chat is about, the four things people
+// Home (/ai): the prompt box, what the chat is about, the four things people
 // come for, and the chats they were in last. Sending starts a new chat and
 // moves to it; the reply is written by the workspace's one chat engine, so
 // it carries on wherever the lawyer goes next.
 export default function AiHomePage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user: me } = useAuth();
   const { data: profile } = useMyProfile();
   const { chat } = useAiWorkspace();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   useAiPageTitle("AI workspace");
 
   // ?project=<id> opens Home with that project chosen; ?mode= with a skill
@@ -68,31 +62,6 @@ export default function AiHomePage() {
     setSearchParams(new URLSearchParams(), { replace: true });
   }, [projectParam, modeParam, setSearchParams]);
 
-  const handleSend = async (input: { message: string; attachments: ChatAttachment[]; skill: ActiveSkill | null }) => {
-    if (chat.turnFor(null)?.inFlight) {
-      toast({ title: "A new chat is still being started", description: "Give it a moment; you'll find it in Recents.", variant: "destructive" });
-      return;
-    }
-    const matterId = scope.matterId;
-    chat.send({ matterId, general: matterId ? undefined : me?.id, threadId: null, ...input }).catch((err: Error) => {
-      toast({ title: "Couldn't send", description: err.message, variant: "destructive" });
-    });
-    navigate(matterId ? `${NEW_CHAT_PATH}?matter=${matterId}` : NEW_CHAT_PATH);
-  };
-
-  // Edit: the chosen version opens in a chat of its own, beside the composer.
-  const handleEditDocument = async (target: EditTarget) => {
-    if (!scope.matterId) return;
-    try {
-      const { threadId, artifact } = await openDocumentForEdit(scope.matterId, target, me?.id);
-      queryClient.setQueryData(["chat-artifacts", threadId], [artifact]);
-      queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
-      navigate(`/ai/c/${threadId}?open=${openParam({ kind: "artifact", id: artifact.id })}`);
-    } catch (err) {
-      toast({ title: "Couldn't open that document", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
-    }
-  };
-
   const pickTile = (key: ActionTileKey) => {
     setHint(null);
     switch (key) {
@@ -123,19 +92,22 @@ export default function AiHomePage() {
       <div className="mx-auto w-full max-w-[44rem] px-4 pb-16 pt-10 md:px-8 md:pt-16">
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl" style={{ fontFamily: "var(--ai-serif)" }}>{name}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {scope.matterId ? "Grounded in this project's documents, the firm's precedents and the law library." : "Grounded in the firm's precedents and the law library. Choose a project to work on its documents."}
+          {scope.matterId ? (
+            <>
+              Grounded in this project's documents, the firm's precedents and the law library.{" "}
+              <Link to={`/ai/p/${scope.matterId}`} className="underline underline-offset-4 hover:text-foreground" data-testid="home-project-link">Open the project page</Link>
+            </>
+          ) : (
+            "Grounded in the firm's precedents and the law library. Choose a project to work on its documents."
+          )}
         </p>
 
         <div className="-mx-4 mt-6 md:-mx-8">
-          <Composer
-            key={scope.matterId ?? "general"}
-            matterId={scope.matterId}
-            sending={false}
-            initialText={seedText}
-            initialSkill={skill}
-            onSend={handleSend}
-            onStop={() => undefined}
-            onEditDocument={handleEditDocument}
+          <HomePrompt
+            scope={scope}
+            onScopeChange={changeScope}
+            skill={skill}
+            seedText={seedText}
             editPickerOpen={editPickerOpen}
             onEditPickerOpenChange={setEditPickerOpen}
             onNeedsProject={setProjectPicker}
@@ -146,8 +118,6 @@ export default function AiHomePage() {
             // longer the seed: a scope change does not bring it back, and
             // clicking Table again puts it in afresh.
             onTextChange={(t) => setSeedText((s) => (s !== undefined && t !== s ? undefined : s))}
-            appearance="ai"
-            toolbar={<ScopePill scope={scope} onChange={changeScope} />}
             autoFocus
           />
         </div>
@@ -172,15 +142,19 @@ export default function AiHomePage() {
           >
             <ul className="divide-y rounded-2xl border bg-card">
               {recentRows.map((t) => (
-                <li key={t.id}>
-                  <Link to={`/ai/c/${t.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm">{t.title || "New chat"}</div>
-                      <div className="truncate text-xs text-muted-foreground">{t.matter?.name ?? "General"}</div>
-                    </div>
-                    <StatusDot status={chatStatus({ questionnaire: t.questionnaire, busy: chat.busyThreadIds.has(t.id), failed: !!chat.turnFor(t.id)?.stream.error })} />
-                    <span className="shrink-0 text-xs text-muted-foreground">{relativeDay(t.last_message_at ?? t.created_at)}</span>
+                <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent">
+                  <Link to={`/ai/c/${t.id}`} className="min-w-0 flex-1">
+                    <div className="truncate text-sm">{t.title || "New chat"}</div>
                   </Link>
+                  {t.matter_id && t.matter?.name ? (
+                    <Link to={`/ai/p/${t.matter_id}`} className="hidden max-w-[12rem] shrink-0 truncate text-xs text-muted-foreground hover:text-foreground hover:underline sm:block" title="The project's page">
+                      {t.matter.name}
+                    </Link>
+                  ) : (
+                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">General</span>
+                  )}
+                  <StatusDot status={chatStatus({ questionnaire: t.questionnaire, busy: chat.busyThreadIds.has(t.id), failed: !!chat.turnFor(t.id)?.stream.error })} />
+                  <Link to={`/ai/c/${t.id}`} className="shrink-0 text-xs text-muted-foreground" tabIndex={-1}>{relativeDay(t.last_message_at ?? t.created_at)}</Link>
                 </li>
               ))}
             </ul>

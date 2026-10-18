@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, FolderKanban, Globe } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Check, ChevronDown, ExternalLink, FolderKanban, Globe, Star } from "lucide-react";
 import { isOpenMatter, useMatters } from "@/hooks/useMatters";
+import { useStarredMatters } from "@/hooks/useMatterStars";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
@@ -27,7 +29,13 @@ export default function ScopePill({ scope, onChange, locked = false, label: give
   // The picker offers open projects only; the name lookup uses every project,
   // so a chat in a closed one still says which.
   const { data: matters } = useMatters();
-  const openMatters = useMemo(() => (matters ?? []).filter(isOpenMatter), [matters]);
+  const { data: starred } = useStarredMatters();
+  // Starred projects first, then the rest in the list's order.
+  const starredFirst = useMemo(() => {
+    const open = (matters ?? []).filter(isOpenMatter);
+    if (!starred?.size) return open;
+    return [...open.filter((m) => starred.has(m.id)), ...open.filter((m) => !starred.has(m.id))];
+  }, [matters, starred]);
   const [open, setOpen] = useState(false);
   const current = useMemo(() => matters?.find((m) => m.id === scope.matterId), [matters, scope.matterId]);
   const label = scope.matterId ? (current?.name ?? givenLabel ?? "Project") : "General";
@@ -84,7 +92,7 @@ export default function ScopePill({ scope, onChange, locked = false, label: give
               </CommandItem>
             </CommandGroup>
             <CommandGroup heading="Projects">
-              {openMatters.map((m) => (
+              {starredFirst.map((m) => (
                 <CommandItem
                   key={m.id}
                   value={`${m.name} ${m.client?.name ?? ""}`}
@@ -94,7 +102,7 @@ export default function ScopePill({ scope, onChange, locked = false, label: give
                   }}
                 >
                   <Check className={cn("mr-2 h-4 w-4", scope.matterId === m.id ? "opacity-100" : "opacity-0")} />
-                  <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />
+                  {starred?.has(m.id) ? <Star className="mr-2 h-4 w-4 fill-[hsl(var(--gold))] text-[hsl(var(--gold))]" /> : <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />}
                   <div className="min-w-0">
                     <div className="truncate text-sm">{m.name}</div>
                     {m.client?.name && <div className="truncate text-xs text-muted-foreground">{m.client.name}</div>}
@@ -104,6 +112,13 @@ export default function ScopePill({ scope, onChange, locked = false, label: give
             </CommandGroup>
           </CommandList>
         </Command>
+        {scope.matterId && (
+          <div className="border-t px-2 py-1.5">
+            <Link to={`/ai/p/${scope.matterId}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setOpen(false)} data-testid="scope-project-link">
+              <ExternalLink className="h-3.5 w-3.5" /> Open the project page: its files, chats and instructions
+            </Link>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

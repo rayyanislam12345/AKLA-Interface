@@ -66,8 +66,9 @@ import { DocumentDropZone } from "@/components/documents/DocumentDropZone";
 import { DocumentIntakePanel } from "@/components/documents/DocumentIntakePanel";
 import { useDocumentIntake, type IntakeDocument } from "@/components/documents/useDocumentIntake";
 import { DocumentPreviewSheet, type PreviewTarget, type PreviewVersion } from "@/components/documents/DocumentPreviewSheet";
-import { downloadZip, todayLabel, versionDownloadName, type ZipEntry, type ZipProgress } from "@/components/documents/zipDownload";
+import { useProjectZip } from "@/hooks/useProjectZip";
 import { plainUploadError } from "@/components/documents/uploadErrors";
+import { hasIndexQueue, READ_STATE_LABEL, readStateHint, versionReadState, type ReadState } from "@/lib/documentReadState";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -129,69 +130,9 @@ const STAGE_CYCLE = ["not_started", "in_progress", "complete"] as const;
 
 const NO_DOCUMENTS: IntakeDocument[] = [];
 
-// Whether search and Ask AI can read a version, in words a lawyer can act
-// on. "unknown" (versions saved before the status was recorded) and a
-// "pending" that has sat for more than ten minutes are treated as failed:
-// they get the one automatic retry and a Try again button, never a spinner
-// that turns forever.
-//
-// With the index worker (20261017090000_indexing_pipeline.sql) the server owns
-// the state: a version is waiting in the queue, being read, searchable, or
-// failed with a reason (indexing_error) after three tries. The worker retries
-// on its own, so no timeout or automatic retry is needed here; the version
-// rows then carry indexing_attempts, which is how this page tells the two
-// apart before and after the migration.
-const READING_TIMEOUT_MS = 10 * 60 * 1000;
-type ReadState = "searchable" | "waiting" | "reading" | "failed" | "unsupported";
-type VersionIndexing = {
-  indexing_status: string;
-  created_at: string;
-  indexing_error?: string | null;
-  indexing_attempts?: number | null;
-  indexing_started_at?: string | null;
-};
-const MAX_READ_ATTEMPTS = 3;
-
-const hasIndexQueue = (v: VersionIndexing) => v.indexing_attempts !== undefined;
-
-function versionReadState(v: VersionIndexing, now: number): ReadState {
-  if (v.indexing_status === "indexed") return "searchable";
-  if (v.indexing_status === "unsupported") return "unsupported";
-  if (hasIndexQueue(v)) {
-    if (v.indexing_status === "pending") return v.indexing_started_at ? "reading" : "waiting";
-    return "failed";
-  }
-  if (v.indexing_status === "pending" && now - new Date(v.created_at).getTime() < READING_TIMEOUT_MS) return "reading";
-  return "failed";
-}
-
-const READ_STATE_LABEL: Record<ReadState, string> = {
-  searchable: "Searchable",
-  waiting: "Waiting to be read",
-  reading: "Reading…",
-  failed: "Couldn't be read",
-  unsupported: "Not searchable (file type)",
-};
-
-const READ_STATE_HINT: Record<ReadState, string> = {
-  searchable: "Search and Ask AI can read this version.",
-  waiting: "In the queue. Files are read one at a time on the server; you can carry on working.",
-  reading: "Reading the text so search and Ask AI can use it. A long scanned PDF can take a while.",
-  failed: "The file is saved, but search and Ask AI can't read it yet. Press Try again.",
-  unsupported: "This file type can't be read for search. The file is saved and can be downloaded.",
-};
-
-// The badge's hint, with the server's reason when there is one.
-function readStateHint(v: VersionIndexing, state: ReadState): string {
-  if (state === "failed" && v.indexing_error) return `${v.indexing_error} The file is saved and can be downloaded.`;
-  if (state === "failed" && hasIndexQueue(v) && v.indexing_status === "unknown") {
-    return "Saved before files were read automatically. Press Try again to read it now.";
-  }
-  if (state === "reading" && (v.indexing_attempts ?? 0) > 1) {
-    return `Reading it again (attempt ${v.indexing_attempts} of ${MAX_READ_ATTEMPTS}) after a problem last time.`;
-  }
-  return READ_STATE_HINT[state];
-}
+// Whether search and Ask AI can read a version, and the words the badge
+// uses, live in lib/documentReadState so the AI workspace's Files panel
+// says the same thing.
 
 // Every mutation on this page used to fire with no error handling: a failed
 // add, tick, status change or dismiss simply did nothing, and the lawyer was
@@ -772,7 +713,7 @@ export default function MatterWorkspacePage() {
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(() => new Set());
-  const [zipProgress, setZipProgress] = useState<(ZipProgress & { what: string }) | null>(null);
+  const { zipProgress, downloadLatestOf, downloadAllVersions } = useProjectZip({ projectName: matter?.name });
   const [preview, setPreview] = useState<{ openId: string; docId: string; versionId: string } | null>(null);
   const [showPlaceholderRow, setShowPlaceholderRow] = useState(false);
 
@@ -808,52 +749,7 @@ export default function MatterWorkspacePage() {
     if (files.length) intake.addFiles(files);
   };
 
-  type DocVersion = { id: string; version_number: number; storage_path: string; file_name: string | null; label: string | null; created_at: string };
-  const latestOf = (versions: DocVersion[] | null | undefined) =>
-    (versions ?? []).reduce<DocVersion | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
-
-  // One zip, files fetched one at a time, with progress on the card.
-  const runZip = async (what: string, entries: ZipEntry[], zipName: string) => {
-    if (zipProgress) return;
-    if (!entries.length) {
-      toast({ title: "Nothing to download", description: "None of these documents has a file yet." });
-      return;
-    }
-    setZipProgress({ what, phase: "fetching", done: 0, total: entries.length, percent: 0 });
-    try {
-      const { failed } = await downloadZip(entries, zipName, (p) => setZipProgress({ what, ...p }));
-      if (failed.length) {
-        toast({
-          title: `${failed.length} file${failed.length === 1 ? "" : "s"} couldn't be added to the zip`,
-          description: `${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""}. The rest were downloaded.`,
-          variant: "destructive",
-        });
-      }
-    } catch (err) {
-      toast({ title: "Couldn't make the zip", description: plainUploadError(err), variant: "destructive" });
-    } finally {
-      setZipProgress(null);
-    }
-  };
-
-  const downloadLatestOf = (docs: Array<{ title: string; versions?: DocVersion[] | null }>, what: string) =>
-    runZip(
-      what,
-      docs.flatMap((d) => {
-        const v = latestOf(d.versions);
-        return v ? [{ storagePath: v.storage_path, name: versionDownloadName(d.title, v) }] : [];
-      }),
-      `${matter?.name ?? "Project"} - documents - ${todayLabel()}.zip`,
-    );
-
-  const downloadAllVersions = (doc: { title: string; versions?: DocVersion[] | null }) =>
-    runZip(
-      `every version of "${doc.title}"`,
-      [...(doc.versions ?? [])]
-        .sort((a, b) => a.version_number - b.version_number)
-        .map((v) => ({ storagePath: v.storage_path, name: versionDownloadName(doc.title, v) })),
-      `${doc.title} - all versions - ${todayLabel()}.zip`,
-    );
+  // The zip runner (one at a time, progress on the card) is useProjectZip.
 
   const toggleSelected = (docId: string, on: boolean) =>
     setSelectedDocIds((prev) => {

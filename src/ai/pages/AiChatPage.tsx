@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ExternalLink, FileText, PanelRightOpen } from "lucide-react";
 import type { ImperativePanelGroupHandle } from "react-resizable-panels";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,7 +14,6 @@ import {
   type GuideState,
   EMPTY_STREAM,
   messageMetadata,
-  openDocumentForEdit,
   useChatMessages,
   useChatThread,
   useCustomSkills,
@@ -25,11 +23,12 @@ import { resolveThreadSkill, seedSkillFor, shouldClearSkill, type StoredSkill } 
 import { openParam, parseOpenParam } from "@/lib/aiLinks";
 import { useAiPageTitle, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import { useSplitLayout } from "@/ai/useMediaQuery";
+import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import SiteLink from "@/ai/components/SiteLink";
 import ScopePill from "@/ai/components/ScopePill";
+import AiDocumentWindow from "@/ai/components/AiDocumentWindow";
 import MessageList from "@/components/ai/chat/MessageList";
 import Composer from "@/components/ai/chat/Composer";
-import ArtifactPanel from "@/components/ai/chat/ArtifactPanel";
 import GuideQuestionCard from "@/components/ai/chat/GuideQuestionCard";
 import ProjectPickerDialog from "@/components/ai/chat/ProjectPickerDialog";
 import { Button } from "@/components/ui/button";
@@ -52,7 +51,6 @@ function ChatView({ threadId }: { threadId: string | null }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user: me } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const split = useSplitLayout();
   const { chat, panel, setPanel, openArtifact: openArtifactInPanel, closePanel, autoOpenedThreads } = useAiWorkspace();
@@ -82,9 +80,13 @@ function ChatView({ threadId }: { threadId: string | null }) {
   // The panel belongs to the chat it was opened from; it always shows the
   // freshest copy of its document (after a save, the row is refetched).
   const openArtifact = panel?.kind === "artifact" && panel.threadId === threadId ? artifactMap.get(panel.artifactId) ?? null : null;
+  // A stored project version in the window (from the files list, or ?open=v:).
+  const openVersionId = panel?.kind === "version" ? panel.versionId : null;
+  const panelOpen = !!openArtifact || !!openVersionId;
 
-  // ?open=a:<id> on arrival opens that document once; after that the address
-  // follows the panel, so a refresh or a shared link lands on the same view.
+  // ?open=a:<id> (a chat document) or ?open=v:<id> (a stored version) on
+  // arrival opens it once; after that the address follows the panel, so a
+  // refresh or a shared link lands on the same view.
   const openSeed = searchParams.get("open");
   const adopted = useRef(false);
   useEffect(() => {
@@ -94,31 +96,34 @@ function ChatView({ threadId }: { threadId: string | null }) {
       adopted.current = true;
       return;
     }
-    if (parsed.kind === "artifact" && artifactMap.has(parsed.id)) {
+    if (parsed.kind === "version") {
+      adopted.current = true;
+      setPanel({ kind: "version", versionId: parsed.id });
+    } else if (artifactMap.has(parsed.id)) {
       adopted.current = true;
       setPanel({ kind: "artifact", artifactId: parsed.id, threadId });
-    } else if (parsed.kind !== "artifact" || threadArtifacts) {
+    } else if (threadArtifacts) {
       // Not this chat's document, or no longer there: leave the panel shut.
       adopted.current = true;
     }
   }, [openSeed, artifactMap, threadArtifacts, threadId, setPanel]);
   useEffect(() => {
     if (!threadId || !adopted.current) return;
-    const want = openParam(openArtifact ? { kind: "artifact", id: openArtifact.id } : null) ?? null;
+    const want = openParam(openArtifact ? { kind: "artifact", id: openArtifact.id } : openVersionId ? { kind: "version", id: openVersionId } : null) ?? null;
     if (want === (searchParams.get("open") ?? null)) return;
     const next = new URLSearchParams(searchParams);
     if (want) next.set("open", want);
     else next.delete("open");
     setSearchParams(next, { replace: true });
-  }, [openArtifact, threadId, searchParams, setSearchParams]);
+  }, [openArtifact, openVersionId, threadId, searchParams, setSearchParams]);
 
   // A review puts a Word page beside its suggestions, which needs far more
   // width than a reply: the document takes most of the screen.
   const reviewing = openArtifact?.kind === "review" && split;
   const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
   useEffect(() => {
-    if (openArtifact && split) panelGroupRef.current?.setLayout(reviewing ? [24, 76] : [45, 55]);
-  }, [openArtifact?.id, reviewing, split]);
+    if (panelOpen && split) panelGroupRef.current?.setLayout(reviewing ? [24, 76] : [45, 55]);
+  }, [openArtifact?.id, openVersionId, panelOpen, reviewing, split]);
 
   // A chat handed a document before anything was said in it (minutes from
   // Record Meeting, a version opened for Edit) opens on that document. Once
@@ -174,16 +179,22 @@ function ChatView({ threadId }: { threadId: string | null }) {
   // Edit: the chosen version opens in a chat of its own.
   const [editPickerOpen, setEditPickerOpen] = useState(false);
   const [projectPicker, setProjectPicker] = useState<null | "review" | "edit">(null);
-  const handleEditDocument = async (target: EditTarget) => {
-    if (!matterId) return;
-    try {
-      const { threadId: newId, artifact } = await openDocumentForEdit(matterId, target, me?.id);
-      queryClient.setQueryData(["chat-artifacts", newId], [artifact]);
-      queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
-      navigate(`/ai/c/${newId}?open=${openParam({ kind: "artifact", id: artifact.id })}`);
-    } catch (err) {
-      toast({ title: "Couldn't open that document", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
-    }
+  const openEdit = useOpenEditChat();
+  const handleEditDocument = (target: EditTarget) => {
+    if (matterId) void openEdit(matterId, target);
+  };
+
+  // "Ask about this" in the document window puts the stored version in the
+  // composer, beside whatever is attached already.
+  const attachedRef = useRef<ChatAttachment[]>([]);
+  const [handed, setHanded] = useState<ChatAttachment[] | undefined>(undefined);
+  const addToComposer = (attachment: ChatAttachment) => {
+    // Everything attached stays, a file still uploading included: its
+    // placeholder must survive so the finished upload can take its place.
+    const merged = [...attachedRef.current];
+    if (!merged.some((a) => a.path === attachment.path)) merged.push(attachment);
+    setHanded(merged);
+    toast({ title: `${attachment.name} is in the prompt box`, description: "Say what you want to know about it and send." });
   };
 
   // ---- states that replace the chat ----
@@ -229,12 +240,17 @@ function ChatView({ threadId }: { threadId: string | null }) {
 
   const chatColumn = (
     <div className="flex h-full min-w-0 flex-col">
-      {(!isMobile || (!openArtifact && lastArtifact)) && (
+      {(!isMobile || (!panelOpen && lastArtifact)) && (
         <div className="flex h-12 shrink-0 items-center gap-2 px-3 md:px-5">
           {!isMobile && (
             <div className="min-w-0 flex-1 truncate text-sm">
               <span className="font-medium">{thread?.title ?? "New chat"}</span>
-              {matterName && <span className="text-muted-foreground"> · {matterName}</span>}
+              {matterId && matterName && (
+                <>
+                  <span className="text-muted-foreground"> · </span>
+                  <Link to={`/ai/p/${matterId}`} className="text-muted-foreground hover:text-foreground hover:underline" title="The project's page: its files, chats and instructions">{matterName}</Link>
+                </>
+              )}
             </div>
           )}
           {isMobile && <div className="flex-1" />}
@@ -243,7 +259,7 @@ function ChatView({ threadId }: { threadId: string | null }) {
               <ExternalLink className="h-3.5 w-3.5" /> Open on Project Hub
             </SiteLink>
           )}
-          {!openArtifact && lastArtifact && (
+          {!panelOpen && lastArtifact && (
             <Button variant="ghost" size="sm" className="h-8" onClick={() => openArtifactInPanel(lastArtifact)} data-testid="open-last-document">
               <PanelRightOpen className="mr-2 h-4 w-4" />
               <span className="hidden max-w-[16rem] truncate sm:inline">{lastArtifact.title}</span>
@@ -288,6 +304,10 @@ function ChatView({ threadId }: { threadId: string | null }) {
             matterId={matterId}
             sending={!!turn?.inFlight}
             initialSkill={composerSkill}
+            initialAttachments={handed}
+            onAttachmentsChange={(a) => {
+              attachedRef.current = a;
+            }}
             onSend={handleSend}
             onStop={() => chat.stop(threadId)}
             onEditDocument={handleEditDocument}
@@ -302,18 +322,31 @@ function ChatView({ threadId }: { threadId: string | null }) {
     </div>
   );
 
-  const panelContent = openArtifact && (
-    <ArtifactPanel matterId={matterId} matterName={matterName} artifact={openArtifact} lawUpdate={null} onClose={closePanel} />
-  );
+  const panelContent = openArtifact ? (
+    <AiDocumentWindow kind="artifact" artifact={openArtifact} matterId={matterId} matterName={matterName} lawUpdate={null} onClose={closePanel} />
+  ) : openVersionId ? (
+    <AiDocumentWindow
+      key={openVersionId}
+      kind="version"
+      versionId={openVersionId}
+      onClose={closePanel}
+      onVersionChange={(id) => setPanel({ kind: "version", versionId: id })}
+      onAsk={(attachment) => {
+        addToComposer(attachment);
+        if (isMobile) closePanel();
+      }}
+      onEdit={(target, docMatterId) => void openEdit(docMatterId, target)}
+    />
+  ) : null;
 
   return (
     <div className="relative flex min-h-0 flex-1" data-testid="ai-chat">
       {split ? (
         <ResizablePanelGroup ref={panelGroupRef} direction="horizontal" className="min-w-0 flex-1">
-          <ResizablePanel id="chat" order={1} defaultSize={openArtifact ? (reviewing ? 24 : 45) : 100} minSize={reviewing ? 20 : 30}>
+          <ResizablePanel id="chat" order={1} defaultSize={panelOpen ? (reviewing ? 24 : 45) : 100} minSize={reviewing ? 20 : 30}>
             {chatColumn}
           </ResizablePanel>
-          {openArtifact && (
+          {panelOpen && (
             <>
               <ResizableHandle withHandle />
               <ResizablePanel id="artifact" order={2} defaultSize={reviewing ? 76 : 55} minSize={30}>
@@ -325,13 +358,13 @@ function ChatView({ threadId }: { threadId: string | null }) {
       ) : (
         <>
           <div className="min-w-0 flex-1">{chatColumn}</div>
-          {!isMobile && openArtifact && (
+          {!isMobile && panelOpen && (
             <div className="absolute inset-y-0 right-0 z-20 w-[min(100%,40rem)] border-l bg-background shadow-xl animate-in fade-in slide-in-from-right-8 duration-200" data-testid="artifact-overlay">
               {panelContent}
             </div>
           )}
           {isMobile && (
-            <Sheet open={!!openArtifact} onOpenChange={(o) => !o && closePanel()}>
+            <Sheet open={panelOpen} onOpenChange={(o) => !o && closePanel()}>
               <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-none [&>button]:hidden">
                 <SheetTitle className="sr-only">Document</SheetTitle>
                 <div className="flex h-full flex-col">
