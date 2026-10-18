@@ -25,6 +25,7 @@ import { handleAgreementTurn } from "./agreementFlow.js";
 import { addLawToLibrary } from "./lawLibrary.js";
 import { searchPrecedents } from "./precedentSearch.js";
 import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbers, listActs, MAX_EXCERPT_CHARS, bestPassages, TOOL_TURN_PASSAGES, alignCommentExpectations } from "./libraryTools.js";
+import { retrieve, MIN_RELEVANCE } from "./retrieve.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
 import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, PLACEMENT_TEXT } from "./changes.js";
@@ -118,7 +119,6 @@ const CHAT_EFFORT = "medium";
 const MAX_CONTINUATIONS = 8;
 // Lookups the plain chat may make in one reply before it must answer.
 const MAX_TOOL_ROUNDS = 8;
-const MATCH_THRESHOLD = 0.35;
 // A retrieved chunk is normally a few thousand characters, but a handful of
 // legacy rows hold a whole document (the largest is 11MB).
 const MAX_SOURCE_CHARS = 8_000;
@@ -624,14 +624,6 @@ async function anthropicToolLoop(body, onDelta, { initialText = "", clientSignal
     break;
   }
   return { text, generated, incomplete, stoppedByClient, rounds };
-}
-
-// A library search that timed out is tried once more — the second run
-// finds the index warm — and only then given up on.
-async function searchLibrary(rpc) {
-  let result = await rpc();
-  if (result.error && /statement timeout/i.test(result.error.message ?? "")) result = await rpc();
-  return result;
 }
 
 // Extracted text of stored files. A project version or chat upload never
@@ -2386,7 +2378,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       send("notice", { text: `Working on ${docxBase.fileName} (${docxBase.inspection.paragraphCount} paragraphs).` });
     }
 
-    // ---- retrieval: the same three searches rag-query runs ----
+    // ---- retrieval: the project, the precedent library and the law library ----
     const lastUserMessage = [...priorMessages].reverse().find((m) => m.role === "user")?.content ?? "";
     const effectiveMessage = message || lastUserMessage;
     // "Show me the source", "it's in the law library", "find the relevant
@@ -2403,57 +2395,53 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     let templateHtml = templateRow?.content_html ?? null;
     let templateRules = templateRow?.format_rules ?? null;
     if (retrievalQuery) {
-      const embResp = await fetch("https://api.voyageai.com/v1/embeddings", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${VOYAGE_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "voyage-law-2", input: [retrievalQuery], input_type: "query" }),
-      });
-      if (embResp.ok) {
-        const queryEmbedding = (await embResp.json()).data[0].embedding;
-        const actNames = (relevantLaws ?? []).map((r) => r.act_name).filter(Boolean);
-        // A standard is checked against the law the associate named, so
-        // more of it is read than a question in a project chat needs.
-        // A turn with tools gets only the few best passages overall (see
-        // below), so no search needs to bring back more than that many.
-        const count = (full) => (withTools ? Math.min(full, TOOL_TURN_PASSAGES) : full);
-        const statuteParams = { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(standardising ? 12 : 4), statute_only: true };
-        // Omitted, not null: an empty act filter makes the SQL match nothing.
-        if (actNames.length > 0) statuteParams.filter_act_names = actNames;
-        const [m, p, s, t] = await Promise.all([
-          matterId ? searchLibrary(() => supabase.rpc("match_documents", { query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(6), filter_matter_id: matterId })) : none([]),
-          searchLibrary(() => supabase.rpc("match_documents", {
-            query_embedding: queryEmbedding, match_threshold: MATCH_THRESHOLD, match_count: count(standardising ? 10 : 6), precedent_only: true,
-            ...(documentType ? { filter_document_type_id: documentType.id } : {}),
-          })),
-          searchLibrary(() => supabase.rpc("match_documents", statuteParams)),
-          Promise.resolve({ data: templateRow }),
-        ]);
-        // A search that still times out does not fail the turn when the
-        // lawyer has attached what they are asking about: the reply is
-        // grounded in those documents and says the library was not read.
-        const failed = [m, p, s].filter((result) => result.error);
-        if (failed.length) {
-          const timedOut = failed.every((result) => /statement timeout/i.test(result.error.message ?? ""));
-          if (!timedOut || !contextDocs.length) throw new Error(`Library retrieval failed: ${failed[0].error.message}`);
-          console.error(`library retrieval timed out for thread=${threadId}; answering from the attached documents`);
-          send("notice", { text: "The firm's library could not be searched in time for this message, so this reply relies on the attached documents and the conversation only." });
-          for (const result of failed) result.data = [];
-        }
-        sources = [
-          ...(m.data ?? []).map((x) => ({ ...x, scope: "matter" })),
-          ...(p.data ?? []).map((x) => ({ ...x, scope: "precedent" })),
-          ...(s.data ?? []).map((x) => ({ ...x, scope: "statute" })),
-        ];
-        // The assistant looks up what it needs on a turn with tools, so the
-        // automatic search gives it a start, not a reading list: the best
-        // few passages overall, and only those are numbered and listed.
-        // Turns without tools keep the full search.
-        if (withTools) sources = bestPassages(sources, TOOL_TURN_PASSAGES);
-        templateHtml = t?.data?.content_html ?? null;
-        templateRules = t?.data?.format_rules ?? null;
-      } else {
-        throw new Error(`Library retrieval unavailable (${embResp.status}); no grounded answer was generated.`);
+      const actNames = (relevantLaws ?? []).map((r) => r.act_name).filter(Boolean);
+      // A standard is checked against the law the associate named, so
+      // more of it is read than a question in a project chat needs.
+      // A turn with tools gets only the few best passages overall (see
+      // below), so no search needs to bring back more than that many.
+      const count = (full) => (withTools ? Math.min(full, TOOL_TURN_PASSAGES) : full);
+      // One search per library (retrieve.js): the words and the meaning of
+      // the message, the current version of each project document only,
+      // reranked against the message, each passage labelled for citation.
+      const search = (scope, k, extra = {}) => retrieve({
+        supabase, voyageKey: VOYAGE_KEY, anthropicJson, query: retrievalQuery, scope, k, minScore: MIN_RELEVANCE, signal: clientGone.signal, ...extra,
+      }).then((data) => ({ data }), (error) => ({ data: null, error }));
+      const [m, p, s, t] = await Promise.all([
+        matterId ? search("project", count(6), { matterId }) : none([]),
+        search("precedent", count(standardising ? 10 : 6), documentType ? { documentTypeId: documentType.id } : {}),
+        // No act filter, not an empty one, when the project has no laws.
+        search("statute", count(standardising ? 12 : 4), actNames.length > 0 ? { actNames } : {}),
+        Promise.resolve({ data: templateRow }),
+      ]);
+      // A search that still times out does not fail the turn when the
+      // lawyer has attached what they are asking about: the reply is
+      // grounded in those documents and says the library was not read.
+      const failed = [m, p, s].filter((result) => result.error);
+      if (failed.length) {
+        if (clientGone.signal.aborted) throw failed[0].error;
+        const timedOut = failed.every((result) => /statement timeout/i.test(result.error.message ?? ""));
+        if (!timedOut || !contextDocs.length) throw new Error(`Library retrieval failed: ${failed[0].error.message}`);
+        console.error(`library retrieval timed out for thread=${threadId}; answering from the attached documents`);
+        send("notice", { text: "The firm's library could not be searched in time for this message, so this reply relies on the attached documents and the conversation only." });
+        for (const result of failed) result.data = [];
       }
+      const asSource = (scope) => (x) => ({
+        id: x.id, scope, content: x.text, similarity: x.similarity, label: x.label, section: x.section ?? null,
+        metadata: { ...x.metadata, filename: x.filename ?? x.metadata?.filename ?? null, act_name: x.act_name ?? x.metadata?.act_name ?? null, source_url: x.url ?? x.metadata?.source_url ?? null },
+      });
+      sources = [
+        ...(m.data ?? []).map(asSource("matter")),
+        ...(p.data ?? []).map(asSource("precedent")),
+        ...(s.data ?? []).map(asSource("statute")),
+      ];
+      // The assistant looks up what it needs on a turn with tools, so the
+      // automatic search gives it a start, not a reading list: the best
+      // few passages overall, and only those are numbered and listed.
+      // Turns without tools keep the full search.
+      if (withTools) sources = bestPassages(sources, TOOL_TURN_PASSAGES);
+      templateHtml = t?.data?.content_html ?? null;
+      templateRules = t?.data?.format_rules ?? null;
     }
     // Include newly checked authorities even when a matter's curated Act filter is narrower.
     sources.push(...(research?.sources ?? []).filter(r => !sources.some(s => s.metadata?.source_hash === r.metadata?.source_hash)));
@@ -2471,7 +2459,7 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     for (const d of sources) {
       const excerpt = String(d.content ?? "").slice(0, docxBase ? 2_000 : MAX_SOURCE_CHARS);
       const { entry, fresh } = registry.register({
-        id: d.id, scope: d.scope, act_name: d.metadata?.act_name ?? null, section: null, filename: d.metadata?.filename ?? null,
+        id: d.id, scope: d.scope, label: d.label, act_name: d.metadata?.act_name ?? null, section: d.section ?? null, filename: d.metadata?.filename ?? null,
         url: d.metadata?.source_url ?? d.metadata?.pdf_url ?? null, similarity: typeof d.similarity === "number" ? d.similarity : null, excerpt,
       });
       registered.push({ entry, fresh, text: excerpt });

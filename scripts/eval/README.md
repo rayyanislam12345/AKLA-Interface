@@ -11,7 +11,8 @@ before associates see it. It reads the live index and writes nothing to it.
 | File | What it is |
 |---|---|
 | `gold.json` | the questions and their acceptable answers |
-| `run.mjs` | the runner and the adapters (`baseline`, `tools`, `fake`) |
+| `run.mjs` | the runner and the adapters (`baseline`, `tools`, `retrieve`, `fake`) |
+| `time-retrieve.mjs` | where one search's time goes, stage by stage |
 | `score.mjs` | the scoring rules; no network |
 | `results/` | one JSON file per run, named `<label>-<timestamp>.json` (created on first run). It quotes client documents, so it is git-ignored. |
 
@@ -61,6 +62,33 @@ Adapters:
   out) among deliberate near-misses: the wrong section, the right file without
   the phrase, a contents line. It then checks the scorer found each answer
   where it was put. Run it after any change to `score.mjs`.
+
+- `retrieve`: the one search, `chat-service/retrieve.js`, routed like
+  `tools`. Each question's line also shows `search … ms`: the slowest
+  scope's `retrieve()` alone, without the runner's own placing of statute
+  passages in their sections (recorded as `searchMs` in the result file).
+  `--deadline MS` overrides RETRIEVE_DEADLINE_MS (`--deadline 0` measures
+  the full search however long it takes; a search that returned the quick
+  way is marked `fb:<scope>=<path>` — `fused` is the question's own search
+  unreranked, `words` the search by words alone, `none` nothing in time —
+  and `v<N>` is its Voyage calls). The result file's `retrieve` holds, per
+  scope, `fellBack`, `reason`, `path`, `voyageCalls` and every stage's
+  timing (`events`), so a capped run can be read question by question.
+  `--rerank-pool N`, `--rerank-chars N` and `--rewrite-wait MS` override
+  retrieve.js's `RERANK_POOL` (30), `RERANK_CHARS` (8,000) and
+  `REWRITE_WAIT_MS` (2,500), to compare a setting's scores and speed.
+
+Where a search's time goes: `time-retrieve.mjs` runs six of the questions
+(two precedent, two statute concept, one project, one which-document; or
+`--only …`) the way `--adapter retrieve` does and prints each stage's start
+and length — rewrite, embeddings, each `search_passages` call, rerank, the
+Acts read to place statute passages, a named section's read — then each
+stage's average. Round 1 is a fresh process; round 2 keeps the law list and
+rebuilt Acts, as the running service does.
+
+```bash
+node scripts/eval/time-retrieve.mjs --chat-service /opt/chat-service
+```
 
 Other useful options: `--only S01,C03`, `--kind precedent_clause`,
 `--label after-reindex`, `--verbose` (prints each question's top 10, with `*`

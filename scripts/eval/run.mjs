@@ -7,6 +7,8 @@
 //   node scripts/eval/run.mjs --adapter baseline            today's automatic search
 //   node scripts/eval/run.mjs --adapter tools               the assistant's library tools
 //   node scripts/eval/run.mjs --adapter tools --route kind  tools, with the right tool picked for each question
+//   node scripts/eval/run.mjs --adapter retrieve             the one search (chat-service/retrieve.js), routed like tools
+//   node scripts/eval/run.mjs --adapter retrieve --route kind  the one search, the question's kind picking the scope
 //   node scripts/eval/run.mjs --adapter fake                checks the scorer itself; no network
 //   node scripts/eval/run.mjs --check-gold                  checks every expected answer still exists in the index
 //
@@ -19,6 +21,12 @@
 //          --no-synonyms    precedent search without the Haiku synonym step (no ANTHROPIC_API_KEY needed)
 //          --baseline-order similarity|server   ranking of the baseline's three searches (default similarity)
 //          --verbose        print the top results of each question
+//          --rerank-pool N --rerank-chars N --rewrite-wait MS   (retrieve adapter) override retrieve.js's
+//                           RERANK_POOL, RERANK_CHARS and REWRITE_WAIT_MS, to compare
+//          --deadline MS    (retrieve adapter) override RETRIEVE_DEADLINE_MS; 0 measures the full
+//                           search however long it takes (a search that fell back is marked
+//                           "fb:<scope>=<path>"; the result file's `retrieve` holds each scope's
+//                           fellBack, reason, path, voyageCalls and stage timings)
 //
 // Reads SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and VOYAGE_API_KEY (and
 // ANTHROPIC_API_KEY for precedent synonyms) — the names chat-service/server.js
@@ -57,6 +65,10 @@ function parseArgs(argv) {
     else if (a === "--concurrency") out.concurrency = Math.max(1, Number(next()) || 1);
     else if (a === "--baseline-order") out.baselineOrder = next();
     else if (a === "--no-synonyms") out.synonyms = false;
+    else if (a === "--rerank-pool") out.retrieveOptions = { ...out.retrieveOptions, rerankPool: Number(next()) };
+    else if (a === "--rerank-chars") out.retrieveOptions = { ...out.retrieveOptions, rerankChars: Number(next()) };
+    else if (a === "--rewrite-wait") out.retrieveOptions = { ...out.retrieveOptions, rewriteWaitMs: Number(next()) };
+    else if (a === "--deadline") out.retrieveOptions = { ...out.retrieveOptions, deadlineMs: Number(next()) };
     else if (a === "--check-gold") out.checkGold = true;
     else if (a === "--verbose" || a === "-v") out.verbose = true;
     else if (a === "--help" || a === "-h") out.help = true;
@@ -65,13 +77,13 @@ function parseArgs(argv) {
   return out;
 }
 
-function findChatService(explicit) {
+export function findChatService(explicit) {
   const candidates = [explicit, process.env.CHAT_SERVICE_DIR, join(HERE, "../../chat-service"), join(HERE, ".."), join(HERE, "../.."), "/opt/chat-service"].filter(Boolean);
   for (const c of candidates) if (existsSync(join(c, "libraryTools.js"))) return resolve(c);
   throw new Error(`Could not find chat-service (looked in ${candidates.join(", ")}). Pass --chat-service <dir>.`);
 }
 
-function loadEnv(files) {
+export function loadEnv(files) {
   for (const file of files) {
     if (!file || !existsSync(file)) continue;
     for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -245,7 +257,7 @@ export function detectAct(question, acts) {
 }
 
 const SECTION_RE = /\b(?:sections?|sectoin|sec\.?|s\.|s|rule|article|art\.)\s*(\d{1,4}[A-Za-z]?)\b/i;
-const LAWISH = /\b(?:act|acts|ordinance|rules?|section|sectoin|statute|statutory|law|legal|court|enforceable|void|admissible|pakistan|pakistani|prohibited|lawful|regulations?|ppra|p3a|secp)\b/i;
+export const LAWISH = /\b(?:act|acts|ordinance|rules?|section|sectoin|statute|statutory|law|legal|court|enforceable|void|admissible|pakistan|pakistani|prohibited|lawful|regulations?|ppra|p3a|secp)\b/i;
 
 // (b) The assistant's library tools (chat-service/libraryTools.js), called
 // the way the assistant calls them. With --route auto (default) the tools
@@ -335,6 +347,95 @@ export function toolsAdapter({ supabase, voyageKey, anthropicJson, lib, place, r
   };
 }
 
+// (d) The one search, chat-service/retrieve.js, as the tools and the chat's
+// automatic search now call it: hybrid search_passages (or match_documents
+// before that migration), Haiku phrasings for precedent and statute
+// questions, rerank-2. Routed like the tools adapter: with --route auto the
+// scopes are picked from the question's words (statute when it names an Act
+// or reads like law, the project inside a project, precedents outside one)
+// and their lists interleaved, a section the question names read first;
+// with --route kind the gold's kind picks the scope. Each scope returns its
+// best K_MAX.
+//
+// retrievePlan is the routing alone: the scopes searched for a question and
+// the options each is searched with (scripts/eval/time-retrieve.mjs uses it).
+export function retrievePlan({ question, scope, kind = null, act = null, route = "auto" }) {
+  const lawish = !!act || LAWISH.test(question);
+  let plan;
+  if (route === "kind" && kind) {
+    if (kind.startsWith("statute")) plan = ["statute"];
+    else if (kind === "precedent_clause") plan = ["precedent"];
+    else plan = isMatter(scope) ? ["project"] : ["precedent"];
+  } else if (isMatter(scope)) plan = ["project", ...(lawish ? ["statute"] : [])];
+  else plan = lawish ? ["statute", "precedent"] : ["precedent", "statute"];
+  return plan.map((s) => ({
+    scope: s,
+    options: {
+      ...(s === "project" ? { matterId: scope } : {}),
+      ...(s === "statute" && act ? { actNames: [act] } : {}),
+    },
+  }));
+}
+
+export function retrieveAdapter({ supabase, voyageKey, anthropicJson, lib, place, route, retrieveMod, retrieveOptions = {} }) {
+  let actsPromise = null;
+  const acts = () => (actsPromise ??= lib.listActs(supabase));
+  const kindOf = { project: "matter", precedent: "precedent", statute: "statute" };
+  const run = async (question, scope, extra, timing) => {
+    const t0 = Date.now();
+    const got = await retrieveMod.retrieve({ supabase, voyageKey, anthropicJson, query: question, scope, k: K_MAX, ...retrieveOptions, ...extra, timings: true });
+    const ms = Date.now() - t0;
+    timing.searchMs = Math.max(timing.searchMs, ms);
+    // An older retrieve.js returns the passages alone.
+    const out = Array.isArray(got) ? got : got.passages;
+    const t = got.timings ?? null;
+    if (t?.fellBack) timing.fellBack = [...(timing.fellBack ?? []), scope];
+    if (typeof t?.voyageCalls === "number") timing.voyageCalls = (timing.voyageCalls ?? 0) + t.voyageCalls;
+    // Each scope's search as retrieve.js reported it: whether and why it
+    // fell back, which path produced the passages, its Voyage calls and
+    // every stage's timing — written into the result file.
+    timing.scopes.push({
+      scope, ms, passages: out.length,
+      fellBack: !!t?.fellBack, reason: t?.reason ?? null, path: t?.path ?? null, voyageCalls: t?.voyageCalls ?? null,
+      engine: t?.engine ?? null, reranked: t?.reranked ?? null, rerankSkipped: t?.rerankSkipped ?? null,
+      phrasings: t?.phrasings ?? null, rewriteLate: t?.rewriteLate ?? null, deadlineMs: t?.deadlineMs ?? null,
+      total: t?.total ?? null, events: t?.events ?? null,
+    });
+    return Promise.all(out.map(async (p) => {
+      const placed = p.scope === "statute" && !p.lead ? await place(p.act_name, p.text) : [];
+      return {
+        kind: kindOf[p.scope], id: p.id, similarity: p.similarity ?? null, act_name: p.act_name ?? null,
+        sections: placed.length ? placed : p.section ? [p.section] : [], storage_path: p.storage_path ?? null,
+        filename: p.label ?? p.filename ?? null, text: p.text, lead: !!p.lead,
+      };
+    }));
+  };
+  const interleave = (lists) => {
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; lists.some((l) => i < l.length); i++) {
+      for (const l of lists) if (l[i] && !seen.has(l[i].id)) { seen.add(l[i].id); out.push(l[i]); }
+    }
+    return out;
+  };
+  return {
+    name: "retrieve",
+    async retrieve(question, scope, gold = {}) {
+      const act = detectAct(question, await acts());
+      const plan = retrievePlan({ question, scope, kind: gold.kind, act, route });
+      // searchMs: the slowest scope's retrieve() alone, without the
+      // evaluation's own placing of statute passages in their sections.
+      const timing = { searchMs: 0, scopes: [] };
+      const lists = await Promise.all(plan.map((p) => run(question, p.scope, p.options, timing)));
+      // A section read whole leads, as read_act_section's answer does for the tools.
+      const lead = lists.flat().filter((p) => p.lead);
+      const results = [...lead, ...interleave(lists).filter((p) => !p.lead)];
+      Object.defineProperty(results, "timing", { value: timing, enumerable: false });
+      return results;
+    },
+  };
+}
+
 // (c) A fake adapter for checking the scorer without the network: for each
 // question it plants an acceptable answer at a known rank (1, 3, 7 or
 // nowhere) among near-misses built to fail — the wrong section, the right
@@ -418,6 +519,28 @@ async function checkGold(gold, { supabase, lib, place }) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * One question's row in the result file: its score, timing (ms, searchMs),
+ * the scopes that fell back, the Voyage calls, and — under `retrieve` — each
+ * scope's search as retrieve.js reported it (fellBack, reason, path,
+ * voyageCalls, every stage's events), when the adapter attached them.
+ */
+export function resultRow(q, results, { ms = null, error = null } = {}) {
+  const timing = results.timing ?? null;
+  const s = scoreQuestion(results, q.expected);
+  return {
+    id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms,
+    searchMs: timing?.searchMs ?? null, fellBack: timing?.fellBack ?? null, voyageCalls: timing?.voyageCalls ?? null,
+    retrieve: timing?.scopes?.length ? timing.scopes : null,
+    error, resultCount: results.length, ...s,
+    top: results.slice(0, K_MAX).map((r, i) => ({
+      rank: i + 1, kind: r.kind, act_name: r.act_name ?? null, sections: r.sections ?? [], filename: r.filename ?? null,
+      storage_path: r.storage_path ?? null, similarity: r.similarity ?? null, matched: q.expected.some((e) => matchItem(r, e)),
+      excerpt: String(r.text ?? "").replace(/\s+/g, " ").slice(0, 160),
+    })),
+  };
+}
+
 async function pool(items, n, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -430,7 +553,38 @@ async function pool(items, n, fn) {
   return out;
 }
 
-const HELP = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 24).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+/**
+ * The live services, as the chat service reaches them: { supabase, lib,
+ * voyageKey, anthropicJson, place, chatDir }. Keys from the environment, the
+ * --env file, the chat-service .env or /opt/chat-service/.env.
+ */
+export async function connect({ chatService = null, env = null, synonyms = true } = {}) {
+  const chatDir = findChatService(chatService);
+  loadEnv([env, join(chatDir, ".env"), "/opt/chat-service/.env"]);
+  const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "VOYAGE_API_KEY"].filter((k) => !process.env[k]);
+  if (missing.length) throw new Error(`Not set: ${missing.join(", ")} (environment, --env file, or ${join(chatDir, ".env")}).`);
+  const require = createRequire(join(chatDir, "package.json"));
+  const supabaseMod = await import(pathToFileURL(require.resolve("@supabase/supabase-js")).href);
+  const createClient = supabaseMod.createClient ?? supabaseMod.default?.createClient;
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const lib = await import(pathToFileURL(join(chatDir, "libraryTools.js")).href);
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicJson = synonyms && anthropicKey
+    ? async (body, signal) => {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: signal ?? AbortSignal.timeout(60000),
+      });
+      if (!resp.ok) throw new Error(`Anthropic ${resp.status}`);
+      return resp.json();
+    }
+    : null;
+  return { supabase, lib, voyageKey: process.env.VOYAGE_API_KEY, anthropicJson, place: makeActPlacer(supabase, lib), chatDir };
+}
+
+const HELP = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 30).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -448,30 +602,8 @@ async function main() {
   let ctx = {};
   const needsLive = args.checkGold || args.adapter !== "fake";
   if (needsLive) {
-    const chatDir = findChatService(args.chatService);
-    loadEnv([args.env, join(chatDir, ".env"), "/opt/chat-service/.env"]);
-    const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "VOYAGE_API_KEY"].filter((k) => !process.env[k]);
-    if (missing.length) throw new Error(`Not set: ${missing.join(", ")} (environment, --env file, or ${join(chatDir, ".env")}).`);
-    const require = createRequire(join(chatDir, "package.json"));
-    const supabaseMod = await import(pathToFileURL(require.resolve("@supabase/supabase-js")).href);
-    const createClient = supabaseMod.createClient ?? supabaseMod.default?.createClient;
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-    const lib = await import(pathToFileURL(join(chatDir, "libraryTools.js")).href);
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const anthropicJson = args.synonyms && anthropicKey
-      ? async (body, signal) => {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: signal ?? AbortSignal.timeout(60000),
-        });
-        if (!resp.ok) throw new Error(`Anthropic ${resp.status}`);
-        return resp.json();
-      }
-      : null;
-    ctx = { supabase, lib, voyageKey: process.env.VOYAGE_API_KEY, anthropicJson, place: makeActPlacer(supabase, lib), chatDir };
-    console.log(`chat-service code: ${chatDir}${anthropicJson ? "" : "  (precedent synonyms off)"}`);
+    ctx = await connect(args);
+    console.log(`chat-service code: ${ctx.chatDir}${ctx.anthropicJson ? "" : "  (precedent synonyms off)"}`);
   }
 
   if (args.checkGold) {
@@ -483,8 +615,11 @@ async function main() {
 
   if (args.adapter === "baseline") adapter = baselineAdapter({ ...ctx, order: args.baselineOrder });
   else if (args.adapter === "tools") adapter = toolsAdapter({ ...ctx, route: args.route });
-  else if (args.adapter === "fake") adapter = fakeAdapter();
-  else throw new Error(`Unknown adapter "${args.adapter}" (baseline, tools, fake).`);
+  else if (args.adapter === "retrieve") {
+    const retrieveMod = await import(pathToFileURL(join(ctx.chatDir, "retrieve.js")).href);
+    adapter = retrieveAdapter({ ...ctx, route: args.route, retrieveMod, retrieveOptions: args.retrieveOptions ?? {} });
+  } else if (args.adapter === "fake") adapter = fakeAdapter();
+  else throw new Error(`Unknown adapter "${args.adapter}" (baseline, tools, retrieve, fake).`);
 
   const started = new Date();
   const rows = await pool(questions, args.concurrency, async (q) => {
@@ -497,23 +632,18 @@ async function main() {
       error = err instanceof Error ? err.message : String(err);
     }
     const ms = Date.now() - t0;
-    const s = scoreQuestion(results, q.expected);
-    const row = {
-      id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms, error, resultCount: results.length, ...s,
-      top: results.slice(0, K_MAX).map((r, i) => ({
-        rank: i + 1, kind: r.kind, act_name: r.act_name ?? null, sections: r.sections ?? [], filename: r.filename ?? null,
-        storage_path: r.storage_path ?? null, similarity: r.similarity ?? null, matched: q.expected.some((e) => matchItem(r, e)),
-        excerpt: String(r.text ?? "").replace(/\s+/g, " ").slice(0, 160),
-      })),
-    };
+    const row = resultRow(q, results, { ms, error });
+    const { searchMs, voyageCalls, fellBack, retrieve: scopes } = row;
+    const s = row;
+    const fb = fellBack ? ` fb:${fellBack.map((sc) => `${sc}=${scopes?.find((x) => x.scope === sc)?.path ?? "?"}`).join("+")}` : "";
     const mark = error ? "ERR " : s.firstRank ? `@${s.firstRank}`.padEnd(4) : "miss";
-    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
+    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms${searchMs != null ? ` (search ${String(searchMs).padStart(5)}ms)` : ""}${voyageCalls != null ? ` v${voyageCalls}` : ""}${fb}  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
     if (args.verbose) for (const t of row.top) console.log(`        ${String(t.rank).padStart(2)}${t.matched ? "*" : " "} ${t.kind ?? ""} ${t.act_name ? `${t.act_name} §${t.sections.join(",")}` : t.filename ?? t.storage_path ?? ""} ${t.similarity != null ? `(${Number(t.similarity).toFixed(3)})` : ""}`);
     return row;
   });
 
   const summary = summarise(rows);
-  const label = args.label ?? `${adapter.name}${args.adapter === "tools" && args.route !== "auto" ? `-route-${args.route}` : ""}`;
+  const label = args.label ?? `${adapter.name}${(args.adapter === "tools" || args.adapter === "retrieve") && args.route !== "auto" ? `-route-${args.route}` : ""}`;
   console.log(`\n${formatTable(summary, `${label} — ${rows.length} questions, ${started.toISOString()}`)}`);
 
   let selfCheck = null;
@@ -531,7 +661,7 @@ async function main() {
   const goldHash = createHash("sha256").update(readFileSync(goldPath)).digest("hex").slice(0, 12);
   writeFileSync(file, JSON.stringify({
     label, adapter: adapter.name, timestamp: started.toISOString(), gold: { path: goldPath, sha256_12: goldHash, questions: rows.length },
-    options: { route: args.route, baselineOrder: args.baselineOrder, synonyms: !!ctx.anthropicJson, only: args.only ?? null, kind: args.kind ?? null },
+    options: { route: args.route, baselineOrder: args.baselineOrder, synonyms: !!ctx.anthropicJson, only: args.only ?? null, kind: args.kind ?? null, retrieve: args.retrieveOptions ?? null },
     summary, selfCheck, questions: rows,
   }, null, 2));
   console.log(`\nWrote ${file}`);
