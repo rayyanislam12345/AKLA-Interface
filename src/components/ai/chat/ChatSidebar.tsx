@@ -1,27 +1,11 @@
 import { useMemo, useState } from "react";
-import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, SquarePen, Trash2 } from "lucide-react";
-import { type ChatThread, useDeleteChatThread, useUpdateChatThread } from "@/hooks/useChat";
+import { Archive, Pin, Search, SquarePen } from "lucide-react";
+import type { ChatThread } from "@/hooks/useChat";
 import { useAuth } from "@/hooks/useAuth";
 import { useMyProfile, useProfiles } from "@/hooks/useProfiles";
+import ThreadRowMenu from "@/components/ai/chat/ThreadRowMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 interface ChatSidebarProps {
@@ -51,11 +35,6 @@ function relativeDay(iso: string | null) {
 export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadId, busyThreadIds, onSelect }: ChatSidebarProps) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-  const [renaming, setRenaming] = useState<ChatThread | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [deleting, setDeleting] = useState<ChatThread | null>(null);
-  const update = useUpdateChatThread(scopeKey);
-  const remove = useDeleteChatThread(scopeKey);
   // A project's chats are shared by everyone on it: each row says whose it
   // is when it is not yours, "Mine" narrows the list to your own, and only
   // the person who started a chat, or an administrator, can delete it.
@@ -85,39 +64,7 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
   const recent = visible.filter((t) => !t.pinned);
   const archivedCount = threads.filter((t) => t.archived).length;
 
-  const commitRename = async () => {
-    if (renaming && renameValue.trim() && renameValue.trim() !== renaming.title) {
-      await update.mutateAsync({ id: renaming.id, title: renameValue.trim() });
-    }
-    setRenaming(null);
-  };
-
-  const Section = ({ label, items }: { label: string; items: ChatThread[] }) =>
-    items.length ? (
-      <div className="space-y-0.5">
-        <div className="px-2 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-        {items.map((t) => (
-          <ThreadRow
-            key={t.id}
-            thread={t}
-            active={t.id === activeThreadId}
-            busy={!!busyThreadIds?.has(t.id)}
-            author={authorName(t)}
-            onSelect={() => onSelect(t.id)}
-            onRename={() => {
-              setRenaming(t);
-              setRenameValue(t.title ?? "");
-            }}
-            onPin={() => update.mutate({ id: t.id, pinned: !t.pinned })}
-            onArchive={() => {
-              update.mutate({ id: t.id, archived: !t.archived });
-              if (t.id === activeThreadId) onSelect(null);
-            }}
-            onDelete={mayDelete(t) ? () => setDeleting(t) : undefined}
-          />
-        ))}
-      </div>
-    ) : null;
+  const sectionProps = { scopeKey, activeThreadId, busyThreadIds, authorName, mayDelete, onSelect };
 
   return (
     <div className="flex h-full flex-col border-r bg-muted/30" data-testid="chat-sidebar">
@@ -149,8 +96,8 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
             {showArchived ? "No archived chats." : mineOnly && threads.length ? "None of your chats match." : threads.length ? "No chats match." : "No chats yet — start one below."}
           </p>
         )}
-        <Section label="Pinned" items={pinned} />
-        <Section label={showArchived ? "Archived" : "Recent"} items={recent} />
+        <Section label="Pinned" items={pinned} {...sectionProps} />
+        <Section label={showArchived ? "Archived" : "Recent"} items={recent} {...sectionProps} />
       </div>
 
       {archivedCount > 0 && (
@@ -163,76 +110,75 @@ export default function ChatSidebar({ scopeKey, subtitle, threads, activeThreadI
           {showArchived ? "Back to recent" : `Archived (${archivedCount})`}
         </button>
       )}
+    </div>
+  );
+}
 
-      <AlertDialog open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Rename chat</AlertDialogTitle>
-            <AlertDialogDescription>Give this conversation a name you'll recognise later.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <Input
-            autoFocus
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && commitRename()}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={commitRename}>Save</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{deleting?.title}"{deleting && authorName(deleting) ? `, started by ${authorName(deleting)},` : ""} and any documents it produced that haven't been saved to the project will be removed for everyone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => {
-                if (!deleting) return;
-                await remove.mutateAsync(deleting.id);
-                if (deleting.id === activeThreadId) onSelect(null);
-                setDeleting(null);
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+// A module-level component (not one made inside ChatSidebar's render), so
+// the rows keep their identity across re-renders: each row's "…" menu holds
+// its own Rename / Delete dialog, which a remount would close mid-typing.
+function Section({
+  label,
+  items,
+  scopeKey,
+  activeThreadId,
+  busyThreadIds,
+  authorName,
+  mayDelete,
+  onSelect,
+}: {
+  label: string;
+  items: ChatThread[];
+  scopeKey: string;
+  activeThreadId: string | null;
+  busyThreadIds?: Set<string>;
+  authorName: (t: ChatThread) => string | null;
+  mayDelete: (t: ChatThread) => boolean;
+  onSelect: (threadId: string | null) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="space-y-0.5">
+      <div className="px-2 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      {items.map((t) => (
+        <ThreadRow
+          key={t.id}
+          thread={t}
+          scopeKey={scopeKey}
+          active={t.id === activeThreadId}
+          busy={!!busyThreadIds?.has(t.id)}
+          author={authorName(t)}
+          canDelete={mayDelete(t)}
+          onSelect={() => onSelect(t.id)}
+          onGone={() => {
+            if (t.id === activeThreadId) onSelect(null);
+          }}
+        />
+      ))}
     </div>
   );
 }
 
 function ThreadRow({
   thread,
+  scopeKey,
   active,
   busy,
   author,
+  canDelete,
   onSelect,
-  onRename,
-  onPin,
-  onArchive,
-  onDelete,
+  onGone,
 }: {
   thread: ChatThread;
+  scopeKey: string;
   active: boolean;
   busy: boolean;
   // Who started the chat, when it was not you.
   author: string | null;
+  canDelete: boolean;
   onSelect: () => void;
-  onRename: () => void;
-  onPin: () => void;
-  onArchive: () => void;
-  // Absent when you may not delete this chat.
-  onDelete?: () => void;
+  // The chat was archived or deleted.
+  onGone: () => void;
 }) {
   return (
     <div
@@ -252,30 +198,7 @@ function ThreadRow({
           {author && <> · {author}</>}
         </div>
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Chat options">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onRename}><Pencil className="mr-2 h-4 w-4" />Rename</DropdownMenuItem>
-          <DropdownMenuItem onClick={onPin}>
-            {thread.pinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
-            {thread.pinned ? "Unpin" : "Pin"}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onArchive}>
-            {thread.archived ? <ArchiveRestore className="mr-2 h-4 w-4" /> : <Archive className="mr-2 h-4 w-4" />}
-            {thread.archived ? "Unarchive" : "Archive"}
-          </DropdownMenuItem>
-          {onDelete && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ThreadRowMenu thread={thread} scopeKey={scopeKey} author={author} canDelete={canDelete} onArchived={onGone} onDeleted={onGone} />
     </div>
   );
 }

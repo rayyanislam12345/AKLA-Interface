@@ -29,6 +29,9 @@ import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
+import AiLayout from "./ai/layout/AiLayout";
+import AiHomePage from "./ai/pages/AiHomePage";
+import AiChatPage from "./ai/pages/AiChatPage";
 
 const queryClient = new QueryClient();
 
@@ -99,6 +102,13 @@ const App = () => {
                     }
                   />
                   <Route path="/assistant" element={<ProtectedRoute><AppLayout><AiWorkspacePage /></AppLayout></ProtectedRoute>} />
+                  {/* The new AI workspace: its own shell, no AppLayout. Pages
+                      not built yet (projects, documents, library) land on Home. */}
+                  <Route path="/ai" element={<ProtectedRoute><AiLayout /></ProtectedRoute>}>
+                    <Route index element={<AiHomePage />} />
+                    <Route path="c/:threadId" element={<AiChatPage />} />
+                    <Route path="*" element={<Navigate to="/ai" replace />} />
+                  </Route>
                   <Route
                     path="/matters/:matterId/ai"
                     element={

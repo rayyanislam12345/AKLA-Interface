@@ -155,6 +155,53 @@ export function useChatThreads(scope: ChatScope | string | undefined) {
   });
 }
 
+export type ChatThreadWithMatter = ChatThread & { matter: { name: string } | null };
+
+// One chat and the project it belongs to. The new workspace reads a chat's
+// scope from its row, not from the address.
+export function useChatThread(threadId: string | undefined) {
+  return useQuery({
+    queryKey: ["chat-thread", threadId],
+    enabled: !!threadId,
+    queryFn: async (): Promise<ChatThreadWithMatter | null> => {
+      const { data, error } = await supabase
+        .from("ai_chat_threads")
+        .select("*, matter:matters(name)")
+        .eq("id", threadId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as ChatThreadWithMatter | null;
+    },
+  });
+}
+
+// The user's own recent chats across every project, for the new workspace's
+// sidebar: not archived, not standardisation sessions, newest first. While a
+// reply is being written the list is refreshed every ten seconds so titles
+// and status keep up.
+export function useRecentChats(options: { running?: boolean; limit?: number } = {}) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["chat-recent", user?.id],
+    enabled: !!user?.id,
+    refetchInterval: options.running ? 10_000 : false,
+    queryFn: async (): Promise<ChatThreadWithMatter[]> => {
+      const { data, error } = await supabase
+        .from("ai_chat_threads")
+        .select("*, matter:matters(name)")
+        .eq("created_by", user!.id)
+        .is("document_type_id", null)
+        .eq("archived", false)
+        .order("pinned", { ascending: false })
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(options.limit ?? 30);
+      if (error) throw error;
+      return data as unknown as ChatThreadWithMatter[];
+    },
+  });
+}
+
 // `scopeKey` is the threads list to refresh — chatScopeKey(scope).
 export function useUpdateChatThread(scopeKey: string | undefined) {
   const queryClient = useQueryClient();
@@ -163,7 +210,11 @@ export function useUpdateChatThread(scopeKey: string | undefined) {
       const { error } = await supabase.from("ai_chat_threads").update(patch).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
+      queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-thread", id] });
+    },
   });
 }
 
@@ -174,7 +225,10 @@ export function useDeleteChatThread(scopeKey: string | undefined) {
       const { error } = await supabase.from("ai_chat_threads").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
+      queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
+    },
   });
 }
 
@@ -651,6 +705,7 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
               // The sidebar needs the new row now, not when the turn ends,
               // so it can show the reply being written there.
               queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
+              queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
               if (isFirstRound) onThreadCreated?.(data.threadId);
             }
             break;
@@ -684,6 +739,8 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
           case "title":
           case "questionnaire":
             queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
+            queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
+            if (key !== NEW_CHAT_KEY) queryClient.invalidateQueries({ queryKey: ["chat-thread", key] });
             break;
           case "done":
             receivedDone = true;
@@ -781,6 +838,8 @@ export function useSendChatMessage(onThreadCreated?: (threadId: string) => void,
       // exists. Look again once it has had a moment.
       if (wasStopped) setTimeout(refetch, 2500);
       queryClient.invalidateQueries({ queryKey: ["chat-threads", scopeKey] });
+      queryClient.invalidateQueries({ queryKey: ["chat-recent"] });
+      if (threadId) queryClient.invalidateQueries({ queryKey: ["chat-thread", threadId] });
       // The turn is over: drop it, unless it failed — the error stays visible
       // in that chat until dismissed.
       setTurns((all) => {

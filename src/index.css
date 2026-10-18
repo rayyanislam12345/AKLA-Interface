@@ -144,6 +144,125 @@ All colors MUST be HSL.
     --sidebar-border: 224 35% 30%;
     --sidebar-ring: 40 55% 62%;
   }
+
+  /* The AI workspace (/ai): a warm, paper-like surface for reading long
+     replies, scoped to its own subtree so the rest of the site keeps its
+     theme. Navy stays for buttons, links and the focus ring. Gold is kept
+     out of the hover states shadcn paints with --accent and given its own
+     token, --gold, used only for the monogram, stars, the active scope pill
+     and the "needs you" dot. Menus and dialogs render in portals outside
+     the subtree, so AiLayout also puts the class on <body> while mounted. */
+  .ai-app {
+    --background: 40 20% 98%;
+    --foreground: 30 12% 12%;
+
+    --card: 40 20% 99%;
+    --card-foreground: 30 12% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 12% 12%;
+
+    --primary: 224 42% 30%;
+    --primary-foreground: 0 0% 98%;
+    --primary-light: 224 40% 42%;
+    --primary-glow: 224 38% 55%;
+
+    --secondary: 40 14% 93%;
+    --secondary-foreground: 30 12% 16%;
+
+    --muted: 40 14% 94%;
+    --muted-foreground: 30 8% 42%;
+
+    --accent: 40 14% 92%;
+    --accent-foreground: 30 12% 12%;
+    --accent-light: 40 14% 95%;
+
+    --gold: 40 46% 55%;
+    --gold-foreground: 224 42% 16%;
+
+    --success: 142 60% 34%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 48%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 40 10% 88%;
+    --input: 40 10% 90%;
+    --ring: 224 42% 30%;
+
+    --sidebar-background: 40 12% 95%;
+    --sidebar-foreground: 30 12% 14%;
+    --sidebar-primary: 224 42% 30%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 40 12% 90%;
+    --sidebar-accent-foreground: 30 12% 12%;
+    --sidebar-border: 40 10% 88%;
+    --sidebar-ring: 224 42% 30%;
+
+    --ai-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .dark .ai-app {
+    --background: 30 8% 9%;
+    --foreground: 40 10% 92%;
+
+    --card: 30 8% 11%;
+    --card-foreground: 40 10% 92%;
+
+    --popover: 30 8% 11%;
+    --popover-foreground: 40 10% 92%;
+
+    --primary: 224 45% 68%;
+    --primary-foreground: 224 30% 8%;
+    --primary-light: 224 45% 78%;
+    --primary-glow: 224 40% 62%;
+
+    --secondary: 30 6% 16%;
+    --secondary-foreground: 40 10% 92%;
+
+    --muted: 30 6% 15%;
+    --muted-foreground: 35 6% 62%;
+
+    --accent: 30 6% 18%;
+    --accent-foreground: 40 10% 92%;
+    --accent-light: 30 6% 22%;
+
+    --gold: 40 55% 62%;
+    --gold-foreground: 224 30% 10%;
+
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+
+    --border: 30 6% 20%;
+    --input: 30 6% 18%;
+    --ring: 224 45% 68%;
+
+    --sidebar-background: 30 8% 7%;
+    --sidebar-foreground: 40 10% 90%;
+    --sidebar-primary: 224 45% 68%;
+    --sidebar-primary-foreground: 224 30% 8%;
+    --sidebar-accent: 30 6% 14%;
+    --sidebar-accent-foreground: 40 10% 92%;
+    --sidebar-border: 30 6% 18%;
+    --sidebar-ring: 224 45% 68%;
+  }
+}
+
+/* An assistant reply in the AI workspace: serif, 16px, roomy lines. Set
+   outside the layers so it wins over the prose plugin's sizes. */
+.ai-reply {
+  font-family: var(--ai-serif);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+.ai-reply :where(code, pre, kbd) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @layer base {

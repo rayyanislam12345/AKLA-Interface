@@ -19,6 +19,9 @@ interface MarkdownMessageProps {
   // Draws one cited source number. When given, "[Source n]" tokens in the
   // reply's prose become whatever this returns (code and links untouched).
   renderCitation?: (n: number) => ReactNode;
+  // "ai": the new workspace's reading look (serif, 16px, roomier lines; see
+  // .ai-reply in index.css). "site" (the default) is unchanged.
+  appearance?: "site" | "ai";
 }
 
 // Turns "[Source 3]" / "[Sources 3 and 5]" in prose text nodes into a span
@@ -78,7 +81,7 @@ export function artifactIcon(kind: string) {
 // document the model produced shown as a clickable card (the chat function
 // stores those as [[artifact:id]] markers where the block was) rather than
 // inline in the bubble.
-export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false, renderCitation }: MarkdownMessageProps) {
+export default function MarkdownMessage({ content, artifacts, onOpenArtifact, activeArtifactId, className, inProgress = false, renderCitation, appearance = "site" }: MarkdownMessageProps) {
   const components = useMemo<Components | undefined>(
     () =>
       renderCitation
@@ -116,7 +119,14 @@ export default function MarkdownMessage({ content, artifacts, onOpenArtifact, ac
     <div className={cn("space-y-3", className)}>
       {parts.map((part, i) =>
         part.type === "md" ? (
-          <div key={i} className="prose prose-sm dark:prose-invert max-w-none break-words prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-xs">
+          <div
+            key={i}
+            className={
+              appearance === "ai"
+                ? "ai-reply prose dark:prose-invert max-w-none break-words prose-p:my-3 prose-headings:mt-6 prose-headings:mb-2 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-sm"
+                : "prose prose-sm dark:prose-invert max-w-none break-words prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-xs"
+            }
+          >
             <ReactMarkdown remarkPlugins={renderCitation ? CITATION_PLUGINS : PLAIN_PLUGINS} components={components}>{part.text}</ReactMarkdown>
           </div>
         ) : (

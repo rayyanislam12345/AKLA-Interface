@@ -21,13 +21,19 @@ interface MessageListProps {
   // A reply left half-written can be picked up again from where it stopped.
   onResume?: (message: ChatMessage) => void;
   resumingMessageId?: string | null;
+  // "ai": the new workspace's look — a narrower column, replies in serif,
+  // the lawyer's turns in a soft grey bubble. "site" (the default) is the
+  // look every existing page has.
+  appearance?: MessageAppearance;
 }
+
+export type MessageAppearance = "site" | "ai";
 
 // The scrolling transcript — persisted messages, then (while a turn is in
 // flight) the lawyer's just-sent message and the assistant's reply as it
 // streams. Layout mirrors claude.ai: user turns as a bubble on the right,
 // assistant turns full-width with no bubble.
-export default function MessageList({ messages, artifacts, stream, pending, activeArtifactId, onOpenArtifact, empty, onResume, resumingMessageId }: MessageListProps) {
+export default function MessageList({ messages, artifacts, stream, pending, activeArtifactId, onOpenArtifact, empty, onResume, resumingMessageId, appearance = "site" }: MessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -71,7 +77,7 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
 
   return (
     <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 md:px-8" data-testid="message-list">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
+      <div className={appearance === "ai" ? "mx-auto flex max-w-[44rem] flex-col gap-6 py-8" : "mx-auto flex max-w-3xl flex-col gap-6 py-6"}>
         {showEmpty && empty}
         {messages
           // While it is being resumed the partial is shown as the streaming
@@ -87,10 +93,11 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
               onResume={!pending && onResume ? onResume : undefined}
               threadSources={threadSources}
               onOpenSource={openSource}
+              appearance={appearance}
             />
           ))}
         {showPendingBubble && (
-          <UserBubble content={pending!.content} attachments={pending!.attachments} />
+          <UserBubble content={pending!.content} attachments={pending!.attachments} appearance={appearance} />
         )}
         {pending && (
           <div className="min-w-0" data-testid="streaming-reply">
@@ -104,6 +111,7 @@ export default function MessageList({ messages, artifacts, stream, pending, acti
                 onOpenArtifact={onOpenArtifact}
                 inProgress
                 renderCitation={renderStreamingCitation}
+                appearance={appearance}
               />
             ) : (
               <ThinkingDots />
@@ -163,6 +171,7 @@ function MessageRow({
   onResume,
   threadSources,
   onOpenSource,
+  appearance,
 }: {
   message: ChatMessage;
   artifacts: Map<string, ChatArtifact>;
@@ -171,13 +180,14 @@ function MessageRow({
   onResume?: (message: ChatMessage) => void;
   threadSources: ThreadSourceMap;
   onOpenSource: OpenSource;
+  appearance: MessageAppearance;
 }) {
   const meta = messageMetadata(message);
   const renderCitation = useCitationRenderer(meta.sources, meta.unverifiedCitations, threadSources, message.content, onOpenSource);
   if (message.role === "user") {
     return (
       <>
-        <UserBubble content={message.content} attachments={meta.attachments ?? []} />
+        <UserBubble content={message.content} attachments={meta.attachments ?? []} appearance={appearance} />
         {(!!meta.notices?.length || meta.error) && (
           <div className="-mb-4 min-w-0" data-testid="turn-notices">
             {meta.notices?.map((n, i) => (
@@ -201,6 +211,7 @@ function MessageRow({
         onOpenArtifact={onOpenArtifact}
         activeArtifactId={activeArtifactId}
         renderCitation={renderCitation}
+        appearance={appearance}
       />
       {(!!meta.sources?.length || !!meta.cited?.length) && (
         <SourcesFootnote
@@ -223,7 +234,7 @@ function MessageRow({
   );
 }
 
-function UserBubble({ content, attachments }: { content: string; attachments: ChatAttachment[] }) {
+function UserBubble({ content, attachments, appearance = "site" }: { content: string; attachments: ChatAttachment[]; appearance?: MessageAppearance }) {
   return (
     <div className="flex flex-col items-end gap-1.5" data-testid="user-message">
       {attachments.length > 0 && (
@@ -238,7 +249,13 @@ function UserBubble({ content, attachments }: { content: string; attachments: Ch
         </div>
       )}
       {content && (
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+        <div
+          className={
+            appearance === "ai"
+              ? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-[15px] leading-relaxed text-foreground"
+              : "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground"
+          }
+        >
           {content}
         </div>
       )}

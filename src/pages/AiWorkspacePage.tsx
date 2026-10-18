@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileText, Menu, PanelRightOpen, PencilLine, ScanSearch, Sparkles, StickyNote, Search, FileSignature } from "lucide-react";
+import { resolveThreadSkill, seedSkillFor, type StoredSkill } from "@/lib/threadSkill";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useMatter } from "@/hooks/useMatters";
@@ -16,7 +17,6 @@ import {
   type EditTarget,
   type GuideState,
   type MessageMetadata,
-  type SkillKey,
   messageMetadata,
   openDocumentForEdit,
   useCustomSkills,
@@ -200,13 +200,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
     ];
   }, [seedVersion, seedDoc]);
 
-  const seedSkill = useMemo<ActiveSkill | null | undefined>(() => {
-    if (mode === "draft") return { key: "draft", label: "Draft" };
-    if (mode === "agreement") return { key: "agreement", label: "Agreement" };
-    if (mode === "summarise") return { key: "summarise", label: "Summarise" };
-    if (mode === "review" || mode === "verify" || lawUpdateId) return { key: "review", label: "Review" };
-    return undefined;
-  }, [mode, lawUpdateId]);
+  const seedSkill = useMemo<ActiveSkill | null | undefined>(() => seedSkillFor(mode, lawUpdateId), [mode, lawUpdateId]);
 
   const seedText = useMemo(() => {
     if (!lawUpdate) return undefined;
@@ -223,34 +217,11 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
   const lastUserMessage = useMemo(() => [...(messages ?? [])].reverse().find((m) => m.role === "user"), [messages]);
   const storedSkill = (lastUserMessage ? messageMetadata(lastUserMessage).skill : (activeThread?.skill as MessageMetadata["skill"] | undefined)) ?? null;
   const storedSkillKey = activeThreadId && storedSkill ? JSON.stringify(storedSkill) : "";
-  const threadSkill = useMemo<ActiveSkill | null>(() => {
-    if (!storedSkillKey) return null;
-    const sk = JSON.parse(storedSkillKey) as NonNullable<MessageMetadata["skill"]>;
-    const key: SkillKey = sk.key === "verify" ? "review" : sk.key;
-    const base = { documentTypeId: sk.documentTypeId, customSkillId: sk.customSkillId, documentVersionId: sk.documentVersionId, matterDocumentId: sk.matterDocumentId };
-    switch (key) {
-      case "edit":
-        if (!sk.documentVersionId) return null;
-        return { key, ...base, label: (activeThread?.title ?? "Edit").replace(/^Edit: /, "Edit · ") };
-      case "draft": {
-        const type = documentTypes?.find((t) => t.id === sk.documentTypeId)?.name;
-        return { key, ...base, label: type ? `Draft · ${type}` : "Draft" };
-      }
-      case "custom": {
-        const custom = customSkills?.find((c) => c.id === sk.customSkillId);
-        // A firm skill deleted since: nothing is applied, so nothing is shown.
-        return custom ? { key, ...base, label: custom.name } : null;
-      }
-      case "review":
-        return { key, ...base, label: "Review" };
-      case "summarise":
-        return { key, ...base, label: "Summarise" };
-      case "agreement":
-        return { key, ...base, label: "Agreement" };
-      default:
-        return null;
-    }
-  }, [storedSkillKey, activeThread?.title, documentTypes, customSkills]);
+  // The rule lives in lib/threadSkill so the new workspace applies the same one.
+  const threadSkill = useMemo<ActiveSkill | null>(
+    () => (storedSkillKey ? resolveThreadSkill(JSON.parse(storedSkillKey) as StoredSkill, { threadTitle: activeThread?.title, documentTypes, customSkills }) : null),
+    [storedSkillKey, activeThread?.title, documentTypes, customSkills],
+  );
   const lastArtifact = threadArtifacts?.length ? threadArtifacts[threadArtifacts.length - 1] : null;
 
   // A chat handed a document before anything was said in it — minutes from
@@ -375,6 +346,14 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
                 <span className="font-medium">{activeThread?.title ?? "New chat"}</span>
                 {matter?.name && <span className="text-muted-foreground"> · {matter.name}</span>}
               </div>
+              <Link
+                to={activeThreadId ? `/ai/c/${activeThreadId}` : matterId ? `/ai?project=${matterId}` : "/ai"}
+                className="hidden shrink-0 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:inline"
+                title="The same chats in the new AI workspace"
+                data-testid="try-new-workspace"
+              >
+                Try the new workspace
+              </Link>
               {!openArtifact && lastArtifact && (
                 <Button variant="ghost" size="sm" className="h-8" onClick={() => setOpenArtifact(lastArtifact)}>
                   <PanelRightOpen className="mr-2 h-4 w-4" />

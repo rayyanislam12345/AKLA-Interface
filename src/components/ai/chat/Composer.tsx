@@ -53,6 +53,18 @@ interface ComposerProps {
   // The general assistant (no project open): Review and Edit work on a
   // project's document, so the page asks which project first.
   onNeedsProject?: (purpose: "review" | "edit") => void;
+  // "ai": the new workspace's look (softer corners, a faint shadow, a
+  // toolbar row). "site" (the default) is unchanged.
+  appearance?: "site" | "ai";
+  // Extra controls in the toolbar row, after "+": the new workspace's scope pill.
+  toolbar?: React.ReactNode;
+  // Told whenever the attached files change, so a page that swaps the
+  // composer out (a scope change) can say what was lost.
+  onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+  // Told whenever the text changes (typed, seeded or cleared), so a page
+  // that seeds the box can tell when its seed has been used up.
+  onTextChange?: (text: string) => void;
+  autoFocus?: boolean;
 }
 
 type PendingAttachment = ChatAttachment & { uploading?: boolean; error?: string };
@@ -82,6 +94,11 @@ export default function Composer({
   editPickerOpen = false,
   onEditPickerOpenChange,
   onNeedsProject,
+  appearance = "site",
+  toolbar,
+  onAttachmentsChange,
+  onTextChange,
+  autoFocus = false,
 }: ComposerProps) {
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
@@ -126,6 +143,16 @@ export default function Composer({
   useEffect(() => {
     if (initialAttachments) setAttachments(initialAttachments);
   }, [initialAttachments]);
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+    // Only when the files change; a new callback identity is not a change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachments]);
+  useEffect(() => {
+    onTextChange?.(text);
+    // Only when the text changes; a new callback identity is not a change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -259,10 +286,12 @@ export default function Composer({
   };
 
   return (
-    <div className="px-4 pb-4 pt-2 md:px-8">
+    <div className={appearance === "ai" ? "px-4 pb-3 pt-2 md:px-8" : "px-4 pb-4 pt-2 md:px-8"}>
       <div
         className={cn(
-          "mx-auto max-w-3xl rounded-2xl border bg-background shadow-sm transition-colors focus-within:border-primary/50",
+          appearance === "ai"
+            ? "mx-auto max-w-[44rem] rounded-[1.25rem] border border-border/80 bg-background shadow-[0_1px_2px_hsl(var(--foreground)/0.04),0_10px_30px_-16px_hsl(var(--foreground)/0.18)] transition-colors focus-within:border-primary/50"
+            : "mx-auto max-w-3xl rounded-2xl border bg-background shadow-sm transition-colors focus-within:border-primary/50",
           dragging && "border-primary bg-primary/5",
         )}
         onDragOver={(e) => {
@@ -338,6 +367,7 @@ export default function Composer({
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
                 rows={1}
+                autoFocus={autoFocus}
                 placeholder={
                   standard
                     ? "Attach the firm's earlier documents and say what the master should be — e.g. \"build the master from these three agreements\" — or ask for a change…"
@@ -353,7 +383,10 @@ export default function Composer({
                           ? "Ask about this project, or type / for skills…"
                           : "Ask anything, drop in a document, or type / for skills…"
                 }
-                className="max-h-60 min-h-[44px] w-full resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
+                className={cn(
+                  "max-h-60 min-h-[44px] w-full resize-none bg-transparent px-1 py-2 outline-none placeholder:text-muted-foreground",
+                  appearance === "ai" ? "text-[15px] leading-relaxed" : "text-sm",
+                )}
                 data-testid="composer-input"
               />
             </div>
@@ -467,7 +500,10 @@ export default function Composer({
                 </>}
               </DropdownMenuContent>
             </DropdownMenu>
-            <span className="hidden text-[11px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line{standard ? "" : " · / for skills"}</span>
+            {toolbar}
+            {appearance !== "ai" && (
+              <span className="hidden text-[11px] text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line{standard ? "" : " · / for skills"}</span>
+            )}
           </div>
 
           {sending ? (
