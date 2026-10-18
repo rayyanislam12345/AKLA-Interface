@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   retrieve, retrieveDetailed, fuseLists, capPerFile, dedupeByText, buildLabel, shortHeading, sectionFromHeading, clauseOf,
   keywordText, isMissingFunction, namedAct, rrfOf, toCandidate, rerankPassages, passageText, clearRetrieveCaches, MAX_TEXT,
-  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS, rewriteWorthwhile,
+  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS, rewriteWorthwhile, FALLBACK_GRACE_MS,
 } from '../retrieve.js';
 import { clearCaches } from '../libraryTools.js';
 
@@ -162,15 +162,24 @@ test('a project search: one embedding call, the hybrid search scoped to the proj
   assert.equal(embeds.length, 1);
   assert.deepEqual(embeds[0].body.input, ['what is the concession period']);
   assert.equal(embeds[0].body.input_type, 'query');
-  const call = supabase.calls.find((c) => c.name === 'search_passages');
+  const searches = supabase.calls.filter((c) => c.name === 'search_passages');
+  const call = searches.find((c) => c.args.query_embedding);
   assert.deepEqual(Object.keys(call.args).sort(), ['act_names', 'all_versions', 'document_type_id', 'exclude_document_id', 'k', 'matter_id', 'query_embedding', 'query_text', 'scope'].sort());
   assert.equal(call.args.scope, 'project');
   assert.equal(call.args.matter_id, 'm1');
   assert.equal(call.args.all_versions, false);
   assert.deepEqual(call.args.query_embedding, [1, 0, 0]);
+  // Under the default deadline the question is also searched by its words
+  // alone from the start, with no embedding, in case the embedding is slow.
+  const words = searches.find((c) => c.args.query_embedding === null);
+  assert.ok(words, 'the words-only search was started');
+  assert.equal(words.args.query_text, 'what is the concession period');
+  assert.equal(words.args.matter_id, 'm1');
+  assert.equal(searches.length, 2);
   assert.equal(voyage.requests.filter((r) => r.url.endsWith('/rerank')).length, 0);
   // The fused order, the fused score as the similarity.
   assert.deepEqual(out.passages.map((p) => p.id), ['a', 'b']);
+  assert.equal(out.path, 'full');
   assert.equal(out.passages[0].label, 'Term Sheet v3, 4. Term › 4.2 Concession Period');
   assert.equal(out.passages[0].similarity, Math.round((2 / 61) * 1e6) / 1e6);
   assert.equal(out.passages[0].storage_path, 'm/d/a.docx');
@@ -244,13 +253,19 @@ test('before the hybrid migration, the search falls back to match_documents and 
   // All versions asked for: everything that still has a version.
   const all = await retrieve({ supabase, voyageKey: 'v', query: 'term of the FSA', scope: 'project', matterId: 'm1', allVersions: true, rerank: false, fetchImpl: voyage.fetchImpl });
   assert.deepEqual(all.map((p) => p.id).sort(), ['ai', 'cur', 'old']);
-  // For the next minute the missing function is not asked for again.
-  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, 1);
+  // For the next minute the missing function is not asked for again: the
+  // first search asked at most twice (the question's own search and the
+  // words-only search start together, before either has seen the error),
+  // the second not at all.
+  const asked = supabase.calls.filter((c) => c.name === 'search_passages').length;
+  assert.ok(asked >= 1 && asked <= 2, `${asked} calls`);
+  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, asked);
   // A real failure is not mistaken for a missing function.
   clearRetrieveCaches();
   const broken = fakeSupabase({ rpc: { search_passages: { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } } } });
   await assert.rejects(retrieve({ supabase: broken, voyageKey: 'v', query: 'term', scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl }), /statement timeout/);
-  assert.equal(broken.calls.filter((c) => c.name === 'search_passages').length, 2, 'a timeout is tried once more');
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 2, 'a timeout is tried once more');
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 2, 'the words-only search likewise');
 });
 
 test('a precedent question is rewritten once into legal phrasings, each searched, merged', async () => {
@@ -274,7 +289,8 @@ test('a precedent question is rewritten once into legal phrasings, each searched
   const q = 'tag along where a shareholder sells to a third party';
   const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rerank: false });
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
-  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, 3);
+  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 3, 'the question and each phrasing, with their embeddings');
+  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 1, 'and the question by words alone');
   const embeds = voyage.requests.filter((r) => r.url.endsWith('/embeddings'));
   assert.equal(embeds.length, 1, 'one embedding call: the question and its phrasings together');
   assert.deepEqual(embeds[0].body.input, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
@@ -333,13 +349,17 @@ function deferred() {
   return { promise, resolve };
 }
 
-// search_passages answering after `delay` ms, counting how many are in flight at once.
+// search_passages answering after `delay` ms, counting how many are in flight
+// at once. `texts`: the queries searched with an embedding (the question and
+// its phrasings); `wordsOnly`: those searched by words alone (the words-only
+// search every deadline-bound search starts at once, and any search whose
+// embedding failed).
 function slowSearch(delay, rowsFor = () => []) {
-  const state = { inFlight: 0, maxInFlight: 0, texts: [] };
+  const state = { inFlight: 0, maxInFlight: 0, texts: [], wordsOnly: [] };
   const supabase = fakeSupabase({
     rpc: {
       search_passages: async (args) => {
-        state.texts.push(args.query_text);
+        (args.query_embedding ? state.texts : state.wordsOnly).push(args.query_text);
         state.inFlight++;
         state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
         await sleep(delay);
@@ -361,16 +381,18 @@ test('the question waits for the rewrite and is embedded with its phrasings in o
   const q = 'tag along where a shareholder sells to a third party';
   const running = retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rerank: false });
   await sleep(30);
-  // The rewrite has not answered: nothing embedded, nothing searched yet.
+  // The rewrite has not answered: nothing embedded, nothing searched with an
+  // embedding yet; only the words-only search, which needs none, has started.
   assert.equal(voyage.requests.length, 0);
   assert.deepEqual(state.texts, []);
+  assert.deepEqual(state.wordsOnly, [q]);
   reply.resolve({ content: [{ type: 'text', text: '["tag-along right", "entitled to sell on the same terms"]' }] });
   const out = await running;
   assert.deepEqual(voyage.requests.map((r) => r.body.input), [[q, 'tag-along right', 'entitled to sell on the same terms']]);
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'entitled to sell on the same terms']);
   assert.equal(out.rewriteLate, false);
   assert.deepEqual(state.texts.slice().sort(), [q, 'tag-along right', 'entitled to sell on the same terms'].sort());
-  assert.equal(out.passages.length, 3);
+  assert.equal(out.passages.length, 3, 'the words-only search is not merged into a full search');
 
   // The same question in another scope (the chat searches all three at
   // once): its embedding is kept, so it is searched while its own rewrite
@@ -394,7 +416,8 @@ test('the phrasings are searched all at once, with the question\'s own search st
   const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: 'example of a drag along clause', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false });
   assert.equal(out.phrasings.length, 4);
   assert.equal(state.texts.length, 4);
-  assert.equal(state.maxInFlight, 4, 'no phrasing waits for another');
+  assert.deepEqual(state.wordsOnly, ['example of a drag along clause']);
+  assert.equal(state.maxInFlight, 5, 'no phrasing waits for another, nor for the words-only search');
 });
 
 test('a rewrite that has not come within the wait is not waited for, and is used the next time once it comes', async () => {
@@ -441,8 +464,11 @@ test('a failed rewrite or a failed phrasing embedding leaves the question\'s own
   sb2.rpc = ((orig) => (name, args) => { embeddings.push(args.query_embedding); return orig(name, args); })(sb2.rpc);
   const out2 = await retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: rewrite, query: lock, scope: 'precedent', fetchImpl: flaky, rerank: false });
   assert.deepEqual(out2.phrasings, [lock, 'restriction on transfer']);
-  assert.deepEqual(s2.texts.slice().sort(), [lock, 'restriction on transfer'].sort());
-  assert.deepEqual(embeddings, [null, null]);
+  assert.deepEqual(s2.texts, [], 'nothing was searched with an embedding');
+  assert.deepEqual(s2.wordsOnly.slice().sort(), [lock, lock, 'restriction on transfer'].sort(), 'the question (twice: its own search and the words-only one) and the phrasing, by words');
+  assert.deepEqual(embeddings, [null, null, null]);
+  assert.equal(out2.fellBack, false, 'the full search finished on its own');
+  assert.equal(out2.path, 'full');
 });
 
 test('the reranker reads 30 passages, each whole; both can be set per call', async () => {
@@ -702,7 +728,42 @@ async function noUnhandled(fn, settle = 120) {
   }
 }
 
-test('a search still reranking at the deadline returns the question\'s own search, marked fellBack, and the reranker is stopped', async () => {
+// fn's result and how long it took, on its own (noUnhandled's settle aside).
+async function timed(fn) {
+  const t0 = Date.now();
+  const result = await fn();
+  return { result, took: Date.now() - t0 };
+}
+
+const searchCalls = (supabase) => supabase.calls.filter((c) => c.name === 'search_passages');
+const hybridCalls = (supabase) => searchCalls(supabase).filter((c) => c.args.query_embedding);
+const wordsCalls = (supabase) => searchCalls(supabase).filter((c) => c.args.query_embedding === null);
+
+// A statute library of `acts` (name → text) whose list and rows the stubbed
+// client answers, each row read taking `delay` ms; `rpc` answers
+// search_passages.
+function statuteLibrary(acts, rpc, delay = 1) {
+  const { supabase, reads } = actLibrary(acts, delay);
+  const fromTable = supabase.from;
+  supabase.from = (table) => {
+    const q = fromTable(table);
+    const plainThen = q.then;
+    let selected = '';
+    const sel = q.select;
+    q.select = (cols) => { selected = String(cols); sel(cols); return q; };
+    q.then = (ok, bad) => (selected.startsWith('act_name')
+      ? Promise.resolve({ data: Object.keys(acts).map((act_name) => ({ act_name })), error: null }).then(ok, bad)
+      : plainThen(ok, bad));
+    return q;
+  };
+  supabase.rpc = async (name, args) => {
+    supabase.calls.push({ name, args });
+    return name === 'search_passages' ? rpc(args) : { data: [], error: null };
+  };
+  return { supabase, reads };
+}
+
+test('a search still reranking at the deadline returns the question\'s own search (fused, not reranked), marked fellBack, and the reranker is stopped', async () => {
   const data = Array.from({ length: 12 }, (_, i) => precRow(`p${i}`, 1 / (61 + i)));
   const supabase = fakeSupabase({ rpc: { search_passages: { data, error: null } } });
   let rerankSignal = null;
@@ -711,97 +772,155 @@ test('a search still reranking at the deadline returns the question\'s own searc
     if (url.endsWith('/rerank')) { rerankSignal = init.signal; voyage.requests.push({ url }); return hanging(init); }
     return voyage.fetchImpl(url, init);
   };
-  const t0 = Date.now();
-  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl, rewrite: false, deadlineMs: 150, timings: true }));
-  const took = Date.now() - t0;
-  assert.ok(took >= 140 && took < 400, `returned at the deadline (${took} ms)`);
+  const { result: { result: out, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl, rewrite: false, deadlineMs: 150, timings: true })));
+  assert.ok(took >= 140 && took < 150 + 500, `returned at the deadline (${took} ms)`);
   assert.equal(out.fellBack, true);
-  assert.match(out.reason, /longer than 150 ms: returned the question's own search, not reranked/);
+  assert.equal(out.path, 'fused');
+  assert.match(out.reason, /longer than 150 ms: returned the question's own search \(words and meaning fused\), not reranked/);
   assert.equal(out.timings.fellBack, true);
+  assert.equal(out.timings.path, 'fused');
+  assert.equal(out.timings.reason, out.reason);
+  assert.equal(out.timings.deadlineMs, 150);
   assert.equal(out.reranked, false);
   assert.deepEqual(out.passages.map((p) => p.id), ['p0', 'p1', 'p2', 'p3', 'p4'], 'the fused order, best k');
   assert.ok(out.passages.every((p) => p.label), 'labelled for citation');
   assert.equal(out.voyageCalls, 2, 'the embedding and the abandoned rerank');
+  assert.equal(out.timings.voyageCalls, 2);
   assert.equal(rerankSignal?.aborted, true, 'the rerank call was aborted');
   assert.deepEqual(seen, [], 'no unhandled rejection');
-  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, 1, 'no second search was needed');
+  assert.equal(hybridCalls(supabase).length, 1);
+  assert.equal(wordsCalls(supabase).length, 1, 'the words-only search started beside it');
 });
 
-test('with the embedding not back before the deadline, a search by words alone is started and returned', async () => {
-  const supabase = fakeSupabase({
-    rpc: {
-      search_passages: (args) => ({ data: args.query_embedding ? [] : [precRow('w1', 0.02), precRow('w2', 0.01)], error: null }),
-    },
-  });
+test('with the embedding hanging, the search by words alone — started at once, no Voyage call — is returned by the deadline, for every scope', async () => {
+  const deadlineMs = 150;
+  const contract = '1. Short title.—This Act may be called the Contract Act. 73. Compensation for loss or damage caused by breach of contract.—When a contract has been broken, the party who suffers is entitled to compensation. 74. Compensation for breach of contract where penalty stipulated for.—When a sum is named in the contract as the amount to be paid in case of breach, the party complaining is entitled to reasonable compensation.';
   const fetchImpl = (url, init) => hanging(init); // Voyage never answers
-  const t0 = Date.now();
-  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl, rewrite: false, deadlineMs: 150, timings: true }));
-  const took = Date.now() - t0;
-  assert.ok(took < 400, `${took} ms`);
+  const cases = [
+    {
+      scope: 'project', query: 'what is the concession period', options: { matterId: 'm1' },
+      rows: [row('w1', { heading_path: '4. Term › 4.2 Concession Period' }), row('w2', { page: 7, document_version_id: 'v-w2' })],
+      ids: ['w1', 'w2'], labels: ['Term Sheet v3, 4. Term › 4.2 Concession Period', 'Term Sheet v3, p. 7'],
+    },
+    {
+      scope: 'precedent', query: 'example of a drag along clause', options: {},
+      rows: [precRow('w1', 0.02, { heading_path: 'Clause 9 Transfers › 9.3 Drag along' }), precRow('w2', 0.01)],
+      ids: ['w1', 'w2'], labels: ['w1.docx, Clause 9 Transfers › 9.3 Drag along', 'w2.docx'],
+    },
+    {
+      // A question naming a section: that section, read whole, leads.
+      scope: 'statute', query: 'contract act 1872 section 74 penalty', options: { actNames: ['Contract Act, 1872'] },
+      rows: [{ ...row('w1'), metadata: { act_name: 'Contract Act, 1872' }, heading_path: 'Chapter VI › 73. Compensation for loss or damage caused by breach of contract', content: contract.slice(contract.indexOf('73. Compensation')) }],
+      ids: null, labels: ['Contract Act, 1872, s.74', 'Contract Act, 1872, s.73'],
+    },
+  ];
+  for (const c of cases) {
+    clearRetrieveCaches();
+    clearCaches();
+    const rpc = (args) => {
+      assert.equal(args.query_embedding, null, `${c.scope}: only the words-only search can run`);
+      assert.equal(args.scope, c.scope);
+      return { data: c.rows, error: null };
+    };
+    const supabase = c.scope === 'statute' ? statuteLibrary({ 'Contract Act, 1872': contract }, rpc).supabase : fakeSupabase({ rpc: { search_passages: rpc } });
+    const { result: { result: out, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: c.query, scope: c.scope, ...c.options, k: 5, fetchImpl, rewrite: false, deadlineMs, timings: true })));
+    assert.ok(took >= deadlineMs - 10 && took <= deadlineMs + 500, `${c.scope}: returned at the deadline (${took} ms)`);
+    assert.equal(out.fellBack, true, c.scope);
+    assert.equal(out.path, 'words', c.scope);
+    assert.match(out.reason, /longer than 150 ms: returned the search by words alone \(the question's embedding was not back\), not reranked/);
+    assert.equal(out.timings.fellBack, true);
+    assert.equal(out.timings.path, 'words');
+    assert.equal(out.timings.reason, out.reason);
+    assert.equal(out.timings.voyageCalls, 1, `${c.scope}: the embedding call that never answered`);
+    assert.ok(out.timings.events.some((e) => e.stage === 'words only' && e.start < 50 && e.rows === c.rows.length), `${c.scope}: the words-only search started at once: ${JSON.stringify(out.timings.events)}`);
+    assert.equal(out.reranked, false);
+    if (c.ids) assert.deepEqual(out.passages.map((p) => p.id), c.ids, c.scope);
+    assert.deepEqual(out.passages.map((p) => p.label), c.labels, c.scope);
+    if (c.scope === 'statute') {
+      assert.equal(out.passages[0].lead, true, 'the named section, read whole, leads');
+      assert.equal(out.passages[0].section, '74');
+      assert.equal(out.passages[1].section, '73', 'the section from the heading path: no Act is read to place it');
+    }
+    assert.equal(wordsCalls(supabase).length, 1, c.scope);
+    assert.equal(hybridCalls(supabase).length, 0, `${c.scope}: no embedding, no hybrid search`);
+    assert.deepEqual(seen, [], c.scope);
+  }
+});
+
+test('with every search hanging too, nothing is returned by the deadline, marked, and what answers later changes nothing; match_documents is not tried', async () => {
+  const late = deferred();
+  const supabase = fakeSupabase({ rpc: { search_passages: () => late.promise, match_documents: () => { throw new Error('match_documents must not be called'); } } });
+  const voyage = fakeVoyage();
+  const deadlineMs = 100;
+  const { result: { result: out, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs, timings: true })));
+  assert.ok(took >= deadlineMs && took <= deadlineMs + 500, `the deadline and its grace at most (${took} ms)`);
   assert.equal(out.fellBack, true);
-  assert.match(out.reason, /words only/);
-  assert.deepEqual(out.passages.map((p) => p.id), ['w1', 'w2']);
-  const call = supabase.calls.find((c) => c.name === 'search_passages');
-  assert.equal(call.args.query_embedding, null);
-  assert.ok(out.timings.events.some((e) => e.stage === 'fallback: words only'));
+  assert.equal(out.path, 'none');
+  assert.deepEqual(out.passages, []);
+  assert.match(out.reason, /longer than 100 ms and neither the question's own search nor the search by words was back in time; nothing returned/);
+  assert.equal(out.timings.path, 'none');
+  assert.equal(out.timings.reason, out.reason);
+  assert.equal(supabase.calls.filter((c) => c.name === 'match_documents').length, 0);
+  const before = JSON.stringify(out);
+  late.resolve({ data: [precRow('late', 0.05)], error: null });
+  await sleep(50);
+  assert.equal(JSON.stringify(out), before, 'nothing written to the result after it was returned');
   assert.deepEqual(seen, []);
 });
 
-test('with search_passages not back before the deadline, match_documents (meaning only) is started and returned; the late answer changes nothing', async () => {
-  const late = deferred();
+test('the deadline is a hard total: a words-only answer just after it is still used, a later one is not, and the search returns within the deadline and 500 ms either way', async () => {
+  const fetchImpl = (url, init) => hanging(init);
+  const deadlineMs = 200;
+  for (const [answerAt, expectPath] of [[deadlineMs + 100, 'words'], [deadlineMs + FALLBACK_GRACE_MS + 400, 'none']]) {
+    clearRetrieveCaches();
+    const supabase = fakeSupabase({ rpc: { search_passages: async () => { await sleep(answerAt); return { data: [precRow('w1', 0.02)], error: null }; } } });
+    const { result: out, took } = await timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl, rewrite: false, deadlineMs }));
+    assert.ok(took <= deadlineMs + 500, `answer at ${answerAt} ms: returned in ${took} ms`);
+    assert.equal(out.path, expectPath, `answer at ${answerAt} ms`);
+    assert.equal(out.passages.length, expectPath === 'words' ? 1 : 0);
+  }
+});
+
+test('a full search that fails before the deadline returns the words-only result when there is one; with nothing in hand, its error', async () => {
   const supabase = fakeSupabase({
     rpc: {
-      search_passages: () => late.promise,
-      match_documents: { data: [{ id: 'm1', content: 'The concession period is thirty years.', metadata: { storage_path: 'precedent/m1.docx', filename: 'm1.docx' }, similarity: 0.8 }], error: null },
+      search_passages: (args) => (args.query_embedding ? { data: null, error: { code: 'XX000', message: 'boom' } } : { data: [precRow('w1', 0.02)], error: null }),
     },
   });
   const voyage = fakeVoyage();
-  const { result: out, seen } = await noUnhandled(async () => {
-    const r = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 150 });
-    const before = JSON.stringify(r);
-    // search_passages answers after the search has returned.
-    late.resolve({ data: [precRow('late', 0.05)], error: null });
-    await sleep(50);
-    assert.equal(JSON.stringify(r), before, 'nothing written to the result after it was returned');
-    return r;
-  });
+  const { result: { result: out, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000, timings: true })));
+  assert.ok(took < 1000, `returned as soon as the failure was known (${took} ms)`);
   assert.equal(out.fellBack, true);
-  assert.equal(out.engine, 'vector');
-  assert.match(out.reason, /match_documents/);
-  assert.equal(out.passages.length, 1);
-  assert.match(out.passages[0].text, /thirty years/);
-  const md = supabase.calls.find((c) => c.name === 'match_documents');
-  assert.deepEqual(md.args.query_embedding, [1, 0, 0], 'the question\'s embedding, already in hand');
+  assert.equal(out.path, 'words');
+  assert.match(out.reason, /^the search failed \(The search failed: boom\): returned the search by words alone/);
+  assert.deepEqual(out.passages.map((p) => p.id), ['w1']);
   assert.deepEqual(seen, []);
-});
-
-test('a search that finishes in time is not touched by the deadline, and the deadline can be turned off', async () => {
-  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03)], error: null } } });
-  const voyage = fakeVoyage();
-  const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000 });
-  assert.equal(out.fellBack, false);
-  assert.equal(out.reason, null);
-  // deadlineMs: 0 — waits for the whole search however long it takes.
-  clearRetrieveCaches();
-  const slow = fakeSupabase({ rpc: { search_passages: async () => { await sleep(120); return { data: [precRow('a', 0.03)], error: null }; } } });
-  const off = await retrieveDetailed({ supabase: slow, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 0 });
-  assert.equal(off.fellBack, false);
-  assert.equal(off.passages.length, 1);
-  // A failure before the deadline is still a failure.
+  // Everything failing: the error.
   clearRetrieveCaches();
   const broken = fakeSupabase({ rpc: { search_passages: { data: null, error: { code: 'XX000', message: 'boom' } } } });
   await assert.rejects(retrieve({ supabase: broken, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000 }), /boom/);
 });
 
-test('when nothing at all comes back by the deadline and its grace, nothing is returned, marked fellBack', async () => {
-  const supabase = fakeSupabase({ rpc: { search_passages: () => new Promise(() => {}), match_documents: () => new Promise(() => {}) } });
+test('a search that finishes in time is not touched by the deadline, and with the deadline off no words-only search is started', async () => {
+  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03)], error: null } } });
   const voyage = fakeVoyage();
-  const t0 = Date.now();
-  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 100 }));
-  const took = Date.now() - t0;
-  assert.ok(took >= 140 && took < 400, `the deadline and half again (${took} ms)`);
-  assert.equal(out.fellBack, true);
-  assert.deepEqual(out.passages, []);
-  assert.match(out.reason, /no quicker search came back/);
-  assert.deepEqual(seen, []);
+  const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000, timings: true });
+  assert.equal(out.fellBack, false);
+  assert.equal(out.reason, null);
+  assert.equal(out.path, 'full');
+  assert.equal(out.timings.path, 'full');
+  assert.equal(out.timings.fellBack, false);
+  assert.equal(out.timings.deadlineMs, 5000);
+  assert.equal(wordsCalls(supabase).length, 1);
+  // deadlineMs: 0 — waits for the whole search however long it takes, and
+  // starts no search by words alone.
+  clearRetrieveCaches();
+  const slow = fakeSupabase({ rpc: { search_passages: async () => { await sleep(120); return { data: [precRow('a', 0.03)], error: null }; } } });
+  const off = await retrieveDetailed({ supabase: slow, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 0, timings: true });
+  assert.equal(off.fellBack, false);
+  assert.equal(off.path, 'full');
+  assert.equal(off.timings.deadlineMs, null);
+  assert.equal(off.passages.length, 1);
+  assert.equal(wordsCalls(slow).length, 0);
+  assert.equal(searchCalls(slow).length, 1);
 });

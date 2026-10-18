@@ -42,20 +42,31 @@
 // the Companies Act 2017") also gets that section's full text first, read the
 // way read_act_section reads it, from the start, alongside the search.
 //
-// A deadline (deadlineMs, default RETRIEVE_DEADLINE_MS = 12 s): when all of
-// that has not finished in time, the search returns what it already has the
-// quick way — the question's own search_passages call (or, when that is not
-// back either, a search by words only or by meaning only on match_documents,
-// started a few seconds before the deadline), not reranked — marked
-// fellBack with the reason, and stops the rest (the reranker and any search
-// still running are aborted).
+// A deadline (deadlineMs, default RETRIEVE_DEADLINE_MS = 12 s) is a hard
+// total: retrieve() returns within deadlineMs + FALLBACK_GRACE_MS, whatever
+// the services are doing. Under a deadline a search by words alone (the same
+// search_passages call with no embedding: its keyword and file-name legs,
+// which need no Voyage call) starts at once, beside the rewrite and the
+// embedding, so that something is in hand when the embedding is slow — on
+// the free tier a Voyage call can wait 7-15 s. At the deadline the search
+// returns the best it has: the full search when it has finished (path
+// "full"); else the question's own search_passages result, words and
+// meaning fused but not reranked ("fused"); else the words-only result
+// ("words"); and only when none is back, nothing ("none"). A full search
+// that fails before the deadline (a statement timeout, say) returns the
+// same way when a quicker result is in hand. A quick return is marked
+// fellBack with the reason, the reranker is never run on it, nothing that
+// finishes later changes what was returned, and the rest (the reranker and
+// any search still running) is aborted.
 //
 // The Voyage account is on the free tier (3 requests a minute): every call
 // counts, and a search makes at most two (one embedding, one rerank), often
 // fewer. `voyageCalls` counts them.
 //
 // `timings: true` returns, with the passages, when each stage started and how
-// long it took (scripts/eval/time-retrieve.mjs prints them).
+// long it took, with fellBack, reason, path and voyageCalls
+// (scripts/eval/time-retrieve.mjs prints them; run.mjs writes them into its
+// results file).
 //
 // Deploying this before the migration is safe: when search_passages is not
 // in the database, the same flow runs on match_documents (meaning only) and
@@ -89,12 +100,9 @@ export const RETRIEVE_DEADLINE_MS = (() => {
   const v = Number(raw);
   return raw && Number.isFinite(v) && v >= 0 ? v : 12_000;
 })();
-// When the question's own search is not back this long before the deadline,
-// a quicker one is started beside it (at most a third of the deadline).
-const FALLBACK_LEAD_MS = 4_000;
-// After the deadline, how long the first of those may still be waited for
-// when none is back (at most half the deadline); then nothing is returned.
-const FALLBACK_GRACE_MS = 3_000;
+// After the deadline, how long a search about to answer is still waited for
+// when nothing is back: retrieve() returns within the deadline plus this.
+export const FALLBACK_GRACE_MS = 300;
 // Statute passages are placed in their sections for the first few Acts.
 const PLACE_ACTS = 3;
 // The rerank-2 score under which a passage found automatically (the chat's
@@ -114,6 +122,9 @@ const WINDOW = 3_000;
 const MAX_QUESTION_CHARS = 600;
 const LONG_QUERY = 300;
 const REWRITE_TIMEOUT_MS = 6_000;
+// The embedding call's own timeout. It does not bound a search: under a
+// deadline the search returns without it (the call is shared through the
+// cache, so a late embedding still serves the next question).
 const EMBED_TIMEOUT_MS = 15_000;
 const CACHE_MS = 60 * 60 * 1000;
 const MAX_CACHE = 500;
@@ -805,38 +816,42 @@ export function rewriteWorthwhile(query) {
 }
 
 // One search's work, started at once: `full` (the whole search, a promise of
-// its result), and what retrieveDetailed falls back on when it is late —
-// prepareFallback() starts a quicker search beside it, fallback() returns
-// the best quick result there is. `work` stops this search's own calls (the
-// reranker, the database searches); the embedding and the rewrite, which
-// other searches may be sharing through the caches, stop only with `signal`.
+// its result) and, with `wordsFirst`, a search by words alone beside it;
+// fallback() returns the best result in hand when `full` is late or has
+// failed. `work` stops this search's own calls (the reranker, the database
+// searches); the embedding and the rewrite, which other searches may be
+// sharing through the caches, stop only with `signal`.
 function startSearch({
   supabase, voyageKey, anthropicJson = null, query, scope,
   matterId = null, actNames = null, documentTypeId = null, allVersions = false,
   excludeDocumentId = null, excludeStoragePath = null,
   k = 8, rewrite = true, rerank = true, minScore = 0, candidates = CANDIDATES,
   rewriteWaitMs = REWRITE_WAIT_MS, rerankPool = RERANK_POOL, rerankChars = RERANK_CHARS, timings = false,
-  signal = null, work, fetchImpl = globalThis.fetch,
+  deadlineMs = 0, wordsFirst = false, signal = null, work, fetchImpl = globalThis.fetch,
 }) {
   const clock = stopwatch();
   const q = norm(query);
   const meter = { voyageCalls: 0 };
   const voyage = (url, init) => { meter.voyageCalls++; return fetchImpl(url, init); };
-  const blank = () => ({ passages: [], phrasings: [q], engine: null, reranked: false, rerankSkipped: null, rewriteLate: false, fellBack: false, reason: null, voyageCalls: 0 });
+  // path: which search produced the passages — "full", "fused" (the
+  // question's own search_passages call, not reranked), "words" (by words
+  // alone, not reranked) or "none" (nothing was back).
+  const blank = () => ({ passages: [], phrasings: [q], engine: null, reranked: false, rerankSkipped: null, rewriteLate: false, fellBack: false, reason: null, path: null, voyageCalls: 0 });
   const finish = (out) => {
     out.voyageCalls = meter.voyageCalls;
     if (timings) {
       out.timings = {
         total: clock.elapsed(), scope, engine: out.engine, phrasings: out.phrasings.length, rewriteLate: out.rewriteLate, reranked: out.reranked,
-        rerankSkipped: out.rerankSkipped, voyageCalls: meter.voyageCalls, fellBack: out.fellBack, reason: out.reason,
+        rerankSkipped: out.rerankSkipped, voyageCalls: meter.voyageCalls, fellBack: out.fellBack, reason: out.reason, path: out.path,
+        deadlineMs: deadlineMs > 0 ? deadlineMs : null,
         events: [...clock.events].sort((a, b) => a.start - b.start),
       };
     }
     return out;
   };
   if (q.length < 2 || (scope === "project" && !matterId)) {
-    const out = finish(blank());
-    return { clock, full: Promise.resolve(out), prepareFallback: noop, fallback: async () => out };
+    const out = finish({ ...blank(), path: "full" });
+    return { clock, full: Promise.resolve(out), fallback: async () => out };
   }
 
   const named = (actNames ?? []).filter(Boolean);
@@ -848,7 +863,7 @@ function startSearch({
   // where it is awaited, never left unhandled if the search stops first.
   const started = (p) => { p.catch(noop); return p; };
   // What the quick way needs to see of the full search.
-  const st = { done: false, prepared: false, qEmb: null, plain: null, plainByWords: false, words: null, meaning: null, versionsP: null };
+  const st = { done: false, qEmb: null, plain: null, plainByWords: false, words: null, versionsP: null };
 
   // Everything that needs only the question starts at once: the rewrite,
   // the named Acts' other copies, the section the question names, and —
@@ -874,8 +889,7 @@ function startSearch({
   const leadT = leadP ? track(leadP) : null;
 
   // Meaning only, on match_documents (the current-version filter applied
-  // here): before the search_passages migration, and as the quick way's
-  // last resort.
+  // here): before the search_passages migration.
   const byMeaning = async (embedding, acts, terms) => {
     if (!st.versionsP) st.versionsP = scope === "project" ? started(projectVersions(supabase, matterId)) : Promise.resolve(null);
     const list = await vectorFallback(supabase, {
@@ -934,6 +948,18 @@ function startSearch({
   };
   if (!rewriting || (voyageKey && recall(embedCache, embedKey(q)) !== undefined)) {
     startPlain(started(embed([q]).then((v) => v?.[0] ?? null)), queryTerms(q, []));
+  }
+
+  // Under a deadline, the question searched by its words alone from the
+  // start — search_passages with no embedding: its keyword leg (precedent
+  // paragraphs, statute rows, the project's current versions) and file-name
+  // leg, no Voyage call — so that something is in hand whatever the
+  // embedding does. Only the quick way reads it; its failure is seen there.
+  if (wordsFirst) {
+    st.words = track(started(actsP.then((acts) => {
+      work.throwIfAborted();
+      return search(0, q, null, acts, queryTerms(q, []), "words only");
+    })));
   }
 
   // Merged, without repeats, at most three a file (any number from one Act
@@ -1030,60 +1056,51 @@ function startSearch({
     }
     for (const c of final) c.label = buildLabel(c);
     out.passages = final.map(toPassage);
+    out.path = "full";
     st.done = true;
     return finish(out);
   })());
   const fullT = track(full);
 
-  // A few seconds before the deadline, with the question's own search not
-  // back: a quicker one beside it — by meaning only on match_documents (the
-  // search before C2) when the embedding is in hand, else by words only.
-  const prepareFallback = () => {
-    if (st.done || st.prepared || work.aborted) return;
-    st.prepared = true;
-    if (st.plain?.state === "ok" || Date.now() < hybridMissingUntil) return;
-    const emb = st.qEmb?.state === "ok" ? st.qEmb.value : null;
-    const terms = queryTerms(q, []);
-    if (emb) {
-      st.meaning = track(started(clock.time("fallback: match_documents", () => actsP.then((acts) => byMeaning(emb, acts, terms)), {}, (rows) => ({ rows: rows.length }))));
-    } else if (!(st.plain && st.plainByWords)) {
-      st.words = track(started(actsP.then((acts) => search(0, q, null, acts, terms, "fallback: words only"))));
-    }
-  };
-
-  // The quick result: the question's own search, else the words-only or
-  // match_documents search, not reranked; when none is back, the first to
-  // come within the grace (or the full search, should it finish first).
-  const fallback = async (deadlineMs, graceMs) => {
-    prepareFallback();
+  // The best result in hand at the deadline (or when the full search has
+  // failed: `failure`): the full search when it is done; else the question's
+  // own search_passages result, not reranked; else the words-only result.
+  // When none is back, the first to answer within the grace; then nothing —
+  // or, when the full search failed and nothing else can answer, its error.
+  // The passages are built from copies: nothing the full search does after
+  // this changes them, and the reranker is never run here.
+  const fallback = async (deadlineMs, failure = null) => {
     const ways = [
-      [st.plain, "returned the question's own search, not reranked"],
-      [st.words, "returned a search by words only (the question's embedding was not back), not reranked"],
-      [st.meaning, "returned match_documents, by meaning only (the hybrid search was not back), not reranked"],
+      [fullT, "full", null],
+      [st.plain, st.plainByWords ? "words" : "fused", st.plainByWords
+        ? "returned the question's own search, by words alone (its embedding failed), not reranked"
+        : "returned the question's own search (words and meaning fused), not reranked"],
+      [st.words, "words", "returned the search by words alone (the question's embedding was not back), not reranked"],
     ];
     const pick = () => ways.find(([t]) => t?.state === "ok");
     let chosen = pick();
-    while (!chosen && fullT.state !== "ok") {
-      const pending = [fullT, ...ways.map(([t]) => t)].filter((t) => t?.state === "pending");
-      const left = deadlineMs + graceMs - clock.elapsed();
+    while (!chosen) {
+      const pending = ways.map(([t]) => t).filter((t) => t?.state === "pending");
+      const left = deadlineMs + FALLBACK_GRACE_MS - clock.elapsed();
       if (!pending.length || left <= 0) break;
       await within(Promise.race(pending.map((t) => t.p.then(noop, noop))), left);
       chosen = pick();
     }
-    if (!chosen && fullT.state === "ok") return fullT.value;
+    if (chosen?.[1] === "full") return chosen[0].value;
+    const why = failure ? `the search failed (${String(failure?.message ?? failure).slice(0, 200)})` : `the search took longer than ${deadlineMs} ms`;
     const out = blank();
     out.fellBack = true;
     if (!chosen) {
-      const failed = [fullT, ...ways.map(([t]) => t)].filter((t) => t?.state === "error");
-      const stillRunning = [fullT, ...ways.map(([t]) => t)].some((t) => t?.state === "pending");
-      if (failed.length && !stillRunning) throw failed[0].error;
-      out.reason = `the search took longer than ${deadlineMs} ms and no quicker search came back in time; nothing returned`;
-      clock.note("fell back", { reason: out.reason });
+      if (failure && !ways.some(([t]) => t?.state === "pending")) throw failure;
+      out.path = "none";
+      out.reason = `${why} and neither the question's own search nor the search by words was back in time; nothing returned`;
+      clock.note("fell back", { reason: out.reason, path: out.path });
       console.error(`retrieve (${scope}): ${out.reason}`);
       return finish(out);
     }
-    const [t, how] = chosen;
-    out.reason = `the search took longer than ${deadlineMs} ms: ${how}`;
+    const [t, path, how] = chosen;
+    out.path = path;
+    out.reason = `${why}: ${how}`;
     out.engine = t.value.engine ?? null;
     const acts = actsT.state === "ok" ? actsT.value : [];
     const pool = merge([t.value], acts).slice(0, k);
@@ -1091,42 +1108,48 @@ function startSearch({
     const final = scope === "statute" && leadT?.state === "ok" ? withLead(pool, leadT.value) : pool;
     for (const c of final) c.label = buildLabel(c);
     out.passages = final.map(toPassage);
-    clock.note("fell back", { reason: out.reason });
+    clock.note("fell back", { reason: out.reason, path: out.path });
     console.warn(`retrieve (${scope}): ${out.reason}`);
     return finish(out);
   };
 
-  return { clock, full, prepareFallback, fallback };
+  return { clock, full, fallback };
 }
 
 /**
  * The search, with what it did: { passages, phrasings, engine: "hybrid" |
  * "vector" | null, reranked, rerankSkipped, rewriteLate, fellBack, reason,
- * voyageCalls } and, with `timings: true`, timings: { total, events:
+ * path, voyageCalls } and, with `timings: true`, timings: { total, events:
  * [{ stage, start, ms, ... }], ... }. See retrieve().
  */
 export async function retrieveDetailed(options) {
   const scope = options?.scope;
   if (!SCOPES.has(scope)) throw new Error(`retrieve: scope must be project, precedent or statute, not ${scope}`);
-  const deadlineMs = options.deadlineMs ?? RETRIEVE_DEADLINE_MS;
+  const raw = options.deadlineMs ?? RETRIEVE_DEADLINE_MS;
+  const deadlineMs = raw > 0 && Number.isFinite(raw) ? raw : 0;
   const signal = options.signal ?? null;
   // Stops this search's own calls when the caller goes, when it falls back,
-  // and once it has returned (a quick search started beside it, say).
+  // and once it has returned (the words-only search started beside it, say).
   const stop = new AbortController();
   const relay = () => stop.abort(signal.reason);
   if (signal?.aborted) stop.abort(signal.reason);
   else signal?.addEventListener("abort", relay, { once: true });
-  let prepTimer = null;
   try {
-    const run = startSearch({ ...options, signal, work: stop.signal });
-    if (!(deadlineMs > 0) || !Number.isFinite(deadlineMs)) return await run.full;
-    prepTimer = setTimeout(run.prepareFallback, Math.max(0, deadlineMs - Math.min(FALLBACK_LEAD_MS, deadlineMs / 3) - run.clock.elapsed()));
-    const r = await within(run.full, deadlineMs - run.clock.elapsed());
+    const run = startSearch({ ...options, deadlineMs, wordsFirst: deadlineMs > 0, signal, work: stop.signal });
+    if (!deadlineMs) return await run.full;
+    let r;
+    try {
+      r = await within(run.full, deadlineMs - run.clock.elapsed());
+    } catch (err) {
+      // The full search failed before the deadline: what is in hand, else
+      // the error.
+      signal?.throwIfAborted();
+      return await run.fallback(deadlineMs, err);
+    }
     if (r !== LATE) return r;
     signal?.throwIfAborted();
-    return await run.fallback(deadlineMs, Math.min(FALLBACK_GRACE_MS, deadlineMs / 2));
+    return await run.fallback(deadlineMs);
   } finally {
-    clearTimeout(prepTimer);
     signal?.removeEventListener("abort", relay);
     stop.abort(new Error("the search has returned"));
   }
@@ -1146,9 +1169,11 @@ export async function retrieveDetailed(options) {
  * anthropicJson), rewriteWaitMs (how long they are waited for), rerank,
  * rerankPool / rerankChars (how many passages the reranker reads, and how
  * much of each), minScore (drop reranked passages scoring below),
- * deadlineMs (when to return the quick way instead; 0: never), timings
- * (return { passages, timings } instead: each stage's start and duration,
- * the Voyage calls made, and whether and why it fell back).
+ * deadlineMs (a hard total: the search returns within this plus
+ * FALLBACK_GRACE_MS, the quick way when the full search is not done; 0:
+ * never), timings (return { passages, timings } instead: each stage's start
+ * and duration, the Voyage calls made, whether and why it fell back, and
+ * which path — full, fused, words, none — produced the passages).
  */
 export async function retrieve(options) {
   const d = await retrieveDetailed(options);

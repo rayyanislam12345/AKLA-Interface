@@ -67,7 +67,8 @@ const detailOf = (e) => Object.entries(e)
 
 function printScope(scope, wallMs, t) {
   console.log(`    ${scope}: ${wallMs} ms  (engine ${t.engine ?? "-"}, ${t.phrasings} phrasing${t.phrasings === 1 ? "" : "s"}${t.rewriteLate ? ", rewrite not waited for" : ""}, ${t.reranked ? "reranked" : t.rerankSkipped ? `rerank skipped: ${t.rerankSkipped}` : "not reranked"}${t.voyageCalls != null ? `, ${t.voyageCalls} Voyage call${t.voyageCalls === 1 ? "" : "s"}` : ""})`);
-  if (t.fellBack) console.log(`      FELL BACK: ${t.reason}`);
+  if (t.fellBack) console.log(`      FELL BACK (path ${t.path ?? "?"}): ${t.reason}`);
+  else if (t.path) console.log(`      path ${t.path}`);
   console.log(`      ${"start".padStart(6)} ${"ms".padStart(6)}  stage`);
   for (const e of t.events) console.log(`      ${pad(e.start, 6)} ${pad(e.ms, 6)}  ${e.stage.padEnd(22)} ${detailOf(e)}`);
 }

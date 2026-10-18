@@ -137,7 +137,11 @@ Port 8092 (8090 is ocr-service, 8091 the relay). `.env` needs
 `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `PORT=8092`.
 Optional: `RETRIEVE_DEADLINE_MS` (default 12000; 0 turns it off), how long a
-library search may take before it returns the quick way (retrieve.js).
+library search may take before it returns the quick way (retrieve.js). It is
+a hard total: a search returns within it (plus 300 ms) with the best it has —
+the full search, else the question's own search unreranked, else a search by
+words alone that starts at once and needs no Voyage call — marked `fellBack`
+with the reason and the `path` that answered.
 
 ```bash
 ./chat-service/deploy.sh            # copies, stamps the commit, restarts

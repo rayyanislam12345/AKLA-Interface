@@ -69,7 +69,11 @@ Adapters:
   passages in their sections (recorded as `searchMs` in the result file).
   `--deadline MS` overrides RETRIEVE_DEADLINE_MS (`--deadline 0` measures
   the full search however long it takes; a search that returned the quick
-  way is marked `fb:<scope>`, and `v<N>` is its Voyage calls).
+  way is marked `fb:<scope>=<path>` — `fused` is the question's own search
+  unreranked, `words` the search by words alone, `none` nothing in time —
+  and `v<N>` is its Voyage calls). The result file's `retrieve` holds, per
+  scope, `fellBack`, `reason`, `path`, `voyageCalls` and every stage's
+  timing (`events`), so a capped run can be read question by question.
   `--rerank-pool N`, `--rerank-chars N` and `--rewrite-wait MS` override
   retrieve.js's `RERANK_POOL` (30), `RERANK_CHARS` (8,000) and
   `REWRITE_WAIT_MS` (2,500), to compare a setting's scores and speed.

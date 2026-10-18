@@ -24,7 +24,9 @@
 //          --rerank-pool N --rerank-chars N --rewrite-wait MS   (retrieve adapter) override retrieve.js's
 //                           RERANK_POOL, RERANK_CHARS and REWRITE_WAIT_MS, to compare
 //          --deadline MS    (retrieve adapter) override RETRIEVE_DEADLINE_MS; 0 measures the full
-//                           search however long it takes (a search that fell back is marked "fb")
+//                           search however long it takes (a search that fell back is marked
+//                           "fb:<scope>=<path>"; the result file's `retrieve` holds each scope's
+//                           fellBack, reason, path, voyageCalls and stage timings)
 //
 // Reads SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and VOYAGE_API_KEY (and
 // ANTHROPIC_API_KEY for precedent synonyms) — the names chat-service/server.js
@@ -382,11 +384,23 @@ export function retrieveAdapter({ supabase, voyageKey, anthropicJson, lib, place
   const run = async (question, scope, extra, timing) => {
     const t0 = Date.now();
     const got = await retrieveMod.retrieve({ supabase, voyageKey, anthropicJson, query: question, scope, k: K_MAX, ...retrieveOptions, ...extra, timings: true });
-    timing.searchMs = Math.max(timing.searchMs, Date.now() - t0);
+    const ms = Date.now() - t0;
+    timing.searchMs = Math.max(timing.searchMs, ms);
     // An older retrieve.js returns the passages alone.
     const out = Array.isArray(got) ? got : got.passages;
-    if (got.timings?.fellBack) timing.fellBack = [...(timing.fellBack ?? []), scope];
-    if (typeof got.timings?.voyageCalls === "number") timing.voyageCalls = (timing.voyageCalls ?? 0) + got.timings.voyageCalls;
+    const t = got.timings ?? null;
+    if (t?.fellBack) timing.fellBack = [...(timing.fellBack ?? []), scope];
+    if (typeof t?.voyageCalls === "number") timing.voyageCalls = (timing.voyageCalls ?? 0) + t.voyageCalls;
+    // Each scope's search as retrieve.js reported it: whether and why it
+    // fell back, which path produced the passages, its Voyage calls and
+    // every stage's timing — written into the result file.
+    timing.scopes.push({
+      scope, ms, passages: out.length,
+      fellBack: !!t?.fellBack, reason: t?.reason ?? null, path: t?.path ?? null, voyageCalls: t?.voyageCalls ?? null,
+      engine: t?.engine ?? null, reranked: t?.reranked ?? null, rerankSkipped: t?.rerankSkipped ?? null,
+      phrasings: t?.phrasings ?? null, rewriteLate: t?.rewriteLate ?? null, deadlineMs: t?.deadlineMs ?? null,
+      total: t?.total ?? null, events: t?.events ?? null,
+    });
     return Promise.all(out.map(async (p) => {
       const placed = p.scope === "statute" && !p.lead ? await place(p.act_name, p.text) : [];
       return {
@@ -411,7 +425,7 @@ export function retrieveAdapter({ supabase, voyageKey, anthropicJson, lib, place
       const plan = retrievePlan({ question, scope, kind: gold.kind, act, route });
       // searchMs: the slowest scope's retrieve() alone, without the
       // evaluation's own placing of statute passages in their sections.
-      const timing = { searchMs: 0 };
+      const timing = { searchMs: 0, scopes: [] };
       const lists = await Promise.all(plan.map((p) => run(question, p.scope, p.options, timing)));
       // A section read whole leads, as read_act_section's answer does for the tools.
       const lead = lists.flat().filter((p) => p.lead);
@@ -505,6 +519,28 @@ async function checkGold(gold, { supabase, lib, place }) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * One question's row in the result file: its score, timing (ms, searchMs),
+ * the scopes that fell back, the Voyage calls, and — under `retrieve` — each
+ * scope's search as retrieve.js reported it (fellBack, reason, path,
+ * voyageCalls, every stage's events), when the adapter attached them.
+ */
+export function resultRow(q, results, { ms = null, error = null } = {}) {
+  const timing = results.timing ?? null;
+  const s = scoreQuestion(results, q.expected);
+  return {
+    id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms,
+    searchMs: timing?.searchMs ?? null, fellBack: timing?.fellBack ?? null, voyageCalls: timing?.voyageCalls ?? null,
+    retrieve: timing?.scopes?.length ? timing.scopes : null,
+    error, resultCount: results.length, ...s,
+    top: results.slice(0, K_MAX).map((r, i) => ({
+      rank: i + 1, kind: r.kind, act_name: r.act_name ?? null, sections: r.sections ?? [], filename: r.filename ?? null,
+      storage_path: r.storage_path ?? null, similarity: r.similarity ?? null, matched: q.expected.some((e) => matchItem(r, e)),
+      excerpt: String(r.text ?? "").replace(/\s+/g, " ").slice(0, 160),
+    })),
+  };
+}
+
 async function pool(items, n, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -596,20 +632,12 @@ async function main() {
       error = err instanceof Error ? err.message : String(err);
     }
     const ms = Date.now() - t0;
-    const searchMs = results.timing?.searchMs ?? null;
-    const fellBack = results.timing?.fellBack ?? null;
-    const voyageCalls = results.timing?.voyageCalls ?? null;
-    const s = scoreQuestion(results, q.expected);
-    const row = {
-      id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms, searchMs, fellBack, voyageCalls, error, resultCount: results.length, ...s,
-      top: results.slice(0, K_MAX).map((r, i) => ({
-        rank: i + 1, kind: r.kind, act_name: r.act_name ?? null, sections: r.sections ?? [], filename: r.filename ?? null,
-        storage_path: r.storage_path ?? null, similarity: r.similarity ?? null, matched: q.expected.some((e) => matchItem(r, e)),
-        excerpt: String(r.text ?? "").replace(/\s+/g, " ").slice(0, 160),
-      })),
-    };
+    const row = resultRow(q, results, { ms, error });
+    const { searchMs, voyageCalls, fellBack, retrieve: scopes } = row;
+    const s = row;
+    const fb = fellBack ? ` fb:${fellBack.map((sc) => `${sc}=${scopes?.find((x) => x.scope === sc)?.path ?? "?"}`).join("+")}` : "";
     const mark = error ? "ERR " : s.firstRank ? `@${s.firstRank}`.padEnd(4) : "miss";
-    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms${searchMs != null ? ` (search ${String(searchMs).padStart(5)}ms)` : ""}${voyageCalls != null ? ` v${voyageCalls}` : ""}${fellBack ? ` fb:${fellBack.join("+")}` : ""}  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
+    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms${searchMs != null ? ` (search ${String(searchMs).padStart(5)}ms)` : ""}${voyageCalls != null ? ` v${voyageCalls}` : ""}${fb}  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
     if (args.verbose) for (const t of row.top) console.log(`        ${String(t.rank).padStart(2)}${t.matched ? "*" : " "} ${t.kind ?? ""} ${t.act_name ? `${t.act_name} §${t.sections.join(",")}` : t.filename ?? t.storage_path ?? ""} ${t.similarity != null ? `(${Number(t.similarity).toFixed(3)})` : ""}`);
     return row;
   });
