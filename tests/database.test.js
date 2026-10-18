@@ -581,6 +581,8 @@ test('indexing: Try again re-queues a failed version for members only; a stoppin
 // three-number embeddings. The HNSW index and its settings are not
 // exercised here (set_config on hnsw.* is a harmless placeholder in PGlite).
 const hybridSql=()=>readFileSync('supabase/migrations/20261017120000_hybrid_search.sql','utf8');
+// The same search, faster (18 Oct): replaces the function; the tests below run on it.
+const hybridSpeedSql=()=>readFileSync('supabase/migrations/20261018120000_hybrid_search_speed.sql','utf8');
 const vec=(a)=>(a?`{${a.join(',')}}`:null);
 async function hybridDatabase() {
  const db=await indexingDatabase(async(db)=>{
@@ -595,6 +597,8 @@ async function hybridDatabase() {
  await db.exec(readFileSync('supabase/migrations/20260921090000_precedent_passages.sql','utf8'));
  await db.exec(hybridSql());
  await db.exec(hybridSql()); // a second run changes nothing
+ await db.exec(hybridSpeedSql());
+ await db.exec(hybridSpeedSql());
  return db;
 }
 // A project document with versions; returns { docId, versions: [{ id, path }] }.
@@ -738,6 +742,59 @@ test('hybrid search: precedents are searched by paragraph, statutes within the n
   const any=await search(db,{q:'compensation breach',scope:'statute',matter:null});
   assert.equal(any.filter(r=>r.metadata.act_name==='Contract Act, 1872').length,3,'no Act named: at most three from one Act');
   assert.equal(any.filter(r=>r.metadata.act_name==='Other Act').length,1);
+ } finally {await db.close();}
+});
+
+test('hybrid search (18 Oct): a precedent file is found by its name once, by its row closest to the question; a row with no storage path is its own file', async () => {
+ const db=await hybridDatabase();
+ try {
+  const prec=async(path,filename,body,emb)=>(await db.query(`insert into documents(content,metadata,is_precedent,embedding) values($1,$2,true,$3) returning id`,
+   [body,JSON.stringify(path?{storage_path:path,filename}:{filename}),vec(emb)])).rows[0].id;
+  const far=await prec('precedent/a/1788590751052-SHA0522 _Execution Version_.docx','1788590751052-SHA0522 _Execution Version_.docx','<p>Recitals: the shareholders wish to record their arrangements.</p>',[0,0,1]);
+  const near=await prec('precedent/a/1788590751052-SHA0522 _Execution Version_.docx','1788590751052-SHA0522 _Execution Version_.docx','<p>Schedule 1: the shareholders and the shares each of them holds.</p>',[0,1,0]);
+  await prec('precedent/b/12. JVA.docx','12. JVA.docx','<p>Deadlock between the joint venture partners goes to the chairmen.</p>',[1,0,0]);
+  const mou=await prec(null,'MOU SIAC Singapore.docx','<p>Disputes are finally resolved by arbitration under the rules in force.</p>',[1,0,0]);
+  const byName=(await search(db,{q:'deadlock resolution mechanism in SHA0522',scope:'precedent',matter:null,emb:[0,1,0]})).filter(r=>r.name_rank!==null);
+  assert.equal(byName.length,1,'one file, one passage from the name leg');
+  assert.equal(byName[0].id,near,'the file is represented by its row closest to the question');
+  assert.ok(byName[0].id!==far);
+  const own=(await search(db,{q:'SIAC arbitration seated in singapore',scope:'precedent',matter:null,emb:[0,1,0]})).filter(r=>r.name_rank!==null);
+  assert.deepEqual(own.map(r=>r.id),[mou],'a row with no storage path is found by its own file name');
+ } finally {await db.close();}
+});
+
+test('hybrid search (18 Oct): common precedent words come from the statistics once the paragraphs are analysed, counted until then', async () => {
+ const db=await hybridDatabase();
+ try {
+  const paras=Array.from({length:12},(_,i)=>`<p>${i}. This agreement binds the parties and their successors${i<2?' and the drag along right applies':''}.</p>`).join('');
+  await db.query(`insert into documents(content,metadata,is_precedent) values($1,$2,true)`,[paras,JSON.stringify({storage_path:'precedent/c/SSA.docx',filename:'SSA.docx'})]);
+  assert.equal((await db.query(`select public.precedent_common_lexemes(array['agreement','drag'],5) as w`)).rows[0].w,null,'no statistics yet: null, and the function counts');
+  const before=await search(db,{q:'drag along agreement example',scope:'precedent',matter:null});
+  await db.exec('analyze precedent_passages');
+  assert.deepEqual((await db.query(`select public.precedent_common_lexemes(array['agreement','drag'],5) as w`)).rows[0].w,['agreement'],'a word in at least 5 paragraphs by the statistics is common');
+  assert.deepEqual((await db.query(`select public.precedent_common_lexemes(array['agreement','drag'],50) as w`)).rows[0].w,[]);
+  const after=await search(db,{q:'drag along agreement example',scope:'precedent',matter:null});
+  assert.deepEqual(after.map(r=>[r.metadata.passage_ordinal,r.keyword_rank]),before.map(r=>[r.metadata.passage_ordinal,r.keyword_rank]),'the same results whether counted or read from the statistics');
+  assert.ok(after.length>=1&&/drag along/.test(after[0].content),'the paragraph holding the most words first');
+  await db.exec('set role authenticated');
+  assert.deepEqual((await db.query(`select public.precedent_common_lexemes(array['agreement'],5) as w`)).rows[0].w,['agreement'],'a signed-in member reads them too (pg_stats hides a row-secured table from them)');
+  await db.exec('reset role');
+ } finally {await db.close();}
+});
+
+test('hybrid search (18 Oct): with Acts named, every leg runs on those Acts and the nearest in meaning ranks first', async () => {
+ const db=await hybridDatabase();
+ try {
+  const act=async(content,meta,emb)=>(await db.query(`insert into documents(content,metadata,is_statute,embedding) values($1,$2,true,$3) returning id`,[content,JSON.stringify(meta),vec(emb)])).rows[0].id;
+  const a=await act('73. Compensation for loss caused by breach of contract.',{act_name:'Contract Act, 1872'},[0,1,0]);
+  const b=await act('74. Compensation for breach where penalty stipulated for.',{act_name:'Contract Act, 1872'},[1,0,0]);
+  const amend=await act('2. Section 74 is amended.',{act_name:'Contract (Amendment) Act, 2020',amends_act:'Contract Act, 1872'},[0.9,0.1,0]);
+  await act('5. Compensation for breach.',{act_name:'Other Act'},[1,0,0]);
+  const rows=await search(db,{q:'penalty stipulated',scope:'statute',matter:null,acts:['Contract Act, 1872'],emb:[1,0,0]});
+  assert.deepEqual(rows.map(r=>r.id).sort(),[a,b,amend].sort(),'the Act and its amendment, nothing else');
+  assert.equal(rows.find(r=>r.vector_rank===1).id,b);
+  assert.equal(rows[0].id,b,'nearest in meaning and a keyword hit');
+  assert.deepEqual(await search(db,{q:'penalty',scope:'statute',matter:null,acts:['No Such Act'],emb:[1,0,0]}),[]);
  } finally {await db.close();}
 });
 

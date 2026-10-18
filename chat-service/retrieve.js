@@ -14,7 +14,8 @@
 //      "compensation for breach of contract where penalty stipulated for").
 //      Cached per question.
 //   2. One embedding call for all the phrasings (voyage-law-2, query).
-//   3. search_passages (supabase/migrations/20261017120000_hybrid_search.sql)
+//   3. search_passages (supabase/migrations/20261017120000_hybrid_search.sql,
+//      made faster by 20261018120000_hybrid_search_speed.sql)
 //      per phrasing: meaning, words and file names, fused by reciprocal
 //      rank in SQL, current versions only, at most three passages a file.
 //   4. The phrasings' lists merged (each passage keeps its best fused
