@@ -4,7 +4,7 @@
 // stage timings — and the result row written to the result file keeps it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { retrieveAdapter, resultRow } from '../scripts/eval/run.mjs';
+import { retrieveAdapter, toolsAdapter, resultRow } from '../scripts/eval/run.mjs';
 
 const question = {
   id: 'S04', kind: 'statute_concept', scope: 'general',
@@ -83,4 +83,49 @@ test('the retrieve adapter records each scope\'s fellBack, reason, path, Voyage 
   assert.equal(bare.voyageCalls, null);
   assert.equal(bare.error, 'down');
   assert.ok('retrieve' in bare && 'searchMs' in bare);
+});
+
+// The tools adapter measures the tools as the assistant runs them.
+test('the tools adapter takes each precedent passage\'s file from the tool\'s answer and hands the model for phrasings to the law and project tools, as the chat does', async () => {
+  const calls = [];
+  const anthropicJson = async () => ({ content: [] });
+  const lib = {
+    listActs: async () => [{ act_name: 'Contract Act, 1872', chunk_count: 10 }],
+    readActSection: async () => { throw new Error('no section was named'); },
+    searchLaw: async (sb, key, input, opts) => {
+      calls.push({ tool: 'law', input, opts });
+      return [{ id: 's1', act_name: 'Contract Act, 1872', section: '74', label: 'Contract Act, 1872, s.74', text: '74. Compensation for breach of contract where penalty stipulated for.', similarity: 0.7 }];
+    },
+    searchPrecedentsTool: async (sb, key, aj, input, opts) => {
+      calls.push({ tool: 'precedent', input, opts, anthropicJson: aj });
+      return [
+        { id: 'precedent:precedent/x/EPC.docx:row-1:4', storage_path: 'precedent/x/EPC.docx', filename: 'EPC.docx', label: 'EPC.docx, cl. 14.2', text: 'Liquidated damages are a genuine pre-estimate.', similarity: 0.6 },
+        // An id of another shape: the path comes from what the tool states.
+        { id: 'row-9', storage_path: 'precedent/y/SHA.docx', filename: 'SHA.docx', label: 'SHA.docx', text: 'Deadlock.', similarity: 0.5 },
+      ];
+    },
+    searchProject: async (sb, key, input, opts) => {
+      calls.push({ tool: 'project', input, opts });
+      return [{ id: 'd1', filename: 'Term Sheet.docx', label: 'Term Sheet v3, 4.2 Concession Period', text: 'The concession period is thirty years.', storage_path: 'matter/m1/term-sheet.docx', similarity: 0.4 }];
+    },
+  };
+  const supabase = { from: () => ({ select: () => ({ in: async () => ({ data: [{ id: 'd1', metadata: { storage_path: 'matter/m1/term-sheet.docx' } }], error: null }) }) }) };
+  const adapter = toolsAdapter({ supabase, voyageKey: 'v', anthropicJson, lib, place: async () => [], route: 'auto' });
+
+  const precedentQ = { id: 'C02', kind: 'precedent_clause', scope: 'general', question: 'example of a drag along clause in a joint venture agreement', expected: [{ match: 'storage_path', value: 'precedent/x/EPC.docx' }] };
+  const results = await adapter.retrieve(precedentQ.question, precedentQ.scope, precedentQ);
+  const precedents = results.filter((r) => r.kind === 'precedent');
+  assert.deepEqual(precedents.map((r) => r.storage_path), ['precedent/x/EPC.docx', 'precedent/y/SHA.docx']);
+  assert.deepEqual(precedents.map((r) => r.id), ['precedent:precedent/x/EPC.docx:row-1:4', 'row-9']);
+  assert.equal(resultRow(precedentQ, results, { ms: 1 }).firstRank, 1, 'scored by the file');
+  const law = calls.find((c) => c.tool === 'law');
+  assert.equal(law.opts.anthropicJson, anthropicJson, 'the law search is given the model for phrasings, as makeToolRunner gives it');
+  assert.equal(calls.find((c) => c.tool === 'precedent').anthropicJson, anthropicJson);
+
+  const projectQ = { id: 'P01', kind: 'project_fact', scope: 'm1', question: 'what is the concession period under the term sheet', expected: [{ match: 'storage_path', value: 'matter/m1/term-sheet.docx' }] };
+  const inProject = await adapter.retrieve(projectQ.question, projectQ.scope, projectQ);
+  assert.deepEqual(inProject.map((r) => [r.kind, r.storage_path]), [['matter', 'matter/m1/term-sheet.docx']]);
+  const project = calls.find((c) => c.tool === 'project');
+  assert.equal(project.input.matterId, 'm1');
+  assert.equal(project.opts.anthropicJson, anthropicJson);
 });

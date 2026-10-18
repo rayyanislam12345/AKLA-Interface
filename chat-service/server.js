@@ -24,7 +24,7 @@ import { researchLaw, needsResearch, describeLookup } from "./research.js";
 import { handleAgreementTurn } from "./agreementFlow.js";
 import { addLawToLibrary } from "./lawLibrary.js";
 import { searchPrecedents } from "./precedentSearch.js";
-import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbers, listActs, MAX_EXCERPT_CHARS, bestPassages, TOOL_TURN_PASSAGES, alignCommentExpectations } from "./libraryTools.js";
+import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbers, listActs, MAX_EXCERPT_CHARS, bestPassages, TOOL_TURN_PASSAGES, automaticScopes, alignCommentExpectations } from "./libraryTools.js";
 import { retrieve, MIN_RELEVANCE } from "./retrieve.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
@@ -2404,11 +2404,16 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       // One search per library (retrieve.js): the words and the meaning of
       // the message, the current version of each project document only,
       // reranked against the message, each passage labelled for citation.
-      const search = (scope, k, extra = {}) => retrieve({
+      // Each search is at most two database calls. A turn with tools
+      // searches the project alone: the assistant looks the libraries up
+      // itself (automaticScopes), and the pool is not asked for six calls
+      // before the tools' own.
+      const scopes = automaticScopes({ withTools, matterId });
+      const search = (scope, k, extra = {}) => (scopes.includes(scope) ? retrieve({
         supabase, voyageKey: VOYAGE_KEY, anthropicJson, query: retrievalQuery, scope, k, minScore: MIN_RELEVANCE, signal: clientGone.signal, ...extra,
-      }).then((data) => ({ data }), (error) => ({ data: null, error }));
+      }).then((data) => ({ data }), (error) => ({ data: null, error })) : none([]));
       const [m, p, s, t] = await Promise.all([
-        matterId ? search("project", count(6), { matterId }) : none([]),
+        search("project", count(6), { matterId }),
         search("precedent", count(standardising ? 10 : 6), documentType ? { documentTypeId: documentType.id } : {}),
         // No act filter, not an empty one, when the project has no laws.
         search("statute", count(standardising ? 12 : 4), actNames.length > 0 ? { actNames } : {}),

@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mergeChunks, readSection, sectionIndex, sectionAt, parseSection, resolveAct, sameLaw, bestCopy,
-  findPassages, createSourceRegistry, citedNumbers, labelFor, makeToolRunner, clearCaches, chatTools, researchPassages,
+  findPassages, createSourceRegistry, citedNumbers, labelFor, makeToolRunner, clearCaches, chatTools, researchPassages, searchPrecedentsTool, automaticScopes,
 } from '../libraryTools.js';
+import { clearRetrieveCaches } from '../retrieve.js';
 import { citationIssues, documentTurnRequest, readDocumentTurn, DOCUMENT_TURN_SYSTEM } from '../chatState.js';
 
 // An Act laid out the way the library holds the Companies Act, 2017: a
@@ -298,4 +299,65 @@ test('the document-turn classifier is asked about the message, the reply before 
   assert.equal(readDocumentTurn(''), 'question');
   assert.equal(readDocumentTurn(undefined), 'question');
   assert.equal(readDocumentTurn('{"edit": tru'), 'question');
+});
+
+// The precedent tool (search_precedents) hands on what the one search found:
+// each passage with an id of the shape precedent:<storage path>:<row>:<paragraph>
+// (the evaluation reads the file from it), the storage path itself, the file
+// and a citation label — and the tool runner numbers them as sources.
+test('the precedent tool returns passages with ids, paths and labels the assistant and the evaluation can use', async () => {
+  clearCaches();
+  clearRetrieveCaches();
+  const path = 'precedent/5e9cc07f/1788590751052-SHA0522 _Execution Version_.docx';
+  const file = 'SHA0522 (Execution Version).docx';
+  const rows = [
+    { id: 'row-1', content: '3.4 Deadlock Resolution. There is a deadlock if a resolution to approve a matter is not passed.', metadata: { storage_path: path, filename: file, passage_ordinal: 7 }, heading_path: 'Article 3 › 3.4 Deadlock Resolution', vector_rank: 1, keyword_rank: 1, name_rank: null, rrf_score: 0.032 },
+    { id: 'row-1', content: 'The Board shall cause proper books of accounts to be kept.', metadata: { storage_path: path, filename: file, passage_ordinal: 12 }, heading_path: null, vector_rank: 2, keyword_rank: null, name_rank: null, rrf_score: 0.016 },
+    { id: 'row-2', content: '9.3 Drag along. The majority may compel the minority to sell.', metadata: { storage_path: 'precedent/x/JVA.docx', filename: 'JVA.docx', passage_ordinal: 3 }, heading_path: 'Clause 9 › 9.3 Drag along', vector_rank: 3, keyword_rank: null, name_rank: null, rrf_score: 0.0158 },
+  ];
+  const calls = [];
+  const supabase = {
+    rpc: async (name, args) => { calls.push({ name, args }); return { data: name === 'search_passages' ? rows : [], error: null }; },
+    from: () => { throw new Error('a precedent search reads no table'); },
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).endsWith('/embeddings')) throw new Error(`unexpected request to ${url}`);
+    const n = JSON.parse(init.body).input.length;
+    return new Response(JSON.stringify({ data: Array.from({ length: n }, (_, i) => ({ index: i, embedding: [1, 0, 0] })) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const out = await searchPrecedentsTool(supabase, 'voyage-key', null, { query: 'deadlock resolution mechanism in SHA0522' }, {});
+    assert.ok(calls.every((c) => c.name === 'search_passages' && c.args.scope === 'precedent' && c.args.document_type_id === null), 'the one search, precedents, no type filter');
+    assert.deepEqual(out.map((p) => p.id), [`precedent:${path}:row-1:7`, `precedent:${path}:row-1:12`, 'precedent:precedent/x/JVA.docx:row-2:3']);
+    // The evaluation's reading of the id, and the path the tool states, agree.
+    for (const p of out) {
+      const m = /^precedent:(.*):[^:]*:[^:]*$/.exec(p.id);
+      assert.equal(m[1], p.storage_path);
+    }
+    assert.deepEqual(out.map((p) => p.filename), [file, file, 'JVA.docx']);
+    assert.deepEqual(out.map((p) => p.label), [`${file}, Article 3 › 3.4 Deadlock Resolution`, file, 'JVA.docx, Clause 9 › 9.3 Drag along']);
+    assert.ok(out.every((p) => typeof p.text === 'string' && p.text.length && typeof p.similarity === 'number'));
+
+    // The tool runner shows them as numbered sources with those labels.
+    const registry = createSourceRegistry([]);
+    const run = makeToolRunner({ supabase, voyageKey: 'voyage-key', anthropicJson: null, registry });
+    const result = await run({ id: 't1', name: 'search_precedents', input: { query: 'deadlock resolution mechanism in SHA0522' } });
+    assert.equal(result.is_error, undefined);
+    assert.match(result.content, /\[Source 1\] SHA0522 \(Execution Version\)\.docx, Article 3 › 3\.4 Deadlock Resolution \(precedent library\)\n3\.4 Deadlock Resolution/);
+    assert.match(result.content, /\[Source 3\] JVA\.docx, Clause 9 › 9\.3 Drag along \(precedent library\)/);
+    assert.deepEqual(registry.thisTurn().map((s) => [s.n, s.id, s.scope, s.filename]), [[1, `precedent:${path}:row-1:7`, 'precedent', file], [2, `precedent:${path}:row-1:12`, 'precedent', file], [3, 'precedent:precedent/x/JVA.docx:row-2:3', 'precedent', 'JVA.docx']]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// The chat's automatic search before a turn: a turn with tools searches the
+// project alone (the assistant has tools for the libraries, and each scope
+// is two database calls); a turn without tools searches all three.
+test('the automatic search reads one scope on a tool turn and three on a plain one', () => {
+  assert.deepEqual(automaticScopes({ withTools: true, matterId: 'm1' }), ['project']);
+  assert.deepEqual(automaticScopes({ withTools: true, matterId: null }), [], 'outside a project a tool turn searches nothing up front');
+  assert.deepEqual(automaticScopes({ withTools: false, matterId: 'm1' }), ['project', 'precedent', 'statute']);
+  assert.deepEqual(automaticScopes({ withTools: false }), ['precedent', 'statute']);
 });

@@ -833,6 +833,20 @@ export function makeToolRunner({ supabase, voyageKey, anthropicJson, matterId = 
 // (six precedents, six project, four statutes) were mostly noise, and each
 // one took a source number the lawyer then saw listed.
 export const TOOL_TURN_PASSAGES = 3;
+
+/**
+ * Which libraries the automatic search reads before a turn: a turn with
+ * tools searches the project alone (the assistant has search_precedents and
+ * search_law_library for the rest, and each scope's search is two database
+ * calls the pool must carry); a turn without tools, all three. Outside a
+ * project the project scope is not searched.
+ */
+export function automaticScopes({ withTools = false, matterId = null } = {}) {
+  const scopes = matterId ? ["project"] : [];
+  if (!withTools) scopes.push("precedent", "statute");
+  return scopes;
+}
+
 export function bestPassages(sources, n = TOOL_TURN_PASSAGES) {
   const score = (s) => (typeof s?.similarity === "number" && Number.isFinite(s.similarity) ? s.similarity : -Infinity);
   return (sources ?? [])

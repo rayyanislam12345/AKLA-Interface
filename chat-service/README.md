@@ -141,7 +141,22 @@ library search may take before it returns the quick way (retrieve.js). It is
 a hard total: a search returns within it (plus 300 ms) with the best it has —
 the full search, else the question's own search unreranked, else a search by
 words alone that starts at once and needs no Voyage call — marked `fellBack`
-with the reason and the `path` that answered.
+with the reason and the `path` that answered. A search sends the database
+at most two calls — the words-only one at once, then one full hybrid call
+carrying the question's embedding and every Haiku phrasing with its own
+(fused in SQL by `search_passages`, migration
+`20261019090000_search_passages_one_call.sql`) — so a chat turn is at most
+six, and each call carries its time budget: `max_ms` (the function stops
+between its legs once over it) and an `X-Statement-Timeout-Ms` header that
+PostgREST's pre-request function (same migration; it needs
+`pgrst.db_pre_request` set on the `authenticator` role, which the migration
+does or tells you how to) turns into the statement's timeout, so a call
+nobody is waiting for is cancelled in the database instead of running on
+for the role's 30 s. `RETRIEVE_MAX_CALLS` (default 6; 0 lifts it): how
+many database searches the process has in flight at once; the rest wait
+their turn, the words-only calls first, and a call still waiting when its
+search has returned is never sent (PostgREST's pool is about ten
+connections).
 
 ```bash
 ./chat-service/deploy.sh            # copies, stamps the commit, restarts

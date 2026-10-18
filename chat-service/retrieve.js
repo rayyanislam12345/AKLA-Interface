@@ -21,17 +21,19 @@
 //      a question asked again, or by the chat's other scopes at the same
 //      moment, costs no call, and its search starts at once. A late rewrite
 //      is still cached for the next time the question is asked.
-//   3. search_passages (supabase/migrations/20261017120000_hybrid_search.sql,
-//      made faster by 20261018120000_hybrid_search_speed.sql)
-//      per phrasing, all at once: meaning, words and file names, fused by
-//      reciprocal rank in SQL, current versions only, at most three passages
-//      a file.
-//   4. The phrasings' lists merged (each passage keeps its best fused
-//      score), repeated text dropped, three a file again, and the best 30
-//      reranked by Voyage rerank-2 against the question, each by its
-//      8,000 characters around the question's words; on any rerank failure
-//      the fused order stands. No rerank when the merged list already fits
-//      in k, nor for a project search with at most twice k passages.
+//   3. ONE search_passages call (supabase/migrations/20261017120000_hybrid_
+//      search.sql, 20261018120000_hybrid_search_speed.sql, and
+//      20261019090000_search_passages_one_call.sql, which takes the
+//      phrasings in the call) carrying the question, its embedding and the
+//      phrasings with theirs: meaning, words and file names for each
+//      phrasing, fused by reciprocal rank in SQL (a passage's best phrasing,
+//      ties to the one more phrasings found), current versions only, at
+//      most three passages a file.
+//   4. Repeated text dropped, three a file again, and the best 30 reranked
+//      by Voyage rerank-2 against the question, each by its 8,000
+//      characters around the question's words; on any rerank failure the
+//      fused order stands. No rerank when the list already fits in k, nor
+//      for a project search with at most twice k passages.
 //   5. Each passage labelled for citation: "Term Sheet v3, 4.2 Concession
 //      Period", "12. JVA.docx, cl. 9.1", "Contract Act, 1872, s.74". A
 //      statute passage is placed in its section in its Act's rebuilt text
@@ -42,22 +44,47 @@
 // the Companies Act 2017") also gets that section's full text first, read the
 // way read_act_section reads it, from the start, alongside the search.
 //
+// A search sends the database AT MOST TWO calls, and nothing else:
+//
+//   call 1, at once (under a deadline): the question by its words alone —
+//           search_passages with no embedding, its keyword and file-name
+//           legs, no Voyage call — the safety net while the rewrite and the
+//           embedding are out (on the free tier a Voyage call can wait
+//           7-15 s);
+//   call 2, when the one embedding call is back: the full hybrid search,
+//           the question's embedding and the phrasings with theirs inside
+//           the call. When the embedding fails and there are phrasings,
+//           call 2 goes by words with the phrasings' keyword legs; with
+//           none, call 1's rows serve and no second call is made.
+//
+// Until 19 Oct 2026 a search sent up to five calls (the words-only one, the
+// question, each phrasing), fifteen per chat turn; abandoned at the
+// deadline they ran on in the database for up to the role's 30 s statement
+// timeout, and PostgREST's pool of about ten connections jammed (the
+// evaluation's tools run of 18 Oct, live-tools-c2-alone, returned nothing
+// for 51 of 60 searches). Now a chat turn is at most six calls, and each
+// carries its time budget: max_ms (the function stops between its legs once
+// over it) and the X-Statement-Timeout-Ms header (PostgREST's pre-request
+// function sets the statement timeout from it, so a call nobody is waiting
+// for is cancelled in the database too; see the migration).
+//
 // A deadline (deadlineMs, default RETRIEVE_DEADLINE_MS = 12 s) is a hard
 // total: retrieve() returns within deadlineMs + FALLBACK_GRACE_MS, whatever
-// the services are doing. Under a deadline a search by words alone (the same
-// search_passages call with no embedding: its keyword and file-name legs,
-// which need no Voyage call) starts at once, beside the rewrite and the
-// embedding, so that something is in hand when the embedding is slow — on
-// the free tier a Voyage call can wait 7-15 s. At the deadline the search
-// returns the best it has: the full search when it has finished (path
-// "full"); else the question's own search_passages result, words and
-// meaning fused but not reranked ("fused"); else the words-only result
-// ("words"); and only when none is back, nothing ("none"). A full search
-// that fails before the deadline (a statement timeout, say) returns the
-// same way when a quicker result is in hand. A quick return is marked
-// fellBack with the reason, the reranker is never run on it, nothing that
-// finishes later changes what was returned, and the rest (the reranker and
-// any search still running) is aborted.
+// the services are doing. At the deadline the search returns the best it
+// has: the full search when it has finished (path "full"); else call 2's
+// rows, words and meaning fused in the database but not reranked
+// ("fused"); else call 1's rows ("words"); and only when neither is back,
+// nothing ("none"). A full search that fails before the deadline (a
+// statement timeout, say) returns the same way when a quicker result is in
+// hand. A quick return is marked fellBack with the reason, the reranker is
+// never run on it (it runs only after call 2), nothing that finishes later
+// changes what was returned, and the rest (the reranker and any call still
+// running) is aborted.
+//
+// One process keeps at most MAX_SEARCH_CALLS (default 6) database searches
+// in flight at once; the rest wait here, the words-only calls first, and a
+// call still waiting when its search has returned is never sent. With two
+// calls a search the limit is rarely reached; it stays as the guard it was.
 //
 // The Voyage account is on the free tier (3 requests a minute): every call
 // counts, and a search makes at most two (one embedding, one rerank), often
@@ -68,9 +95,12 @@
 // (scripts/eval/time-retrieve.mjs prints them; run.mjs writes them into its
 // results file).
 //
-// Deploying this before the migration is safe: when search_passages is not
-// in the database, the same flow runs on match_documents (meaning only) and
-// the current-version filter is applied here instead.
+// Deploying this before the migrations is safe: with the 18 Oct function
+// in the database (no phrasings, no max_ms parameter) the same two calls go
+// without them for an hour at a time, the question alone; with no
+// search_passages at all, the flow runs on match_documents (meaning only,
+// the question's embedding) and the current-version filter is applied here
+// instead.
 //
 // The VM runs Node 20: nothing newer is used.
 
@@ -103,6 +133,19 @@ export const RETRIEVE_DEADLINE_MS = (() => {
 // After the deadline, how long a search about to answer is still waited for
 // when nothing is back: retrieve() returns within the deadline plus this.
 export const FALLBACK_GRACE_MS = 300;
+// The least time a database call is given under a deadline (max_ms and the
+// statement timeout header): what is left of the deadline, or this.
+export const CALL_MIN_MS = 2_000;
+// How many database searches (search_passages, or match_documents before
+// it) one process has in flight at once; the rest wait their turn (see the
+// top of the file). Six is one chat turn: two calls for each of its three
+// scopes, so a turn is never held up by itself. RETRIEVE_MAX_CALLS in the
+// environment sets it; 0 lifts the limit.
+export const MAX_SEARCH_CALLS = (() => {
+  const raw = String(process.env.RETRIEVE_MAX_CALLS ?? "").trim();
+  const v = Number(raw);
+  return raw && Number.isInteger(v) && v >= 0 ? v : 6;
+})();
 // Statute passages are placed in their sections for the first few Acts.
 const PLACE_ACTS = 3;
 // The rerank-2 score under which a passage found automatically (the chat's
@@ -146,6 +189,9 @@ const noop = () => {};
 const embedCache = new Map();
 const rewriteCache = new Map();
 let hybridMissingUntil = 0;
+// Until when the database is known to hold the 18 Oct search_passages,
+// which takes neither phrasings nor max_ms: the calls go without them.
+let legacySearchUntil = 0;
 
 function remember(cache, key, value) {
   cache.delete(key);
@@ -168,6 +214,7 @@ export function clearRetrieveCaches() {
   embedCache.clear();
   rewriteCache.clear();
   hybridMissingUntil = 0;
+  legacySearchUntil = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,20 +594,88 @@ export function toCandidate(row, scope) {
   return c;
 }
 
-// An RPC, stopped when `signal` aborts (supabase-js's abortSignal), tried
-// once more after a statement timeout.
-async function callRpc(supabase, name, params, signal) {
+// The process's database searches: how many are in flight and which are
+// waiting for a turn, in order of worth (priority 0 first) and then of
+// asking. A waiting call whose signal aborts leaves the line unsent.
+const searchCalls = { inFlight: 0, waiting: [], seq: 0 };
+
+/** How many searches the process has in flight and waiting, and the limit. */
+export function searchCallLoad() {
+  return { inFlight: searchCalls.inFlight, waiting: searchCalls.waiting.length, limit: MAX_SEARCH_CALLS };
+}
+
+function sendNextCalls() {
+  while (searchCalls.waiting.length && (!MAX_SEARCH_CALLS || searchCalls.inFlight < MAX_SEARCH_CALLS)) {
+    const e = searchCalls.waiting.shift();
+    e.signal?.removeEventListener("abort", e.onAbort);
+    if (e.signal?.aborted) { e.reject(e.signal.reason ?? new Error("the search has returned")); continue; }
+    searchCalls.inFlight++;
+    e.resolve();
+  }
+}
+
+// Resolves when the call may be sent (the caller frees the turn with
+// freeSearchCall); rejects, unsent, when `signal` aborts first.
+function takeSearchCall(priority, signal) {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("the search has returned"));
+  return new Promise((resolve, reject) => {
+    const e = { priority, seq: searchCalls.seq++, signal, resolve, reject, onAbort: null };
+    e.onAbort = () => {
+      const at = searchCalls.waiting.indexOf(e);
+      if (at >= 0) searchCalls.waiting.splice(at, 1);
+      reject(signal.reason ?? new Error("the search has returned"));
+    };
+    signal?.addEventListener("abort", e.onAbort, { once: true });
+    const at = searchCalls.waiting.findIndex((w) => w.priority > priority);
+    if (at < 0) searchCalls.waiting.push(e); else searchCalls.waiting.splice(at, 0, e);
+    sendNextCalls();
+  });
+}
+
+function freeSearchCall() {
+  searchCalls.inFlight = Math.max(0, searchCalls.inFlight - 1);
+  sendNextCalls();
+}
+
+// How many of a search's own calls are still waiting for a turn.
+const waitingFor = (signal) => searchCalls.waiting.filter((e) => e.signal === signal).length;
+
+// An RPC, stopped when `signal` aborts (supabase-js's abortSignal), sent
+// with `headers` when the client can carry them, and — when `retryTimeout`
+// — tried once more after a statement timeout (not for a call that was
+// given a time budget: its budget is spent).
+async function callRpc(supabase, name, params, signal, headers = null, retryTimeout = true) {
   const call = () => {
-    const b = supabase.rpc(name, params);
-    return signal && typeof b?.abortSignal === "function" ? b.abortSignal(signal) : b;
+    let b = supabase.rpc(name, params);
+    if (signal && typeof b?.abortSignal === "function") b = b.abortSignal(signal);
+    if (headers && typeof b?.setHeader === "function") for (const [h, v] of Object.entries(headers)) b = b.setHeader(h, v);
+    return b;
   };
   let r = await call();
-  if (r.error && /statement timeout/i.test(r.error.message ?? "") && !signal?.aborted) r = await call();
+  if (retryTimeout && r.error && /statement timeout/i.test(r.error.message ?? "") && !signal?.aborted) r = await call();
   return r;
 }
 
-async function hybridSearch(supabase, params, signal) {
-  const r = await callRpc(supabase, "search_passages", params, signal);
+// The header PostgREST's pre-request function reads the statement timeout
+// from (20261019090000_search_passages_one_call.sql).
+export const TIMEOUT_HEADER = "X-Statement-Timeout-Ms";
+
+// One search_passages call: `params` the question's (query_text,
+// query_embedding, scope, filters, k), `phrasings` [{ text, embedding }]
+// carried in the same call, `maxMs` its time budget (max_ms in the call and
+// the statement timeout header). With the 18 Oct function in the database,
+// which knows neither parameter, the call goes without them.
+async function hybridSearch(supabase, params, { signal, phrasings = [], maxMs = null }) {
+  const headers = maxMs ? { [TIMEOUT_HEADER]: String(maxMs) } : null;
+  const legacy = Date.now() < legacySearchUntil;
+  let r = await callRpc(supabase, "search_passages", legacy ? params : { ...params, phrasings: phrasings.length ? phrasings : null, max_ms: maxMs }, signal, headers, !maxMs);
+  if (r.error && !legacy && isMissingFunction(r.error) && !signal?.aborted) {
+    r = await callRpc(supabase, "search_passages", params, signal, headers, !maxMs);
+    if (!r.error) {
+      legacySearchUntil = Date.now() + CACHE_MS;
+      console.warn("search_passages in the database takes no phrasings yet (apply 20261019090000_search_passages_one_call.sql); searching the question alone");
+    }
+  }
   if (r.error) {
     const err = new Error(`The search failed: ${r.error.message}`);
     err.code = r.error.code;
@@ -862,8 +977,10 @@ function startSearch({
   // A promise started now and maybe awaited later: its failure is handled
   // where it is awaited, never left unhandled if the search stops first.
   const started = (p) => { p.catch(noop); return p; };
-  // What the quick way needs to see of the full search.
-  const st = { done: false, qEmb: null, plain: null, plainByWords: false, words: null, versionsP: null };
+  // What the quick way needs to see of the full search: `words` is call 1
+  // (by words alone, at once), `plain` call 2 (the full hybrid search; or,
+  // `plainByWords`, by words when no embedding could be had).
+  const st = { done: false, plain: null, plainByWords: false, words: null, versionsP: null };
 
   // Everything that needs only the question starts at once: the rewrite,
   // the named Acts' other copies, the section the question names, and —
@@ -899,13 +1016,15 @@ function startSearch({
     list.engine = "vector";
     return list;
   };
-  // One phrasing searched: search_passages, or match_documents before that
-  // migration. The list carries the engine that answered.
-  const searchOne = async (i, phrase, embedding, acts, terms) => {
+  // One call: search_passages with the question (its words; its embedding,
+  // when there is one) and the phrasings [{ text, embedding }] — or
+  // match_documents, the question's embedding alone, before that migration.
+  // The list carries the engine that answered.
+  const searchOne = async ({ embedding, phrasings, acts, terms, maxMs }) => {
     if (Date.now() >= hybridMissingUntil) {
       try {
         const list = await hybridSearch(supabase, {
-          query_text: i === 0 ? keywordText(phrase) : phrase,
+          query_text: keywordText(q),
           query_embedding: embedding ?? null,
           scope,
           matter_id: scope === "project" ? matterId : null,
@@ -914,7 +1033,7 @@ function startSearch({
           all_versions: !!allVersions,
           exclude_document_id: excludeDocumentId ?? null,
           k: candidates,
-        }, work);
+        }, { signal: work, phrasings, maxMs });
         list.engine = "hybrid";
         return list;
       } catch (err) {
@@ -923,42 +1042,51 @@ function startSearch({
         console.warn(`search_passages is not in the database yet (${err.dbMessage ?? err.message}); searching with match_documents`);
       }
     }
-    if (!embedding) {
-      if (i === 0) throw new Error("The search service did not respond, so the library could not be searched.");
-      return [];
-    }
+    if (!embedding) throw new Error("The search service did not respond, so the library could not be searched.");
     return byMeaning(embedding, acts, terms);
   };
-  const search = (i, phrase, embedding, acts, terms, stage = "search") =>
-    clock.time(stage, () => searchOne(i, phrase, embedding, acts, terms), { phrasing: i, byWordsOnly: !embedding }, (rows) => ({ rows: rows.length, engine: rows.engine }));
-
-  // The question as asked, searched as soon as its embedding is in hand (by
-  // its words alone when the embedding failed).
-  let qEmbP = null;
-  let plainP = null;
-  const startPlain = (embP, terms) => {
-    qEmbP = embP;
-    st.qEmb = track(embP);
-    plainP = started(Promise.all([embP, actsP]).then(([emb, acts]) => {
-      work.throwIfAborted();
-      st.plainByWords = !emb;
-      return search(0, q, emb, acts, terms);
-    }));
-    st.plain = track(plainP);
+  // Each call takes its turn among the process's database searches first,
+  // call 1 (by words) before call 2, and is given what is left of the
+  // deadline (CALL_MIN_MS at least) as its budget. The event records how
+  // long it waited (waitedMs), the budget (maxMs) and the phrasings carried.
+  const search = ({ stage, embedding = null, phrasings = [], acts, terms }) => {
+    const detail = { byWordsOnly: !embedding, phrasings: phrasings.length };
+    const priority = stage === "words only" ? 0 : 1;
+    return clock.time(stage, async () => {
+      const asked = performance.now();
+      await takeSearchCall(priority, work);
+      detail.waitedMs = Math.round(performance.now() - asked);
+      const maxMs = deadlineMs > 0 ? Math.max(CALL_MIN_MS, deadlineMs - clock.elapsed()) : null;
+      if (maxMs) detail.maxMs = maxMs;
+      // The turn is given back when the call answers or when this search
+      // stops waiting for it (the deadline), whichever comes first — not
+      // when a client that cannot be stopped finally answers.
+      let onAbort = null;
+      const call = searchOne({ embedding, phrasings, acts, terms, maxMs });
+      call.catch(noop);
+      const stopped = new Promise((_, reject) => {
+        onAbort = () => reject(work.reason ?? new Error("the search has returned"));
+        if (work.aborted) onAbort(); else work.addEventListener("abort", onAbort, { once: true });
+      });
+      try {
+        return await Promise.race([call, stopped]);
+      } finally {
+        work.removeEventListener("abort", onAbort);
+        freeSearchCall();
+      }
+    }, detail, (rows) => ({ rows: rows.length, engine: rows.engine }));
   };
-  if (!rewriting || (voyageKey && recall(embedCache, embedKey(q)) !== undefined)) {
-    startPlain(started(embed([q]).then((v) => v?.[0] ?? null)), queryTerms(q, []));
-  }
 
-  // Under a deadline, the question searched by its words alone from the
+  // Call 1, under a deadline: the question by its words alone from the
   // start — search_passages with no embedding: its keyword leg (precedent
   // paragraphs, statute rows, the project's current versions) and file-name
   // leg, no Voyage call — so that something is in hand whatever the
-  // embedding does. Only the quick way reads it; its failure is seen there.
+  // embedding does. The quick way reads it, and the full search when no
+  // embedding can be had; its failure is seen there.
   if (wordsFirst) {
     st.words = track(started(actsP.then((acts) => {
       work.throwIfAborted();
-      return search(0, q, null, acts, queryTerms(q, []), "words only");
+      return search({ stage: "words only", acts, terms: queryTerms(q, []) });
     })));
   }
 
@@ -996,26 +1124,30 @@ function startSearch({
     out.phrasings = [q, ...phrasings].slice(0, 4);
     const extra = out.phrasings.slice(1);
     const terms = queryTerms(q, extra);
-    // One embedding call: the question with its phrasings, or the
-    // phrasings alone when the question's embedding was kept.
-    let extraEmbP = Promise.resolve([]);
-    if (!qEmbP) {
-      const allP = started(embed([q, ...extra]));
-      startPlain(started(allP.then((v) => v?.[0] ?? null)), terms);
-      extraEmbP = allP.then((v) => (v ? v.slice(1) : null));
-    } else if (extra.length) {
-      extraEmbP = embed(extra);
-    }
-    const acts = await actsP;
-    const extraP = started(extraEmbP.then((embs) => {
-      work.throwIfAborted();
-      return Promise.all(extra.map((p, j) => search(j + 1, p, embs?.[j] ?? null, acts, terms)));
-    }));
-    const lists = [await plainP, ...(await extraP)];
+    // One embedding call: the question with its phrasings (whichever are
+    // already kept are not sent again). Null when it failed.
+    const embs = await embed([q, ...extra]);
     work.throwIfAborted();
-    out.engine = lists.some((l) => l.engine === "vector") ? "vector" : lists.some((l) => l.engine === "hybrid") ? "hybrid" : null;
+    const acts = await actsP;
+    // Call 2: the question's embedding and the phrasings with theirs, in
+    // one. With no embedding to be had: by words — call 1's rows when it
+    // was sent and there are no phrasings (it carries all a wordless search
+    // can), else one call by words with the phrasings' keyword legs.
+    let plainP;
+    if (embs) {
+      plainP = started(search({ stage: "search", embedding: embs[0], phrasings: extra.map((text, j) => ({ text, embedding: embs[j + 1] ?? null })), acts, terms }));
+    } else {
+      st.plainByWords = true;
+      plainP = st.words && !extra.length
+        ? st.words.p
+        : started(search({ stage: "search", phrasings: extra.map((text) => ({ text, embedding: null })), acts, terms }));
+    }
+    st.plain = track(plainP);
+    const list = await plainP;
+    work.throwIfAborted();
+    out.engine = list.engine ?? null;
 
-    const merged = merge(lists, acts);
+    const merged = merge([list], acts);
     const pool = merged.slice(0, Math.max(rerankPool, k));
     const windowQueries = [question ? q : keywordText(q), ...extra];
     dress(pool, windowQueries);
@@ -1063,18 +1195,18 @@ function startSearch({
   const fullT = track(full);
 
   // The best result in hand at the deadline (or when the full search has
-  // failed: `failure`): the full search when it is done; else the question's
-  // own search_passages result, not reranked; else the words-only result.
-  // When none is back, the first to answer within the grace; then nothing —
-  // or, when the full search failed and nothing else can answer, its error.
-  // The passages are built from copies: nothing the full search does after
-  // this changes them, and the reranker is never run here.
+  // failed: `failure`): the full search when it is done; else call 2's rows,
+  // not reranked; else call 1's. When neither is back, the first to answer
+  // within the grace; then nothing — or, when the full search failed and
+  // nothing else can answer, its error. The passages are built from copies:
+  // nothing the full search does after this changes them, and the reranker
+  // is never run here.
   const fallback = async (deadlineMs, failure = null) => {
     const ways = [
       [fullT, "full", null],
       [st.plain, st.plainByWords ? "words" : "fused", st.plainByWords
-        ? "returned the question's own search, by words alone (its embedding failed), not reranked"
-        : "returned the question's own search (words and meaning fused), not reranked"],
+        ? "returned the search by words alone (the embedding failed), not reranked"
+        : "returned the search by words and meaning (the phrasings included), fused but not reranked"],
       [st.words, "words", "returned the search by words alone (the question's embedding was not back), not reranked"],
     ];
     const pick = () => ways.find(([t]) => t?.state === "ok");
@@ -1093,7 +1225,9 @@ function startSearch({
     if (!chosen) {
       if (failure && !ways.some(([t]) => t?.state === "pending")) throw failure;
       out.path = "none";
-      out.reason = `${why} and neither the question's own search nor the search by words was back in time; nothing returned`;
+      const unsent = waitingFor(work);
+      out.reason = `${why} and neither the full search nor the search by words was back in time; nothing returned`
+        + (unsent ? ` (${unsent} of its calls never left the queue: ${searchCalls.inFlight} searches in flight, ${searchCalls.waiting.length} waiting)` : "");
       clock.note("fell back", { reason: out.reason, path: out.path });
       console.error(`retrieve (${scope}): ${out.reason}`);
       return finish(out);

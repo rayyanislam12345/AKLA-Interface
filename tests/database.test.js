@@ -583,6 +583,9 @@ test('indexing: Try again re-queues a failed version for members only; a stoppin
 const hybridSql=()=>readFileSync('supabase/migrations/20261017120000_hybrid_search.sql','utf8');
 // The same search, faster (18 Oct): replaces the function; the tests below run on it.
 const hybridSpeedSql=()=>readFileSync('supabase/migrations/20261018120000_hybrid_search_speed.sql','utf8');
+// One call per scope (19 Oct): the phrasings travel inside the call, max_ms
+// stops it between legs, and PostgREST's pre-request function bounds it.
+const hybridOneCallSql=()=>readFileSync('supabase/migrations/20261019090000_search_passages_one_call.sql','utf8');
 const vec=(a)=>(a?`{${a.join(',')}}`:null);
 async function hybridDatabase() {
  const db=await indexingDatabase(async(db)=>{
@@ -599,6 +602,8 @@ async function hybridDatabase() {
  await db.exec(hybridSql()); // a second run changes nothing
  await db.exec(hybridSpeedSql());
  await db.exec(hybridSpeedSql());
+ await db.exec(hybridOneCallSql());
+ await db.exec(hybridOneCallSql()); // a second run changes nothing
  return db;
 }
 // A project document with versions; returns { docId, versions: [{ id, path }] }.
@@ -620,8 +625,9 @@ async function passage(db,{version=null,docId=null,path,content,embedding=[1,0,0
  return (await db.query(`insert into documents(matter_id,content,metadata,embedding,document_version_id,matter_document_id,heading_path)
   values($1,$2,$3,$4,$5,$6,$7) returning id`,[project,content,JSON.stringify({storage_path:path,filename:filename??path.split('/').pop()}),vec(embedding),legacy?null:version,legacy?null:docId,null])).rows[0].id;
 }
-const search=async(db,args)=>(await db.query(`select * from search_passages(query_text=>$1,query_embedding=>$2,scope=>$3,matter_id=>$4,act_names=>$5,document_type_id=>$6,all_versions=>$7,exclude_document_id=>$8,k=>$9)`,
- [args.q,vec(args.emb),args.scope??'project','matter' in args?args.matter:project,args.acts??null,args.type??null,args.all??false,args.exclude??null,args.k??40])).rows;
+// phrasings: [{ text, embedding: [..] | null }] travel inside the call; maxMs its budget.
+const search=async(db,args)=>(await db.query(`select * from search_passages(query_text=>$1,query_embedding=>$2,scope=>$3,matter_id=>$4,act_names=>$5,document_type_id=>$6,all_versions=>$7,exclude_document_id=>$8,k=>$9,phrasings=>$10,max_ms=>$11)`,
+ [args.q,vec(args.emb),args.scope??'project','matter' in args?args.matter:project,args.acts??null,args.type??null,args.all??false,args.exclude??null,args.k??40,args.phrasings?JSON.stringify(args.phrasings):null,args.maxMs??null])).rows;
 
 test('hybrid search: only the current, human-written version of a project document is searched unless all versions are asked for', async () => {
  const db=await hybridDatabase();
@@ -795,6 +801,117 @@ test('hybrid search (18 Oct): with Acts named, every leg runs on those Acts and 
   assert.equal(rows.find(r=>r.vector_rank===1).id,b);
   assert.equal(rows[0].id,b,'nearest in meaning and a keyword hit');
   assert.deepEqual(await search(db,{q:'penalty',scope:'statute',matter:null,acts:['No Such Act'],emb:[1,0,0]}),[]);
+ } finally {await db.close();}
+});
+
+test('hybrid search (19 Oct): the phrasings travel inside the one call — each with its own vector and keyword legs, fused in the database, the best phrasing counting — and max_ms stops a call that is out of time', async () => {
+ const db=await hybridDatabase();
+ try {
+  const prec=async(path,filename,body,emb)=>(await db.query(`insert into documents(content,metadata,is_precedent,embedding) values($1,$2,true,$3) returning id`,
+   [body,JSON.stringify({storage_path:path,filename}),vec(emb)])).rows[0].id;
+  // Three agreements: one says "drag along" (the question's words), one
+  // "compel the minority to sell" (a phrasing's words), one nothing
+  // relevant; their embeddings lie along different axes.
+  const drag=await prec('precedent/a/JVA.docx','JVA.docx','<p>1. Definitions.</p><p>9.3 Drag along: the Majority may require the minority to sell on the same terms.</p>',[1,0,0]);
+  const compel=await prec('precedent/b/SHA.docx','SHA.docx','<p>1. Definitions.</p><p>7.1 The Majority Shareholder may compel the minority to sell its shares to the purchaser.</p>',[0,1,0]);
+  const other=await prec('precedent/c/EPC.docx','EPC.docx','<p>14.2 The Employer may terminate for convenience.</p>',[0,0,1]);
+  // The question alone: the JVA by its words and its embedding; the others
+  // only as the nearest of three in meaning, no words matched.
+  const alone=await search(db,{q:'example of a drag along clause',scope:'precedent',matter:null,emb:[1,0,0]});
+  assert.equal(alone[0].id,drag,'the question alone: the agreement that uses its words first');
+  assert.equal(alone[0].keyword_rank,1);
+  assert.equal(alone.find(r=>r.id===compel).keyword_rank,null,'the SHA matched no word of the question');
+  assert.ok([2,3].includes(alone.find(r=>r.id===compel).vector_rank),'found by meaning only (the SHA and the EPC are equally far)');
+  // With a phrasing in the call: its keyword leg finds the SHA by the
+  // phrasing's words, its vector leg by the phrasing's embedding (rank 1
+  // there); the JVA, found by the question's two legs, still ranks first,
+  // and the SHA now outranks the EPC.
+  const withPhrasing=await search(db,{q:'example of a drag along clause',scope:'precedent',matter:null,emb:[1,0,0],phrasings:[{text:'compel the minority to sell',embedding:[0,1,0]},{text:'drag along notice',embedding:null}]});
+  const ids=withPhrasing.map(r=>r.id);
+  assert.ok(ids.includes(drag)&&ids.includes(compel),'both agreements found in one call');
+  assert.equal(ids[0],drag,'the question\'s own hits rank first');
+  assert.ok(ids.indexOf(compel)<ids.indexOf(other),'the SHA, found by the phrasing, outranks the EPC');
+  const sha=withPhrasing.find(r=>r.id===compel);
+  assert.equal(sha.vector_rank,1,'the phrasing\'s embedding is a vector leg of its own: the best rank across phrasings');
+  assert.ok(sha.keyword_rank>=1,'and its words a keyword leg');
+  assert.ok(sha.rrf_score>alone.find(r=>r.id===compel).rrf_score,'a better fused score than under the question alone');
+  assert.match(sha.content,/compel the minority/,'represented by the paragraph holding the phrasing\'s words');
+  assert.ok(withPhrasing.every(r=>!r.content.includes('<p>')));
+  for(let i=1;i<withPhrasing.length;i++) assert.ok(withPhrasing[i-1].rrf_score>=withPhrasing[i].rrf_score,'ordered by fused score');
+  // A phrasing with no embedding still searches by its words; a malformed
+  // phrasings value is ignored.
+  const byWords=await search(db,{q:'termination',scope:'precedent',matter:null,phrasings:[{text:'compel the minority to sell'}]});
+  assert.ok(byWords.some(r=>r.id===compel)&&byWords.some(r=>r.id===other));
+  assert.deepEqual((await search(db,{q:'drag along',scope:'precedent',matter:null,phrasings:{text:'x'}})).map(r=>r.id),[drag]);
+  // max_ms: a call over its budget stops with 57014 (query_canceled)
+  // before its next leg — here before the first, with no time at all.
+  await assert.rejects(search(db,{q:'drag along',scope:'precedent',matter:null,maxMs:0}),(err)=>/out of time/.test(err.message)&&err.code==='57014','57014, query_canceled: a cancelled statement to the client');
+  assert.ok((await search(db,{q:'drag along',scope:'precedent',matter:null,maxMs:30000})).length>=1,'within its budget it answers');
+  // The OR fallback's candidates must hold one of the rarest three
+  // uncommon words (precedents and statutes): four agreements holding
+  // four, three, two and one of the words "novation escrow guarantee
+  // notice" — the one holding only "notice", the commonest, is not a
+  // candidate; the others rank by how many words they hold.
+  const p1=await prec('precedent/d/1.docx','1.docx','<p>Novation, escrow, guarantee and notice are all dealt with here.</p>',[0,0,0.1]);
+  const p2=await prec('precedent/d/2.docx','2.docx','<p>Escrow, guarantee and notice are dealt with here.</p>',[0,0,0.1]);
+  const p3=await prec('precedent/d/3.docx','3.docx','<p>Guarantee and notice are dealt with here.</p>',[0,0,0.1]);
+  const p4=await prec('precedent/d/4.docx','4.docx','<p>Notice alone is dealt with here.</p>',[0,0,0.1]);
+  const rare=await search(db,{q:'novation escrow guarantee notice',scope:'precedent',matter:null});
+  assert.deepEqual(rare.map(r=>r.id),[p1,p2,p3],'most words first; the agreement holding only the commonest word is not a candidate');
+  assert.ok(rare.every(r=>r.keyword_rank!==null&&r.vector_rank===null));
+  // The word counts come from the statistics once the paragraphs are
+  // analysed (null until then: the function counts), and the results agree.
+  assert.equal((await db.query(`select public.precedent_lexeme_df(array['notic','novat','nosuchword']) as df`)).rows[0].df,null,'no statistics yet');
+  await db.exec('analyze precedent_passages');
+  const df=(await db.query(`select public.precedent_lexeme_df(array['notic','novat','nosuchword']) as df`)).rows[0].df;
+  assert.equal(df.length,3);
+  assert.ok(df[0]>=2&&df[0]<=8,`notice is in four paragraphs, by estimate (${df[0]})`);
+  assert.ok(df[1]===null||(df[1]>=1&&df[1]<=2),`novation in one (${df[1]})`);
+  assert.equal(df[2],null,'a word the statistics do not list is rare');
+  assert.deepEqual((await search(db,{q:'novation escrow guarantee notice',scope:'precedent',matter:null})).map(r=>r.id),[p1,p2,p3],'the same answer from the statistics');
+  await db.exec('set role authenticated');
+  assert.ok(Array.isArray((await db.query(`select public.precedent_lexeme_df(array['notic']) as df`)).rows[0].df),'a signed-in member reads them too');
+  await db.exec('reset role');
+  // The same shape, for a statute question in a project-less chat.
+  for(let i=0;i<3;i++) await db.query(`insert into documents(content,metadata,is_statute,embedding) values($1,$2,true,$3)`,[`${73+i}. Compensation for breach of contract.— text ${i}`,JSON.stringify({act_name:'Contract Act, 1872'}),vec([0,0,1])]);
+  await db.query(`insert into documents(content,metadata,is_statute,embedding) values($1,$2,true,$3)`,['10. Every agreement in restraint of trade is void.',JSON.stringify({act_name:'Contract Act, 1872'}),vec([0,1,0])]);
+  const statute=await search(db,{q:'is a penalty clause enforceable',scope:'statute',matter:null,emb:[0,0,1],phrasings:[{text:'restraint of trade void',embedding:[0,1,0]}]});
+  assert.ok(statute.some(r=>/restraint of trade/.test(r.content)),'found by the phrasing\'s words and meaning');
+  assert.ok(statute.some(r=>/Compensation for breach/.test(r.content)));
+ } finally {await db.close();}
+});
+
+test('hybrid search (19 Oct): PostgREST\'s pre-request function sets the statement timeout from the request header, a second at least and never above the role\'s own', async () => {
+ const db=await hybridDatabase();
+ try {
+  const run=async(header)=>{
+   await db.exec('begin');
+   try {
+    await db.query(`select set_config('request.headers',$1,true)`,[header]);
+    await db.exec('select public.pgrst_pre_request()');
+    return (await db.query(`select s.setting from pg_settings s where s.name='statement_timeout'`)).rows[0].setting;
+   } finally {await db.exec('rollback');}
+  };
+  const before=(await db.query(`select s.setting from pg_settings s where s.name='statement_timeout'`)).rows[0].setting;
+  assert.equal(await run('{"x-statement-timeout-ms":"5000"}'),'5000');
+  assert.equal(await run('{"x-statement-timeout-ms":"10"}'),'1000','a second at least');
+  assert.equal(await run('{"x-statement-timeout-ms":"abc"}'),before,'a malformed header is ignored');
+  assert.equal(await run('{}'),before,'no header, no change');
+  assert.equal(await run('not json'),before,'and nothing raises');
+  // Never above the role's own: with a 2 s timeout in force, 5 s asked is 2 s.
+  await db.exec('begin');
+  try {
+   await db.exec(`set local statement_timeout = '2s'`);
+   await db.query(`select set_config('request.headers',$1,true)`,['{"x-statement-timeout-ms":"5000"}']);
+   await db.exec('select public.pgrst_pre_request()');
+   assert.equal((await db.query(`select s.setting from pg_settings s where s.name='statement_timeout'`)).rows[0].setting,'2000');
+  } finally {await db.exec('rollback');}
+  const canExec=async(role)=>(await db.query("select has_function_privilege($1,'public.pgrst_pre_request()','execute') ok",[role])).rows[0].ok;
+  assert.equal(await canExec('authenticated'),true);
+  assert.equal(await canExec('anon'),true);
+  assert.equal(await canExec('service_role'),true);
+  // The old nine-argument function is gone (PostgREST could not choose between the two).
+  assert.equal((await db.query("select count(*)::int n from pg_proc where proname='search_passages'")).rows[0].n,1);
  } finally {await db.close();}
 });
 

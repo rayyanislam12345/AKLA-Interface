@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   retrieve, retrieveDetailed, fuseLists, capPerFile, dedupeByText, buildLabel, shortHeading, sectionFromHeading, clauseOf,
   keywordText, isMissingFunction, namedAct, rrfOf, toCandidate, rerankPassages, passageText, clearRetrieveCaches, MAX_TEXT,
-  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS, rewriteWorthwhile, FALLBACK_GRACE_MS,
+  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS, rewriteWorthwhile, FALLBACK_GRACE_MS, MAX_SEARCH_CALLS, searchCallLoad, CALL_MIN_MS, TIMEOUT_HEADER,
 } from '../retrieve.js';
 import { clearCaches } from '../libraryTools.js';
 
@@ -164,18 +164,21 @@ test('a project search: one embedding call, the hybrid search scoped to the proj
   assert.equal(embeds[0].body.input_type, 'query');
   const searches = supabase.calls.filter((c) => c.name === 'search_passages');
   const call = searches.find((c) => c.args.query_embedding);
-  assert.deepEqual(Object.keys(call.args).sort(), ['act_names', 'all_versions', 'document_type_id', 'exclude_document_id', 'k', 'matter_id', 'query_embedding', 'query_text', 'scope'].sort());
+  assert.deepEqual(Object.keys(call.args).sort(), ['act_names', 'all_versions', 'document_type_id', 'exclude_document_id', 'k', 'matter_id', 'max_ms', 'phrasings', 'query_embedding', 'query_text', 'scope'].sort());
   assert.equal(call.args.scope, 'project');
   assert.equal(call.args.matter_id, 'm1');
   assert.equal(call.args.all_versions, false);
   assert.deepEqual(call.args.query_embedding, [1, 0, 0]);
+  assert.equal(call.args.phrasings, null, 'a project question has no phrasings');
+  assert.ok(call.args.max_ms >= CALL_MIN_MS && call.args.max_ms <= 12_000, `the call's budget is what is left of the default deadline (${call.args.max_ms})`);
   // Under the default deadline the question is also searched by its words
   // alone from the start, with no embedding, in case the embedding is slow.
   const words = searches.find((c) => c.args.query_embedding === null);
   assert.ok(words, 'the words-only search was started');
   assert.equal(words.args.query_text, 'what is the concession period');
   assert.equal(words.args.matter_id, 'm1');
-  assert.equal(searches.length, 2);
+  assert.ok(words.args.max_ms >= CALL_MIN_MS && words.args.max_ms <= 12_000);
+  assert.equal(searches.length, 2, 'two calls, nothing else');
   assert.equal(voyage.requests.filter((r) => r.url.endsWith('/rerank')).length, 0);
   // The fused order, the fused score as the similarity.
   assert.deepEqual(out.passages.map((p) => p.id), ['a', 'b']);
@@ -254,21 +257,54 @@ test('before the hybrid migration, the search falls back to match_documents and 
   const all = await retrieve({ supabase, voyageKey: 'v', query: 'term of the FSA', scope: 'project', matterId: 'm1', allVersions: true, rerank: false, fetchImpl: voyage.fetchImpl });
   assert.deepEqual(all.map((p) => p.id).sort(), ['ai', 'cur', 'old']);
   // For the next minute the missing function is not asked for again: the
-  // first search asked at most twice (the question's own search and the
-  // words-only search start together, before either has seen the error),
-  // the second not at all.
+  // first search asked at most four times (the words-only call and the
+  // full one start before either has seen the error, and each is tried
+  // once more without the phrasings in case the database holds the 18 Oct
+  // function), the second not at all.
   const asked = supabase.calls.filter((c) => c.name === 'search_passages').length;
-  assert.ok(asked >= 1 && asked <= 2, `${asked} calls`);
+  assert.ok(asked >= 1 && asked <= 4, `${asked} calls`);
   assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, asked);
-  // A real failure is not mistaken for a missing function.
+  // A real failure is not mistaken for a missing function. A call given a
+  // time budget (under a deadline) is not tried again after a statement
+  // timeout: its budget is spent; one without is tried once more.
   clearRetrieveCaches();
   const broken = fakeSupabase({ rpc: { search_passages: { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } } } });
   await assert.rejects(retrieve({ supabase: broken, voyageKey: 'v', query: 'term', scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl }), /statement timeout/);
-  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 2, 'a timeout is tried once more');
-  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 2, 'the words-only search likewise');
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 1, 'under a deadline, once');
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 1, 'the words-only call likewise');
+  clearRetrieveCaches();
+  broken.calls.length = 0;
+  await assert.rejects(retrieve({ supabase: broken, voyageKey: 'v', query: 'term', scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl, deadlineMs: 0 }), /statement timeout/);
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 2, 'with no deadline (no budget), a timeout is tried once more');
+  assert.equal(broken.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 0, 'and no words-only call is made');
 });
 
-test('a precedent question is rewritten once into legal phrasings, each searched, merged', async () => {
+test('with the 18 Oct function still in the database (no phrasings, no max_ms), the same calls go without them, the question alone, for an hour', async () => {
+  const seen = [];
+  const supabase = fakeSupabase({
+    rpc: {
+      search_passages: (args) => {
+        seen.push(args);
+        if ('phrasings' in args || 'max_ms' in args) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.search_passages(act_names, all_versions, document_type_id, exclude_document_id, k, matter_id, max_ms, phrasings, query_embedding, query_text, scope) in the schema cache' } };
+        return { data: [precRow('a', 0.03)], error: null };
+      },
+    },
+  });
+  const voyage = fakeVoyage();
+  const anthropicJson = async () => ({ content: [{ type: 'text', text: '["drag-along right"]' }] });
+  const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: 'example of a drag along clause', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false, deadlineMs: 0 });
+  assert.equal(out.engine, 'hybrid');
+  assert.equal(out.path, 'full');
+  assert.deepEqual(out.passages.map((p) => p.id), ['a']);
+  assert.deepEqual(seen.map((a) => 'phrasings' in a), [true, false], 'tried with the phrasings, then without');
+  assert.equal(supabase.calls.filter((c) => c.name === 'match_documents').length, 0, 'match_documents was not needed');
+  // The next search knows, and sends the old shape at once.
+  seen.length = 0;
+  await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: 'lock-in period for the sponsors', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false, deadlineMs: 0 });
+  assert.deepEqual(seen.map((a) => 'phrasings' in a), [false]);
+});
+
+test('a precedent question is rewritten once into legal phrasings, which travel inside the one full call, fused in the database', async () => {
   let asked = 0;
   const anthropicJson = async (body) => {
     asked++;
@@ -277,10 +313,15 @@ test('a precedent question is rewritten once into legal phrasings, each searched
   };
   const supabase = fakeSupabase({
     rpc: {
+      // The database fuses the phrasings' legs: the call carrying them
+      // answers with the tag-along paragraph first.
       search_passages: (args) => ({
-        data: args.query_text === 'tag-along right'
-          ? [{ ...row('p1'), metadata: { storage_path: 'precedent/x/SSA.docx', filename: 'SSA.docx', passage_ordinal: 12 }, content: '7.2 Tag-Along. If the Majority sells...', rrf_score: 2 / 61 }]
-          : [{ ...row('p1'), metadata: { storage_path: 'precedent/x/SSA.docx', filename: 'SSA.docx', passage_ordinal: 3 }, content: '1. Definitions', rrf_score: 1 / 70 }],
+        data: [
+          ...(args.phrasings?.some((p) => p.text === 'tag-along right')
+            ? [{ ...row('p1'), metadata: { storage_path: 'precedent/x/SSA.docx', filename: 'SSA.docx', passage_ordinal: 12 }, content: '7.2 Tag-Along. If the Majority sells...', rrf_score: 2 / 61 }]
+            : []),
+          { ...row('p1'), metadata: { storage_path: 'precedent/x/SSA.docx', filename: 'SSA.docx', passage_ordinal: 3 }, content: '1. Definitions', rrf_score: 1 / 70 },
+        ],
         error: null,
       }),
     },
@@ -289,8 +330,17 @@ test('a precedent question is rewritten once into legal phrasings, each searched
   const q = 'tag along where a shareholder sells to a third party';
   const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rerank: false });
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
-  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding).length, 3, 'the question and each phrasing, with their embeddings');
-  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null).length, 1, 'and the question by words alone');
+  const full = supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding);
+  assert.equal(full.length, 1, 'one call with an embedding: the question and its phrasings together');
+  assert.equal(full[0].args.query_text, q);
+  assert.deepEqual(full[0].args.query_embedding, [1, 0, 0]);
+  assert.deepEqual(full[0].args.phrasings, [
+    { text: 'tag-along right', embedding: [2, 0, 0] },
+    { text: 'shall be entitled to sell its shares on the same terms', embedding: [3, 0, 0] },
+  ], 'each phrasing with its own embedding, inside the call');
+  const words = supabase.calls.filter((c) => c.name === 'search_passages' && c.args.query_embedding === null);
+  assert.equal(words.length, 1, 'and the question by words alone');
+  assert.equal(words[0].args.phrasings, null, 'the words-only call carries no phrasings: it goes before the rewrite');
   const embeds = voyage.requests.filter((r) => r.url.endsWith('/embeddings'));
   assert.equal(embeds.length, 1, 'one embedding call: the question and its phrasings together');
   assert.deepEqual(embeds[0].body.input, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
@@ -350,15 +400,17 @@ function deferred() {
 }
 
 // search_passages answering after `delay` ms, counting how many are in flight
-// at once. `texts`: the queries searched with an embedding (the question and
-// its phrasings); `wordsOnly`: those searched by words alone (the words-only
+// at once. `texts`: the queries searched with an embedding (the question;
+// its phrasings travel inside that call, `calls` keeps every call's
+// arguments); `wordsOnly`: those searched by words alone (the words-only
 // search every deadline-bound search starts at once, and any search whose
 // embedding failed).
 function slowSearch(delay, rowsFor = () => []) {
-  const state = { inFlight: 0, maxInFlight: 0, texts: [], wordsOnly: [] };
+  const state = { inFlight: 0, maxInFlight: 0, texts: [], wordsOnly: [], calls: [] };
   const supabase = fakeSupabase({
     rpc: {
       search_passages: async (args) => {
+        state.calls.push(args);
         (args.query_embedding ? state.texts : state.wordsOnly).push(args.query_text);
         state.inFlight++;
         state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
@@ -373,10 +425,10 @@ function slowSearch(delay, rowsFor = () => []) {
 
 const precedentRow = (id, text, rrf) => ({ ...row(id), metadata: { storage_path: `precedent/${id}.docx`, filename: `${id}.docx`, passage_ordinal: 1 }, content: text, rrf_score: rrf });
 
-test('the question waits for the rewrite and is embedded with its phrasings in one call; a question already embedded is searched at once', async () => {
+test('the question waits for the rewrite and is embedded with its phrasings in one call; a question already embedded costs no new embedding call, and its phrasings still go inside the one full call', async () => {
   const reply = deferred();
   const anthropicJson = () => reply.promise;
-  const { supabase, state } = slowSearch(5, (args) => [precedentRow(args.query_text.replace(/\W+/g, '-'), `${args.query_text} clause`, 0.01)]);
+  const { supabase, state } = slowSearch(5, (args) => [precedentRow(args.query_text.replace(/\W+/g, '-'), `${args.query_text} clause`, 0.01), ...(args.phrasings ?? []).map((p) => precedentRow(p.text.replace(/\W+/g, '-'), `${p.text} clause`, 0.009))]);
   const voyage = fakeVoyage();
   const q = 'tag along where a shareholder sells to a third party';
   const running = retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rerank: false });
@@ -391,33 +443,87 @@ test('the question waits for the rewrite and is embedded with its phrasings in o
   assert.deepEqual(voyage.requests.map((r) => r.body.input), [[q, 'tag-along right', 'entitled to sell on the same terms']]);
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'entitled to sell on the same terms']);
   assert.equal(out.rewriteLate, false);
-  assert.deepEqual(state.texts.slice().sort(), [q, 'tag-along right', 'entitled to sell on the same terms'].sort());
-  assert.equal(out.passages.length, 3, 'the words-only search is not merged into a full search');
+  assert.deepEqual(state.texts, [q], 'one call with an embedding');
+  assert.deepEqual(state.calls.find((c) => c.query_embedding).phrasings.map((p) => p.text), ['tag-along right', 'entitled to sell on the same terms'], 'the phrasings inside it');
+  assert.equal(state.calls.length, 2, 'two calls, nothing else');
+  assert.equal(out.passages.length, 3, 'the full call\'s rows; the words-only search is not merged into it');
 
   // The same question in another scope (the chat searches all three at
-  // once): its embedding is kept, so it is searched while its own rewrite
-  // is written, and the phrasings go in one call of their own.
+  // once): its embedding is kept, so the one embedding call carries the
+  // phrasings alone, and the full call still waits for them.
   const statuteReply = deferred();
   const { supabase: sb2, state: s2 } = slowSearch(5);
   const second = retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: () => statuteReply.promise, query: q, scope: 'statute', fetchImpl: voyage.fetchImpl, rerank: false });
   await sleep(30);
-  assert.deepEqual(s2.texts, [q], 'searched before the rewrite came');
-  assert.equal(voyage.requests.length, 1, 'with no new call');
+  assert.deepEqual(s2.texts, [], 'the full call waits for the rewrite');
+  assert.deepEqual(s2.wordsOnly, [q], 'the words-only call does not');
+  assert.equal(voyage.requests.length, 1, 'no new embedding call yet');
   statuteReply.resolve({ content: [{ type: 'text', text: '["right of co-sale"]' }] });
   const out2 = await second;
-  assert.deepEqual(voyage.requests.map((r) => r.body.input)[1], ['right of co-sale']);
+  assert.deepEqual(voyage.requests.map((r) => r.body.input)[1], ['right of co-sale'], 'the phrasing alone is embedded: the question was kept');
   assert.equal(out2.voyageCalls, 1);
+  assert.deepEqual(s2.texts, [q]);
+  assert.deepEqual(s2.calls.find((c) => c.query_embedding).phrasings, [{ text: 'right of co-sale', embedding: [1, 0, 0] }], 'the phrasing, with the embedding its own call gave it');
+  assert.equal(s2.calls.length, 2);
 });
 
-test('the phrasings are searched all at once, with the question\'s own search still running', async () => {
+test('a scope is searched in at most two database calls — one by words before the embedding, one after it carrying the embedding and every phrasing — each with its budget and the statement timeout header; none by words when there is no deadline', async () => {
   const anthropicJson = async () => ({ content: [{ type: 'text', text: '["drag-along right", "compel the minority to sell", "drag along notice"]' }] });
   const { supabase, state } = slowSearch(60);
+  // The calls as supabase-js builds them: abortSignal() and setHeader()
+  // chain, then the call answers.
+  const headers = [];
+  const plainRpc = supabase.rpc;
+  supabase.rpc = (name, args) => {
+    const sent = {};
+    const b = {
+      abortSignal: () => b,
+      setHeader: (h, v) => { sent[h] = v; return b; },
+      then: (ok, bad) => plainRpc(name, args).then((r) => { headers.push({ args, sent }); return r; }).then(ok, bad),
+    };
+    return b;
+  };
   const voyage = fakeVoyage();
-  const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: 'example of a drag along clause', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false });
+  const embedding = deferred();
+  const fetchImpl = async (url, init) => (url.endsWith('/embeddings') ? embedding.promise.then(() => voyage.fetchImpl(url, init)) : voyage.fetchImpl(url, init));
+  const q = 'example of a drag along clause';
+  const running = retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', fetchImpl, rerank: false, deadlineMs: 3000, timings: true });
+  await sleep(40);
+  assert.deepEqual(state.calls.map((c) => c.query_text), [q], 'before the embedding: one call, by words');
+  assert.equal(state.calls[0].query_embedding, null);
+  assert.equal(state.calls[0].phrasings, null);
+  assert.ok(state.calls[0].max_ms > 2900 && state.calls[0].max_ms <= 3000, `its budget is the whole deadline (${state.calls[0].max_ms})`);
+  embedding.resolve();
+  const out = await running;
+  assert.equal(out.path, 'full');
   assert.equal(out.phrasings.length, 4);
-  assert.equal(state.texts.length, 4);
-  assert.deepEqual(state.wordsOnly, ['example of a drag along clause']);
-  assert.equal(state.maxInFlight, 5, 'no phrasing waits for another, nor for the words-only search');
+  assert.equal(state.calls.length, 2, 'after the embedding: one more call, nothing else');
+  const full = state.calls[1];
+  assert.equal(full.query_text, q);
+  assert.deepEqual(full.query_embedding, [1, 0, 0]);
+  assert.deepEqual(full.phrasings, [
+    { text: 'drag-along right', embedding: [2, 0, 0] },
+    { text: 'compel the minority to sell', embedding: [3, 0, 0] },
+    { text: 'drag along notice', embedding: [4, 0, 0] },
+  ], 'every phrasing, with its embedding, inside the call');
+  assert.ok(full.max_ms >= CALL_MIN_MS && full.max_ms < state.calls[0].max_ms, `what is left of the deadline (${full.max_ms})`);
+  assert.equal(state.maxInFlight, 2);
+  // The budget travels as the statement timeout header too, so PostgREST's
+  // pre-request function can cancel the call in the database.
+  assert.deepEqual(headers.map((h) => h.sent[TIMEOUT_HEADER]), [String(state.calls[0].max_ms), String(full.max_ms)]);
+  const events = out.timings.events.filter((e) => e.stage === 'search' || e.stage === 'words only');
+  assert.deepEqual(events.map((e) => [e.stage, e.phrasings, e.byWordsOnly]), [['words only', 0, true], ['search', 3, false]]);
+  assert.ok(events.every((e) => e.maxMs >= CALL_MIN_MS), 'each event records its budget');
+
+  // No deadline: no words-only call, no budget, no header; one call in all.
+  clearRetrieveCaches();
+  state.calls.length = 0;
+  headers.length = 0;
+  await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', fetchImpl, rerank: false, deadlineMs: 0 });
+  assert.equal(state.calls.length, 1);
+  assert.ok(state.calls[0].query_embedding);
+  assert.equal(state.calls[0].max_ms, null);
+  assert.deepEqual(headers.map((h) => h.sent), [{}]);
 });
 
 test('a rewrite that has not come within the wait is not waited for, and is used the next time once it comes', async () => {
@@ -465,10 +571,20 @@ test('a failed rewrite or a failed phrasing embedding leaves the question\'s own
   const out2 = await retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: rewrite, query: lock, scope: 'precedent', fetchImpl: flaky, rerank: false });
   assert.deepEqual(out2.phrasings, [lock, 'restriction on transfer']);
   assert.deepEqual(s2.texts, [], 'nothing was searched with an embedding');
-  assert.deepEqual(s2.wordsOnly.slice().sort(), [lock, lock, 'restriction on transfer'].sort(), 'the question (twice: its own search and the words-only one) and the phrasing, by words');
-  assert.deepEqual(embeddings, [null, null, null]);
+  assert.deepEqual(s2.wordsOnly, [lock, lock], 'the words-only call, then the full call by words');
+  assert.deepEqual(s2.calls.map((c) => c.phrasings), [null, [{ text: 'restriction on transfer', embedding: null }]], 'the phrasing travels in the full call, by its words');
+  assert.deepEqual(embeddings, [null, null]);
   assert.equal(out2.fellBack, false, 'the full search finished on its own');
   assert.equal(out2.path, 'full');
+  // With no phrasings and the embedding failed, the words-only call's rows
+  // serve: no second call at all.
+  clearRetrieveCaches();
+  const { supabase: sb3, state: s3 } = slowSearch(1, () => [precedentRow('a', 'Clause 9 Transfers', 0.02)]);
+  const out3 = await retrieveDetailed({ supabase: sb3, voyageKey: 'v', query: lock, scope: 'precedent', fetchImpl: flaky, rewrite: false, rerank: false, timings: true });
+  assert.equal(s3.calls.length, 1, 'the words-only call alone');
+  assert.equal(out3.path, 'full');
+  assert.equal(out3.passages.length, 1);
+  assert.ok(out3.timings.events.some((e) => e.stage === 'words only') && !out3.timings.events.some((e) => e.stage === 'search'));
 });
 
 test('the reranker reads 30 passages, each whole; both can be set per call', async () => {
@@ -631,7 +747,7 @@ test('without timings retrieve returns the passages alone, as every caller expec
   const timed = await retrieve({ supabase, voyageKey: 'v', query: 'concession period', scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl, timings: true });
   assert.ok(Array.isArray(timed.passages) && timed.passages.length === 1);
   assert.equal(timed.timings.scope, 'project');
-  assert.ok(timed.timings.events.find((e) => e.stage === 'search' && e.phrasing === 0 && e.rows === 1));
+  assert.ok(timed.timings.events.find((e) => e.stage === 'search' && e.phrasings === 0 && e.rows === 1));
 });
 
 // ------------------------------------------- Voyage calls: fewer, and counted
@@ -776,7 +892,7 @@ test('a search still reranking at the deadline returns the question\'s own searc
   assert.ok(took >= 140 && took < 150 + 500, `returned at the deadline (${took} ms)`);
   assert.equal(out.fellBack, true);
   assert.equal(out.path, 'fused');
-  assert.match(out.reason, /longer than 150 ms: returned the question's own search \(words and meaning fused\), not reranked/);
+  assert.match(out.reason, /longer than 150 ms: returned the search by words and meaning \(the phrasings included\), fused but not reranked/);
   assert.equal(out.timings.fellBack, true);
   assert.equal(out.timings.path, 'fused');
   assert.equal(out.timings.reason, out.reason);
@@ -857,7 +973,7 @@ test('with every search hanging too, nothing is returned by the deadline, marked
   assert.equal(out.fellBack, true);
   assert.equal(out.path, 'none');
   assert.deepEqual(out.passages, []);
-  assert.match(out.reason, /longer than 100 ms and neither the question's own search nor the search by words was back in time; nothing returned/);
+  assert.match(out.reason, /longer than 100 ms and neither the full search nor the search by words was back in time; nothing returned/);
   assert.equal(out.timings.path, 'none');
   assert.equal(out.timings.reason, out.reason);
   assert.equal(supabase.calls.filter((c) => c.name === 'match_documents').length, 0);
@@ -865,6 +981,32 @@ test('with every search hanging too, nothing is returned by the deadline, marked
   late.resolve({ data: [precRow('late', 0.05)], error: null });
   await sleep(50);
   assert.equal(JSON.stringify(out), before, 'nothing written to the result after it was returned');
+  assert.deepEqual(seen, []);
+});
+
+test('with the embedding back but the full call late, the deadline returns call 1\'s rows (by words), and the full call is abandoned', async () => {
+  const late = deferred();
+  const supabase = fakeSupabase({
+    rpc: {
+      search_passages: (args) => (args.query_embedding ? late.promise : { data: [precRow('w1', 0.02, { heading_path: 'Clause 9 Transfers › 9.3 Drag along' }), precRow('w2', 0.01)], error: null }),
+    },
+  });
+  const voyage = fakeVoyage();
+  const deadlineMs = 150;
+  const { result: { result: out, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'example of a drag along clause', scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs, timings: true })));
+  assert.ok(took >= deadlineMs - 10 && took <= deadlineMs + 500, `returned at the deadline (${took} ms)`);
+  assert.equal(out.fellBack, true);
+  assert.equal(out.path, 'words');
+  assert.match(out.reason, /longer than 150 ms: returned the search by words alone \(the question's embedding was not back\), not reranked/);
+  assert.deepEqual(out.passages.map((p) => p.id), ['w1', 'w2'], 'call 1\'s rows');
+  assert.equal(out.passages[0].label, 'w1.docx, Clause 9 Transfers › 9.3 Drag along');
+  assert.equal(out.voyageCalls, 1, 'the embedding; no rerank on a quick return');
+  assert.equal(hybridCalls(supabase).length, 1, 'the full call was sent');
+  assert.equal(wordsCalls(supabase).length, 1);
+  const before = JSON.stringify(out);
+  late.resolve({ data: [precRow('late', 0.05)], error: null });
+  await sleep(50);
+  assert.equal(JSON.stringify(out), before, 'its late answer changes nothing');
   assert.deepEqual(seen, []);
 });
 
@@ -923,4 +1065,89 @@ test('a search that finishes in time is not touched by the deadline, and with th
   assert.equal(off.passages.length, 1);
   assert.equal(wordsCalls(slow).length, 0);
   assert.equal(searchCalls(slow).length, 1);
+});
+
+// -------------------------------------- the process's database searches
+
+// On 18 Oct 2026 the evaluation's tools run returned nothing for twenty
+// searches in a row: every search's five database calls went out at once,
+// the ones the deadline abandoned ran on in the database (holding PostgREST's
+// ten or so connections for up to 30 s), and the next search's words-only
+// call — its safety net — waited behind them past the deadline. The calls now
+// take turns, a few at a time per process.
+test('one process keeps at most MAX_SEARCH_CALLS database searches in flight: ten searches at once take turns, and all answer', async () => {
+  assert.equal(MAX_SEARCH_CALLS, 6, 'one chat turn: two calls for each of three scopes');
+  let inFlight = 0;
+  let peak = 0;
+  let sent = 0;
+  const supabase = fakeSupabase({
+    rpc: {
+      search_passages: async (args) => {
+        sent++;
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await sleep(40);
+        inFlight--;
+        return { data: [row(`r-${args.query_text}`)], error: null };
+      },
+    },
+  });
+  const voyage = fakeVoyage();
+  const outs = await Promise.all(Array.from({ length: 10 }, (_, i) => retrieve({ supabase, voyageKey: 'v', query: `concession period ${i}`, scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 0, timings: true })));
+  assert.equal(sent, 10, 'every search was sent');
+  assert.equal(peak, MAX_SEARCH_CALLS, `at most six in flight (peak ${peak})`);
+  assert.ok(outs.every((o) => o.passages.length === 1), 'every search answered');
+  assert.ok(outs.some((o) => o.timings.events.find((e) => e.stage === 'search').waitedMs >= 30), 'the event says how long a call waited for its turn');
+  assert.deepEqual(searchCallLoad(), { inFlight: 0, waiting: 0, limit: MAX_SEARCH_CALLS }, 'every turn given back');
+});
+
+test('a waiting call goes in order of worth — the words-only calls before the full ones — and one whose search has returned by the deadline is never sent', async () => {
+  const held = [];
+  const supabase = fakeSupabase({
+    rpc: { search_passages: (args) => new Promise((resolve) => held.push({ args, release: () => resolve({ data: [precRow(`p${held.length}`, 0.02)], error: null }) })) },
+  });
+  const voyage = fakeVoyage();
+  // Six searches with no deadline (one call each) take every turn.
+  const busy = Array.from({ length: MAX_SEARCH_CALLS }, (_, i) => retrieve({ supabase, voyageKey: 'v', query: `concession period ${i}`, scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 0 }));
+  await sleep(30);
+  assert.equal(held.length, MAX_SEARCH_CALLS);
+  assert.deepEqual(searchCallLoad(), { inFlight: MAX_SEARCH_CALLS, waiting: 0, limit: MAX_SEARCH_CALLS });
+
+  // A capped search: its words-only and own calls wait their turn; at the
+  // deadline it returns nothing, says why, and they are never sent.
+  const { result: { result: capped, took }, seen } = await noUnhandled(() => timed(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'drag along', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 100, timings: true })));
+  assert.ok(took <= 100 + 500, `returned at the deadline (${took} ms)`);
+  assert.equal(capped.path, 'none');
+  assert.match(capped.reason, /neither the full search nor the search by words was back in time; nothing returned \(2 of its calls never left the queue: 6 searches in flight, 2 waiting\)/);
+  assert.equal(held.length, MAX_SEARCH_CALLS, 'nothing of it was sent');
+  assert.equal(searchCallLoad().waiting, 0, 'its calls left the line when it returned');
+  assert.deepEqual(seen, []);
+
+  // Two more searches line up, two calls each: one with phrasings (the
+  // words-only call, then the full call carrying the phrasings), then a
+  // plain one (words only, then the full call).
+  const anthropicJson = async () => ({ content: [{ type: 'text', text: '["drag-along right", "compel the minority to sell"]' }] });
+  const withPhrasings = retrieve({ supabase, voyageKey: 'v', anthropicJson, query: 'example of a drag along clause', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false, deadlineMs: 5000 });
+  await sleep(30);
+  const plain = retrieve({ supabase, voyageKey: 'v', query: 'lock-in period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, rerank: false, deadlineMs: 5000 });
+  await sleep(30);
+  assert.equal(searchCallLoad().waiting, 4);
+  assert.equal(held.length, MAX_SEARCH_CALLS, 'still nothing sent');
+  // As turns free up, the waiting calls go by worth, then by who asked first.
+  const order = [];
+  for (let i = 0; i < 4; i++) {
+    held[i].release();
+    await sleep(20);
+    const sent = held[MAX_SEARCH_CALLS + i];
+    assert.ok(sent, `a waiting call was sent when turn ${i} freed`);
+    order.push(`${sent.args.query_text}${sent.args.query_embedding ? '' : ' (words)'}${sent.args.phrasings ? ` +${sent.args.phrasings.length}` : ''}`);
+  }
+  assert.deepEqual(order, [
+    'example of a drag along clause (words)', 'lock-in period (words)',
+    'example of a drag along clause +2', 'lock-in period',
+  ]);
+  for (const h of held.slice(4)) h.release();
+  const [withOut, plainOut] = await Promise.all([withPhrasings, plain, ...busy]);
+  assert.ok(withOut.length >= 1 && plainOut.length >= 1);
+  assert.deepEqual(searchCallLoad(), { inFlight: 0, waiting: 0, limit: MAX_SEARCH_CALLS });
 });

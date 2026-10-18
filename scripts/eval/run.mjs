@@ -260,7 +260,10 @@ const SECTION_RE = /\b(?:sections?|sectoin|sec\.?|s\.|s|rule|article|art\.)\s*(\
 export const LAWISH = /\b(?:act|acts|ordinance|rules?|section|sectoin|statute|statutory|law|legal|court|enforceable|void|admissible|pakistan|pakistani|prohibited|lawful|regulations?|ppra|p3a|secp)\b/i;
 
 // (b) The assistant's library tools (chat-service/libraryTools.js), called
-// the way the assistant calls them. With --route auto (default) the tools
+// the way the assistant calls them (libraryTools.makeToolRunner: the model
+// for phrasings is handed to the law and project searches too, so a statute
+// question is measured with its rewrite, as the chat runs it). With --route
+// auto (default) the tools
 // are picked from the question's words alone — read_act_section when it
 // names an Act and a section, search_law_library when it sounds like law,
 // search_precedents outside a project, search_project_documents inside one
@@ -280,7 +283,7 @@ export function toolsAdapter({ supabase, voyageKey, anthropicJson, lib, place, r
     return ids.map((id) => metaCache.get(id) ?? {});
   }
   const lawPassages = async (q, act) => {
-    const out = await lib.searchLaw(supabase, voyageKey, { query: q, act }, {});
+    const out = await lib.searchLaw(supabase, voyageKey, { query: q, act }, { anthropicJson });
     return Promise.all(out.map(async (p) => {
       const placed = await place(p.act_name, p.text);
       return { kind: "statute", id: p.id, similarity: p.similarity ?? null, act_name: p.act_name, sections: placed.length ? placed : p.section ? [p.section] : [], storage_path: null, filename: null, text: p.text };
@@ -297,13 +300,15 @@ export function toolsAdapter({ supabase, voyageKey, anthropicJson, lib, place, r
   const precedentPassages = async (q) => {
     const out = await lib.searchPrecedentsTool(supabase, voyageKey, anthropicJson, { query: q }, {});
     return out.map((p) => {
+      // The file: the tool says it (storage_path), else it is read from the
+      // id, precedent:<storage path>:<row>:<paragraph>.
       const m = /^precedent:(.*):[^:]*:[^:]*$/.exec(p.id ?? "");
-      const path = m ? m[1] : null;
+      const path = p.storage_path ?? (m ? m[1] : null);
       return { kind: "precedent", id: p.id, similarity: p.similarity ?? null, act_name: null, sections: [], storage_path: path && path.includes("/") ? path : null, filename: p.filename ?? null, text: p.text };
     });
   };
   const projectPassages = async (q, matterId) => {
-    const out = await lib.searchProject(supabase, voyageKey, { matterId, query: q }, {});
+    const out = await lib.searchProject(supabase, voyageKey, { matterId, query: q }, { anthropicJson });
     const metas = await projectMeta(out.map((p) => p.id));
     return out.map((p, i) => ({ kind: "matter", id: p.id, similarity: p.similarity ?? null, act_name: null, sections: [], storage_path: metas[i].storage_path ?? null, filename: p.filename, text: p.text }));
   };
