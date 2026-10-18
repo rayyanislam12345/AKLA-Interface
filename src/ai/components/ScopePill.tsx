@@ -36,7 +36,7 @@ export default function ScopePill({ scope, onChange, locked = false, label: give
   const pillClass = cn(
     "inline-flex h-8 max-w-[14rem] items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
     scope.matterId
-      ? "border-[hsl(var(--gold)/0.6)] bg-[hsl(var(--gold)/0.16)] text-foreground"
+      ? "border-[hsl(var(--gold))] bg-[hsl(var(--gold)/0.16)] text-foreground"
       : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
     locked && "cursor-default",
     className,

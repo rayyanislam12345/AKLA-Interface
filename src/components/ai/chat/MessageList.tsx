@@ -252,7 +252,7 @@ function UserBubble({ content, attachments, appearance = "site" }: { content: st
         <div
           className={
             appearance === "ai"
-              ? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-[15px] leading-relaxed text-foreground"
+              ? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-[hsl(var(--ai-bubble))] px-4 py-2.5 text-[15px] leading-relaxed text-[hsl(var(--ai-bubble-foreground))]"
               : "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground"
           }
         >

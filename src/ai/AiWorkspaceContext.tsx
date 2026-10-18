@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { type ChatArtifact, useSendChatMessage } from "@/hooks/useChat";
+import { type AiThemeId, readAiTheme, saveAiTheme } from "@/ai/theme";
 
 // What the whole AI workspace shares, whichever page is showing: the one
 // chat engine (so a reply being written carries on when the lawyer moves
@@ -20,9 +21,15 @@ interface AiWorkspaceValue {
   panel: AiPanel;
   setPanel: (panel: AiPanel) => void;
   openArtifact: (artifact: ChatArtifact) => void;
+  /** A stored project version in the document window (?open=v:<id>). */
+  openVersion: (versionId: string) => void;
   closePanel: () => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  // The workspace's colour theme (see src/ai/theme.ts); read from
+  // localStorage before the first render so there is no flash.
+  aiTheme: AiThemeId;
+  setAiTheme: (theme: AiThemeId) => void;
   mobileSidebarOpen: boolean;
   setMobileSidebarOpen: (open: boolean) => void;
   // What the phone's top bar shows for the page that is open.
@@ -57,7 +64,19 @@ export function AiWorkspaceProvider({ children }: { children: ReactNode }) {
   const openArtifact = useCallback((artifact: ChatArtifact) => {
     setPanelState({ kind: "artifact", artifactId: artifact.id, threadId: artifact.thread_id });
   }, []);
+  const openVersion = useCallback((versionId: string) => setPanelState({ kind: "version", versionId }), []);
   const closePanel = useCallback(() => setPanelState(null), []);
+  // A document window belongs to the page it was opened on (a chat's own
+  // artifact panel comes back when the lawyer returns to that chat, so it
+  // stays); a stored version closes when the page changes. A layout effect,
+  // so it runs before the new page's own effects open what its address asks
+  // for (?open=v:), and only on a change, not on the first page.
+  const lastPathRef = useRef(location.pathname);
+  useLayoutEffect(() => {
+    if (lastPathRef.current === location.pathname) return;
+    lastPathRef.current = location.pathname;
+    setPanelState((p) => (p?.kind === "version" ? null : p));
+  }, [location.pathname]);
 
   const chat = useSendChatMessage(
     (threadId) => {
@@ -83,6 +102,11 @@ export function AiWorkspaceProvider({ children }: { children: ReactNode }) {
       /* a private window: the choice lasts for the session */
     }
   }, []);
+  const [aiTheme, setAiThemeState] = useState<AiThemeId>(readAiTheme);
+  const setAiTheme = useCallback((theme: AiThemeId) => {
+    setAiThemeState(theme);
+    saveAiTheme(theme);
+  }, []);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Moving to another page closes the phone's sidebar sheet.
   useEffect(() => {
@@ -93,8 +117,8 @@ export function AiWorkspaceProvider({ children }: { children: ReactNode }) {
   const autoOpenedThreads = useRef(new Set<string>()).current;
 
   const value = useMemo<AiWorkspaceValue>(
-    () => ({ chat, panel, setPanel, openArtifact, closePanel, sidebarCollapsed, setSidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen, pageTitle, setPageTitle, autoOpenedThreads }),
-    [chat, panel, setPanel, openArtifact, closePanel, sidebarCollapsed, setSidebarCollapsed, mobileSidebarOpen, pageTitle, autoOpenedThreads],
+    () => ({ chat, panel, setPanel, openArtifact, openVersion, closePanel, sidebarCollapsed, setSidebarCollapsed, aiTheme, setAiTheme, mobileSidebarOpen, setMobileSidebarOpen, pageTitle, setPageTitle, autoOpenedThreads }),
+    [chat, panel, setPanel, openArtifact, openVersion, closePanel, sidebarCollapsed, setSidebarCollapsed, aiTheme, setAiTheme, mobileSidebarOpen, pageTitle, autoOpenedThreads],
   );
   return <AiWorkspaceContext.Provider value={value}>{children}</AiWorkspaceContext.Provider>;
 }

@@ -171,14 +171,18 @@ All colors MUST be HSL.
     --secondary-foreground: 30 12% 16%;
 
     --muted: 40 14% 94%;
-    --muted-foreground: 30 8% 42%;
+    --muted-foreground: 30 8% 40%;
 
     --accent: 40 14% 92%;
     --accent-foreground: 30 12% 12%;
     --accent-light: 40 14% 95%;
 
-    --gold: 40 46% 55%;
-    --gold-foreground: 224 42% 16%;
+    --gold: 40 50% 42%;
+    --gold-foreground: 0 0% 4%;
+
+    /* The lawyer's own messages: a tinted bubble and its text. */
+    --ai-bubble: 40 14% 94%;
+    --ai-bubble-foreground: 30 12% 12%;
 
     --success: 142 60% 34%;
     --success-foreground: 0 0% 98%;
@@ -188,7 +192,7 @@ All colors MUST be HSL.
     --destructive-foreground: 0 0% 98%;
 
     --border: 40 10% 88%;
-    --input: 40 10% 90%;
+    --input: 40 8% 53%;
     --ring: 224 42% 30%;
 
     --sidebar-background: 40 12% 95%;
@@ -232,6 +236,9 @@ All colors MUST be HSL.
     --gold: 40 55% 62%;
     --gold-foreground: 224 30% 10%;
 
+    --ai-bubble: 30 6% 15%;
+    --ai-bubble-foreground: 40 10% 92%;
+
     --success: 142 60% 46%;
     --success-foreground: 30 8% 9%;
     --warning: 40 90% 60%;
@@ -240,7 +247,7 @@ All colors MUST be HSL.
     --destructive-foreground: 30 8% 9%;
 
     --border: 30 6% 20%;
-    --input: 30 6% 18%;
+    --input: 30 6% 46%;
     --ring: 224 45% 68%;
 
     --sidebar-background: 30 8% 7%;
@@ -251,6 +258,425 @@ All colors MUST be HSL.
     --sidebar-accent-foreground: 40 10% 92%;
     --sidebar-border: 30 6% 18%;
     --sidebar-ring: 224 45% 68%;
+  }
+
+  /* AI workspace colour themes (chosen in the sidebar's Appearance panel,
+     stored as data-ai-theme on the .ai-app root and on <body>). Generated
+     from the scratch script that checks every text/background pair for
+     WCAG AA; edit the tokens there, not by hand. "warm" is the block above.
+     Night and Monokai are dark only: they set the dark tokens whether or
+     not .dark is on, and the workspace pins the mode to dark while one
+     of them is chosen (AiLayout), because the chat's other dark styles key
+     off next-themes' .dark class. */
+
+  .ai-app[data-ai-theme="blue"] {
+    --background: 210 30% 98%;
+    --foreground: 215 28% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 13%;
+    --primary: 212 85% 36%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 212 85% 48%;
+    --primary-glow: 212 85% 61%;
+    --secondary: 212 30% 93%;
+    --secondary-foreground: 215 28% 13%;
+    --muted: 212 28% 94%;
+    --muted-foreground: 214 16% 40%;
+    --accent: 212 32% 92%;
+    --accent-foreground: 215 28% 13%;
+    --accent-light: 212 32% 95%;
+    --gold: 212 85% 42%;
+    --gold-foreground: 0 0% 100%;
+    --success: 142 60% 34%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 212 22% 87%;
+    --input: 212 14% 54%;
+    --ring: 212 85% 36%;
+    --sidebar-background: 212 38% 94%;
+    --sidebar-foreground: 215 28% 14%;
+    --sidebar-primary: 212 85% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 212 36% 88%;
+    --sidebar-accent-foreground: 215 28% 13%;
+    --sidebar-border: 212 25% 85%;
+    --sidebar-ring: 212 85% 36%;
+    --ai-bubble: 212 65% 92%;
+    --ai-bubble-foreground: 215 28% 13%;
+  }
+
+  .dark .ai-app[data-ai-theme="blue"] {
+    --background: 212 20% 11%;
+    --foreground: 212 15% 90%;
+    --card: 212 18% 13%;
+    --card-foreground: 212 15% 90%;
+    --popover: 212 18% 13%;
+    --popover-foreground: 212 15% 90%;
+    --primary: 206 85% 66%;
+    --primary-foreground: 212 30% 10%;
+    --primary-light: 206 85% 76%;
+    --primary-glow: 206 85% 60%;
+    --secondary: 212 15% 18%;
+    --secondary-foreground: 212 15% 90%;
+    --muted: 212 15% 17%;
+    --muted-foreground: 212 12% 66%;
+    --accent: 212 15% 20%;
+    --accent-foreground: 212 15% 90%;
+    --accent-light: 212 15% 24%;
+    --gold: 206 85% 62%;
+    --gold-foreground: 212 30% 10%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 212 14% 22%;
+    --input: 212 12% 47%;
+    --ring: 206 85% 66%;
+    --sidebar-background: 212 22% 8%;
+    --sidebar-foreground: 212 12% 88%;
+    --sidebar-primary: 206 85% 66%;
+    --sidebar-primary-foreground: 212 30% 10%;
+    --sidebar-accent: 212 18% 15%;
+    --sidebar-accent-foreground: 212 15% 90%;
+    --sidebar-border: 212 14% 19%;
+    --sidebar-ring: 206 85% 66%;
+    --ai-bubble: 210 42% 23%;
+    --ai-bubble-foreground: 212 15% 93%;
+  }
+
+  .ai-app[data-ai-theme="pink"] {
+    --background: 340 30% 98%;
+    --foreground: 340 15% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 340 15% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 340 15% 13%;
+    --primary: 335 70% 36%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 335 70% 48%;
+    --primary-glow: 335 70% 61%;
+    --secondary: 340 25% 93%;
+    --secondary-foreground: 340 15% 13%;
+    --muted: 340 25% 94%;
+    --muted-foreground: 340 10% 40%;
+    --accent: 340 28% 92%;
+    --accent-foreground: 340 15% 13%;
+    --accent-light: 340 28% 95%;
+    --gold: 335 70% 44%;
+    --gold-foreground: 0 0% 100%;
+    --success: 142 60% 34%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 340 20% 87%;
+    --input: 340 12% 56%;
+    --ring: 335 70% 36%;
+    --sidebar-background: 340 35% 95%;
+    --sidebar-foreground: 340 15% 14%;
+    --sidebar-primary: 335 70% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 340 32% 89%;
+    --sidebar-accent-foreground: 340 15% 13%;
+    --sidebar-border: 340 22% 86%;
+    --sidebar-ring: 335 70% 36%;
+    --ai-bubble: 340 60% 93%;
+    --ai-bubble-foreground: 340 15% 13%;
+  }
+
+  .dark .ai-app[data-ai-theme="pink"] {
+    --background: 335 15% 10%;
+    --foreground: 340 12% 91%;
+    --card: 335 14% 12%;
+    --card-foreground: 340 12% 91%;
+    --popover: 335 14% 12%;
+    --popover-foreground: 340 12% 91%;
+    --primary: 338 75% 72%;
+    --primary-foreground: 335 25% 10%;
+    --primary-light: 338 75% 82%;
+    --primary-glow: 338 75% 66%;
+    --secondary: 335 12% 18%;
+    --secondary-foreground: 340 12% 91%;
+    --muted: 335 12% 17%;
+    --muted-foreground: 335 10% 66%;
+    --accent: 335 12% 20%;
+    --accent-foreground: 340 12% 91%;
+    --accent-light: 335 12% 24%;
+    --gold: 338 75% 68%;
+    --gold-foreground: 335 25% 10%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 335 12% 22%;
+    --input: 335 10% 47%;
+    --ring: 338 75% 72%;
+    --sidebar-background: 335 16% 7%;
+    --sidebar-foreground: 340 10% 88%;
+    --sidebar-primary: 338 75% 72%;
+    --sidebar-primary-foreground: 335 25% 10%;
+    --sidebar-accent: 335 14% 15%;
+    --sidebar-accent-foreground: 340 12% 91%;
+    --sidebar-border: 335 12% 19%;
+    --sidebar-ring: 338 75% 72%;
+    --ai-bubble: 335 35% 23%;
+    --ai-bubble-foreground: 340 12% 93%;
+  }
+
+  .ai-app[data-ai-theme="orange"] {
+    --background: 32 35% 98%;
+    --foreground: 25 18% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 25 18% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 25 18% 12%;
+    --primary: 24 85% 32%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 24 85% 44%;
+    --primary-glow: 24 85% 57%;
+    --secondary: 32 28% 93%;
+    --secondary-foreground: 25 18% 12%;
+    --muted: 32 28% 94%;
+    --muted-foreground: 25 12% 38%;
+    --accent: 32 32% 92%;
+    --accent-foreground: 25 18% 12%;
+    --accent-light: 32 32% 95%;
+    --gold: 28 85% 40%;
+    --gold-foreground: 0 0% 4%;
+    --success: 142 60% 34%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 32 22% 87%;
+    --input: 32 14% 53%;
+    --ring: 24 85% 32%;
+    --sidebar-background: 32 38% 94%;
+    --sidebar-foreground: 25 18% 13%;
+    --sidebar-primary: 24 85% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 32 36% 88%;
+    --sidebar-accent-foreground: 25 18% 12%;
+    --sidebar-border: 32 25% 85%;
+    --sidebar-ring: 24 85% 32%;
+    --ai-bubble: 30 75% 91%;
+    --ai-bubble-foreground: 25 18% 12%;
+  }
+
+  .dark .ai-app[data-ai-theme="orange"] {
+    --background: 28 12% 10%;
+    --foreground: 32 12% 91%;
+    --card: 28 11% 12%;
+    --card-foreground: 32 12% 91%;
+    --popover: 28 11% 12%;
+    --popover-foreground: 32 12% 91%;
+    --primary: 28 85% 64%;
+    --primary-foreground: 28 30% 10%;
+    --primary-light: 28 85% 74%;
+    --primary-glow: 28 85% 58%;
+    --secondary: 28 10% 18%;
+    --secondary-foreground: 32 12% 91%;
+    --muted: 28 10% 17%;
+    --muted-foreground: 30 10% 66%;
+    --accent: 28 10% 20%;
+    --accent-foreground: 32 12% 91%;
+    --accent-light: 28 10% 24%;
+    --gold: 28 85% 60%;
+    --gold-foreground: 28 30% 10%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 28 10% 22%;
+    --input: 28 10% 47%;
+    --ring: 28 85% 64%;
+    --sidebar-background: 28 13% 7%;
+    --sidebar-foreground: 32 10% 88%;
+    --sidebar-primary: 28 85% 64%;
+    --sidebar-primary-foreground: 28 30% 10%;
+    --sidebar-accent: 28 11% 15%;
+    --sidebar-accent-foreground: 32 12% 91%;
+    --sidebar-border: 28 10% 19%;
+    --sidebar-ring: 28 85% 64%;
+    --ai-bubble: 28 32% 23%;
+    --ai-bubble-foreground: 32 12% 93%;
+  }
+
+  .ai-app[data-ai-theme="green"] {
+    --background: 140 22% 98%;
+    --foreground: 150 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 150 15% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 15% 12%;
+    --primary: 150 60% 26%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 150 60% 38%;
+    --primary-glow: 150 60% 51%;
+    --secondary: 140 18% 93%;
+    --secondary-foreground: 150 15% 12%;
+    --muted: 140 18% 94%;
+    --muted-foreground: 150 10% 38%;
+    --accent: 140 22% 92%;
+    --accent-foreground: 150 15% 12%;
+    --accent-light: 140 22% 95%;
+    --gold: 148 58% 32%;
+    --gold-foreground: 0 0% 100%;
+    --success: 142 60% 34%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 140 16% 87%;
+    --input: 140 10% 52%;
+    --ring: 150 60% 26%;
+    --sidebar-background: 140 24% 94%;
+    --sidebar-foreground: 150 15% 13%;
+    --sidebar-primary: 150 60% 26%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 140 24% 88%;
+    --sidebar-accent-foreground: 150 15% 12%;
+    --sidebar-border: 140 18% 85%;
+    --sidebar-ring: 150 60% 26%;
+    --ai-bubble: 140 45% 91%;
+    --ai-bubble-foreground: 150 15% 12%;
+  }
+
+  .dark .ai-app[data-ai-theme="green"] {
+    --background: 150 12% 10%;
+    --foreground: 140 10% 91%;
+    --card: 150 11% 12%;
+    --card-foreground: 140 10% 91%;
+    --popover: 150 11% 12%;
+    --popover-foreground: 140 10% 91%;
+    --primary: 145 55% 62%;
+    --primary-foreground: 150 25% 9%;
+    --primary-light: 145 55% 72%;
+    --primary-glow: 145 55% 56%;
+    --secondary: 150 10% 18%;
+    --secondary-foreground: 140 10% 91%;
+    --muted: 150 10% 17%;
+    --muted-foreground: 145 10% 66%;
+    --accent: 150 10% 20%;
+    --accent-foreground: 140 10% 91%;
+    --accent-light: 150 10% 24%;
+    --gold: 145 55% 58%;
+    --gold-foreground: 150 25% 9%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 150 10% 22%;
+    --input: 150 8% 47%;
+    --ring: 145 55% 62%;
+    --sidebar-background: 150 13% 7%;
+    --sidebar-foreground: 140 10% 88%;
+    --sidebar-primary: 145 55% 62%;
+    --sidebar-primary-foreground: 150 25% 9%;
+    --sidebar-accent: 150 11% 15%;
+    --sidebar-accent-foreground: 140 10% 91%;
+    --sidebar-border: 150 10% 19%;
+    --sidebar-ring: 145 55% 62%;
+    --ai-bubble: 150 26% 22%;
+    --ai-bubble-foreground: 140 10% 93%;
+  }
+
+  .ai-app[data-ai-theme="night"], .dark .ai-app[data-ai-theme="night"] {
+    --background: 0 0% 12%;
+    --foreground: 0 0% 82%;
+    --card: 0 0% 14%;
+    --card-foreground: 0 0% 82%;
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 82%;
+    --primary: 206 92% 64%;
+    --primary-foreground: 0 0% 8%;
+    --primary-light: 206 92% 74%;
+    --primary-glow: 206 92% 58%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 82%;
+    --muted: 0 0% 17%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 0% 21%;
+    --accent-foreground: 0 0% 82%;
+    --accent-light: 0 0% 25%;
+    --gold: 206 92% 60%;
+    --gold-foreground: 0 0% 8%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 70% 62%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 0 0% 22%;
+    --input: 0 0% 47%;
+    --ring: 206 92% 64%;
+    --sidebar-background: 0 0% 9%;
+    --sidebar-foreground: 0 0% 80%;
+    --sidebar-primary: 206 92% 64%;
+    --sidebar-primary-foreground: 0 0% 8%;
+    --sidebar-accent: 0 0% 16%;
+    --sidebar-accent-foreground: 0 0% 82%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 206 92% 64%;
+    --ai-bubble: 206 38% 22%;
+    --ai-bubble-foreground: 0 0% 90%;
+  }
+
+  .ai-app[data-ai-theme="monokai"], .dark .ai-app[data-ai-theme="monokai"] {
+    --background: 70 8% 15%;
+    --foreground: 60 30% 96%;
+    --card: 70 8% 17%;
+    --card-foreground: 60 30% 96%;
+    --popover: 70 8% 18%;
+    --popover-foreground: 60 30% 96%;
+    --primary: 80 76% 53%;
+    --primary-foreground: 70 10% 10%;
+    --primary-light: 80 76% 63%;
+    --primary-glow: 80 76% 47%;
+    --secondary: 70 7% 22%;
+    --secondary-foreground: 60 30% 96%;
+    --muted: 70 7% 21%;
+    --muted-foreground: 55 10% 66%;
+    --accent: 70 7% 24%;
+    --accent-foreground: 60 30% 96%;
+    --accent-light: 70 7% 28%;
+    --gold: 32 98% 56%;
+    --gold-foreground: 70 10% 10%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 338 85% 72%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 70 6% 26%;
+    --input: 70 6% 50%;
+    --ring: 80 76% 53%;
+    --sidebar-background: 70 8% 12%;
+    --sidebar-foreground: 60 30% 94%;
+    --sidebar-primary: 80 76% 53%;
+    --sidebar-primary-foreground: 70 10% 10%;
+    --sidebar-accent: 70 7% 19%;
+    --sidebar-accent-foreground: 60 30% 96%;
+    --sidebar-border: 70 6% 22%;
+    --sidebar-ring: 80 76% 53%;
+    --ai-bubble: 32 30% 24%;
+    --ai-bubble-foreground: 60 30% 96%;
   }
 }
 
@@ -263,6 +689,10 @@ All colors MUST be HSL.
 }
 .ai-reply :where(code, pre, kbd) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+/* Links in a reply take the theme's colour (checked for AA on every theme). */
+.ai-reply :where(a) {
+  color: hsl(var(--primary));
 }
 
 @layer base {

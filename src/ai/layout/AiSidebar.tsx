@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "next-themes";
 import {
   ArrowLeft,
   BookMarked,
@@ -8,14 +7,12 @@ import {
   ChevronsRight,
   FolderKanban,
   LogOut,
-  Monitor,
-  Moon,
   MoreHorizontal,
+  Palette,
   Pin,
   Search,
   Settings,
   SquarePen,
-  Sun,
   Wand2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,6 +21,7 @@ import { useMatters } from "@/hooks/useMatters";
 import { chatScopeKey, type ChatThreadWithMatter, useRecentChats } from "@/hooks/useChat";
 import { chatStatus, relativeDay } from "@/lib/chatStatus";
 import { useAiWorkspace } from "@/ai/AiWorkspaceContext";
+import AppearancePanel from "@/ai/components/AppearancePanel";
 import SiteLink from "@/ai/components/SiteLink";
 import StatusDot from "@/ai/components/StatusDot";
 import ThreadRowMenu from "@/components/ai/chat/ThreadRowMenu";
@@ -37,12 +35,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -302,8 +295,8 @@ function RecentRow({
 function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { user, signOut } = useAuth();
   const { data: profile } = useMyProfile();
-  const { theme, setTheme } = useTheme();
   const { chat } = useAiWorkspace();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const writing = chat.busyThreadIds.size > 0;
   const initials = initialsOf(profile?.full_name, user?.email);
   const name = profile?.full_name || user?.email || "";
@@ -337,19 +330,9 @@ function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
           <DropdownMenuItem asChild>
             <SiteLink to="/settings" className="cursor-pointer"><Settings className="mr-2 h-4 w-4" />Settings</SiteLink>
           </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              {theme === "dark" ? <Moon className="mr-2 h-4 w-4" /> : theme === "light" ? <Sun className="mr-2 h-4 w-4" /> : <Monitor className="mr-2 h-4 w-4" />}
-              Appearance
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
-                <DropdownMenuRadioItem value="light"><Sun className="mr-2 h-4 w-4" />Light</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="dark"><Moon className="mr-2 h-4 w-4" />Dark</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="system"><Monitor className="mr-2 h-4 w-4" />Same as the device</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <DropdownMenuItem onSelect={() => setAppearanceOpen(true)} data-testid="ai-appearance-item">
+            <Palette className="mr-2 h-4 w-4" />Appearance
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
@@ -361,6 +344,7 @@ function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <AppearancePanel open={appearanceOpen} onOpenChange={setAppearanceOpen} />
     </div>
   );
 }
