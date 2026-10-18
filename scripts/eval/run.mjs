@@ -23,6 +23,8 @@
 //          --verbose        print the top results of each question
 //          --rerank-pool N --rerank-chars N --rewrite-wait MS   (retrieve adapter) override retrieve.js's
 //                           RERANK_POOL, RERANK_CHARS and REWRITE_WAIT_MS, to compare
+//          --deadline MS    (retrieve adapter) override RETRIEVE_DEADLINE_MS; 0 measures the full
+//                           search however long it takes (a search that fell back is marked "fb")
 //
 // Reads SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and VOYAGE_API_KEY (and
 // ANTHROPIC_API_KEY for precedent synonyms) — the names chat-service/server.js
@@ -64,6 +66,7 @@ function parseArgs(argv) {
     else if (a === "--rerank-pool") out.retrieveOptions = { ...out.retrieveOptions, rerankPool: Number(next()) };
     else if (a === "--rerank-chars") out.retrieveOptions = { ...out.retrieveOptions, rerankChars: Number(next()) };
     else if (a === "--rewrite-wait") out.retrieveOptions = { ...out.retrieveOptions, rewriteWaitMs: Number(next()) };
+    else if (a === "--deadline") out.retrieveOptions = { ...out.retrieveOptions, deadlineMs: Number(next()) };
     else if (a === "--check-gold") out.checkGold = true;
     else if (a === "--verbose" || a === "-v") out.verbose = true;
     else if (a === "--help" || a === "-h") out.help = true;
@@ -378,8 +381,12 @@ export function retrieveAdapter({ supabase, voyageKey, anthropicJson, lib, place
   const kindOf = { project: "matter", precedent: "precedent", statute: "statute" };
   const run = async (question, scope, extra, timing) => {
     const t0 = Date.now();
-    const out = await retrieveMod.retrieve({ supabase, voyageKey, anthropicJson, query: question, scope, k: K_MAX, ...retrieveOptions, ...extra });
+    const got = await retrieveMod.retrieve({ supabase, voyageKey, anthropicJson, query: question, scope, k: K_MAX, ...retrieveOptions, ...extra, timings: true });
     timing.searchMs = Math.max(timing.searchMs, Date.now() - t0);
+    // An older retrieve.js returns the passages alone.
+    const out = Array.isArray(got) ? got : got.passages;
+    if (got.timings?.fellBack) timing.fellBack = [...(timing.fellBack ?? []), scope];
+    if (typeof got.timings?.voyageCalls === "number") timing.voyageCalls = (timing.voyageCalls ?? 0) + got.timings.voyageCalls;
     return Promise.all(out.map(async (p) => {
       const placed = p.scope === "statute" && !p.lead ? await place(p.act_name, p.text) : [];
       return {
@@ -590,9 +597,11 @@ async function main() {
     }
     const ms = Date.now() - t0;
     const searchMs = results.timing?.searchMs ?? null;
+    const fellBack = results.timing?.fellBack ?? null;
+    const voyageCalls = results.timing?.voyageCalls ?? null;
     const s = scoreQuestion(results, q.expected);
     const row = {
-      id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms, searchMs, error, resultCount: results.length, ...s,
+      id: q.id, kind: q.kind, scope: q.scope, question: q.question, ms, searchMs, fellBack, voyageCalls, error, resultCount: results.length, ...s,
       top: results.slice(0, K_MAX).map((r, i) => ({
         rank: i + 1, kind: r.kind, act_name: r.act_name ?? null, sections: r.sections ?? [], filename: r.filename ?? null,
         storage_path: r.storage_path ?? null, similarity: r.similarity ?? null, matched: q.expected.some((e) => matchItem(r, e)),
@@ -600,7 +609,7 @@ async function main() {
       })),
     };
     const mark = error ? "ERR " : s.firstRank ? `@${s.firstRank}`.padEnd(4) : "miss";
-    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms${searchMs != null ? ` (search ${String(searchMs).padStart(5)}ms)` : ""}  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
+    console.log(`${q.id.padEnd(4)} ${mark} ${String(ms).padStart(6)}ms${searchMs != null ? ` (search ${String(searchMs).padStart(5)}ms)` : ""}${voyageCalls != null ? ` v${voyageCalls}` : ""}${fellBack ? ` fb:${fellBack.join("+")}` : ""}  ${q.question.slice(0, 80)}${error ? `  — ${error}` : ""}`);
     if (args.verbose) for (const t of row.top) console.log(`        ${String(t.rank).padStart(2)}${t.matched ? "*" : " "} ${t.kind ?? ""} ${t.act_name ? `${t.act_name} §${t.sections.join(",")}` : t.filename ?? t.storage_path ?? ""} ${t.similarity != null ? `(${Number(t.similarity).toFixed(3)})` : ""}`);
     return row;
   });

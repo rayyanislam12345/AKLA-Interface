@@ -67,8 +67,11 @@ Adapters:
   `tools`. Each question's line also shows `search … ms`: the slowest
   scope's `retrieve()` alone, without the runner's own placing of statute
   passages in their sections (recorded as `searchMs` in the result file).
+  `--deadline MS` overrides RETRIEVE_DEADLINE_MS (`--deadline 0` measures
+  the full search however long it takes; a search that returned the quick
+  way is marked `fb:<scope>`, and `v<N>` is its Voyage calls).
   `--rerank-pool N`, `--rerank-chars N` and `--rewrite-wait MS` override
-  retrieve.js's `RERANK_POOL` (20), `RERANK_CHARS` (1,500) and
+  retrieve.js's `RERANK_POOL` (30), `RERANK_CHARS` (8,000) and
   `REWRITE_WAIT_MS` (2,500), to compare a setting's scores and speed.
 
 Where a search's time goes: `time-retrieve.mjs` runs six of the questions

@@ -20,6 +20,7 @@
 //          --route auto|kind  as run.mjs (default auto)
 //          --chat-service <dir>  --env <file>  --no-synonyms   as run.mjs
 //          --rerank-pool N --rerank-chars N --rewrite-wait MS  override retrieve.js's defaults
+//          --deadline MS      override RETRIEVE_DEADLINE_MS (0: no deadline)
 //          --json <file>      also write every event to a file
 //
 // Read-only, like run.mjs: the same RPCs and selects as the chat service.
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     else if (a === "--rerank-pool") out.retrieveOptions.rerankPool = Number(next());
     else if (a === "--rerank-chars") out.retrieveOptions.rerankChars = Number(next());
     else if (a === "--rewrite-wait") out.retrieveOptions.rewriteWaitMs = Number(next());
+    else if (a === "--deadline") out.retrieveOptions.deadlineMs = Number(next());
     else if (a === "--json") out.json = next();
     else if (a === "--help" || a === "-h") out.help = true;
     else throw new Error(`Unknown option ${a}. Try --help.`);
@@ -64,7 +66,8 @@ const detailOf = (e) => Object.entries(e)
   .join(" ");
 
 function printScope(scope, wallMs, t) {
-  console.log(`    ${scope}: ${wallMs} ms  (engine ${t.engine ?? "-"}, ${t.phrasings} phrasing${t.phrasings === 1 ? "" : "s"}${t.rewriteLate ? ", rewrite not waited for" : ""}, ${t.reranked ? "reranked" : "not reranked"})`);
+  console.log(`    ${scope}: ${wallMs} ms  (engine ${t.engine ?? "-"}, ${t.phrasings} phrasing${t.phrasings === 1 ? "" : "s"}${t.rewriteLate ? ", rewrite not waited for" : ""}, ${t.reranked ? "reranked" : t.rerankSkipped ? `rerank skipped: ${t.rerankSkipped}` : "not reranked"}${t.voyageCalls != null ? `, ${t.voyageCalls} Voyage call${t.voyageCalls === 1 ? "" : "s"}` : ""})`);
+  if (t.fellBack) console.log(`      FELL BACK: ${t.reason}`);
   console.log(`      ${"start".padStart(6)} ${"ms".padStart(6)}  stage`);
   for (const e of t.events) console.log(`      ${pad(e.start, 6)} ${pad(e.ms, 6)}  ${e.stage.padEnd(22)} ${detailOf(e)}`);
 }
@@ -81,7 +84,7 @@ async function main() {
   const ctx = await connect({ chatService: args.chatService, env: args.env, synonyms: args.synonyms });
   const retrieveMod = await import(pathToFileURL(join(ctx.chatDir, "retrieve.js")).href);
   console.log(`chat-service code: ${ctx.chatDir}${ctx.anthropicJson ? "" : "  (rewrite off: no ANTHROPIC_API_KEY or --no-synonyms)"}`);
-  console.log(`retrieve.js defaults: rerank pool ${retrieveMod.RERANK_POOL ?? "?"}, rerank chars ${retrieveMod.RERANK_CHARS ?? "(whole)"}, rewrite wait ${retrieveMod.REWRITE_WAIT_MS ?? "(none)"} ms${Object.keys(args.retrieveOptions).length ? `; overridden: ${JSON.stringify(args.retrieveOptions)}` : ""}`);
+  console.log(`retrieve.js defaults: rerank pool ${retrieveMod.RERANK_POOL ?? "?"}, rerank chars ${retrieveMod.RERANK_CHARS ?? "(whole)"}, rewrite wait ${retrieveMod.REWRITE_WAIT_MS ?? "(none)"} ms, deadline ${retrieveMod.RETRIEVE_DEADLINE_MS ?? "(none)"} ms${Object.keys(args.retrieveOptions).length ? `; overridden: ${JSON.stringify(args.retrieveOptions)}` : ""}`);
 
   const records = [];
   for (let round = 1; round <= args.rounds; round++) {

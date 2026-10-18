@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   retrieve, retrieveDetailed, fuseLists, capPerFile, dedupeByText, buildLabel, shortHeading, sectionFromHeading, clauseOf,
   keywordText, isMissingFunction, namedAct, rrfOf, toCandidate, rerankPassages, passageText, clearRetrieveCaches, MAX_TEXT,
-  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS,
+  rerankText, stopwatch, RERANK_POOL, RERANK_CHARS, rewriteWorthwhile,
 } from '../retrieve.js';
 import { clearCaches } from '../libraryTools.js';
 
@@ -140,7 +140,7 @@ test('the Act a question names is found among the laws held', () => {
 
 // -------------------------------------------------------------- the flow
 
-test('a project search: one embedding call, the hybrid search scoped to the project and current versions, reranked, labelled', async () => {
+test('a project search: one embedding call, the hybrid search scoped to the project and current versions, labelled; two passages for five places are not reranked', async () => {
   const supabase = fakeSupabase({
     rpc: {
       search_passages: (args) => ({
@@ -155,7 +155,9 @@ test('a project search: one embedding call, the hybrid search scoped to the proj
   const voyage = fakeVoyage();
   const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'what is the concession period', scope: 'project', matterId: 'm1', k: 5, fetchImpl: voyage.fetchImpl });
   assert.equal(out.engine, 'hybrid');
-  assert.equal(out.reranked, true);
+  assert.equal(out.reranked, false);
+  assert.match(out.rerankSkipped, /2 passages for 5 places/);
+  assert.equal(out.voyageCalls, 1, 'the embedding, and no rerank');
   const embeds = voyage.requests.filter((r) => r.url.endsWith('/embeddings'));
   assert.equal(embeds.length, 1);
   assert.deepEqual(embeds[0].body.input, ['what is the concession period']);
@@ -166,27 +168,44 @@ test('a project search: one embedding call, the hybrid search scoped to the proj
   assert.equal(call.args.matter_id, 'm1');
   assert.equal(call.args.all_versions, false);
   assert.deepEqual(call.args.query_embedding, [1, 0, 0]);
-  const rerank = voyage.requests.find((r) => r.url.endsWith('/rerank'));
-  assert.equal(rerank.body.model, 'rerank-2');
-  assert.equal(rerank.body.query, 'what is the concession period');
-  assert.equal(rerank.body.top_k, 2);
-  assert.match(rerank.body.documents[0], /^Term Sheet v3, 4. Term › 4.2 Concession Period\n\nPassage a/);
-  // The stub reranker reverses the order.
-  assert.deepEqual(out.passages.map((p) => p.id), ['b', 'a']);
-  assert.equal(out.passages[0].label, 'Transaction Structure Report v1, p. 7');
-  assert.equal(out.passages[0].similarity, 0.9);
-  assert.equal(out.passages[1].label, 'Term Sheet v3, 4. Term › 4.2 Concession Period');
-  assert.equal(out.passages[1].storage_path, 'm/d/a.docx');
+  assert.equal(voyage.requests.filter((r) => r.url.endsWith('/rerank')).length, 0);
+  // The fused order, the fused score as the similarity.
+  assert.deepEqual(out.passages.map((p) => p.id), ['a', 'b']);
+  assert.equal(out.passages[0].label, 'Term Sheet v3, 4. Term › 4.2 Concession Period');
+  assert.equal(out.passages[0].similarity, Math.round((2 / 61) * 1e6) / 1e6);
+  assert.equal(out.passages[0].storage_path, 'm/d/a.docx');
+  assert.equal(out.passages[1].label, 'Transaction Structure Report v1, p. 7');
   // A project search outside a project finds nothing and asks nothing.
   assert.deepEqual(await retrieve({ supabase, voyageKey: 'v', query: 'x y', scope: 'project', fetchImpl: voyage.fetchImpl }), []);
 });
 
+const precRow = (id, rrf, over = {}) => ({ ...row(id), metadata: { storage_path: `precedent/${id}.docx`, filename: `${id}.docx` }, content: `${id}: the concession period is thirty years.`, rrf_score: rrf, ...over });
+
+test('a search with more passages than places is reranked against the question: each passage by its label and text, the best k kept', async () => {
+  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03, { heading_path: '4. Term › 4.2 Concession Period' }), precRow('b', 0.02), precRow('c', 0.01)], error: null } } });
+  const voyage = fakeVoyage();
+  const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 2, fetchImpl: voyage.fetchImpl, rewrite: false });
+  assert.equal(out.reranked, true);
+  assert.equal(out.rerankSkipped, null);
+  assert.equal(out.voyageCalls, 2, 'one embedding call, one rerank');
+  const rerank = voyage.requests.find((r) => r.url.endsWith('/rerank'));
+  assert.equal(rerank.body.model, 'rerank-2');
+  assert.equal(rerank.body.query, 'concession period');
+  assert.equal(rerank.body.top_k, 2);
+  assert.equal(rerank.body.documents.length, 3);
+  assert.match(rerank.body.documents[0], /^a\.docx, 4. Term › 4.2 Concession Period\n\na: the concession period/);
+  // The stub reranker reverses the order.
+  assert.deepEqual(out.passages.map((p) => p.id), ['c', 'b']);
+  assert.equal(out.passages[0].similarity, 0.9);
+});
+
 test('when the reranker fails, the fused order stands and the fused score is the similarity', async () => {
-  const supabase = fakeSupabase({ rpc: { search_passages: { data: [row('a', { rrf_score: 0.03 }), row('b', { rrf_score: 0.02 }), row('c', { rrf_score: 0.01 })], error: null } } });
+  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03), precRow('b', 0.02), precRow('c', 0.01)], error: null } } });
   for (const failing of [() => json({ detail: 'overloaded' }, 529), () => json({ data: [] }), () => { throw new Error('socket hang up'); }]) {
     clearRetrieveCaches();
     const voyage = fakeVoyage({ rerank: failing });
-    const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'project', matterId: 'm1', k: 2, fetchImpl: voyage.fetchImpl });
+    const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 2, fetchImpl: voyage.fetchImpl, rewrite: false });
+    assert.equal(voyage.requests.filter((r) => r.url.endsWith('/rerank')).length, 1, 'the reranker was asked');
     assert.equal(out.reranked, false);
     assert.deepEqual(out.passages.map((p) => p.id), ['a', 'b']);
     assert.equal(out.passages[0].similarity, 0.03);
@@ -257,15 +276,16 @@ test('a precedent question is rewritten once into legal phrasings, each searched
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
   assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, 3);
   const embeds = voyage.requests.filter((r) => r.url.endsWith('/embeddings'));
-  assert.equal(embeds.length, 2, 'the question is embedded at once, the phrasings together when they come');
-  assert.deepEqual(embeds[0].body.input, [q]);
-  assert.deepEqual(embeds[1].body.input, ['tag-along right', 'shall be entitled to sell its shares on the same terms']);
+  assert.equal(embeds.length, 1, 'one embedding call: the question and its phrasings together');
+  assert.deepEqual(embeds[0].body.input, [q, 'tag-along right', 'shall be entitled to sell its shares on the same terms']);
+  assert.equal(out.voyageCalls, 1);
   assert.deepEqual(out.passages.map((p) => p.id), ['precedent:precedent/x/SSA.docx:p1:12', 'precedent:precedent/x/SSA.docx:p1:3'], 'a paragraph is its own passage, best fused score first');
   assert.equal(/^precedent:(.*):[^:]*:[^:]*$/.exec(out.passages[0].id)[1], 'precedent/x/SSA.docx', 'the file is read from the id as before');
   assert.equal(out.passages[0].label, 'SSA.docx, cl. 7.2');
-  await retrieve({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false });
+  const again = await retrieve({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false, timings: true });
   assert.equal(asked, 1, 'the rewrite is cached per question');
-  assert.equal(voyage.requests.filter((r) => r.url.endsWith('/embeddings')).length, 2, 'so are the embeddings');
+  assert.equal(voyage.requests.filter((r) => r.url.endsWith('/embeddings')).length, 1, 'so are the embeddings');
+  assert.equal(again.timings.voyageCalls, 0);
   // A project question and a pasted document are not rewritten.
   await retrieve({ supabase, voyageKey: 'v', anthropicJson, query: 'concession period', scope: 'project', matterId: 'm1', fetchImpl: voyage.fetchImpl, rerank: false });
   await retrieve({ supabase, voyageKey: 'v', anthropicJson, query: 'x '.repeat(700), scope: 'statute', fetchImpl: voyage.fetchImpl, rerank: false });
@@ -333,7 +353,7 @@ function slowSearch(delay, rowsFor = () => []) {
 
 const precedentRow = (id, text, rrf) => ({ ...row(id), metadata: { storage_path: `precedent/${id}.docx`, filename: `${id}.docx`, passage_ordinal: 1 }, content: text, rrf_score: rrf });
 
-test('the question as asked is embedded and searched while the rewrite is still being written', async () => {
+test('the question waits for the rewrite and is embedded with its phrasings in one call; a question already embedded is searched at once', async () => {
   const reply = deferred();
   const anthropicJson = () => reply.promise;
   const { supabase, state } = slowSearch(5, (args) => [precedentRow(args.query_text.replace(/\W+/g, '-'), `${args.query_text} clause`, 0.01)]);
@@ -341,15 +361,30 @@ test('the question as asked is embedded and searched while the rewrite is still 
   const q = 'tag along where a shareholder sells to a third party';
   const running = retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: q, scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rerank: false });
   await sleep(30);
-  // The rewrite has not answered, yet the question has been embedded and searched.
-  assert.deepEqual(voyage.requests.filter((r) => r.url.endsWith('/embeddings')).map((r) => r.body.input), [[q]]);
-  assert.deepEqual(state.texts, [q]);
+  // The rewrite has not answered: nothing embedded, nothing searched yet.
+  assert.equal(voyage.requests.length, 0);
+  assert.deepEqual(state.texts, []);
   reply.resolve({ content: [{ type: 'text', text: '["tag-along right", "entitled to sell on the same terms"]' }] });
   const out = await running;
+  assert.deepEqual(voyage.requests.map((r) => r.body.input), [[q, 'tag-along right', 'entitled to sell on the same terms']]);
   assert.deepEqual(out.phrasings, [q, 'tag-along right', 'entitled to sell on the same terms']);
   assert.equal(out.rewriteLate, false);
-  assert.deepEqual(state.texts, [q, 'tag-along right', 'entitled to sell on the same terms']);
+  assert.deepEqual(state.texts.slice().sort(), [q, 'tag-along right', 'entitled to sell on the same terms'].sort());
   assert.equal(out.passages.length, 3);
+
+  // The same question in another scope (the chat searches all three at
+  // once): its embedding is kept, so it is searched while its own rewrite
+  // is written, and the phrasings go in one call of their own.
+  const statuteReply = deferred();
+  const { supabase: sb2, state: s2 } = slowSearch(5);
+  const second = retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: () => statuteReply.promise, query: q, scope: 'statute', fetchImpl: voyage.fetchImpl, rerank: false });
+  await sleep(30);
+  assert.deepEqual(s2.texts, [q], 'searched before the rewrite came');
+  assert.equal(voyage.requests.length, 1, 'with no new call');
+  statuteReply.resolve({ content: [{ type: 'text', text: '["right of co-sale"]' }] });
+  const out2 = await second;
+  assert.deepEqual(voyage.requests.map((r) => r.body.input)[1], ['right of co-sale']);
+  assert.equal(out2.voyageCalls, 1);
 });
 
 test('the phrasings are searched all at once, with the question\'s own search still running', async () => {
@@ -392,52 +427,55 @@ test('a failed rewrite or a failed phrasing embedding leaves the question\'s own
   const anthropicJson = async () => { throw new Error('overloaded'); };
   const { supabase, state } = slowSearch(1, () => [precedentRow('a', 'Clause 9 Transfers', 0.02)]);
   const voyage = fakeVoyage();
-  const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: 'lock-in period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false });
-  assert.deepEqual(out.phrasings, ['lock-in period']);
+  const lock = 'lock-in period for the sponsors';
+  const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query: lock, scope: 'precedent', fetchImpl: voyage.fetchImpl, rerank: false });
+  assert.deepEqual(out.phrasings, [lock]);
   assert.equal(state.texts.length, 1);
   assert.equal(out.passages.length, 1);
-  // The phrasings came but their embedding failed: they are searched by their words.
+  // The phrasings came but the one embedding call failed: everything is searched by its words.
   clearRetrieveCaches();
   const rewrite = async () => ({ content: [{ type: 'text', text: '["restriction on transfer"]' }] });
-  let embeds = 0;
-  const flaky = async (url, init) => (url.endsWith('/embeddings') && ++embeds === 2 ? json({ error: 'down' }, 503) : voyage.fetchImpl(url, init));
+  const flaky = async (url, init) => (url.endsWith('/embeddings') ? json({ error: 'down' }, 503) : voyage.fetchImpl(url, init));
   const { supabase: sb2, state: s2 } = slowSearch(1);
   const embeddings = [];
   sb2.rpc = ((orig) => (name, args) => { embeddings.push(args.query_embedding); return orig(name, args); })(sb2.rpc);
-  const out2 = await retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: rewrite, query: 'lock-in period', scope: 'precedent', fetchImpl: flaky, rerank: false });
-  assert.deepEqual(out2.phrasings, ['lock-in period', 'restriction on transfer']);
-  assert.deepEqual(s2.texts, ['lock-in period', 'restriction on transfer']);
-  assert.deepEqual(embeddings, [[1, 0, 0], null]);
+  const out2 = await retrieveDetailed({ supabase: sb2, voyageKey: 'v', anthropicJson: rewrite, query: lock, scope: 'precedent', fetchImpl: flaky, rerank: false });
+  assert.deepEqual(out2.phrasings, [lock, 'restriction on transfer']);
+  assert.deepEqual(s2.texts.slice().sort(), [lock, 'restriction on transfer'].sort());
+  assert.deepEqual(embeddings, [null, null]);
 });
 
-test('the reranker reads at most 20 passages, each by its ~1,500 characters around the question\'s words', async () => {
+test('the reranker reads 30 passages, each whole; both can be set per call', async () => {
   const filler = 'The parties record their understanding of the general matters set out here. ';
-  const rows = Array.from({ length: 30 }, (_, i) => ({
+  const rows = Array.from({ length: 40 }, (_, i) => ({
     ...row(`s${i}`),
     metadata: { act_name: `Act ${i}, 2000` },
-    content: `Entry ${i}. ${filler.repeat(40)}The penalty stipulated for breach is reasonable compensation. ${filler.repeat(40)}`,
+    content: `Entry ${i}. ${filler.repeat(20)}The penalty stipulated for breach is reasonable compensation. ${filler.repeat(20)}`,
     rrf_score: 1 / (61 + i),
   }));
   const supabase = fakeSupabase({ rpc: { search_passages: { data: rows, error: null } } });
   const voyage = fakeVoyage();
   const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'penalty stipulated for breach', scope: 'statute', k: 8, fetchImpl: voyage.fetchImpl, rewrite: false });
   const rr = voyage.requests.find((r) => r.url.endsWith('/rerank'));
-  assert.equal(RERANK_POOL, 20);
-  assert.equal(rr.body.documents.length, 20);
-  for (const d of rr.body.documents) {
+  assert.equal(RERANK_POOL, 30);
+  assert.equal(RERANK_CHARS, 8000);
+  assert.equal(rr.body.documents.length, 30);
+  for (const [i, d] of rr.body.documents.entries()) {
     const body = d.split('\n\n').slice(1).join('\n\n');
-    assert.ok(body.length <= RERANK_CHARS, `${body.length} characters sent`);
-    assert.match(body, /penalty stipulated for breach/, 'the part of the passage that answers is what is sent');
+    assert.ok(body.length > 3000 && body.startsWith('Entry ') && body.endsWith('here.'), `passage ${i} is sent whole (${body.length} characters)`);
   }
   assert.equal(out.passages.length, 8);
-  assert.ok(out.passages[0].text.length > RERANK_CHARS, 'the passage itself is not cut');
-  // Both can be set per call.
+  // Both can be set per call: 20 passages, each by its ~1,500 characters around the question's words.
   clearRetrieveCaches();
   const v2 = fakeVoyage();
-  await retrieveDetailed({ supabase, voyageKey: 'v', query: 'penalty stipulated for breach', scope: 'statute', k: 8, fetchImpl: v2.fetchImpl, rewrite: false, rerankPool: 30, rerankChars: 8000 });
+  await retrieveDetailed({ supabase, voyageKey: 'v', query: 'penalty stipulated for breach', scope: 'statute', k: 8, fetchImpl: v2.fetchImpl, rewrite: false, rerankPool: 20, rerankChars: 1500 });
   const rr2 = v2.requests.find((r) => r.url.endsWith('/rerank'));
-  assert.equal(rr2.body.documents.length, 30);
-  assert.ok(rr2.body.documents[0].length > RERANK_CHARS);
+  assert.equal(rr2.body.documents.length, 20);
+  for (const d of rr2.body.documents) {
+    const body = d.split('\n\n').slice(1).join('\n\n');
+    assert.ok(body.length <= 1500, `${body.length} characters sent`);
+    assert.match(body, /penalty stipulated for breach/, 'the part of the passage that answers is what is sent');
+  }
 });
 
 test('rerankText keeps a short passage whole and cuts a long one around its anchor', () => {
@@ -498,7 +536,7 @@ test('statute passages are placed in their sections with their Acts read at once
   assert.equal(reads.maxInFlight, 2, 'the two Acts are read at once');
   assert.deepEqual(reads.byAct, { 'Contract Act, 1872': 1, 'Sale of Goods Act, 1930': 1 }, 'read early and placed from the same read');
   const stages = new Set(got.timings.events.map((e) => e.stage));
-  for (const s of ['embed', 'search', 'windows and labels', 'prefetch: act text', 'rerank', 'place']) assert.ok(stages.has(s), `timed: ${s}`);
+  for (const s of ['embed', 'search', 'windows and labels', 'prefetch: act text', 'rerank skipped', 'place']) assert.ok(stages.has(s), `timed: ${s}`);
   assert.ok(got.timings.total >= 40);
   // The next search finds both Acts already rebuilt.
   clearRetrieveCaches();
@@ -568,4 +606,202 @@ test('without timings retrieve returns the passages alone, as every caller expec
   assert.ok(Array.isArray(timed.passages) && timed.passages.length === 1);
   assert.equal(timed.timings.scope, 'project');
   assert.ok(timed.timings.events.find((e) => e.stage === 'search' && e.phrasing === 0 && e.rows === 1));
+});
+
+// ------------------------------------------- Voyage calls: fewer, and counted
+
+test('a question that names a section, quotes exact words or is under four words is not rewritten', async () => {
+  assert.equal(rewriteWorthwhile('is an LD clause a penalty'), true);
+  assert.equal(rewriteWorthwhile('contract act s.74 penalty clause'), false);
+  assert.equal(rewriteWorthwhile('what does rule 36 of the PPRA rules say'), false);
+  assert.equal(rewriteWorthwhile('find "shall not be entitled to" in the EPC'), false);
+  assert.equal(rewriteWorthwhile('clauses saying “fit for purpose” in EPC contracts'), false);
+  assert.equal(rewriteWorthwhile('liquidated damages cap'), false);
+  let asked = 0;
+  const anthropicJson = async () => { asked++; return { content: [{ type: 'text', text: '["x y"]' }] }; };
+  const supabase = fakeSupabase();
+  const voyage = fakeVoyage();
+  for (const query of ['liquidated damages cap', 'find "shall not be entitled to" in the EPC']) {
+    const out = await retrieveDetailed({ supabase, voyageKey: 'v', anthropicJson, query, scope: 'precedent', fetchImpl: voyage.fetchImpl });
+    assert.deepEqual(out.phrasings, [query]);
+  }
+  assert.equal(asked, 0);
+});
+
+test('a question asked again within the hour makes no Voyage call at all', async () => {
+  const anthropicJson = async () => ({ content: [{ type: 'text', text: '["drag-along right"]' }] });
+  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03), precRow('b', 0.02)], error: null } } });
+  const voyage = fakeVoyage();
+  const ask = () => retrieve({ supabase, voyageKey: 'v', anthropicJson, query: 'example of a drag along clause', scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, timings: true });
+  const first = await ask();
+  assert.equal(first.timings.voyageCalls, 1, 'one embedding call; two passages for five places, no rerank');
+  const second = await ask();
+  assert.equal(second.timings.voyageCalls, 0);
+  assert.equal(voyage.requests.length, 1);
+  assert.deepEqual(second.passages.map((p) => p.id), first.passages.map((p) => p.id));
+  assert.ok(second.timings.events.some((e) => e.stage === 'embed' && e.sent === 0));
+  assert.ok(first.timings.events.some((e) => e.stage === 'embed' && e.sent === 2));
+});
+
+test('the embedding cache keeps the 500 used most recently', async () => {
+  const supabase = fakeSupabase();
+  const voyage = fakeVoyage();
+  const ask = (query) => retrieveDetailed({ supabase, voyageKey: 'v', query, scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false });
+  await ask('question number 0');
+  for (let i = 1; i < 500; i++) await ask(`question number ${i}`);
+  assert.equal((await ask('question number 0')).voyageCalls, 0, 'still kept, and now the most recently used');
+  await ask('question number 500'); // the 501st: the least recently used (number 1) goes
+  assert.equal((await ask('question number 0')).voyageCalls, 0);
+  assert.equal((await ask('question number 1')).voyageCalls, 1);
+});
+
+test('the reranker is not called when it cannot change the result: no more passages than places, or a small project search', async () => {
+  const rows = (n) => Array.from({ length: n }, (_, i) => row(`r${i}`, { document_version_id: `v${i}`, rrf_score: 1 / (61 + i) }));
+  const cases = [
+    { scope: 'precedent', n: 8, k: 8, reranked: false },
+    { scope: 'precedent', n: 9, k: 8, reranked: true },
+    { scope: 'project', n: 16, k: 8, reranked: false },
+    { scope: 'project', n: 17, k: 8, reranked: true },
+  ];
+  for (const c of cases) {
+    clearRetrieveCaches();
+    const data = c.scope === 'precedent' ? rows(c.n).map((r, i) => precRow(`r${i}`, r.rrf_score)) : rows(c.n);
+    const supabase = fakeSupabase({ rpc: { search_passages: { data, error: null } } });
+    const voyage = fakeVoyage();
+    const out = await retrieve({ supabase, voyageKey: 'v', query: 'concession period', scope: c.scope, matterId: 'm1', k: c.k, fetchImpl: voyage.fetchImpl, rewrite: false, timings: true });
+    const reranks = voyage.requests.filter((r) => r.url.endsWith('/rerank')).length;
+    assert.equal(reranks, c.reranked ? 1 : 0, `${c.scope}, ${c.n} passages for ${c.k}`);
+    assert.equal(out.timings.reranked, c.reranked);
+    assert.equal(out.timings.voyageCalls, c.reranked ? 2 : 1);
+    if (!c.reranked) assert.ok(out.timings.events.some((e) => e.stage === 'rerank skipped'));
+    assert.equal(out.passages.length, Math.min(c.n, c.k));
+  }
+});
+
+// ------------------------------------------------------------ the deadline
+
+// A fetch that never answers until its signal aborts.
+const hanging = (init) => new Promise((_, reject) => {
+  const s = init?.signal;
+  if (!s) return;
+  if (s.aborted) reject(s.reason);
+  s.addEventListener('abort', () => reject(s.reason ?? new Error('aborted')), { once: true });
+});
+
+// Collects unhandled rejections while fn runs (and for `settle` ms after).
+async function noUnhandled(fn, settle = 120) {
+  const seen = [];
+  const onRejection = (err) => seen.push(err);
+  process.on('unhandledRejection', onRejection);
+  try {
+    const result = await fn();
+    await sleep(settle);
+    return { result, seen };
+  } finally {
+    process.off('unhandledRejection', onRejection);
+  }
+}
+
+test('a search still reranking at the deadline returns the question\'s own search, marked fellBack, and the reranker is stopped', async () => {
+  const data = Array.from({ length: 12 }, (_, i) => precRow(`p${i}`, 1 / (61 + i)));
+  const supabase = fakeSupabase({ rpc: { search_passages: { data, error: null } } });
+  let rerankSignal = null;
+  const voyage = fakeVoyage({ rerank: () => { throw new Error('unused'); } });
+  const fetchImpl = (url, init) => {
+    if (url.endsWith('/rerank')) { rerankSignal = init.signal; voyage.requests.push({ url }); return hanging(init); }
+    return voyage.fetchImpl(url, init);
+  };
+  const t0 = Date.now();
+  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl, rewrite: false, deadlineMs: 150, timings: true }));
+  const took = Date.now() - t0;
+  assert.ok(took >= 140 && took < 400, `returned at the deadline (${took} ms)`);
+  assert.equal(out.fellBack, true);
+  assert.match(out.reason, /longer than 150 ms: returned the question's own search, not reranked/);
+  assert.equal(out.timings.fellBack, true);
+  assert.equal(out.reranked, false);
+  assert.deepEqual(out.passages.map((p) => p.id), ['p0', 'p1', 'p2', 'p3', 'p4'], 'the fused order, best k');
+  assert.ok(out.passages.every((p) => p.label), 'labelled for citation');
+  assert.equal(out.voyageCalls, 2, 'the embedding and the abandoned rerank');
+  assert.equal(rerankSignal?.aborted, true, 'the rerank call was aborted');
+  assert.deepEqual(seen, [], 'no unhandled rejection');
+  assert.equal(supabase.calls.filter((c) => c.name === 'search_passages').length, 1, 'no second search was needed');
+});
+
+test('with the embedding not back before the deadline, a search by words alone is started and returned', async () => {
+  const supabase = fakeSupabase({
+    rpc: {
+      search_passages: (args) => ({ data: args.query_embedding ? [] : [precRow('w1', 0.02), precRow('w2', 0.01)], error: null }),
+    },
+  });
+  const fetchImpl = (url, init) => hanging(init); // Voyage never answers
+  const t0 = Date.now();
+  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl, rewrite: false, deadlineMs: 150, timings: true }));
+  const took = Date.now() - t0;
+  assert.ok(took < 400, `${took} ms`);
+  assert.equal(out.fellBack, true);
+  assert.match(out.reason, /words only/);
+  assert.deepEqual(out.passages.map((p) => p.id), ['w1', 'w2']);
+  const call = supabase.calls.find((c) => c.name === 'search_passages');
+  assert.equal(call.args.query_embedding, null);
+  assert.ok(out.timings.events.some((e) => e.stage === 'fallback: words only'));
+  assert.deepEqual(seen, []);
+});
+
+test('with search_passages not back before the deadline, match_documents (meaning only) is started and returned; the late answer changes nothing', async () => {
+  const late = deferred();
+  const supabase = fakeSupabase({
+    rpc: {
+      search_passages: () => late.promise,
+      match_documents: { data: [{ id: 'm1', content: 'The concession period is thirty years.', metadata: { storage_path: 'precedent/m1.docx', filename: 'm1.docx' }, similarity: 0.8 }], error: null },
+    },
+  });
+  const voyage = fakeVoyage();
+  const { result: out, seen } = await noUnhandled(async () => {
+    const r = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', k: 5, fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 150 });
+    const before = JSON.stringify(r);
+    // search_passages answers after the search has returned.
+    late.resolve({ data: [precRow('late', 0.05)], error: null });
+    await sleep(50);
+    assert.equal(JSON.stringify(r), before, 'nothing written to the result after it was returned');
+    return r;
+  });
+  assert.equal(out.fellBack, true);
+  assert.equal(out.engine, 'vector');
+  assert.match(out.reason, /match_documents/);
+  assert.equal(out.passages.length, 1);
+  assert.match(out.passages[0].text, /thirty years/);
+  const md = supabase.calls.find((c) => c.name === 'match_documents');
+  assert.deepEqual(md.args.query_embedding, [1, 0, 0], 'the question\'s embedding, already in hand');
+  assert.deepEqual(seen, []);
+});
+
+test('a search that finishes in time is not touched by the deadline, and the deadline can be turned off', async () => {
+  const supabase = fakeSupabase({ rpc: { search_passages: { data: [precRow('a', 0.03)], error: null } } });
+  const voyage = fakeVoyage();
+  const out = await retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000 });
+  assert.equal(out.fellBack, false);
+  assert.equal(out.reason, null);
+  // deadlineMs: 0 — waits for the whole search however long it takes.
+  clearRetrieveCaches();
+  const slow = fakeSupabase({ rpc: { search_passages: async () => { await sleep(120); return { data: [precRow('a', 0.03)], error: null }; } } });
+  const off = await retrieveDetailed({ supabase: slow, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 0 });
+  assert.equal(off.fellBack, false);
+  assert.equal(off.passages.length, 1);
+  // A failure before the deadline is still a failure.
+  clearRetrieveCaches();
+  const broken = fakeSupabase({ rpc: { search_passages: { data: null, error: { code: 'XX000', message: 'boom' } } } });
+  await assert.rejects(retrieve({ supabase: broken, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 5000 }), /boom/);
+});
+
+test('when nothing at all comes back by the deadline and its grace, nothing is returned, marked fellBack', async () => {
+  const supabase = fakeSupabase({ rpc: { search_passages: () => new Promise(() => {}), match_documents: () => new Promise(() => {}) } });
+  const voyage = fakeVoyage();
+  const t0 = Date.now();
+  const { result: out, seen } = await noUnhandled(() => retrieveDetailed({ supabase, voyageKey: 'v', query: 'concession period', scope: 'precedent', fetchImpl: voyage.fetchImpl, rewrite: false, deadlineMs: 100 }));
+  const took = Date.now() - t0;
+  assert.ok(took >= 140 && took < 400, `the deadline and half again (${took} ms)`);
+  assert.equal(out.fellBack, true);
+  assert.deepEqual(out.passages, []);
+  assert.match(out.reason, /no quicker search came back/);
+  assert.deepEqual(seen, []);
 });

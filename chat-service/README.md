@@ -136,6 +136,8 @@ fails to import `server.js` on the VM.
 Port 8092 (8090 is ocr-service, 8091 the relay). `.env` needs
 `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `PORT=8092`.
+Optional: `RETRIEVE_DEADLINE_MS` (default 12000; 0 turns it off), how long a
+library search may take before it returns the quick way (retrieve.js).
 
 ```bash
 ./chat-service/deploy.sh            # copies, stamps the commit, restarts
