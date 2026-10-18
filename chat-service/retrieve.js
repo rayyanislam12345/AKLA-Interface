@@ -13,21 +13,33 @@
 //      clause or the statute would use ("is an LD clause a penalty" →
 //      "compensation for breach of contract where penalty stipulated for").
 //      Cached per question.
-//   2. One embedding call for all the phrasings (voyage-law-2, query).
+//   2. The question as asked is embedded (voyage-law-2, query) and searched
+//      at once, while the rewrite is being written; the rewrite's phrasings
+//      are embedded together in one call and searched as soon as they come,
+//      if they come within REWRITE_WAIT_MS of the start (a late rewrite is
+//      still cached for the next time the question is asked).
 //   3. search_passages (supabase/migrations/20261017120000_hybrid_search.sql,
 //      made faster by 20261018120000_hybrid_search_speed.sql)
-//      per phrasing: meaning, words and file names, fused by reciprocal
-//      rank in SQL, current versions only, at most three passages a file.
+//      per phrasing, all at once: meaning, words and file names, fused by
+//      reciprocal rank in SQL, current versions only, at most three passages
+//      a file.
 //   4. The phrasings' lists merged (each passage keeps its best fused
-//      score), repeated text dropped, three a file again, and the best ~30
-//      reranked by Voyage rerank-2 against the question; on any rerank
-//      failure the fused order stands.
+//      score), repeated text dropped, three a file again, and the best 20
+//      reranked by Voyage rerank-2 against the question, each by its
+//      ~1,500 characters around the question's words; on any rerank failure
+//      the fused order stands.
 //   5. Each passage labelled for citation: "Term Sheet v3, 4.2 Concession
-//      Period", "12. JVA.docx, cl. 9.1", "Contract Act, 1872, s.74".
+//      Period", "12. JVA.docx, cl. 9.1", "Contract Act, 1872, s.74". A
+//      statute passage is placed in its section in its Act's rebuilt text
+//      (libraryTools.actText, kept an hour); the Acts the best passages come
+//      from are read while the reranker works, and in parallel.
 //
 // A question that names a section of an Act it can identify ("section 208 of
 // the Companies Act 2017") also gets that section's full text first, read the
-// way read_act_section reads it.
+// way read_act_section reads it, from the start, alongside the search.
+//
+// `timings: true` returns, with the passages, when each stage started and how
+// long it took (scripts/eval/time-retrieve.mjs prints them).
 //
 // Deploying this before the migration is safe: when search_passages is not
 // in the database, the same flow runs on match_documents (meaning only) and
@@ -44,7 +56,17 @@ export const SCOPES = new Set(["project", "precedent", "statute"]);
 export const RRF_K = 60;
 export const FILE_CAP = 3;
 export const CANDIDATES = 40;
-export const RERANK_POOL = 30;
+// How many fused passages the reranker reads, and how much of each: the
+// reranker's time grows with the text it is sent (30 passages of up to
+// 4,000 characters was ~25,000 tokens a call). Both can be set per call
+// (rerankPool, rerankChars) to compare.
+export const RERANK_POOL = 20;
+export const RERANK_CHARS = 1_500;
+// How long from the start of a search the rewrite's phrasings are waited
+// for; the question as asked is searched meanwhile.
+export const REWRITE_WAIT_MS = 2_500;
+// Statute passages are placed in their sections for the first few Acts.
+const PLACE_ACTS = 3;
 // The rerank-2 score under which a passage found automatically (the chat's
 // own search, review evidence) is left out, so a message with nothing
 // relevant in a library is not handed that library's nearest unrelated text.
@@ -359,10 +381,36 @@ export async function rewriteQuery({ anthropicJson, query, scope, signal }) {
 }
 
 /**
- * Voyage rerank-2 over the passages against the question: the best `k`, each
- * with `rerankScore`. Any failure keeps the order given (`reranked: false`).
+ * What the reranker reads of a passage: all of it, or its best `max`
+ * characters — where the words of the question, or of whichever phrasing
+ * matches best, cluster (as passageText picks a window); failing that, around
+ * its anchor, a third before and two thirds after; whole words at both ends.
  */
-export async function rerankPassages({ voyageKey, query, passages, k, fetchImpl = globalThis.fetch, signal }) {
+export function rerankText(p, max = RERANK_CHARS, queries = null) {
+  const text = String(p.text ?? "");
+  if (!(max > 0) || text.length <= max) return text;
+  let best = null;
+  for (const q of queries ?? []) {
+    const [w] = findPassages(text, q, { max: 1, window: max });
+    if (w && (!best || w.score > best.score)) best = w;
+  }
+  if (best) return text.slice(best.start, best.end);
+  const at = p.anchorText ? text.indexOf(p.anchorText) : -1;
+  let start = at > 0 ? Math.max(0, Math.min(at - Math.round(max / 3), text.length - max)) : 0;
+  let end = Math.min(text.length, start + max);
+  if (start > 0) start = text.indexOf(" ", start) + 1 || start;
+  const space = text.lastIndexOf(" ", end);
+  if (end < text.length && space > start) end = space;
+  return text.slice(start, end);
+}
+
+/**
+ * Voyage rerank-2 over the passages against the question: the best `k`, each
+ * with `rerankScore`. Each passage is sent as its label and rerankText(p,
+ * maxChars, queries) (queries: the question and its phrasings; default the
+ * question). Any failure keeps the order given (`reranked: false`).
+ */
+export async function rerankPassages({ voyageKey, query, passages, k, maxChars = RERANK_CHARS, queries = null, fetchImpl = globalThis.fetch, signal }) {
   const keep = { passages: passages.slice(0, k), reranked: false };
   if (!voyageKey || passages.length < 2) return keep;
   try {
@@ -372,7 +420,7 @@ export async function rerankPassages({ voyageKey, query, passages, k, fetchImpl 
       body: JSON.stringify({
         model: "rerank-2",
         query: String(query).slice(0, 8000),
-        documents: passages.map((p) => `${p.label ? `${p.label}\n\n` : ""}${p.text ?? ""}`.slice(0, 8000)),
+        documents: passages.map((p) => `${p.label ? `${p.label}\n\n` : ""}${rerankText(p, maxChars, queries ?? [query])}`.slice(0, 8000)),
         top_k: Math.min(k, passages.length),
         truncation: true,
       }),
@@ -540,16 +588,24 @@ async function expandActs(supabase, names) {
   }
 }
 
+// The Acts whose passages need placing in their sections (no section from
+// the heading path), in the passages' order, at most `max`.
+function actsToPlace(passages, max = PLACE_ACTS) {
+  return [...new Set(passages.filter((p) => !p.section && !sectionFromHeading(p.heading_path) && p.act_name).map((p) => p.act_name))].slice(0, max);
+}
+
 // Statute passages placed in their sections: from the heading path, else by
 // finding the passage in its Act's rebuilt text (as search_law_library does),
-// for the first three Acts involved.
-async function placeSections(supabase, passages) {
+// for the first three Acts involved, those Acts read at once (an Act already
+// being read, or read in the last hour, is not read again: actText).
+async function placeSections(supabase, passages, clock = null) {
   for (const p of passages) if (!p.section) p.section = sectionFromHeading(p.heading_path);
-  const needing = [...new Set(passages.filter((p) => !p.section && p.act_name).map((p) => p.act_name))].slice(0, 3);
-  for (const name of needing) {
+  const needing = actsToPlace(passages);
+  await Promise.all(needing.map(async (name) => {
     try {
-      const doc = await actText(supabase, name);
-      if (!doc) continue;
+      const read = () => actText(supabase, name);
+      const doc = clock ? await clock.time("place: act text", read, { act: name }) : await read();
+      if (!doc) return;
       for (const p of passages) {
         if (p.act_name !== name || p.section) continue;
         const at = doc.text.indexOf(norm(p.anchorText ?? p.text.slice(0, 200)));
@@ -558,7 +614,7 @@ async function placeSections(supabase, passages) {
     } catch (err) {
       console.error(`could not place passages of ${name} in sections: ${err.message}`);
     }
-  }
+  }));
 }
 
 // The section a question names, read whole, when the Act it names is known.
@@ -612,84 +668,200 @@ function toPassage(c) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Timing
+
+const noop = () => {};
+const LATE = Symbol("late");
+
+// p's value, or LATE when it has not settled within `ms`.
+function within(p, ms) {
+  let timer;
+  const late = new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, ms), LATE); });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * When each stage of one search started and how long it took, in
+ * milliseconds from the start: events [{ stage, start, ms, ...detail }].
+ */
+export function stopwatch(now = () => performance.now()) {
+  const t0 = now();
+  const events = [];
+  const add = (stage, started, detail, error) => {
+    const e = { stage, start: Math.round(started - t0), ms: Math.round(now() - started), ...detail };
+    if (error) e.error = String(error?.message ?? error).slice(0, 200);
+    events.push(e);
+  };
+  return {
+    events,
+    elapsed: () => Math.round(now() - t0),
+    /** Runs fn and records it with `detail`, and `after(result)` when it succeeds. */
+    async time(stage, fn, detail = {}, after = null) {
+      const started = now();
+      let result;
+      try {
+        result = await fn();
+      } catch (err) {
+        add(stage, started, detail, err);
+        throw err;
+      }
+      add(stage, started, after ? { ...detail, ...after(result) } : detail);
+      return result;
+    },
+    timeSync(stage, fn, detail = {}) {
+      const started = now();
+      try {
+        return fn();
+      } finally {
+        add(stage, started, detail);
+      }
+    },
+    note(stage, detail = {}) {
+      events.push({ stage, start: Math.round(now() - t0), ms: 0, ...detail });
+    },
+  };
+}
+
 /**
  * The search, with what it did: { passages, phrasings, engine: "hybrid" |
- * "vector" | null, reranked }. See retrieve().
+ * "vector" | null, reranked, rewriteLate } and, with `timings: true`,
+ * timings: { total, events: [{ stage, start, ms, ... }], ... }. See retrieve().
  */
 export async function retrieveDetailed({
   supabase, voyageKey, anthropicJson = null, query, scope,
   matterId = null, actNames = null, documentTypeId = null, allVersions = false,
   excludeDocumentId = null, excludeStoragePath = null,
   k = 8, rewrite = true, rerank = true, minScore = 0, candidates = CANDIDATES,
+  rewriteWaitMs = REWRITE_WAIT_MS, rerankPool = RERANK_POOL, rerankChars = RERANK_CHARS, timings = false,
   signal, fetchImpl = globalThis.fetch,
 }) {
   if (!SCOPES.has(scope)) throw new Error(`retrieve: scope must be project, precedent or statute, not ${scope}`);
+  const clock = stopwatch();
   const q = norm(query);
-  const out = { passages: [], phrasings: [q], engine: null, reranked: false };
-  if (q.length < 2 || (scope === "project" && !matterId)) return out;
+  const out = { passages: [], phrasings: [q], engine: null, reranked: false, rewriteLate: false };
+  const done = () => {
+    if (timings) {
+      out.timings = {
+        total: clock.elapsed(), scope, engine: out.engine, phrasings: out.phrasings.length, rewriteLate: out.rewriteLate, reranked: out.reranked,
+        events: [...clock.events].sort((a, b) => a.start - b.start),
+      };
+    }
+    return out;
+  };
+  if (q.length < 2 || (scope === "project" && !matterId)) return done();
 
   const named = (actNames ?? []).filter(Boolean);
-  const acts = scope === "statute" && named.length ? await expandActs(supabase, named) : [];
   const question = q.length <= MAX_QUESTION_CHARS;
   const sectionAsked = scope === "statute" && question && SECTION_RE.test(q);
+  const rewriting = !!(rewrite && anthropicJson && question && !sectionAsked && (scope === "precedent" || scope === "statute"));
 
-  if (rewrite && anthropicJson && question && !sectionAsked && (scope === "precedent" || scope === "statute")) {
-    out.phrasings = [q, ...(await rewriteQuery({ anthropicJson, query: q, scope, signal }))].slice(0, 4);
-  }
+  // A promise started now and maybe awaited later: its failure is handled
+  // where it is awaited, never left unhandled if the search stops first.
+  const started = (p) => { p.catch(noop); return p; };
 
-  let embeddings = null;
-  try {
-    embeddings = await embedQueries(voyageKey, out.phrasings, { fetchImpl, signal });
-  } catch (err) {
-    if (signal?.aborted) throw err;
-    console.error(`query embedding failed, searching by words only: ${err.message}`);
-  }
+  // Everything that needs only the question starts at once: the rewrite,
+  // the question's embedding, the named Acts' other copies, and the section
+  // the question names.
+  const rewriteP = rewriting
+    ? started(clock.time("rewrite", () => rewriteQuery({ anthropicJson, query: q, scope, signal }), {}, (r) => ({ phrasings: r.length })))
+    : null;
+  const embed = (texts) => clock.time("embed", () => embedQueries(voyageKey, texts, { fetchImpl, signal }), { texts: texts.length })
+    .catch((err) => {
+      if (signal?.aborted) throw err;
+      console.error(`query embedding failed, searching by words only: ${err.message}`);
+      return null;
+    });
+  const plainEmbedP = started(embed([q]).then((v) => v?.[0] ?? null));
+  const actsP = started(scope === "statute" && named.length
+    ? clock.time("acts", () => expandActs(supabase, named), {}, (a) => ({ acts: a.length }))
+    : Promise.resolve([]));
+  const leadP = sectionAsked
+    ? started(actsP.then((acts) => clock.time("section lead", () => sectionLead(supabase, q, named.length ? acts : null), {}, (s) => ({ found: !!s }))))
+    : null;
 
-  let lists = null;
-  if (Date.now() >= hybridMissingUntil) {
-    try {
-      lists = await Promise.all(out.phrasings.map((p, i) => hybridSearch(supabase, {
-        query_text: i === 0 ? keywordText(p) : p,
-        query_embedding: embeddings?.[i] ?? null,
-        scope,
-        matter_id: scope === "project" ? matterId : null,
-        act_names: scope === "statute" && acts.length ? acts : null,
-        document_type_id: documentTypeId ?? null,
-        all_versions: !!allVersions,
-        exclude_document_id: excludeDocumentId ?? null,
-        k: candidates,
-      })));
-      out.engine = "hybrid";
-    } catch (err) {
-      if (!isMissingFunction(err)) throw err;
-      hybridMissingUntil = Date.now() + MISSING_RETRY_MS;
-      console.warn(`search_passages is not in the database yet (${err.dbMessage ?? err.message}); searching with match_documents`);
+  // One phrasing searched: search_passages, or match_documents before that
+  // migration (the current-version filter applied here then).
+  let versionsP = null;
+  const searchOne = async (i, phrase, embedding, acts) => {
+    if (Date.now() >= hybridMissingUntil) {
+      try {
+        const list = await hybridSearch(supabase, {
+          query_text: i === 0 ? keywordText(phrase) : phrase,
+          query_embedding: embedding ?? null,
+          scope,
+          matter_id: scope === "project" ? matterId : null,
+          act_names: scope === "statute" && acts.length ? acts : null,
+          document_type_id: documentTypeId ?? null,
+          all_versions: !!allVersions,
+          exclude_document_id: excludeDocumentId ?? null,
+          k: candidates,
+        });
+        if (!out.engine) out.engine = "hybrid";
+        return list;
+      } catch (err) {
+        if (!isMissingFunction(err)) throw err;
+        hybridMissingUntil = Date.now() + MISSING_RETRY_MS;
+        console.warn(`search_passages is not in the database yet (${err.dbMessage ?? err.message}); searching with match_documents`);
+      }
+    }
+    if (!embedding) {
+      if (i === 0) throw new Error("The search service did not respond, so the library could not be searched.");
+      return [];
+    }
+    if (!versionsP) versionsP = scope === "project" ? projectVersions(supabase, matterId) : Promise.resolve(null);
+    out.engine = "vector";
+    return vectorFallback(supabase, {
+      scope, embedding, matterId, actNames: acts, documentTypeId, allVersions, excludeDocumentId, candidates,
+      terms: queryTerms(q, out.phrasings.slice(1)), versions: await versionsP,
+    });
+  };
+  const search = (i, phrase, embedding, acts) => clock.time("search", () => searchOne(i, phrase, embedding, acts), { phrasing: i }, (rows) => ({ rows: rows.length }));
+
+  // The question as asked, searched as soon as it is embedded; the rewrite's
+  // phrasings, if they come in time, embedded together and searched at once.
+  const acts = await actsP;
+  const plainP = started(plainEmbedP.then((emb) => search(0, q, emb, acts)));
+  let extraP = Promise.resolve([]);
+  if (rewriteP) {
+    const phrasings = await within(rewriteP, rewriteWaitMs - clock.elapsed());
+    if (phrasings === LATE) {
+      out.rewriteLate = true;
+      clock.note("rewrite not waited for", { waitMs: rewriteWaitMs });
+    } else if (phrasings.length) {
+      out.phrasings = [q, ...phrasings].slice(0, 4);
+      const extra = out.phrasings.slice(1);
+      extraP = started(embed(extra).then((embs) => Promise.all(extra.map((p, j) => search(j + 1, p, embs?.[j] ?? null, acts)))));
     }
   }
-  if (!lists) {
-    if (!embeddings) throw new Error("The search service did not respond, so the library could not be searched.");
-    const versions = scope === "project" ? await projectVersions(supabase, matterId) : null;
-    const terms = queryTerms(q, out.phrasings.slice(1));
-    lists = await Promise.all(out.phrasings.map((_, i) => vectorFallback(supabase, {
-      scope, embedding: embeddings[i], matterId, actNames: acts, documentTypeId, allVersions, excludeDocumentId, candidates, terms, versions,
-    })));
-    out.engine = "vector";
-  }
+  const lists = [await plainP, ...(await extraP)];
 
   let pool = fuseLists(lists);
   if (excludeStoragePath) pool = pool.filter((c) => c.storage_path !== excludeStoragePath);
   pool = dedupeByText(pool);
-  pool = capPerFile(pool, scope === "statute" && acts.length ? Infinity : FILE_CAP).slice(0, RERANK_POOL);
+  pool = capPerFile(pool, scope === "statute" && acts.length ? Infinity : FILE_CAP).slice(0, Math.max(rerankPool, k));
   const windowQueries = [question ? q : keywordText(q), ...out.phrasings.slice(1)];
-  for (const c of pool) {
-    Object.assign(c, passageText(c.content, windowQueries));
-    if (scope === "statute") c.section = sectionFromHeading(c.heading_path);
-    c.label = buildLabel(c);
+  clock.timeSync("windows and labels", () => {
+    for (const c of pool) {
+      Object.assign(c, passageText(c.content, windowQueries));
+      if (scope === "statute") c.section = sectionFromHeading(c.heading_path);
+      c.label = buildLabel(c);
+    }
+  }, { passages: pool.length });
+
+  // The Acts the best passages come from are read while the reranker works
+  // (placeSections then finds them read or being read).
+  if (scope === "statute") {
+    for (const name of actsToPlace(pool, PLACE_ACTS + 1)) {
+      started(clock.time("prefetch: act text", () => actText(supabase, name), { act: name }));
+    }
   }
 
   let final = pool.slice(0, k);
   if (rerank) {
-    const r = await rerankPassages({ voyageKey, query: q, passages: pool, k, fetchImpl, signal });
+    const chars = pool.reduce((n, c) => n + Math.min(String(c.text ?? "").length, rerankChars > 0 ? rerankChars : Infinity), 0);
+    const r = await clock.time("rerank", () => rerankPassages({ voyageKey, query: q, passages: pool, k, maxChars: rerankChars, queries: windowQueries, fetchImpl, signal }),
+      { docs: pool.length, chars }, (x) => ({ reranked: x.reranked }));
     final = r.passages;
     out.reranked = r.reranked;
     // A floor on the reranker's score, for callers that would rather have
@@ -699,15 +871,15 @@ export async function retrieveDetailed({
   }
 
   if (scope === "statute") {
-    await placeSections(supabase, final);
-    if (sectionAsked) {
-      const lead = await sectionLead(supabase, q, named.length ? acts : null);
+    await clock.time("place", () => placeSections(supabase, final, clock), { acts: actsToPlace(final).length });
+    if (leadP) {
+      const lead = await leadP;
       if (lead) final = [lead, ...final.filter((p) => !(p.act_name === lead.act_name && p.section === lead.section))].slice(0, k);
     }
   }
   for (const c of final) c.label = buildLabel(c);
   out.passages = final.map(toPassage);
-  return out;
+  return done();
 }
 
 /**
@@ -721,8 +893,12 @@ export async function retrieveDetailed({
  * documentTypeId, allVersions (project: superseded and AI versions too),
  * excludeDocumentId / excludeStoragePath (leave one document out), k,
  * rewrite (model phrasings for precedent and statute questions; needs
- * anthropicJson), rerank, minScore (drop reranked passages scoring below).
+ * anthropicJson), rewriteWaitMs (how long they are waited for), rerank,
+ * rerankPool / rerankChars (how many passages the reranker reads, and how
+ * much of each), minScore (drop reranked passages scoring below), timings
+ * (return { passages, timings } instead: each stage's start and duration).
  */
 export async function retrieve(options) {
-  return (await retrieveDetailed(options)).passages;
+  const d = await retrieveDetailed(options);
+  return options?.timings ? { passages: d.passages, timings: d.timings } : d.passages;
 }

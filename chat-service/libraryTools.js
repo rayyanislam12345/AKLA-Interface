@@ -26,7 +26,14 @@ import { queryTerms } from "./precedentSearch.js";
 import { retrieve } from "./retrieve.js";
 
 const CACHE_MS = 10 * 60 * 1000;
-const MAX_CACHED_ACTS = 8;
+// A rebuilt Act is kept an hour, and as many as fit in ~40 million characters
+// (the whole library is ~13 million): rebuilding one costs a read of up to
+// 2.5 MB and a pass over its text, and a statute search places its passages
+// in their sections from these, so a cold Act was paid for on most searches
+// when only eight were kept for ten minutes. clearCaches() (after a law is
+// downloaded into the library) forgets them all.
+const ACT_CACHE_MS = 60 * 60 * 1000;
+const MAX_CACHED_ACT_CHARS = 40_000_000;
 const MAX_OVERLAP_WORDS = 400;
 const MAX_SECTION_CHARS = 15_000;
 // A table-of-contents entry is followed by the next entry within this many
@@ -379,15 +386,44 @@ export function bestCopy(rows) {
 
 /**
  * An Act's whole text, rebuilt from its chunks: { act_name, text, index,
- * source_url }. Kept ten minutes, at most eight Acts.
+ * source_url }, or null when the library holds none of it. Kept an hour
+ * within a budget of characters; two searches asking for the same Act at
+ * once share one read.
  */
 export async function actText(supabase, actName) {
   const hit = actCache.get(actName);
-  if (hit && Date.now() - hit.at < CACHE_MS) {
+  if (hit && Date.now() - hit.at < ACT_CACHE_MS) {
     actCache.delete(actName);
     actCache.set(actName, hit);
-    return hit.value;
+    return hit.promise;
   }
+  const entry = { at: Date.now(), chars: 0, promise: null };
+  entry.promise = readAct(supabase, actName);
+  actCache.set(actName, entry);
+  let value;
+  try {
+    value = await entry.promise;
+  } catch (err) {
+    if (actCache.get(actName) === entry) actCache.delete(actName);
+    throw err;
+  }
+  if (!value) {
+    if (actCache.get(actName) === entry) actCache.delete(actName);
+    return null;
+  }
+  entry.chars = value.text.length;
+  let total = 0;
+  for (const e of actCache.values()) total += e.chars;
+  for (const [name, e] of actCache) {
+    if (total <= MAX_CACHED_ACT_CHARS) break;
+    if (e === entry) continue;
+    actCache.delete(name);
+    total -= e.chars;
+  }
+  return value;
+}
+
+async function readAct(supabase, actName) {
   const rows = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase.from("documents").select("id, content, metadata").eq("is_statute", true).eq("metadata->>act_name", actName).order("id").range(from, from + PAGE_SIZE - 1);
@@ -399,10 +435,7 @@ export async function actText(supabase, actName) {
   const ordered = bestCopy(rows);
   const text = mergeChunks(ordered.map((r) => r.content));
   const first = ordered[0]?.metadata ?? {};
-  const value = { act_name: actName, text, index: sectionIndex(text), source_url: first.source_url ?? first.pdf_url ?? null };
-  actCache.set(actName, { at: Date.now(), value });
-  while (actCache.size > MAX_CACHED_ACTS) actCache.delete(actCache.keys().next().value);
-  return value;
+  return { act_name: actName, text, index: sectionIndex(text), source_url: first.source_url ?? first.pdf_url ?? null };
 }
 
 /** Forget what has been read: in tests, and once a law has been added to the library. */
