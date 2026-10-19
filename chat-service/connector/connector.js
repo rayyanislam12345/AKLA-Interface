@@ -8,12 +8,15 @@
 // VOYAGE_API_KEY. Its own settings, all optional: CONNECTOR_PORT (8095),
 // CONNECTOR_ISSUER (https://aklachat.duckdns.org), CONNECTOR_REDIRECT_HOSTS
 // (comma-separated hosts a client may be sent back to after sign-in;
-// claude.ai,claude.com) and CONNECTOR_ALLOW_LOOPBACK=1 (also http://localhost,
-// for a dev box only). PORT is chat-service's and is ignored here.
+// claude.ai,claude.com), CONNECTOR_HUB_URL (the site's address, for the
+// "Open in Hub" lines on results; https://akla-interface.vercel.app) and
+// CONNECTOR_ALLOW_LOOPBACK=1 (also http://localhost, for a dev box only).
+// PORT is chat-service's and is ignored here.
 //
 // What it is made of: oauth.js (the authorization server), store.js (its
 // tables), signIn.js (the Hub login, server-side), tools.js (what a lawyer's
-// Claude can look up), app.js (the routes). See docs/claude-ai-connector.md.
+// Claude can look up, plus every module under tools/), hubLinks.js (the
+// links back to the site), app.js (the routes). See docs/claude-ai-connector.md.
 
 import "dotenv/config";
 import { createServer } from "node:http";
@@ -22,7 +25,8 @@ import { createClient } from "@supabase/supabase-js";
 import { createApp } from "./app.js";
 import { createSupabaseStore } from "./store.js";
 import { createSignIn } from "./signIn.js";
-import { createHubTools } from "./tools.js";
+import { createHubTools, loadToolModules } from "./tools.js";
+import { DEFAULT_HUB_URL } from "./hubLinks.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -32,6 +36,7 @@ const VOYAGE_KEY = process.env.VOYAGE_API_KEY;
 const PORT = Number(process.env.CONNECTOR_PORT ?? 8095);
 const ISSUER = (process.env.CONNECTOR_ISSUER ?? "https://aklachat.duckdns.org").replace(/\/+$/, "");
 const REDIRECT_HOSTS = String(process.env.CONNECTOR_REDIRECT_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+const HUB_URL = (process.env.CONNECTOR_HUB_URL ?? DEFAULT_HUB_URL).replace(/\/+$/, "");
 const ALLOW_LOOPBACK = /^(1|true|yes)$/i.test(String(process.env.CONNECTOR_ALLOW_LOOPBACK ?? ""));
 
 for (const [name, value] of Object.entries({ SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY, VOYAGE_API_KEY: VOYAGE_KEY })) {
@@ -63,10 +68,14 @@ try {
 
 const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
 
+// The tool modules under connector/tools/ are read once here; one that
+// will not load stops the start, which systemd reports.
+const modules = await loadToolModules();
+
 const app = createApp({
   store: createSupabaseStore(db),
   signIn: createSignIn({ supabaseUrl: SUPABASE_URL, publishableKey: PUBLISHABLE_KEY, serviceClient: db, log }),
-  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, log }),
+  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, log, hubUrl: HUB_URL, modules }),
   isMember: async (userId) => {
     const { data, error } = await db.rpc("is_firm_member", { _user_id: userId });
     if (error) throw new Error(`is_firm_member: ${error.message}`);
@@ -87,7 +96,7 @@ const server = createServer((req, res) => { app(req, res); });
 server.requestTimeout = 0;
 server.headersTimeout = 60_000;
 server.listen(PORT, "127.0.0.1", () => {
-  log(`hub-connector listening on 127.0.0.1:${PORT} as ${ISSUER} (commit ${version.commit ?? "unknown"}); redirects allowed to ${(REDIRECT_HOSTS.length ? REDIRECT_HOSTS : ["claude.ai", "claude.com"]).join(", ")}`);
+  log(`hub-connector listening on 127.0.0.1:${PORT} as ${ISSUER} (commit ${version.commit ?? "unknown"}); redirects allowed to ${(REDIRECT_HOSTS.length ? REDIRECT_HOSTS : ["claude.ai", "claude.com"]).join(", ")}; Hub links to ${HUB_URL}; ${modules.length} tool module${modules.length === 1 ? "" : "s"} loaded`);
 });
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

@@ -34,14 +34,84 @@ so Claude can cite what it relied on.
 | `search_law_library` (query, act?) | Passages from the firm's law library: words and meaning, optionally within one Act; a query naming a section gets that section whole, first |
 | `read_act_section` (act, section) | One section of an Act in full |
 | `search_precedents` (query, document_type?) | Clause-level passages from the precedent library, at most three from one document |
-| `list_projects` (includeClosed?) | The firm's projects with their ids; open ones unless asked |
+| `list_projects` (includeClosed?) | The firm's projects with their ids, your starred projects first; open ones unless asked |
 | `list_project_documents` (projectId) | A project's documents, every version with its id, the current one marked |
 | `search_project_documents` (projectId, query) | Passages from a project's current documents |
 | `read_document` (versionId, from?, chars?) | The plain text of one version, up to 20,000 characters a call, in slices; from the Hub's stored passages, or read from the file when it has none |
 | `get_document_summary` (versionId) | The index card (what it is, parties, key dates, defined terms, outline, statutes mentioned), the proof check's counts and first findings, and what changed from the version before |
+| `list_acts` () | Every law the firm's law library holds, by name, so the other law tools can be given the exact name |
+| `get_act_outline` (act, from?) | The section numbers and headings of one Act in order, with its official link; in pages |
+| `get_document_checks` (versionId, from?, recheck?) | Every finding of the proof check on one version (blanks, undefined and unused terms, broken cross-references, number/word mismatches, numbering gaps); worked out on the spot when the Hub has not stored it (one such read at a time, kept for the next page), and a stored "could not check" is reported unless recheck is asked |
+| `compare_document_versions` (fromVersionId, toVersionId, from?, includeFormatting?, recheck?) | What changed, clause by clause, between any two versions of one document; formatting-only changes left out unless asked |
+| `get_firm_rules` (task?) | The Hub's own rules for a draft, an answer or a review: search the precedents and the law library first, cite [Source n], quote a statute only from a passage in front of you, the house Markdown shape, a draft written in full |
+| `list_precedents` (documentType?, page?) | The precedent library by document type, each precedent with the path to give `read_precedent` |
+| `find_precedent_clauses` (query, documentType?) | The Precedent tab's clause search: up to three excerpts from each precedent that matches; slower (up to about 12 seconds) and one search at a time |
+| `read_precedent` (storagePath, from?, chars?) | A precedent's whole text, up to 20,000 characters a call, in slices |
+| `get_project_overview` (projectId, from?) | A project on one page: client, sector, standing instructions, relevant laws, and each document's latest version with its index card and whether the Hub has read it |
+| `find_document_by_title` (query, projectId?) | Documents (and projects) whose title contains the words, with their ids and latest version |
+| `search_everything` (query, projectId?, kind?, allVersions?, page?) | Words, or an exact phrase in quotes, across every project's document titles, indexed text, notes and tasks; 25 results a page |
+| `list_document_types` (page?) | The firm's document types by category, 100 a page: which have a Word standard, and which a drafting questionnaire |
+| `read_standard` (documentTypeId, from?, chars?) | A standard's text in slices, with the format rules the Hub drafts under |
+| `get_drafting_decisions` (documentTypeId, from?) | A type's drafting questionnaire as numbered decisions, with the options, the legal basis and when each is asked |
+
+Every project, version and project passage in an answer carries an
+"Open in Hub: https://…" line (the site's address is `CONNECTOR_HUB_URL`),
+so the lawyer can open it where it lives. The first eight tools live in
+`chat-service/connector/tools.js`; the rest are modules under
+`chat-service/connector/tools/` (its README gives the shape), loaded when
+the connector starts, and `MODULE_TOOL_NAMES` in tools.js lists them for
+the tests.
+
+`find_precedent_clauses` runs the Precedent tab's search, which embeds the
+question and the candidate paragraphs with Voyage (the firm's account is on
+the free tier, three calls a minute). Voyage takes 64 paragraphs a request,
+so the connector caps the pool at 64 (the Hub's own tab embeds up to 320,
+six requests): a connector search is two Voyage calls, the question and
+the pool. It also runs one at a time and tells a second caller to try again
+in a moment; it rewrites the question with synonyms only when
+`ANTHROPIC_API_KEY` is in the connector's environment.
 
 It uses the assistant's own search (`chat-service/libraryTools.js`,
 `retrieve.js`), so what it finds is what the Hub's chat would find.
+
+## Seeing the document beside the chat
+
+The companion (`hub-companion/`) is a small Chrome extension that watches
+a claude.ai chat for the connector's "Open in Hub" links and shows that
+page of the Hub in the browser's side panel, so the document, project or
+chat sits beside the conversation instead of in another tab. It puts an
+"open beside" button next to each link, opens the newest one on its own,
+and has a toolbar button for pasting a link by hand. The panel is the real
+Hub page, signed in once inside the panel: version compare, Checks and
+What changed, accept and reject, drop a file in, download a copy.
+
+**Embed mode.** The panel opens a page with `?embed=1` on any `/ai` route
+(`/ai/d/<versionId>`, `/ai/p/<matterId>`, `/ai/c/<threadId>`). In that
+mode the workspace has no sidebar: a one-line header names the place and
+offers "Open in the Hub", which opens the same page in a new tab without
+the mode. The choice is kept in `sessionStorage` (`hub-embed`), so links
+inside the workspace keep it; `?embed=0` switches it off. Links to the
+site's own pages ("Open on Project Hub", "open project") open the ordinary
+Hub in a new tab, because those pages are not built for a 360px panel. The
+sign-in page works inside the panel and comes back to the embedded page
+afterwards (`/auth?next=<route>&embed=1`, written by `ProtectedRoute`).
+Being inside a frame is only a hint; the query parameter is the switch.
+Code: `src/lib/embedMode.ts`, `src/ai/layout/AiLayout.tsx`.
+
+**Framing.** `vercel.json` sets no `X-Frame-Options` and no
+`Content-Security-Policy: frame-ancestors` today, so any page may frame the
+Hub; nothing in the app navigates `window.top` or breaks out of a frame.
+To allow only the companion once it has a fixed extension id, add to
+`vercel.json`:
+
+```json
+"headers": [{ "source": "/(.*)", "headers": [{ "key": "Content-Security-Policy", "value": "frame-ancestors 'self' chrome-extension://<the companion's id>" }] }]
+```
+
+(`vercel.json` is JSON, so this note lives here and not in the file.)
+Chrome partitions a framed site's storage by the framing site, so the
+panel's sign-in is separate from the lawyer's own Hub tab: once in the
+panel, once in the tab, each kept until it expires.
 
 ## What it cannot do (this version)
 
@@ -160,8 +230,10 @@ each lawyer then removes and re-adds the connector in claude.ai.
 **Settings** (`hub-connector.service`): `CONNECTOR_PORT` (8095),
 `CONNECTOR_ISSUER` (`https://aklachat.duckdns.org`; the issuer in the
 discovery documents and the resource claude.ai asks for),
-`CONNECTOR_REDIRECT_HOSTS` (comma-separated; default `claude.ai,claude.com`)
-and `CONNECTOR_ALLOW_LOOPBACK` (never on the VM). The rest comes from
+`CONNECTOR_REDIRECT_HOSTS` (comma-separated; default `claude.ai,claude.com`),
+`CONNECTOR_HUB_URL` (the site's address for the "Open in Hub" lines on
+results; default `https://akla-interface.vercel.app`) and
+`CONNECTOR_ALLOW_LOOPBACK` (never on the VM). The rest comes from
 `/opt/chat-service/.env`.
 
 **Logs:** `sudo journalctl -u hub-connector -f`. One line per sign-in,
@@ -170,12 +242,20 @@ line for every refusal with its reason.
 
 ## Deploying (manual, in this order)
 
-1. **Migration.** Apply `supabase/migrations/20261019150000_connector_tokens.sql`
+1. **Migrations.** Apply `supabase/migrations/20261019150000_connector_tokens.sql`
    to the project (SQL editor or the management API). Safe to run twice.
    Until it is applied, the connector starts but every registration and
-   sign-in fails with "Could not save…" in its journal.
+   sign-in fails with "Could not save…" in its journal. Then
+   `supabase/migrations/20261020100000_search_project_content_as.sql`,
+   which gives `search_everything` its search as the signed-in lawyer (the
+   site's own `search_project_content` becomes a wrapper around it; also
+   safe to run twice). Until it is applied `search_everything` answers with
+   a sentence naming the migration and every other tool works. Confirm with
+   `select has_function_privilege('service_role', 'public.search_project_content_as(uuid,text,uuid,text,boolean,integer,integer)', 'execute');`.
 2. **Code.** From the repo, `chat-service/deploy.sh`. It copies
-   `connector/*.js` to `/opt/chat-service/connector/`, installs
+   `connector/*.js` and `connector/tools/*.js` to
+   `/opt/chat-service/connector/` (with `firmRules.js` and
+   `documentInsight.js` at the service root), installs
    `hub-connector.service` (install + restorecon, as for the index worker),
    runs `npm install` (which adds `@modelcontextprotocol/sdk` and `zod`), and
    restarts chat-service, index-worker and hub-connector. The last lines

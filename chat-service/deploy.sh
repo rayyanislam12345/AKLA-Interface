@@ -23,7 +23,7 @@ echo "Backing up the running copy…"
 ssh -i "$KEY" "$HOST" "test -f $DEST/server.js && sudo cp $DEST/server.js $DEST/server.js.bak-$TS || true"
 
 echo "Copying the service files and the version stamp…"
-scp -i "$KEY" server.js libraryTools.js retrieve.js agreement.js agreementFlow.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js changes.js indexWorker.js proofCheck.js versionCompare.js package.json "$STAMP" "$HOST:/tmp/"
+scp -i "$KEY" server.js libraryTools.js retrieve.js agreement.js agreementFlow.js extractText.js docxAgent.js research.js lawLibrary.js precedentSearch.js questionnaire.js sourcePolicy.js review.js docxChecks.js suggestionMerge.js claudeSkills.js aklaRender.js contextBudget.js chatState.js changes.js indexWorker.js proofCheck.js versionCompare.js firmRules.js documentInsight.js package.json "$STAMP" "$HOST:/tmp/"
 # The index worker's reader (indexing/*.js) and its systemd unit. The unit is
 # copied with install + restorecon, not mv: SELinux is enforcing and a file
 # moved from /tmp keeps its user_tmp_t label, which systemd refuses to read.
@@ -33,18 +33,20 @@ scp -i "$KEY" index-worker.service "$HOST:/tmp/index-worker.service"
 ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/indexing && sudo mv /tmp/indexing $DEST/indexing && sudo chown -R opc:opc $DEST/indexing && sudo install -m 644 -o root -g root /tmp/index-worker.service /etc/systemd/system/index-worker.service && sudo rm -f /tmp/index-worker.service && sudo restorecon /etc/systemd/system/index-worker.service && sudo systemctl daemon-reload && sudo systemctl enable index-worker >/dev/null 2>&1 && echo '  index worker unit installed'"
 # The reader shells out to poppler (pdfinfo, pdftotext, pdftoppm) and tesseract.
 ssh -i "$KEY" "$HOST" "for t in pdfinfo pdftotext pdftoppm tesseract; do command -v \$t >/dev/null || echo \"  WARNING: \$t is not installed; the index worker needs it\"; done"
-# The claude.ai connector (connector/*.js) and its unit, the same way: it
-# imports libraryTools.js, retrieve.js and indexing/ from $DEST, so it ships
-# in the same deploy. Port 8095; Caddy routes /mcp, /oauth/* and the
-# .well-known documents to it (see Caddyfile and docs/claude-ai-connector.md).
-ssh -i "$KEY" "$HOST" "rm -rf /tmp/connector && mkdir -p /tmp/connector"
+# The claude.ai connector (connector/*.js and its tool modules under
+# connector/tools/) and its unit, the same way: it imports libraryTools.js,
+# retrieve.js, firmRules.js and indexing/ from $DEST, so it ships in the
+# same deploy. Port 8095; Caddy routes /mcp, /oauth/* and the .well-known
+# documents to it (see Caddyfile and docs/claude-ai-connector.md).
+ssh -i "$KEY" "$HOST" "rm -rf /tmp/connector && mkdir -p /tmp/connector/tools"
 scp -i "$KEY" connector/*.js "$HOST:/tmp/connector/"
+scp -i "$KEY" connector/tools/*.js "$HOST:/tmp/connector/tools/"
 scp -i "$KEY" hub-connector.service "$HOST:/tmp/hub-connector.service"
 ssh -i "$KEY" "$HOST" "sudo rm -rf $DEST/connector && sudo mv /tmp/connector $DEST/connector && sudo chown -R opc:opc $DEST/connector && sudo install -m 644 -o root -g root /tmp/hub-connector.service /etc/systemd/system/hub-connector.service && sudo rm -f /tmp/hub-connector.service && sudo restorecon /etc/systemd/system/hub-connector.service && sudo systemctl daemon-reload && sudo systemctl enable hub-connector >/dev/null 2>&1 && echo '  hub connector unit installed'"
 # The AKLA Word renderer: the firm's generator, its emblem, and its Python needs.
 ssh -i "$KEY" "$HOST" "rm -rf /tmp/akla && mkdir -p /tmp/akla"
 scp -i "$KEY" akla/build_docx.py akla/akla-logo.png akla/requirements.txt "$HOST:/tmp/akla/"
-ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/libraryTools.js /tmp/retrieve.js /tmp/agreement.js /tmp/agreementFlow.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/changes.js /tmp/indexWorker.js /tmp/proofCheck.js /tmp/versionCompare.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/libraryTools.js $DEST/retrieve.js $DEST/agreement.js $DEST/agreementFlow.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/changes.js $DEST/indexWorker.js $DEST/proofCheck.js $DEST/versionCompare.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
+ssh -i "$KEY" "$HOST" "sudo mv /tmp/server.js /tmp/libraryTools.js /tmp/retrieve.js /tmp/agreement.js /tmp/agreementFlow.js /tmp/extractText.js /tmp/docxAgent.js /tmp/research.js /tmp/lawLibrary.js /tmp/precedentSearch.js /tmp/questionnaire.js /tmp/sourcePolicy.js /tmp/review.js /tmp/docxChecks.js /tmp/suggestionMerge.js /tmp/claudeSkills.js /tmp/aklaRender.js /tmp/contextBudget.js /tmp/chatState.js /tmp/changes.js /tmp/indexWorker.js /tmp/proofCheck.js /tmp/versionCompare.js /tmp/firmRules.js /tmp/documentInsight.js /tmp/package.json $DEST/ && sudo rm -rf $DEST/akla && sudo mv /tmp/akla $DEST/akla && sudo mv /tmp/$(basename "$STAMP") $DEST/DEPLOYED_VERSION && sudo chown opc:opc $DEST/server.js $DEST/libraryTools.js $DEST/retrieve.js $DEST/agreement.js $DEST/agreementFlow.js $DEST/extractText.js $DEST/docxAgent.js $DEST/research.js $DEST/lawLibrary.js $DEST/precedentSearch.js $DEST/questionnaire.js $DEST/sourcePolicy.js $DEST/review.js $DEST/docxChecks.js $DEST/suggestionMerge.js $DEST/claudeSkills.js $DEST/aklaRender.js $DEST/contextBudget.js $DEST/chatState.js $DEST/changes.js $DEST/indexWorker.js $DEST/proofCheck.js $DEST/versionCompare.js $DEST/firmRules.js $DEST/documentInsight.js $DEST/package.json $DEST/DEPLOYED_VERSION && sudo chown -R opc:opc $DEST/akla"
 rm -f "$STAMP"
 
 # Only reinstall when the manifest actually changed — npm install on every

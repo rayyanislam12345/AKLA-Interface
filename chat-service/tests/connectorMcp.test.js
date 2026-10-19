@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../connector/app.js';
 import { createMemoryStore } from '../connector/store.js';
-import { createHubTools, MAX_RESULT_CHARS } from '../connector/tools.js';
+import { createHubTools, loadToolModules, BUILT_IN_TOOL_NAMES, ALL_TOOL_NAMES, MAX_RESULT_CHARS } from '../connector/tools.js';
 import { registerClient, issueCode, exchangeToken } from '../connector/oauth.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -50,7 +50,9 @@ async function start() {
     searchPrecedentsTool: async () => [],
     searchProject: async () => [],
   };
-  const tools = createHubTools({ supabase, voyageKey: 'v', library, readFile: async () => ({ blocks: [] }), log: () => {} });
+  // The real modules under connector/tools/, as connector.js loads them.
+  const modules = await loadToolModules();
+  const tools = createHubTools({ supabase, voyageKey: 'v', library, readFile: async () => ({ blocks: [] }), log: () => {}, modules });
   const app = createApp({ store, signIn: async () => ({ ok: false, reason: 'bad_password', message: 'no' }), tools, issuer: 'https://hub.test', isMember: async (id) => id === USER, log: () => {} });
   const server = createServer((req, res) => { app(req, res); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -72,14 +74,27 @@ test('initialize, list the tools and call them through the SDK client', async ()
     const client = await connect(t.url, t.token);
     assert.equal(client.getServerVersion()?.name, 'AKLA Hub');
     assert.match(client.getInstructions() ?? '', /Read-only access to AKLA's Project Hub/);
+    assert.match(client.getInstructions() ?? '', /Call get_firm_rules once at the start/);
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((x) => x.name), ['search_law_library', 'read_act_section', 'search_precedents', 'list_projects', 'list_project_documents', 'search_project_documents', 'read_document', 'get_document_summary']);
+    const names = tools.map((x) => x.name);
+    assert.deepEqual(names.slice(0, 8), ['search_law_library', 'read_act_section', 'search_precedents', 'list_projects', 'list_project_documents', 'search_project_documents', 'read_document', 'get_document_summary']);
+    assert.deepEqual(names.slice(0, 8), [...BUILT_IN_TOOL_NAMES]);
+    // The loaded modules' tools follow, every one of them read-only.
+    assert.ok(names.includes('get_firm_rules'));
+    assert.equal(new Set(names).size, names.length);
+    assert.deepEqual(names, [...ALL_TOOL_NAMES], 'claude.ai sees every tool, in registration order');
+    for (const x of tools) assert.equal(x.annotations?.readOnlyHint, true, `${x.name} is read-only`);
     const read = tools.find((x) => x.name === 'read_document');
     assert.deepEqual(read.inputSchema.required, ['versionId']);
     assert.equal(read.inputSchema.properties.chars.type, 'integer');
     assert.equal(read.annotations?.readOnlyHint, true);
     const law = tools.find((x) => x.name === 'search_law_library');
     assert.deepEqual(law.inputSchema.required, ['query']);
+    const rules = tools.find((x) => x.name === 'get_firm_rules');
+    assert.deepEqual(rules.inputSchema.properties.task.enum, ['draft', 'answer', 'review']);
+    const ruleText = await client.callTool({ name: 'get_firm_rules', arguments: { task: 'answer' } });
+    assert.equal(ruleText.isError, undefined);
+    assert.match(ruleText.content[0].text, /^AKLA's rules for answering from the Hub\./);
 
     const projects = await client.callTool({ name: 'list_projects', arguments: {} });
     assert.equal(projects.isError, undefined);

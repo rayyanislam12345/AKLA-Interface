@@ -12,6 +12,9 @@ WorkingDirectory=/opt/chat-service
 EnvironmentFile=/opt/chat-service/.env
 Environment=CONNECTOR_PORT=8095
 Environment=CONNECTOR_ISSUER=https://aklachat.duckdns.org
+# The Hub site's address, for the "Open in Hub" lines on every result
+# (connector/hubLinks.js). Change it here if the site moves off Vercel.
+Environment=CONNECTOR_HUB_URL=https://akla-interface.vercel.app
 # Where a registered client may send the lawyer back to after sign-in
 # (default claude.ai,claude.com and their subdomains). Never set
 # CONNECTOR_ALLOW_LOOPBACK here: it is for a dev box only.

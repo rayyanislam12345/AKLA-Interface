@@ -15,10 +15,12 @@ const EXCERPTS_PER_FILE = 3;
 const KEYWORD_HITS = 600;
 const KEYWORD_PER_FILE = 10;
 const PARAGRAPHS_PER_ROW = 12;
-const MAX_PARAGRAPHS = 320;
+/** The candidate pool the Hub's own search embeds; `maxParagraphs` lowers it for a caller that must spend less. */
+export const MAX_PARAGRAPHS = 320;
 const MIN_PARAGRAPH = 40;
 const MAX_PARAGRAPH = 2500;
-const EMBED_BATCH = 64;
+/** Paragraphs per Voyage request: a pool of this size is one request. */
+export const EMBED_BATCH = 64;
 
 const STOP = new Set("the a an of and or to in for on by with that this these those is are be as at from any all shall may will clause clauses agreement agreements find show examples example past our we".split(" "));
 
@@ -100,9 +102,17 @@ async function synonymsFor(query, anthropicJson, signal) {
   }
 }
 
-export async function searchPrecedents({ supabase, voyageKey, anthropicJson, query, documentTypeId = null, signal }) {
+/**
+ * The clause search. Voyage is asked once for the query and once per
+ * EMBED_BATCH of the pool (in parallel), so the calls per search are
+ * 1 + ceil(maxParagraphs / EMBED_BATCH): six at the Hub's 320, two at 64.
+ * `signal` stops the model and Voyage calls and the database phases alike.
+ */
+export async function searchPrecedents({ supabase, voyageKey, anthropicJson, query, documentTypeId = null, signal, maxParagraphs = MAX_PARAGRAPHS }) {
   const q = String(query ?? "").trim();
   if (q.length < 2) throw new Error("Type what you are looking for, e.g. liquidated damages.");
+  // A stub in a test may not have abortSignal; the real client does.
+  const stoppable = (req) => (signal && typeof req.abortSignal === "function" ? req.abortSignal(signal) : req);
   const synonyms = await synonymsFor(q, anthropicJson, signal);
   // An abbreviation embeds as noise; the question is embedded with what it
   // stands for.
@@ -116,12 +126,12 @@ export async function searchPrecedents({ supabase, voyageKey, anthropicJson, que
   const phrases = [...new Set([...(bare ? [] : [q]), ...synonyms])].slice(0, 10);
   const [keyword, semantic] = await Promise.all([
     phrases.length
-      ? supabase.rpc("search_precedent_passages", { p_phrases: phrases, p_document_type_id: documentTypeId, p_limit: KEYWORD_HITS })
+      ? stoppable(supabase.rpc("search_precedent_passages", { p_phrases: phrases, p_document_type_id: documentTypeId, p_limit: KEYWORD_HITS }))
       : Promise.resolve({ data: [] }),
-    supabase.rpc("match_documents", {
+    stoppable(supabase.rpc("match_documents", {
       query_embedding: queryEmbedding, match_threshold: 0.2, match_count: MAX_ROWS, precedent_only: true,
       ...(documentTypeId ? { filter_document_type_id: documentTypeId } : {}),
-    }),
+    })),
   ]);
   if (keyword.error) throw new Error(`Clause search failed: ${keyword.error.message}`);
   if (semantic.error) throw new Error(`Library search failed: ${semantic.error.message}`);
@@ -152,7 +162,7 @@ export async function searchPrecedents({ supabase, voyageKey, anthropicJson, que
   if (!candidates.length) return { query: q, terms, results: [] };
   const pool = candidates
     .sort((a, b) => b.hits.count - a.hits.count || b.keywordRank - a.keywordRank)
-    .slice(0, MAX_PARAGRAPHS);
+    .slice(0, Math.max(1, Math.min(MAX_PARAGRAPHS, Number(maxParagraphs) || MAX_PARAGRAPHS)));
   const vectors = await embed(voyageKey, pool.map((p) => p.text), "document", signal);
   pool.forEach((p, i) => { p.score = cosine(queryEmbedding, vectors[i]) + Math.min(p.hits.count, 3) * 0.05 + (p.keywordRank > 0 ? 0.05 : 0); });
 
@@ -164,7 +174,7 @@ export async function searchPrecedents({ supabase, voyageKey, anthropicJson, que
     byFile.set(key, file);
   }
   const typeIds = [...new Set([...byFile.values()].map((f) => f.documentTypeId).filter(Boolean))];
-  const { data: types } = typeIds.length ? await supabase.from("document_types").select("id, name").in("id", typeIds) : { data: [] };
+  const { data: types } = typeIds.length ? await stoppable(supabase.from("document_types").select("id, name").in("id", typeIds)) : { data: [] };
   const typeName = new Map((types ?? []).map((t) => [t.id, t.name]));
 
   const results = [...byFile.values()]

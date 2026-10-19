@@ -512,14 +512,15 @@ export async function searchPrecedentsTool(supabase, voyageKey, anthropicJson, {
  * Passages from this project's own documents, through the one search: the
  * current version of each document only (not superseded or AI-generated
  * drafts), labelled with the document, its version and where in it:
- * { id, filename, label, text, similarity }.
+ * { id, filename, label, text, similarity }, with the version's id so the
+ * connector can link the passage to its Hub page.
  */
 export async function searchProject(supabase, voyageKey, { matterId, query }, { signal, anthropicJson = null } = {}) {
   if (!matterId) throw new Error("This chat is not inside a project, so there are no project documents to search.");
   const q = norm(query);
   if (q.length < 2) throw new Error("Say what to search the project's documents for.");
   const passages = await retrieve({ supabase, voyageKey, anthropicJson, query: q, scope: "project", matterId, k: MAX_PASSAGES, signal });
-  return passages.map((p) => ({ id: p.id, filename: p.filename ?? "Project document", label: p.label, text: p.text, storage_path: p.storage_path, version_number: p.version_number, similarity: p.similarity }));
+  return passages.map((p) => ({ id: p.id, filename: p.filename ?? "Project document", label: p.label, text: p.text, storage_path: p.storage_path, version_number: p.version_number, document_version_id: p.document_version_id ?? null, similarity: p.similarity }));
 }
 
 // ---------------------------------------------------------------------------
