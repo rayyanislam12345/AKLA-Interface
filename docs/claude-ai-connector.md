@@ -191,6 +191,35 @@ that storage altogether (third-party cookies off), the Hub keeps the
 session in memory for as long as the panel page lives and asks for the
 password again next time (`src/integrations/supabase/client.ts`).
 
+**Planned: the document inside the claude.ai page (not built; owner is
+still testing the side panel, 19 Oct 2026).** The same extension can
+insert its own pane into the claude.ai tab instead of using Chrome's side
+panel: a fixed pane on the right, 380-520px wide and draggable, that
+shrinks the page by its width (set on `document.documentElement`, never on
+claude.ai's own elements, so a redesign cannot break it), with the Hub
+inside and the same bar (Home, Back, paste a link, Open in tab). The
+"Open beside" buttons, the follow-new-links notice and the settings stay
+as they are; a setting "Where to show it: in the page / Chrome side
+panel" picks the view, in-page as the default, the side panel kept as the
+fallback. Work needed, about half a day: (1) a `pane.js` in the content
+script that builds the pane from a `<template>` and hosts
+`chrome-extension://<id>/panel.html` in an iframe (extension pages are
+exempt from claude.ai's page CSP; the inner Hub frame then has two
+ancestors, the extension page and claude.ai, so `vercel.json` must add
+`https://claude.ai` to `frame-ancestors`); (2) `background.js` routes
+"open"/"show" to the pane in that tab when the in-page view is on, and
+to the side panel otherwise; (3) a toggle on the "Open beside" button's
+hint and the toolbar button to show or hide the pane; (4) the pane
+remembers its width in `chrome.storage.sync` and survives claude.ai's
+in-app navigation (the content script re-attaches it after a route
+change; a full reload rebuilds it from `storage.session.panelUrl`).
+Limits: still Chrome/Edge only, nothing in the desktop or mobile apps;
+the pane covers nothing but can be squeezed on a narrow window (below
+~1100px it falls back to a slide-over). A later route is MCP Apps (the
+connector sending a card that renders inside Claude's reply); it is the
+only one that would reach the desktop and mobile apps, but field reports
+say it does not yet work reliably for custom connectors on the web.
+
 ## What it cannot do (this version)
 
 - It never **deletes** or replaces anything: a save is always a new
