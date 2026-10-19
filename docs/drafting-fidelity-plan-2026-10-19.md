@@ -513,10 +513,10 @@ New `chat-service/formatFingerprint.js`:
 - sectPr must be equal (the same count, in the same order). This is what catches the copied-section-break fault (D) and a `remove_block` that swallows a section's closing paragraph;
 - header and footer parts must be equal, except for runs inside paragraphs listed as `fp.variableHeaderParagraphs` (title, date line, footer initials row);
 - every rPr and pPr in the output must exist in the pack, compared after `clean` and after also stripping `w14:paraId`/`w14:textId` and the `<w:b/><w:bCs/>` pair that `runsFor` adds for a **defined term**. Without this normalisation, today's `compareFormat` already flags every bold defined term and every `#` heading insert (whose pPr is a bare `<w:pStyle/>`) as a novel format, so a refusing gate would refuse ordinary fills;
-- body font share ≥ 0.99, and body size share ≥ the pack's own share − 0.01 (`fp.body.share` is measured on the pack; MM68 is 0.90 at 11pt, AM29 0.92);
+- as built in slice 1 (19 Oct): every paragraph's fonts and sizes must be ones the pack uses for paragraphs of the same kind (same pStyle, same table context); the whole-document font and size shares are reported as notes, not refusals, because a share rule let a few wrong paragraphs through on long files and refused short ones;
 - there must be no typed clause-number prefixes (proofCheck "numbering" rule).
 
-It returns `{ status: 'matches' | 'drift', base: fileName, findings: [plain sentence] }`. On the Hub fill path, drift blocks the write in the `applyDocxOps` → `acceptChangesBy` → store sequence (server.js around 2765-2830). It also blocks the guide path's first save (1518-1546) and `writes.saveVersion` in `fillStandardWrite.js` (312-340). The Hub edit path also runs it, against the version being edited.
+It returns `{ status: 'matches' | 'drift', base: fileName, findings: [plain sentence] }`. Header and footer lines that hold a blank or a date are variable by default. Slice 1 result on the server (19 Oct): both live standards match themselves; a fill of every blank, plus an added clause, heading and comment, matches; a full Concession Agreement fill takes 7.6 s on the VM (RFP Volume I 1.5 s). On the Hub fill path, drift blocks the write in the `applyDocxOps` → `acceptChangesBy` → store sequence (server.js around 2765-2830). It also blocks the guide path's first save (1518-1546) and `writes.saveVersion` in `fillStandardWrite.js` (312-340). The Hub edit path also runs it, against the version being edited.
 
 ### D. Engine changes in docxAgent.js
 
