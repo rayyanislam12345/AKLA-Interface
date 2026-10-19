@@ -2,6 +2,41 @@
   "_comment": "Official listing pages the monitor reads every morning and compares with the previous day's snapshot. New entries become candidates and go through the same verification as everything else. The first visit to a page records a baseline and reports nothing. 'default_type' is the classification used when the entry's title does not say otherwise; 'jurisdiction' is written into the summary. A page's domain must be in sources.json allowed_domains. Set 'enabled': false to pause a page without deleting it.",
   "pages": [
     {
+      "name": "SECP — notifications (SROs)",
+      "url": "https://www.secp.gov.pk/laws/notifications/",
+      "default_type": "notice",
+      "jurisdiction": "Federal",
+      "enabled": true
+    },
+    {
+      "name": "SECP — circulars",
+      "url": "https://www.secp.gov.pk/laws/circulars/",
+      "default_type": "notice",
+      "jurisdiction": "Federal",
+      "enabled": true
+    },
+    {
+      "name": "SECP — drafts for discussion",
+      "url": "https://www.secp.gov.pk/laws/draft-for-discussion/draft-rules-regulations/",
+      "default_type": "draft",
+      "jurisdiction": "Federal",
+      "enabled": true
+    },
+    {
+      "name": "SECP — draft laws",
+      "url": "https://www.secp.gov.pk/laws/draft-for-discussion/rules/",
+      "default_type": "draft",
+      "jurisdiction": "Federal",
+      "enabled": true
+    },
+    {
+      "name": "SECP — regulations",
+      "url": "https://www.secp.gov.pk/laws/regulations/",
+      "default_type": "notice",
+      "jurisdiction": "Federal",
+      "enabled": true
+    },
+    {
       "name": "National Assembly — government bills",
       "url": "https://na.gov.pk/en/bills.php?type=1",
       "default_type": "bill",
@@ -38,19 +73,26 @@
     },
     {
       "name": "Sindh Assembly — bills",
-      "url": "https://www.pas.gov.pk/index.php/bills/en",
+      "url": "https://pas.gov.pk/bills/33",
       "default_type": "bill",
       "jurisdiction": "Sindh",
-      "enabled": false,
-      "_why_off": "pas.gov.pk fills its tables by script after the page loads; the page itself holds no titles."
+      "enabled": true,
+      "_note": "33 is the current assembly (2024 – till date); the form on index.php/bills/en lands here."
     },
     {
       "name": "Sindh Assembly — Acts",
-      "url": "https://www.pas.gov.pk/index.php/acts/en",
+      "url": "https://pas.gov.pk/acts/33",
       "default_type": "new_act",
       "jurisdiction": "Sindh",
-      "enabled": false,
-      "_why_off": "pas.gov.pk fills its tables by script after the page loads; the page itself holds no titles."
+      "enabled": true
+    },
+    {
+      "name": "Punjab Assembly — bills",
+      "url": "https://www.pap.gov.pk/bills/show/en/22/introduced",
+      "default_type": "bill",
+      "jurisdiction": "Punjab",
+      "enabled": true,
+      "_note": "One page carries every tab (introduced, passed, referred, under consideration); 22 is the current assembly."
     },
     {
       "name": "Balochistan Assembly — bills",
@@ -133,10 +175,8 @@
     }
   ],
   "_not_watchable": {
-    "SECP": "secp.gov.pk returns 403 to every automated reader, directly and through the relay. SECP stays on web search.",
     "Senate private members' bills": "Only in the daily Orders of the Day PDFs; the government bills page (gbs.php) is watched.",
-    "Punjab Assembly": "pap.gov.pk/bills is a 28-byte shell rendered in the browser.",
-    "Sindh Assembly": "pas.gov.pk fills its bills and Acts tables by script; nothing in the page to read.",
     "NEPRA": "No stable listing page for draft rules; NEPRA stays on web search."
-  }
+  },
+  "_browser_mode": "Pages on a host listed in sources.json browser_hosts are read through the relay's browser mode (official-fetch-relay/browser-fetch.py): a real Chrome on the DigitalOcean droplet, which is the only thing SECP's Cloudflare check lets through. About 15-40 seconds per page."
 }

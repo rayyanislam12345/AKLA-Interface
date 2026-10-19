@@ -49,8 +49,7 @@ All three phases are built, deployed to the VM and committed. Found on the way:
 
 - **The Anthropic key on the VM has no credit left.** Every search call since this morning's 02:03 run returns "credit balance is too low". Until it is topped up, the morning run reads the watched pages and retries downloads, then ends as a *failed* run with that reason, and the card keeps the last real briefing. Nothing is lost, nothing is searched.
 - The watched pages recorded their baselines at 06:11 UTC today (National Assembly 228 + 212 bills and 253 Acts, Khyber Pakhtunkhwa 172 bills and 222 Acts, Pakistan Code, Balochistan, PPRA, OGRA, Ministry of Law). From tomorrow, anything new on them is reported.
-- senate.gov.pk resets connections from the relay droplet as well as from the VM. It is in the list and will show on the card as not answering if that persists.
-- Sindh Assembly and Punjab Assembly render their lists in the browser; nothing to read in the page. SECP answers 403 to every automated reader. These stay on web search.
+- **Workarounds found later the same day:** SECP's Cloudflare check lets a real Google Chrome on a virtual display through, so the relay gained a browser mode (`browser:` prefix) used for hosts listed in `browser_hosts`; SECP's notifications, circulars, drafts for discussion, draft laws and regulations pages are now watched. The Sindh Assembly's lists live at plain addresses (`pas.gov.pk/bills/33`, `/acts/33`) once the tenure is known, and the Punjab Assembly's at `pap.gov.pk/bills/show/en/22/introduced`; both are watched directly. The Senate resets one connection in five whoever asks; the relay retries three times.
 - Notifications were tested end to end with a temporary row: the M6 Motorway team got matter notifications, twelve people got the firm-wide one, a second pass wrote nothing, and the test row was removed.
 
 ## What only Rayyan can do

@@ -352,20 +352,22 @@ def relay_available() -> bool:
     return os.path.exists(f"{RELAY_DIR}/id_ed25519") and os.path.exists(f"{RELAY_DIR}/known_hosts")
 
 
-def _download_relay(url: str) -> tuple[bytes | None, str, str, str | None]:
+def _download_relay(url: str, *, browser: bool = False) -> tuple[bytes | None, str, str, str | None]:
     """(body, content_type, final_url, error). The relay applies its own
     source gate (HTTPS, official domain, redirects checked, size, timeout)
-    and reports the final address so it can be checked again here."""
+    and reports the final address so it can be checked again here. In
+    browser mode the relay opens the page in a real browser — for sites
+    behind a browser check (SECP) or that fill their lists by script."""
     try:
         proc = subprocess.run(
             [
                 "ssh", "-i", f"{RELAY_DIR}/id_ed25519",
                 "-o", f"UserKnownHostsFile={RELAY_DIR}/known_hosts",
                 "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                RELAY_HOST, url,
+                RELAY_HOST, ("browser:" + url) if browser else url,
             ],
             capture_output=True,
-            timeout=150,
+            timeout=200 if browser else 150,
         )
     except (subprocess.TimeoutExpired, OSError) as err:
         return None, "", url, f"relay failed ({err.__class__.__name__})"
@@ -453,6 +455,15 @@ def fetch_bytes(url: str, config: dict) -> tuple[bytes | None, str, str, str | N
     domains = config["allowed_domains"] if tier == "verified" else config.get("news_domains", [])
     use_relay = tier == "verified" and relay_available()
     err = None
+    # Sites that only answer a real browser go straight to the relay's
+    # browser mode; nothing else can read them.
+    if use_relay and _host_in(host, config.get("browser_hosts", [])):
+        body, ctype, final, rerr = _download_relay(url, browser=True)
+        if body is None:
+            return None, "", url, rerr
+        if domain_tier(final, config) != "verified":
+            return None, "", final, "redirect source is not an approved HTTPS site"
+        return body, ctype, final, None
     if not (use_relay and _host_in(host, sorted(RELAY_FIRST_HOSTS))):
         body, ctype, final, err = _download_direct(url, domains, timeout=30 if tier == "verified" else 45)
         if body is not None or not use_relay:

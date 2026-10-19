@@ -143,9 +143,26 @@ reported tier. `relay_first_hosts` lists sites known not to answer the VM.
 
 `watchlist.json` — the listing pages. Each needs a `name`, `url` (on an
 allowed domain), `default_type` and `jurisdiction`; `enabled: false` pauses
-one. The `_not_watchable` note records the sites that cannot be read this
-way (SECP answers 403 to everything; Sindh and Punjab render their lists in
-the browser; Senate private members' bills exist only in agenda PDFs).
+one. Three sites needed their own route:
+
+- **SECP** sits behind a Cloudflare browser check that refuses every plain
+  client and every headless browser. Hosts listed in `browser_hosts`
+  (sources.json) are read through the relay's **browser mode**: the relay
+  opens the page in a real Google Chrome on a virtual display
+  (`official-fetch-relay/browser-fetch.py`, called as `browser:https://…`),
+  which the check lets through. Documents are fetched from inside the
+  cleared page so the same cookies apply. About 15–40 seconds a page.
+- **Sindh Assembly** fills `index.php/bills/en` by script, but the form
+  lands on plain pages: `pas.gov.pk/bills/33` and `pas.gov.pk/acts/33`
+  (33 is the current assembly). Those are watched directly.
+- **Punjab Assembly** keeps its bills at `pap.gov.pk/bills/show/en/22/…`
+  (22 is the current assembly); one page carries every tab.
+- **Senate** resets about one connection in five, whoever asks. The relay
+  now retries three times with a browser-shaped User-Agent.
+
+The `_not_watchable` note records what is still out of reach (Senate
+private members' bills exist only in agenda PDFs; NEPRA has no stable
+listing page).
 
 ## Where the output goes
 

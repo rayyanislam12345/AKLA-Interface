@@ -20,11 +20,19 @@ ssh -i "$CHAT_KEY" "$CHAT_HOST" "sudo mkdir -p /opt/chat-service/.relay && sudo 
 PUBKEY=$(ssh -i "$CHAT_KEY" "$CHAT_HOST" "cat /opt/chat-service/.relay/id_ed25519.pub")
 
 echo "Installing the relay on the droplet…"
-scp -i "$RELAY_KEY" official-fetch.py "$RELAY_HOST:/tmp/official-fetch.py"
+scp -i "$RELAY_KEY" official-fetch.py browser-fetch.py "$RELAY_HOST:/tmp/"
 ssh -i "$RELAY_KEY" "$RELAY_HOST" "set -e
 id $USER_NAME >/dev/null 2>&1 || useradd --system --create-home --shell /bin/sh $USER_NAME
 install -o root -g root -m 0755 /tmp/official-fetch.py /usr/local/bin/akla-official-fetch
-rm -f /tmp/official-fetch.py
+install -o root -g root -m 0755 /tmp/browser-fetch.py /usr/local/bin/akla-browser-fetch
+rm -f /tmp/official-fetch.py /tmp/browser-fetch.py
+# Browser mode: a real Google Chrome on a virtual display, driven by
+# Playwright from /opt/browser-fetch. Set up once by hand:
+#   python3 -m venv /opt/browser-fetch && /opt/browser-fetch/bin/pip install playwright
+#   /opt/browser-fetch/bin/playwright install --with-deps chromium && /opt/browser-fetch/bin/playwright install chrome
+#   apt-get install -y xvfb
+# The relay user only needs to read the venv and run Chrome.
+if [ -d /opt/browser-fetch ]; then chmod -R o+rX /opt/browser-fetch; fi
 install -d -o $USER_NAME -g $USER_NAME -m 0700 /home/$USER_NAME/.ssh
 printf '%s\n' 'from=\"$CHAT_IP\",command=\"/usr/local/bin/akla-official-fetch\",restrict $PUBKEY' > /home/$USER_NAME/.ssh/authorized_keys
 chown $USER_NAME:$USER_NAME /home/$USER_NAME/.ssh/authorized_keys

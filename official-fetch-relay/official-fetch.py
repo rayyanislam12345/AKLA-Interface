@@ -65,11 +65,73 @@ def main():
     raw = (os.environ.get("SSH_ORIGINAL_COMMAND") or " ".join(sys.argv[1:])).strip()
     if not raw or any(c.isspace() for c in raw) or len(raw) > 2048:
         fail("Give exactly one URL")
+    # "browser:https://…" asks for the page through a real browser (see
+    # browser-fetch.py): for sites behind a browser check or that fill
+    # their lists by script. The same domain gate applies.
+    if raw.startswith("browser:"):
+        url = official(raw[len("browser:"):])
+        import subprocess
+        import tempfile
+        env = dict(os.environ)
+        env.update({"HOME": os.environ.get("HOME") or "/tmp", "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8"})
+        env.pop("SSH_ORIGINAL_COMMAND", None)
+        with tempfile.TemporaryDirectory(prefix="akla-browser-") as tmp:
+            outfile = os.path.join(tmp, "page")
+            try:
+                proc = subprocess.run(
+                    ["/usr/bin/xvfb-run", "-a", "/opt/browser-fetch/bin/python", "/usr/local/bin/akla-browser-fetch", url, outfile],
+                    stdin=subprocess.DEVNULL, capture_output=True, timeout=150, env=env,
+                )
+            except subprocess.TimeoutExpired:
+                fail("Source did not respond in time")
+            # xvfb-run merges the child's streams; look for the marker lines in both.
+            lines = [l.strip() for l in (proc.stdout + b"\n" + proc.stderr).decode("utf-8", "replace").split("\n") if l.strip()]
+            error = next((l[6:] for l in lines if l.startswith("ERROR ")), None)
+            if error or proc.returncode != 0 or not os.path.exists(outfile):
+                fail(error or f"browser fetch failed (exit {proc.returncode}): {lines[-1][:200] if lines else 'no output'}")
+            final = next((l[6:].strip() for l in lines if l.startswith("FINAL ")), url)
+            ctype = next((l[5:].strip() for l in lines if l.startswith("TYPE ")), "")
+            official(final)
+            size = os.path.getsize(outfile)
+            if size > MAX_BYTES:
+                fail("Source is too large")
+            sys.stderr.write(f"FINAL {final}\nTYPE {ctype}\n")
+            with open(outfile, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    sys.stdout.buffer.write(chunk)
+            sys.stdout.flush()
+        return
     url = official(raw)
     opener = urllib.request.build_opener(CheckedRedirects())
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (AKLA law library)"})
+    # senate.gov.pk resets about one connection in five, whatever the client;
+    # a second try a moment later goes through. A browser-shaped User-Agent
+    # is accepted everywhere a plain one is, and by a few sites that drop
+    # anything else.
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AKLA-law-library",
+            "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+    )
     try:
-        with opener.open(request, timeout=TIMEOUT) as response:
+        response = None
+        for attempt in range(3):
+            try:
+                response = opener.open(request, timeout=TIMEOUT)
+                break
+            except urllib.error.HTTPError:
+                raise
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as err:
+                if attempt == 2:
+                    raise err
+                import time
+                time.sleep(2 + attempt * 2)
+        with response:
             if int(response.headers.get("Content-Length") or 0) > MAX_BYTES:
                 fail("Source is too large")
             size = 0
