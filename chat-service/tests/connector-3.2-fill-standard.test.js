@@ -301,7 +301,8 @@ test('the facts go into the standard and land accepted, the comment stays in the
   assert.equal(lines[2], 'Could not be made (the slot is as it was in the standard):');
   assert.equal(lines[3], `- Changed ¶${at(P_SECURITY)}: The Performance Security is PKR 500,000,000. — Expected paragraph text does not match the source; no change was made.`);
   assert.equal(lines[4], '- Changed ¶99: Nothing there — Paragraph was not supplied to this turn; request that section first.');
-  assert.equal(lines[5], 'Blanks left in the filed draft: 3 ([●] ×3). They stay [●] until the lawyer fills them.');
+  assert.equal(lines[5], "Format matches the firm's standard (Standard Concession Agreement [AKLA]).", 'the format gate passed and says so');
+  assert.equal(lines[6], 'Blanks left in the filed draft: 3 ([●] ×3). They stay [●] until the lawyer fills them.');
   assert.match(out, new RegExp(`\ndocumentId: ${args.p_document_id}\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\nProject Hyderabad Bypass — Open in Hub: ${HUB}/ai/p/${P1}\n`));
   assert.match(out, /\nOn file; the Hub is reading it now\./);
   assert.ok(!out.includes(UNRECORDED_LINE));
@@ -462,6 +463,66 @@ test('a character Word cannot read in a change never reaches the file: the text 
   assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(xml) && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(comments), 'no control character in the file');
   assert.match(textOf(xml), /The Concession Period is thirty \(30\) years from the Effective Date\./);
   assert.match(comments, /Confirm the law\./);
+});
+
+test('the format gate: a fill that drifts from the standard (a typed clause number) is refused with the list of what differs, recorded as refused, nothing uploaded; FORMAT_GATE=report files it with the list as a warning', async () => {
+  const typed = [{ op: 'insert_after', p: at(P_PERIOD), expected: P_PERIOD, text: '1.1 The Concession Period may be extended by agreement.' }];
+  const before = process.env.FORMAT_GATE;
+  try {
+    delete process.env.FORMAT_GATE;
+    const s = setup();
+    await assert.rejects(s.run(usualInput({ ops: typed })), (err) => {
+      assert.match(err.message, /^The format check found that this file differs from the firm's standard \(Standard Concession Agreement \[AKLA\]\):\n- 1 paragraph starts with a typed clause number instead of Word's numbering \(for example "1\.1 The Concession Period may be extended by agreement\."\)\nNothing was saved, because a draft is filed only in the firm's own format;/);
+      assert.match(err.message, /The standard is unchanged\.$/);
+      return true;
+    });
+    assert.equal(s.supabase.calls.upload.length, 0, 'nothing was uploaded');
+    assert.equal(s.supabase.calls.rpc.length, 0, 'nothing was saved');
+    assert.deepEqual(actions(s).map((r) => r.outcome), ['refused']);
+    assert.equal(s.caps.released, 1);
+    assert.equal(isFilling(), false, 'the lock is free');
+    assert.ok(s.lines.some((l) => /fill_standard_to_project: format drift \(refused\)/.test(l)), 'the refusal is logged');
+
+    process.env.FORMAT_GATE = 'report';
+    const r = setup();
+    const out = await r.run(usualInput({ ops: typed }));
+    assert.equal(r.supabase.calls.upload.length, 1, 'report mode files it');
+    assert.deepEqual(actions(r).map((x) => x.outcome), ['saved']);
+    assert.match(out, /\nWarning: the format differs from the firm's standard \(Standard Concession Agreement \[AKLA\]\), and the file was saved anyway because the format check is set to report only:\n- 1 paragraph starts with a typed clause number/);
+  } finally {
+    if (before === undefined) delete process.env.FORMAT_GATE; else process.env.FORMAT_GATE = before;
+  }
+});
+
+test('the format gate: the project-name blank in the running header (as in the RFP standard) is filled and filed; the header lines the fill targets may change their words', async () => {
+  const HNS = NS + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const ARIAL = '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="20"/></w:rPr>';
+  const hpara = (text) => `<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r>${ARIAL}<w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
+  const standard = zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>'),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>'),
+    'word/document.xml': strToU8(`<w:document ${HNS}><w:body>${BODY}<w:sectPr><w:headerReference w:type="default" r:id="rId9"/><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:body></w:document>`),
+    'word/header1.xml': strToU8(`<w:hdr ${HNS}>${hpara('VOLUME I: INSTRUCTION TO BIDDERS')}${hpara('[●]')}</w:hdr>`),
+  }, { level: 6, mtime: new Date(Date.UTC(2026, 0, 1)) });
+  const v = inspectDocx(standard, { budget: Infinity });
+  const ref = (text) => [...v.byRef.values()].find((r) => r.exactText === text);
+  assert.equal(ref('[●]').part, 'word/header1.xml');
+  const header = (bytes) => partOf(bytes, 'word/header1.xml');
+  const ops = [
+    { op: 'replace', p: ref(P_PERIOD).index, expected: P_PERIOD, text: 'The Concession Period is thirty (30) years from the Effective Date.' },
+    { op: 'replace', p: ref('[●]').index, expected: '[●]', text: 'Hyderabad Bypass Project' },
+  ];
+  const s = setup({ standard });
+  const out = await s.run(usualInput({ ops, templateHash: sha256(standard) }));
+  assert.match(out, /\nFormat matches the firm's standard \(Standard Concession Agreement \[AKLA\]\)\.\n/);
+  assert.equal(s.supabase.calls.upload.length, 1);
+  assert.equal(textOf(header(s.supabase.calls.upload[0].body)), 'VOLUME I: INSTRUCTION TO BIDDERSHyderabad Bypass Project');
+  // The title line is not a blank, but this fill asked to change it: its words may change.
+  const retitle = { op: 'replace', p: ref('VOLUME I: INSTRUCTION TO BIDDERS').index, expected: 'VOLUME I: INSTRUCTION TO BIDDERS', text: 'VOLUME I: INSTRUCTIONS TO BIDDERS' };
+  const t = setup({ standard });
+  const out2 = await t.run(usualInput({ ops: [...ops, retitle], templateHash: sha256(standard) }));
+  assert.match(out2, /\nFormat matches the firm's standard/);
+  assert.equal(textOf(header(t.supabase.calls.upload[0].body)), 'VOLUME I: INSTRUCTIONS TO BIDDERSHyderabad Bypass Project');
 });
 
 test('when no change at all can be made nothing is saved: the reasons are given, recorded as refused', async () => {

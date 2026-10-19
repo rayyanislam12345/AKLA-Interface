@@ -91,6 +91,42 @@ text and comes back as a Markdown draft.
 **The edge function cannot do any of this** — it has no `docxAgent` — so the
 rollback below is a real downgrade, not just a change of host.
 
+## The format check
+
+Before a Word file from a turn is stored, `formatFingerprint.js`
+(`checkFormat`, over `docxChecks.js formatGate`) compares it with the file it
+came from: the firm's standard for a fill read from the library, the version
+being worked on for an edit, a guided-drafting answer, a revision of the
+standard or a review's suggestions written into the file, and the standard
+itself for the guided drafting's first working copy. The connector's
+`fill_standard_to_project` runs the same check before it saves. It checks
+that the style, numbering, theme and font definitions are unchanged (a list
+restart on an existing list is allowed), the page set-up of every section,
+the headers and footers (a header or footer line holding a blank — `[●]`, a
+dotted initials row — or a date may change its words, and so may a line the
+change list itself targets; never its look), that every text and paragraph
+format already exists in that file (tracked-change marks and the bold of a
+defined term apart), that each paragraph's font and size are ones the file
+uses for paragraphs of that kind (same style, in or out of the same kind of
+table), and that no paragraph starts with a typed clause number (a time, a
+measure or an amount such as "10.30 a.m.", "2.5 km" or "1.5 million" is not
+one, and table cells are not looked at). The share of the main font and size
+is reported as a note, never a refusal: a fill that only moves the
+proportions between formats the file already has (long addresses in 10 pt
+cells) is fine. A match adds "Format matches the firm's standard (<file
+name>)." to the reply. A file that drifts is not stored — no copy, no change
+rows, no version — and the reply lists what differs in plain sentences. The
+check takes about 0.2 s on the 4,100-paragraph Concession Agreement here;
+the base's profile is cached for 20 minutes by its sha256.
+
+`FORMAT_GATE` in `.env` is the safety switch: `enforce` (the default, and
+what any other value means) refuses drift; `report` stores the file anyway
+and adds the same list to the reply as a warning. Read on every check, so a
+restart of chat-service and hub-connector is all a change needs. The result
+is kept on the stored row as `data.formatCheck` (status, base, findings,
+mode) and on the reply's metadata. `formatFingerprint.js` must stay in all
+three lists in `deploy.sh`.
+
 ## Review writes into the working file
 
 Review no longer rebuilds a file from the saved version it reviewed. It runs

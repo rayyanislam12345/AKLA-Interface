@@ -84,6 +84,16 @@ between the opening and the fill, the fill is refused and Claude opens it
 again. The filed version is your own filing, labelled "Drafted from the
 firm's standard in claude.ai" with the date.
 
+Before it saves, the fill is checked against the standard's own format
+(the same check the Hub runs, `formatFingerprint.js checkFormat`): styles,
+numbering, page set-up, headers and footers (a blank such as the RFP's
+project name in its running header, and any header line the fill targets,
+may be filled), the formats in use, each paragraph's font and size, and no
+typed clause numbers. A match adds "Format matches
+the firm's standard (<file name>)." to the reply. A fill that differs is
+not saved, is recorded as refused, and the reply lists what differs; ask
+again without the change that caused it (a typed "1.1" is the usual one).
+
 ## What it can do
 
 Every answer carries the same `[Source n]` labels the Hub's assistant uses,
@@ -120,7 +130,7 @@ so Claude can cite what it relied on.
 | `compare_text_with_version` (versionId, text, from?, includeFormatting?) | What Claude's redraft changes against one stored version, clause by clause, before it is filed; the version's file is read on the spot when it is not already in memory (one such read at a time, kept for the next page); no model, nothing saved |
 | `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
 | `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project` |
-| `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
+| `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); refused, with a list of what differs, if the filled file's format differs from the standard's (`FORMAT_GATE=report` saves it with the list as a warning); up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
 | `set_project_instructions` (projectId, content) — saves | Writes the project's standing instructions (the Project Context every Hub chat and overview sees), replacing the whole text; recorded with who wrote it and when |
 | `label_version` (versionId, label) — saves | Gives one version a short label (up to 120 characters), replacing any it had |
 | `rename_document` (documentId or versionId, title) — saves | Changes a document's title only; its type, status and versions are untouched (the type is changed on the Hub) |
@@ -404,7 +414,10 @@ discovery documents and the resource claude.ai asks for),
 `CONNECTOR_HUB_URL` (the site's address for the "Open in Hub" lines on
 results; default `https://akla-interface.vercel.app`) and
 `CONNECTOR_ALLOW_LOOPBACK` (never on the VM). The rest comes from
-`/opt/chat-service/.env`. Saving has no setting of its own: the scope
+`/opt/chat-service/.env`, including `FORMAT_GATE` (shared with
+chat-service): `enforce`, the default, refuses a fill whose format differs
+from the standard's; `report` saves it anyway and puts what differs in the
+reply as a warning. Change it in `.env` and restart both services. Saving has no setting of its own: the scope
 `hub:write` is granted at every sign-in, the caps are fixed in
 `connector/projectWrites.js`, and the migration below must be applied.
 

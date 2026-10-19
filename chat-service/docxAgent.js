@@ -46,7 +46,7 @@ Rules:
 - If you need a section hidden by a gap, emit {"read":[{"from":100,"to":140}]} in the JSON block instead of ops. The document reader will return those paragraphs and you can continue. Request at most 200 paragraphs at once; a longer range is served as its first 200 and you may ask for the rest afterwards.
 - Every operation must include "expected": the exact current text of that paragraph, without the ¶ label. Never operate on a paragraph that was not shown.
 - "replace" gives the COMPLETE new text of that one paragraph, copied from above with your change made in it. Word shows only the words that differ, so keep everything you are not changing exactly as it is — same wording, same spacing, same defined terms. One paragraph per op; never merge or split paragraphs.
-- "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead.
+- "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead; it takes the look of the document's own headings of that level, so use only a level the document's [H1]/[H2]/[H3] paragraphs show (a heading of a level it has none of is not added).
 - Never type clause numbers — Word numbers headings and list items itself.
 - "comment" puts a Word margin comment, titled "AKLA Comments", on that paragraph and leaves its text as it is. Outstanding matters, gaps, figures to confirm and remarks for the reader go in comments — never into the document's text, and never as footnotes or an end section. A paragraph may take a change and a comment in the same turn.
 - **bold** marks a defined term; use no other markup.
@@ -434,7 +434,9 @@ function markParagraphMark(pPr, tag, stamp) {
   if (!pPr || /^<w:pPr(?:\s[^>]*)?\/>$/.test(pPr)) return `<w:pPr><w:rPr>${mark}</w:rPr></w:pPr>`;
   const inner = pPr.replace(/^<w:pPr(?:\s[^>]*)?>/, "").replace(/<\/w:pPr>$/, "");
   const rPr = child(inner, "w:rPr");
-  if (!rPr) return `<w:pPr>${inner}<w:rPr>${mark}</w:rPr></w:pPr>`;
+  // The mark's own properties come before a section break or a recorded
+  // formatting change, which is the order Word requires.
+  if (!rPr) return `<w:pPr>${inner.replace(/(<w:(?:sectPr|pPrChange)[\s>/][\s\S]*)?$/, (tail) => `<w:rPr>${mark}</w:rPr>${tail}`)}</w:pPr>`;
   // The mark goes first in the run properties, whether they are written
   // self-closing, with attributes, or already open. A deleted mark follows
   // an inserted one, which is the order Word writes them in.
@@ -546,9 +548,15 @@ function replaceParagraph(pXml, newText, stamp) {
   return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${pPr}${serialize(rewritten)}</w:p>`;
 }
 
-// Strikes the whole paragraph through, its paragraph mark included.
+// Strikes the whole paragraph through, its paragraph mark included — unless
+// the mark ends a section (a w:sectPr in its properties): accepting the
+// deletion of that mark would take the section break with it, and the
+// pages before it would take on the next section's page set-up. Its words
+// are struck through and the mark stays, empty, carrying the break; nothing
+// moves untracked, so rejecting the deletion restores exactly what was there.
 function deleteParagraph(pXml, stamp) {
-  const pPr = child(pXml, "w:pPr") ?? "";
+  const pPr = paraPropsOf(pXml) || (child(pXml, "w:pPr") ?? "");
+  const keepMark = SECTION_BREAK.test(pPr);
   const bodyXml = pXml.replace(/^<w:p(?:\s[^>]*)?>/, "").replace(/<\/w:p>$/, "").replace(pPr, "");
   const items = tokenize(bodyXml);
   const strike = (list) =>
@@ -557,25 +565,140 @@ function deleteParagraph(pXml, stamp) {
       if (it.kind !== "run") return [it];
       return [{ kind: "raw", xml: strikeRun(it.xml, stamp) }];
     });
-  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${markParagraphMark(pPr, "del", stamp)}${serialize(strike(items))}</w:p>`;
+  return `${/^<w:p(?:\s[^>]*)?>/.exec(pXml)?.[0] ?? "<w:p>"}${keepMark ? pPr : markParagraphMark(pPr, "del", stamp)}${serialize(strike(items))}</w:p>`;
 }
 
-// A new paragraph after `anchor`, formatted like it (or as a heading of the
-// level asked for), marked as an insertion — runs and paragraph mark both,
-// so rejecting it removes the whole line.
-function insertAfter(anchorXml, text, headings, stamp) {
-  let pPr = child(anchorXml, "w:pPr") ?? "";
+// A paragraph's own properties, whole. A recorded formatting change
+// (w:pPrChange) holds a second w:pPr inside the first, so the first
+// </w:pPr> in the paragraph is not necessarily the end of its own.
+function paraPropsOf(pXml) {
+  const open = /^<w:p(?:\s[^>]*)?>\s*/.exec(pXml);
+  if (!open) return "";
+  const head = /^<w:pPr(?:\s[^>]*)?(\/?)>/.exec(pXml.slice(open[0].length));
+  if (!head) return "";
+  if (head[1]) return head[0];
+  const re = /<w:pPr(?:\s[^>]*)?(\/?)>|<\/w:pPr>/g;
+  re.lastIndex = open[0].length;
+  let depth = 0;
+  for (let m; (m = re.exec(pXml)); ) {
+    if (m[0] === "</w:pPr>") { if (--depth === 0) return pXml.slice(open[0].length, m.index + m[0].length); }
+    else if (!m[1]) depth++;
+  }
+  return "";
+}
+
+const SECTION_BREAK = /<w:sectPr[\s>/]/;
+const FORMAT_CHANGE = /<w:rPrChange\b[^>]*\/>|<w:rPrChange\b[^>]*>[\s\S]*?<\/w:rPrChange>/g;
+
+// The properties a new paragraph copies from another. Never its section
+// break: the copy would end a section of its own, with its own page set-up.
+// Never a record of an earlier formatting change, and never the revision
+// mark on the source's own paragraph mark: the new paragraph is ours alone.
+function copiedPPr(pPr) {
+  if (!pPr) return "";
+  return pPr
+    .replace(/<w:pPrChange\b[^>]*\/>|<w:pPrChange\b[^>]*>[\s\S]*?<\/w:pPrChange>/g, "")
+    .replace(/<w:sectPrChange\b[^>]*\/>|<w:sectPrChange\b[^>]*>[\s\S]*?<\/w:sectPrChange>/g, "")
+    .replace(/<w:sectPr\b[^>]*\/>|<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>/g, "")
+    .replace(FORMAT_CHANGE, "")
+    .replace(/<w:(?:ins|del|moveFrom|moveTo)\b[^>]*\/>/g, "")
+    .replace(/<w:rPr><\/w:rPr>|<w:rPr\/>/g, "");
+}
+
+// The formatting of the first run a reader sees in the paragraph (the
+// first that holds text or a tab), without any record of an earlier change
+// to it. The run is found first and its own properties read from its
+// start, so nothing beyond its </w:r> — a page break's run, a bookmark,
+// a field's begin and separate — can be taken for its formatting.
+function firstRunRPr(pXml) {
+  const live = pXml.replace(/<w:del\b[^>]*\/>|<w:del\b[^>]*>[\s\S]*?<\/w:del>/g, "").replace(FORMAT_CHANGE, "");
+  for (const m of live.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)) {
+    if (!/<w:t[\s>]|<w:tab\/>/.test(m[1])) continue;
+    return /^\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(m[1])?.[1] ?? "";
+  }
+  return "";
+}
+
+const unbold = (rPr) => rPr.replace(/<w:b(?:Cs)?(?:\s[^>]*)?\/>/g, "").replace(/^<w:rPr><\/w:rPr>$/, "");
+
+// A new paragraph after `anchor`, formatted like it, marked as an insertion
+// — runs and paragraph mark both, so rejecting it removes the whole line.
+// A heading ("# ", "## ", "### ") instead takes the paragraph and run
+// formatting of the document's own heading of that level nearest the
+// anchor (`exemplar`): where the firm sets Arial on every run over a Times
+// New Roman Normal, the style alone would give the wrong font. A level the
+// file has a heading style for but no heading of is not made up from the
+// bare style (in the firm's CA that style is Cambria, on a list the
+// document never uses, and the format check would refuse the whole turn):
+// the result is { skip: level } and only that operation is refused. A file
+// with no heading styles at all gets a paragraph like the anchor, without
+// its bold. `heading` on the result says whether the paragraph is a
+// heading, so the contents page can be marked out of date.
+function insertAfter(anchorXml, text, headings, stamp, exemplar = () => null) {
+  const anchorPPr = copiedPPr(paraPropsOf(anchorXml));
+  let pPr = anchorPPr;
+  let baseRPr = firstRunRPr(anchorXml);
   let body = text.trim();
+  let heading = false;
   const h = /^(#{1,3})\s+([\s\S]*)$/.exec(body);
   if (h) {
     body = h[2].trim();
-    const styleId = headings.byLevel.get(h[1].length);
-    // A heading takes its style's own numbering and look, not the anchor's.
-    if (styleId) pPr = `<w:pPr><w:pStyle w:val="${styleId}"/></w:pPr>`;
+    const level = h[1].length;
+    const styleId = headings.byLevel.get(level);
+    const model = exemplar(styleId, level);
+    if (model) {
+      pPr = copiedPPr(paraPropsOf(model));
+      baseRPr = firstRunRPr(model);
+      heading = true;
+    } else if (styleId) {
+      return { skip: level };
+    } else {
+      baseRPr = unbold(baseRPr);
+    }
   }
-  const live = anchorXml.replace(/<w:del\b[\s\S]*?<\/w:del>/g, "");
-  const baseRPr = h ? "" : /<w:r(?:\s[^>]*)?>(<w:rPr>[\s\S]*?<\/w:rPr>)?(?:(?!<\/w:r>)[\s\S])*?<w:t/.exec(live)?.[1] ?? "";
-  return `<w:p>${markParagraphMark(pPr, "ins", stamp)}<w:ins ${stamp()}>${runsFor(body, baseRPr)}</w:ins></w:p>`;
+  return { xml: `<w:p>${markParagraphMark(pPr, "ins", stamp)}<w:ins ${stamp()}>${runsFor(body, baseRPr)}</w:ins></w:p>`, heading };
+}
+
+// Why a heading of a level the document has none of was not added.
+function noHeadingReason(level, used) {
+  const levels = used.length ? `it uses heading level${used.length === 1 ? "" : "s"} ${used.length === 1 ? used[0] : `${used.slice(0, -1).join(", ")} and ${used[used.length - 1]}`}` : "it has no headings";
+  return `this document has no level-${level} heading to take the look from (${levels}), so it was not added; add it as a heading of a level the document uses, or as a clause after a paragraph of the kind wanted`;
+}
+
+// After a heading is added or removed the contents page is out of date.
+// Marking its field dirty makes Word rebuild it when the file is opened;
+// the field's own text is left as it is. A field's instruction can be
+// split over several runs, and other fields (a PAGEREF on each entry) sit
+// inside the contents field's result.
+function markTocDirty(xml) {
+  const toc = (instr) => /^\s*TOC\b/i.test(instr);
+  const marks = [];
+  const stack = [];
+  for (const m of xml.matchAll(/<w:fldChar\b[^>]*>|<w:instrText\b[^>]*>([^<]*)<\/w:instrText>|<w:fldSimple\b[^>]*>/g)) {
+    const tag = m[0];
+    if (tag.startsWith("<w:fldSimple")) {
+      if (toc(decodeXml(attr(tag, "w:instr") ?? ""))) marks.push({ at: m.index, tag });
+    } else if (tag.startsWith("<w:instrText")) {
+      if (stack.length) stack[stack.length - 1].instr += decodeXml(m[1]);
+    } else {
+      const type = attr(tag, "w:fldCharType");
+      if (type === "begin") stack.push({ at: m.index, tag, instr: "" });
+      else if (type === "separate" || type === "end") {
+        const top = type === "end" ? stack.pop() : stack[stack.length - 1];
+        if (top && !top.decided) {
+          top.decided = true;
+          if (toc(top.instr)) marks.push(top);
+        }
+      }
+    }
+  }
+  for (const { at, tag } of marks.sort((a, b) => b.at - a.at)) {
+    const dirty = /\sw:dirty="[^"]*"/.test(tag)
+      ? tag.replace(/\sw:dirty="[^"]*"/, ' w:dirty="true"')
+      : tag.replace(/^(<w:(?:fldChar|fldSimple))/, '$1 w:dirty="true"');
+    xml = xml.slice(0, at) + dirty + xml.slice(at + tag.length);
+  }
+  return xml;
 }
 
 // A paragraph the AI itself added on an earlier turn and nobody has accepted
@@ -611,7 +734,7 @@ function ownInsertionBody(pXml) {
 // stood; everything else in the body — a comment's range, a bookmark —
 // stays where it is.
 function rewriteOwnInsertion(pXml, text, stamp) {
-  const baseRPr = /<w:r(?:\s[^>]*)?>(<w:rPr>[\s\S]*?<\/w:rPr>)?(?:(?!<\/w:r>)[\s\S])*?<w:t/.exec(pXml)?.[1] ?? "";
+  const baseRPr = firstRunRPr(pXml);
   const pPr = child(pXml, "w:pPr") ?? "";
   const fresh = { kind: "raw", xml: `<w:ins ${stamp()}>${runsFor(text.trim(), baseRPr)}</w:ins>` };
   let placed = false;
@@ -751,12 +874,32 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
   const comments = [];
   let maxId = Math.max(9000, Number(idFloor) || 0);
   const done = (op, extra = {}) => results.push({ ...op, revisionIds: op.revisionIds ?? [], via: "inline", status: "applied", ...extra });
+  // Whether a heading was added or removed, so the contents page is stale.
+  let headingChanged = false;
 
   if (parsed.length) {
     let documentXml = dec.decode(entries["word/document.xml"]);
     const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
     const stamp = revisionStamps(documentXml, maxId);
-    const byIndex = new Map(enumerateParagraphs(documentXml, headings).map((p) => [p.index, p]));
+    const pristineXml = documentXml;
+    const paragraphs = enumerateParagraphs(documentXml, headings);
+    const byIndex = new Map(paragraphs.map((p) => [p.index, p]));
+    // The document's own heading of a level, nearest the anchor: above it
+    // first, then below. A heading of that style; failing one, any heading
+    // of that level. Read from the file as it arrived.
+    const exemplarNear = (index) => (styleId, level) => {
+      const at = paragraphs.findIndex((p) => p.index === index);
+      const tiers = [(p) => styleId && p.styleId === styleId, (p) => p.headingLevel === level];
+      for (const fits of tiers) {
+        const ok = (p) => p && !p.inTable && !p.formatting && p.text.trim() && fits(p);
+        for (let k = at; k >= 0; k--) if (ok(paragraphs[k])) return pristineXml.slice(paragraphs[k].start, paragraphs[k].end);
+        for (let k = at + 1; k < paragraphs.length; k++) if (ok(paragraphs[k])) return pristineXml.slice(paragraphs[k].start, paragraphs[k].end);
+      }
+      return null;
+    };
+    // The heading levels the document's own headings use, for the reason
+    // given when a heading of another level is asked for.
+    const levelsUsed = [...new Set(paragraphs.filter((p) => p.headingLevel && !p.inTable && !p.formatting && p.text.trim()).map((p) => p.headingLevel))].sort((a, b) => a - b);
 
     // Bottom of the document upwards, so an edit never moves a paragraph
     // another operation is still to find.
@@ -794,7 +937,9 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
         edit.revisionIds = [];
       } else if (edit?.kind === "delete") {
         replacement = deleteParagraph(paraXml, stampFor(stamp, edit));
-        edit.markId = edit.revisionIds[0];
+        // A paragraph that ends a section keeps its (empty) mark and the break.
+        if (SECTION_BREAK.test(paraPropsOf(paraXml))) edit.keptSectionBreak = true;
+        else edit.markId = edit.revisionIds[0];
       } else if (edit?.kind === "replace" && own) {
         // Rewriting a paragraph the AI added earlier takes that change over:
         // the paragraph mark keeps its id, the body gets a new one, and the
@@ -821,6 +966,7 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
         done(edit);
         applied++;
       }
+      if (edit?.kind === "delete" && para.headingLevel) headingChanged = true;
 
       // A comment spans the paragraph as it now stands. Its id is a
       // placeholder here; the package allocates the real one.
@@ -828,7 +974,7 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
         for (const op of notes) {
           const key = `@@AKLA_COMMENT_${comments.length}@@`;
           comments.push({ key, text: op.text.trim() });
-          const open = /^<w:p(?:\s[^>]*)?>(?:<w:pPr>[\s\S]*?<\/w:pPr>)?/.exec(replacement)[0];
+          const open = /^<w:p(?:\s[^>]*)?>\s*/.exec(replacement)[0] + paraPropsOf(replacement);
           replacement = `${open}<w:commentRangeStart w:id="${key}"/>${replacement.slice(open.length, -"</w:p>".length)}<w:commentRangeEnd w:id="${key}"/><w:r><w:commentReference w:id="${key}"/></w:r></w:p>`;
           done(op);
           applied++;
@@ -837,59 +983,93 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
         notes.forEach((op) => results.push({ ...op, status: "skipped", reason: replacement ? `¶${index} has no text to comment on` : `¶${index} was removed, so it cannot take a comment` }));
       }
 
+      const refusedHeadings = new Map();
       const added = additions.map((op) => {
-        const xml = insertAfter(paraXml, op.text, headings, stampFor(stamp, op));
+        const made = insertAfter(paraXml, op.text, headings, stampFor(stamp, op), exemplarNear(index));
+        if (made.skip) {
+          refusedHeadings.set(op, noHeadingReason(made.skip, levelsUsed));
+          return "";
+        }
         op.markId = op.revisionIds[0];
-        return xml;
+        if (made.heading) headingChanged = true;
+        return made.xml;
       }).join("");
       documentXml = documentXml.slice(0, para.start) + replacement + added + documentXml.slice(para.end);
       additions.forEach((op) => {
+        if (refusedHeadings.has(op)) return results.push({ ...op, status: "skipped", reason: refusedHeadings.get(op) });
         done(op);
         applied++;
       });
     }
+    if (headingChanged) documentXml = markTocDirty(documentXml);
     entries["word/document.xml"] = enc.encode(patchEmptyCells(documentXml));
     maxId = stamp.max();
   }
 
   let out = applied ? writeZip(entries) : bytes;
-  // The engine mints its own ids, so each change runs alone and the ids
-  // that appeared are its own. It counts from the highest id in this part
+  // The engine mints its own ids, counting from the highest id in this part
   // alone, which may already be recorded for another part or for a change
   // decided away, so each new id is renumbered from this call's counter.
-  for (const { op, lib } of fallback) {
+  // Each call re-reads the whole package, and on a 400 KB agreement that
+  // costs about 40 seconds whatever the number of changes, so all of them
+  // go in one call and each change's ids come from its own receipt. A call
+  // the engine refuses outright (no per-change result at all) is retried
+  // one change at a time, so one bad change does not take the rest with it.
+  const runFallback = async (batch) => {
     // Each pass re-opens the whole package: a caller whose deadline has
     // passed gets its abort here rather than minutes later.
     signal?.throwIfAborted();
     const before = revisionIdsIn(out);
-    const res = await openDocx(out).applyOperations([lib], {
+    const res = await openDocx(out).applyOperations(batch.map((f) => f.lib), {
       author: DOCX_AUTHOR, atomic: false, validate: true, strictTargets: true, continueOnError: true,
     });
-    const r = (res.results ?? [])[0];
-    if (r?.status === "applied") {
-      if (res.written) out = res.toBuffer();
-      const fresh = [...revisionIdsIn(out)].filter((id) => !before.has(id)).sort((a, b) => a - b);
-      const renumbered = new Map(fresh.map((id) => [id, ++maxId]));
-      if (fresh.length) {
-        const part = readZip(out);
-        const xml = dec.decode(part["word/document.xml"]).replace(/<w:(ins|del)(\s[^>]*?)\bw:id="(\d+)"/g, (m, tag, pre, id) =>
-          renumbered.has(Number(id)) ? `<w:${tag}${pre}w:id="${renumbered.get(Number(id))}"` : m);
-        part["word/document.xml"] = enc.encode(xml);
-        out = writeZip(part);
-      }
-      const receipt = r.receipt?.revisionItems?.filter((x) => x.kind === "ins" || x.kind === "del").map((x) => Number(x.id)).filter((id) => Number.isFinite(id) && renumbered.has(id));
-      const revisionIds = (receipt?.length ? receipt : fresh).map((id) => renumbered.get(id));
-      applied++;
-      results.push({ ...op, status: "applied", revisionIds, via: "fallback" });
-    } else if (r?.status === "no_change") {
-      results.push({ ...op, status: "skipped", reason: "no_change" });
-    } else {
-      // A batch the engine refuses outright comes back with no per-operation
-      // result at all; saying nothing would hide the change from the lawyer.
-      results.push({ ...op, status: "skipped", reason: r?.error?.message ?? r?.error?.code ?? res.error?.message ?? "this paragraph's formatting could not be edited safely" });
+    const perOp = res.results ?? [];
+    if (batch.length > 1 && perOp.length !== batch.length) return false;
+    const written = perOp.some((r) => r?.status === "applied") && res.written;
+    if (written) out = res.toBuffer();
+    const fresh = written ? [...revisionIdsIn(out)].filter((id) => !before.has(id)).sort((a, b) => a - b) : [];
+    const renumbered = new Map(fresh.map((id) => [id, ++maxId]));
+    if (fresh.length) {
+      const part = readZip(out);
+      const xml = dec.decode(part["word/document.xml"]).replace(/<w:(ins|del)(\s[^>]*?)\bw:id="(\d+)"/g, (m, tag, pre, id) =>
+        renumbered.has(Number(id)) ? `<w:${tag}${pre}w:id="${renumbered.get(Number(id))}"` : m);
+      part["word/document.xml"] = enc.encode(xml);
+      out = writeZip(part);
     }
+    const appliedCount = perOp.filter((r) => r?.status === "applied").length;
+    batch.forEach(({ op }, k) => {
+      const r = perOp[k];
+      if (r?.status === "applied") {
+        const receipt = r.receipt?.revisionItems?.filter((x) => x.kind === "ins" || x.kind === "del").map((x) => Number(x.id)).filter((id) => Number.isFinite(id) && renumbered.has(id));
+        // Without a receipt the new ids are this change's only when it is
+        // the only change the call made.
+        const ids = receipt?.length ? receipt : appliedCount === 1 ? fresh : [];
+        applied++;
+        results.push({ ...op, status: "applied", revisionIds: ids.map((id) => renumbered.get(id)), via: "fallback" });
+      } else if (r?.status === "no_change") {
+        results.push({ ...op, status: "skipped", reason: "no_change" });
+      } else {
+        // A change the engine refused says why; saying nothing would hide
+        // it from the lawyer.
+        results.push({ ...op, status: "skipped", reason: r?.error?.message ?? r?.error?.code ?? res.error?.message ?? "this paragraph's formatting could not be edited safely" });
+      }
+    });
+    return true;
+  };
+  if (fallback.length && !(await runFallback(fallback))) {
+    for (const one of fallback) await runFallback([one]);
   }
   if (fallback.length) maxId = maxIdIn(dec.decode(readZip(out)["word/document.xml"]), maxId);
+  // The redline engine writes the part afresh; the mark must survive it.
+  if (headingChanged && fallback.length) {
+    const part = readZip(out);
+    const xml = dec.decode(part["word/document.xml"]);
+    const dirty = markTocDirty(xml);
+    if (dirty !== xml) {
+      part["word/document.xml"] = enc.encode(dirty);
+      out = writeZip(part);
+    }
+  }
 
   results.sort((a, b) => a.i - b.i);
   adoptSplits(results);

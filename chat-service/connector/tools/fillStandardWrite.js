@@ -24,7 +24,10 @@
 // longer matches templateHash), when no change could be made, or when the
 // fill takes longer than APPLY_TIMEOUT_MS (so the docx-redline-js fallback
 // inside applyDocxOps cannot outlast claude.ai's 240 s per call: "took too
-// long, nothing written"). No redline_suggestions rows: the fills are
+// long, nothing written"), or when the filled file's format differs from
+// the standard's (the format gate, formatFingerprint.js checkFormat; the
+// reply lists what differs, and FORMAT_GATE=report saves it anyway with
+// that list as a warning). No redline_suggestions rows: the fills are
 // accepted, and the Hub's "What changed" tab compares versions itself.
 //
 // The write foundation's order holds: checkCaps first (the sign-in afresh,
@@ -52,6 +55,7 @@ import { str, uuid } from "../tools.js";
 import { inspectDocx, applyDocxOps, acceptChangesBy, describeResults, stripXmlIllegal, DOCX_AUTHOR } from "../../docxAgent.js";
 import { alignCommentExpectations } from "../../libraryTools.js";
 import { standardRows, isWordFile } from "./fillStandard.js";
+import { checkFormat, variableLinesFor } from "../../formatFingerprint.js";
 
 export const FILL_TOOL = "fill_standard_to_project";
 /** The bucket the firm's standards live in (server.js guideStart, the same download). */
@@ -308,9 +312,11 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           // standard itself carried stay.
           let out;
           let fileBytes;
+          let inspection;
+          let aligned;
           try {
-            const inspection = inspectDocx(standard.bytes, { budget: Infinity });
-            const aligned = alignCommentExpectations(ops, inspection.byRef);
+            inspection = inspectDocx(standard.bytes, { budget: Infinity });
+            aligned = alignCommentExpectations(ops, inspection.byRef);
             out = await applyWithDeadline(standard.bytes, aligned, inspection.byRef);
             fileBytes = out.applied > 0 ? acceptChangesBy(out.bytes, DOCX_AUTHOR) : out.bytes;
           } catch (err) {
@@ -325,6 +331,19 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           if (out.applied === 0) {
             await record({ documentId: matterDocumentId, outcome: "refused" });
             throw new Error(`None of the ${ops.length} change${ops.length === 1 ? "" : "s"} could be made, so nothing was saved; the standard is unchanged. ${account.slice(2).join(" ")} Open the standard again and quote each paragraph's exact current text in expected.`);
+          }
+
+          // The format gate (formatFingerprint.js): the filled file against
+          // the standard it came from. Drift is refused and nothing is
+          // saved, unless FORMAT_GATE=report, when the file is saved and the
+          // reply carries what differs as a warning. A header or footer line
+          // this fill was asked to change (the RFP's project-name blank in
+          // its running header) may change its words, not its look.
+          const format = checkFormat(fileBytes, standard.bytes, { base: standard.fileName, variableParagraphs: variableLinesFor(aligned, inspection.byRef) });
+          log(`${FILL_TOOL}: format ${format.result.status}${format.refused ? " (refused)" : ""}${format.result.ms != null ? ` in ${format.result.ms}ms` : ""}`);
+          if (format.refused) {
+            await record({ documentId: matterDocumentId, outcome: "refused" });
+            throw new Error(`${format.text} The standard is unchanged.`);
           }
 
           // The save, through the foundation: the upload under the site's
@@ -347,6 +366,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           return [
             `Drafted "${shown}" from the firm's ${standard.type.name} standard (${standard.fileName}) and filed it as v${saved.versionNumber} (${saved.fileName}), ${where}, labelled "${saved.label}".`,
             ...account,
+            format.text,
             blanksLine(out.validation?.placeholders),
             `documentId: ${saved.matterDocumentId}`,
             `versionId: ${saved.versionId}`,
