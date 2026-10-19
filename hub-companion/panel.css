@@ -86,3 +86,10 @@ body {
   border: 0;
   background: #fff;
 }
+.idle {
+  padding: 28px 20px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.idle p { margin: 0 0 10px; }
+.idle strong { color: var(--text); }

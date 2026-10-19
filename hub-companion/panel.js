@@ -6,6 +6,7 @@
 
   var frame = document.getElementById("frame");
   var notice = document.getElementById("notice");
+  var idle = document.getElementById("idle");
   var address = document.getElementById("address");
 
   var LOAD_WAIT = 12000; // ms before "did not load" is shown
@@ -50,6 +51,7 @@
       return;
     }
     clearNotice();
+    idle.hidden = true;
     pendingUrl = null;
     busy = false;
     currentUrl = clean;
@@ -184,8 +186,10 @@
       // A "show" that arrived while we were starting has already set the
       // frame; loading the remembered page as well would load it twice.
       if (currentUrl) return;
+      // Nothing chosen yet: say so rather than load the whole workspace.
       var last = HubLinks.normaliseHubUrl(s.panelUrl, settings.hubOrigin);
-      show(last || HubLinks.homeUrl(settings.hubOrigin));
+      if (last) show(last);
+      else idle.hidden = false;
     });
   });
 })();
