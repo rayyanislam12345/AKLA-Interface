@@ -427,6 +427,14 @@ def extract_text(body: bytes, content_type: str, url: str) -> tuple[str | None, 
                     text = "\n".join(page.extract_text() or "" for page in pdf.pages)
         except Exception as err:  # noqa: BLE001 — a broken PDF is a rejection, not a crash
             return None, f"pdf unreadable ({err})"
+        # Many SROs and gazette notifications are scanned images: pdfplumber
+        # finds no text at all. The OCR service on this VM reads them.
+        if len(re.sub(r"\s+", " ", text).strip()) < 200:
+            ocr_text, ocr_err = ocr_pdf(body)
+            if ocr_text:
+                text = ocr_text
+            elif ocr_err:
+                log(f"    OCR unavailable: {ocr_err}")
     else:
         raw = body.decode("utf-8", "replace")
         stripped = re.sub(r"<(script|style)[\s\S]*?</\1>", " ", raw, flags=re.I)
@@ -441,6 +449,23 @@ def extract_text(body: bytes, content_type: str, url: str) -> tuple[str | None, 
 # goes straight to the relay for the rest of the run instead of costing
 # another 30-second wait per document. sources.json can pre-seed the list.
 RELAY_FIRST_HOSTS: set[str] = set()
+
+
+def ocr_pdf(body: bytes) -> tuple[str | None, str | None]:
+    """Text of a scanned PDF via the OCR service (ocr-service/app.py), when
+    OCR_SHARED_SECRET is configured. (text, error)."""
+    secret = os.environ.get("OCR_SHARED_SECRET")
+    if not secret:
+        return None, "OCR_SHARED_SECRET not set"
+    url = os.environ.get("OCR_URL", "http://127.0.0.1:8090").rstrip("/") + "/ocr/pdf"
+    try:
+        resp = requests.post(url, data=body, headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/pdf"}, timeout=300)
+        if resp.status_code >= 300:
+            return None, f"OCR {resp.status_code}: {resp.text[:120]}"
+        text = resp.json().get("text") or ""
+        return (text if len(text.strip()) >= 200 else None), None if text.strip() else "OCR found no text"
+    except (requests.exceptions.RequestException, ValueError) as err:
+        return None, f"OCR failed: {str(err)[:120]}"
 
 
 def fetch_bytes(url: str, config: dict) -> tuple[bytes | None, str, str, str | None]:
@@ -1129,7 +1154,21 @@ def extract_entries(page_html: str, base_url: str) -> list[dict]:
 
     for href, inner in re.findall(r'<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)</a>', body, re.I):
         add(inner, href)
-    for block in re.findall(r"<(?:tr|li|h[1-6]|p)\b[^>]*>([\s\S]*?)</(?:tr|li|h[1-6]|p)>", body, re.I):
+    # A table row is one entry: its title is the first cell that reads like
+    # a law, not the whole row with its serial number and dates. The dates
+    # are still useful — they travel with the entry.
+    for row in re.findall(r"<tr\b[^>]*>([\s\S]*?)</tr>", body, re.I):
+        cells = re.findall(r"<t[dh]\b[^>]*>([\s\S]*?)</t[dh]>", row, re.I)
+        m = re.search(r'href="([^"]*)"', row)
+        href = m.group(1) if m else None
+        row_text = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", row))).strip()
+        before = len(out)
+        for cell in cells:
+            add(cell, href)
+            if len(out) > before:
+                out[-1]["date"] = find_date(row_text)
+                break
+    for block in re.findall(r"<(?:li|h[1-6]|p)\b[^>]*>([\s\S]*?)</(?:li|h[1-6]|p)>", body, re.I):
         m = re.search(r'href="([^"]*)"', block)
         add(block, m.group(1) if m else None)
     return out
@@ -1196,7 +1235,13 @@ def match_library_act(text: str, library_acts: list[str]) -> str | None:
             continue
         for act in library_acts:
             ab = act_base(act)
-            if base == ab or (len(base) >= 12 and (base in ab or ab in base)):
+            if base == ab:
+                return act
+            # Containment only when the two are nearly the same length:
+            # "registration" must not claim "national database and
+            # registration authority".
+            shorter, longer = sorted((base, ab), key=len)
+            if len(shorter) >= 12 and shorter in longer and len(shorter) >= 0.7 * len(longer):
                 return act
     return None
 
@@ -1225,6 +1270,10 @@ def watch_pages(hub: Hub, config: dict, counts: dict, library_acts: list[str]) -
             continue
         entries = extract_entries(body.decode("utf-8", "replace"), final)
         counts["pages"] += 1
+        # A page whose earlier visits all failed has a row but no snapshot;
+        # the first successful read is still the baseline.
+        if previous is not None and not previous.get("entries") and not previous.get("entry_count"):
+            previous = None
         if previous is None:
             log(f"  baseline recorded: {len(entries)} entries (nothing reported on a first visit)")
             hub.upsert_watch_page({
@@ -1262,7 +1311,7 @@ def watch_pages(hub: Hub, config: dict, counts: dict, library_acts: list[str]) -
                 "summary": f"New entry on {name}" + (f" ({page['jurisdiction']})" if page.get("jurisdiction") else "") + ".",
                 "source_url": url,
                 "document_url": e.get("href"),
-                "published_date": find_date(e["text"]),
+                "published_date": e.get("date") or find_date(e["text"]),
                 "confidence": "medium",
             }
             out.append({"finding": finding, "source_name": name, "found_by": "watch_page", "max_age": window})
@@ -1311,6 +1360,8 @@ def recheck_library_sources(hub: Hub, config: dict, counts: dict, acts: list[str
             "url": url, "name": act, "kind": "library_source", "act_name": act, "content_hash": fp,
             "content_length": len(text), "last_checked_at": now, "last_error": None, "consecutive_failures": 0,
         }
+        if previous is not None and not previous.get("content_hash"):
+            previous = None
         if previous is None:
             log(f"  baseline recorded ({len(text)} chars)")
             hub.upsert_watch_page({**row, "last_changed_at": now})

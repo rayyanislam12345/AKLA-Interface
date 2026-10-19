@@ -23,7 +23,7 @@ import urllib.request
 # Keep in step with OFFICIAL_DOMAINS in chat-service/sourcePolicy.js.
 OFFICIAL_DOMAINS = ["gov.pk", "sbp.org.pk", "nepra.org.pk", "ogra.org.pk", "ppra.org.pk", "na.gov.pk", "senate.gov.pk"]
 MAX_BYTES = 20 * 1024 * 1024
-TIMEOUT = 45
+TIMEOUT = 90  # the Punjab Assembly serves a 1.7 MB page slowly
 
 # Government sites publish IPv6 addresses they do not answer on. Python tries
 # them first and waits out each timeout (47 seconds for one statute, against

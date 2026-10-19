@@ -150,13 +150,19 @@ one. Three sites needed their own route:
   (sources.json) are read through the relay's **browser mode**: the relay
   opens the page in a real Google Chrome on a virtual display
   (`official-fetch-relay/browser-fetch.py`, called as `browser:https://…`),
-  which the check lets through. Documents are fetched from inside the
-  cleared page so the same cookies apply. About 15–40 seconds a page.
+  which the check lets through. A document link (SECP's `?wpdmdl=` links
+  carry no extension) is opened by the same browser with PDFs set to
+  download, and the downloaded file comes back. About 15–40 seconds a page.
+- **Scanned PDFs.** Many SROs are images. When a PDF yields no text, it is
+  sent to the OCR service on this VM (`OCR_URL`, `OCR_SHARED_SECRET` in
+  `.env`) before being given up on.
 - **Sindh Assembly** fills `index.php/bills/en` by script, but the form
   lands on plain pages: `pas.gov.pk/bills/33` and `pas.gov.pk/acts/33`
   (33 is the current assembly). Those are watched directly.
 - **Punjab Assembly** keeps its bills at `pap.gov.pk/bills/show/en/22/…`
-  (22 is the current assembly); one page carries every tab.
+  (22 is the current assembly); one page carries every tab. The site answers
+  from Pakistan but not from either server abroad, so the page is in the list
+  switched off until a Pakistani egress exists.
 - **Senate** resets about one connection in five, whoever asks. The relay
   now retries three times with a browser-shaped User-Agent.
 

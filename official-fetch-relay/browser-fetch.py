@@ -15,10 +15,11 @@ Usage: browser-fetch.py <url> <outfile>
   (or "ERROR <reason>") are printed. Nothing is streamed through pipes:
   xvfb-run merges and cuts the child's streams once a pipe buffer fills.
 """
+import json
+import os
 import re
 import sys
 import tempfile
-import time
 from urllib.parse import urlsplit
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -40,61 +41,66 @@ def main():
         fail("browser fetch is not installed on the relay")
 
     with sync_playwright() as p, tempfile.TemporaryDirectory() as profile:
-        # A persistent context with a throwaway profile directory: Chrome
-        # insists on a writable profile, and the relay user has no home it
-        # should be writing browser state into.
+        # A persistent context with a throwaway profile: Chrome insists on a
+        # writable profile, and the relay user has no home it should be
+        # writing browser state into. The profile tells Chrome to download
+        # PDFs instead of showing them, so a document link (SECP's
+        # "?wpdmdl=" links carry no extension) arrives as a download event.
+        os.makedirs(os.path.join(profile, "Default"), exist_ok=True)
+        with open(os.path.join(profile, "Default", "Preferences"), "w") as f:
+            json.dump({"plugins": {"always_open_pdf_externally": True}, "download": {"prompt_for_download": False}}, f)
         ctx = p.chromium.launch_persistent_context(
             profile,
             channel="chrome",
             headless=False,  # headless Chrome is what the challenge detects
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
-            locale="en-US", viewport={"width": 1366, "height": 900}, accept_downloads=False,
+            locale="en-US", viewport={"width": 1366, "height": 900}, accept_downloads=True,
         )
-        browser = ctx
         page = ctx.new_page()
+        downloads = []
+        page.on("download", lambda d: downloads.append(d))
         origin = "{0.scheme}://{0.netloc}".format(urlsplit(url))
 
         def cleared():
             return "Just a moment" not in page.title()
 
-        try:
-            is_document = bool(re.search(r"\.(pdf|docx?|xlsx?)(\?|$)", url, re.I))
-            # A document cannot be rendered as a page. Clear the challenge on
-            # the site's front page first, then fetch the document with the
-            # same cookies.
-            page.goto(origin + "/" if is_document else url, wait_until="domcontentloaded", timeout=60000)
+        def wait_clear():
             for _ in range(CHALLENGE_WAIT):
                 if cleared():
-                    break
+                    return True
                 page.wait_for_timeout(1000)
-            if not cleared():
+            return cleared()
+
+        try:
+            # Clear the site's browser check on its front page first, so a
+            # document link is opened with the cookies the check issued.
+            page.goto(origin + "/", wait_until="domcontentloaded", timeout=60000)
+            if not wait_clear():
                 fail("the site's browser check did not clear")
-            if is_document:
-                # Fetched from inside the cleared page: the browser's own
-                # HTTP stack and cookies are what the challenge trusts; a
-                # separate request context is refused again.
-                result = page.evaluate(
-                    """async (u) => {
-                        const r = await fetch(u, {credentials: 'include'});
-                        const buf = await r.arrayBuffer();
-                        let bin = '';
-                        const bytes = new Uint8Array(buf);
-                        for (let i = 0; i < bytes.length; i += 0x8000) {
-                            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-                        }
-                        return {status: r.status, url: r.url, type: r.headers.get('content-type') || '', b64: btoa(bin)};
-                    }""",
-                    url,
-                )
-                if result["status"] >= 400:
-                    fail(f"Source download failed ({result['status']})")
-                import base64
-                body = base64.b64decode(result["b64"])
-                if len(body) > MAX_BYTES:
+            started_download = False
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            except Exception as err:  # noqa: BLE001 — "Download is starting" is the document case
+                if "Download is starting" not in str(err):
+                    raise
+                started_download = True
+            if not started_download and not wait_clear():
+                fail("the site's browser check did not clear")
+            if started_download or downloads:
+                for _ in range(60):
+                    if downloads:
+                        break
+                    page.wait_for_timeout(1000)
+                if not downloads:
+                    fail("the document did not download")
+                d = downloads[0]
+                path = d.path()
+                if os.path.getsize(path) > MAX_BYTES:
                     fail("Source is too large")
-                with open(outfile, "wb") as f:
-                    f.write(body)
-                print(f"FINAL {result['url']}\nTYPE {result['type']}")
+                with open(path, "rb") as src, open(outfile, "wb") as dst:
+                    dst.write(src.read())
+                kind = "application/pdf" if d.suggested_filename.lower().endswith(".pdf") else "application/octet-stream"
+                print(f"FINAL {d.url}\nTYPE {kind}")
             else:
                 # Let scripts fill the page (lists loaded after load).
                 page.wait_for_timeout(3000)
@@ -106,7 +112,7 @@ def main():
                 print(f"FINAL {page.url}\nTYPE text/html; charset=utf-8")
             sys.stdout.flush()
         finally:
-            browser.close()
+            ctx.close()
 
 
 if __name__ == "__main__":

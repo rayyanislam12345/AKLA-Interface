@@ -91,8 +91,8 @@
       "url": "https://www.pap.gov.pk/bills/show/en/22/introduced",
       "default_type": "bill",
       "jurisdiction": "Punjab",
-      "enabled": true,
-      "_note": "One page carries every tab (introduced, passed, referred, under consideration); 22 is the current assembly."
+      "enabled": false,
+      "_why_off": "pap.gov.pk answers from Pakistan (it loads in seconds on the laptop) but never from the Oracle VM or the DigitalOcean droplet: it appears to block foreign addresses. Needs a Pakistani egress to watch."
     },
     {
       "name": "Balochistan Assembly — bills",
@@ -176,7 +176,8 @@
   ],
   "_not_watchable": {
     "Senate private members' bills": "Only in the daily Orders of the Day PDFs; the government bills page (gbs.php) is watched.",
-    "NEPRA": "No stable listing page for draft rules; NEPRA stays on web search."
+    "NEPRA": "No stable listing page for draft rules; NEPRA stays on web search.",
+    "Punjab Assembly": "Geo-blocked: pap.gov.pk does not answer either server abroad. The bills page is pap.gov.pk/bills/show/en/22/introduced and is ready in the list; switch it on if a Pakistani proxy becomes available."
   },
   "_browser_mode": "Pages on a host listed in sources.json browser_hosts are read through the relay's browser mode (official-fetch-relay/browser-fetch.py): a real Chrome on the DigitalOcean droplet, which is the only thing SECP's Cloudflare check lets through. About 15-40 seconds per page."
 }
