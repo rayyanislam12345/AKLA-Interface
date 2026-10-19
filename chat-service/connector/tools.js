@@ -66,6 +66,8 @@ export const BUILT_IN_TOOL_NAMES = Object.freeze(["search_law_library", "read_ac
 export const MODULE_TOOL_NAMES = Object.freeze([
   "list_acts", "get_act_outline", // acts.js
   "get_document_checks", "compare_document_versions", // documentInsight.js
+  "open_standard_for_filling", // fillStandard.js
+  "fill_standard_to_project", // fillStandardWrite.js (writes)
   "get_firm_rules", // firmRules.js
   "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js (writes)
   "list_precedents", "find_precedent_clauses", "read_precedent", // precedents.js
@@ -77,13 +79,15 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "check_text", "compare_text_with_version", // textChecks.js
 ]);
 /**
- * The tools that save or change something (slice 2), in registration order.
- * Each is `write: true` with `annotations: WRITE` in its module, is listed
- * only for a sign-in that carries hub:write, and records every call in
- * connector_actions. Pinned here, as MODULE_TOOL_NAMES is, so a read tool
- * that starts claiming to write, or a write tool that stops, fails a test.
+ * The tools that save or change something (slices 2 and 3), in registration
+ * order. Each is `write: true` with `annotations: WRITE` in its module, is
+ * listed only for a sign-in that carries hub:write, and records every call
+ * in connector_actions. Pinned here, as MODULE_TOOL_NAMES is, so a read
+ * tool that starts claiming to write, or a write tool that stops, fails a
+ * test.
  */
 export const WRITE_TOOL_NAMES = Object.freeze([
+  "fill_standard_to_project", // fillStandardWrite.js
   "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js
   "save_note_to_project", "save_draft_to_project", // saves.js
 ]);

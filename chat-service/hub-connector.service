@@ -31,7 +31,12 @@ ExecStart=/usr/bin/node /opt/chat-service/connector/connector.js
 # One vCPU shared with chat-service and the index worker: a lawyer's claude.ai
 # waits a moment rather than a Hub chat reply being starved.
 Nice=5
-MemoryMax=600M
+# A fill of a long Word standard (fill_standard_to_project: the whole file
+# read, the changes applied, the fills accepted) takes the process to about
+# 500 MB resident while it runs; the tool runs one fill at a time for that
+# reason. 1G leaves room for that beside the standards open_standard_for_filling
+# keeps in memory; the VM has 5.5 GB.
+MemoryMax=1G
 Restart=always
 RestartSec=3
 

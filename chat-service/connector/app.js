@@ -24,6 +24,11 @@ import { DEFAULT_REDIRECT_HOSTS, DEFAULT_SCOPE, OAuthError, READ_ONLY_REFUSAL, W
 import { aboutPage, errorPage, signInPage } from "./pages.js";
 
 export const MAX_BODY_BYTES = 1_000_000;
+// POST /mcp alone takes more: a fill_standard_to_project call may carry 300
+// changes each quoting a paragraph and its new text at up to 20,000
+// characters (connector/tools/fillStandardWrite.js), about 12 MB of JSON at
+// the very most. Only a signed-in bearer reaches this read.
+export const MAX_MCP_BODY_BYTES = 12_500_000;
 // How a tool is marked for claude.ai. A tool without annotations of its own
 // is read-only. A write tool (one with `write: true`, registered only when
 // the token carries hub:write) ships as not read-only AND destructive, so
@@ -206,8 +211,8 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
     const server = new McpServer({ name: "AKLA Hub", version: serverVersion }, {
       // The same sourcing rule the Hub's own assistant works under
       // (firmRules.js); get_firm_rules gives the full text.
-      instructions: `Access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an "Open in Hub:" address; pass it on. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards. ${canWrite
-        ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version) or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval."
+      instructions: `Access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an "Open in Hub:" address; pass it on. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards, and open_standard_for_filling opens a type's Word standard with its blanks numbered for a fill. ${canWrite
+        ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version), fill the firm's Word standard with the facts gathered and file the result (fill_standard_to_project, after open_standard_for_filling and the drafting questions), or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval."
         : "This sign-in is read-only: nothing here can change or save a document (reconnecting the connector allows saving into projects)."}`,
     });
     // Write tools are listed only for a sign-in that carries hub:write. A
@@ -354,7 +359,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
         if (!(await stillMember(auth.userId))) return challenge(res, "insufficient_scope", "Your Hub account is no longer an approved firm member.", 403);
         if (req.method !== "POST") return json(res, 405, { jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed: this server is stateless; POST each request to /mcp." }, id: null }, { Allow: "POST, OPTIONS" });
         let body;
-        try { body = parseBody(await readBody(req), req.headers["content-type"] ?? "application/json"); }
+        try { body = parseBody(await readBody(req, MAX_MCP_BODY_BYTES), req.headers["content-type"] ?? "application/json"); }
         catch (err) { return json(res, err?.status === 413 ? 413 : 400, { jsonrpc: "2.0", error: { code: -32700, message: err?.status === 413 ? err.message : "The request body is not JSON." }, id: null }); }
         return await handleMcp(req, res, body, auth, parseAuthorization(req.headers.authorization).bearer);
       }

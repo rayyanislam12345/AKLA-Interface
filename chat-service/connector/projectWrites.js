@@ -271,7 +271,7 @@ export function createProjectWrites({ supabase, hubUrl = DEFAULT_HUB_URL, now = 
    * Returns ids, the file name, the label and the Hub links. Does not
    * record the action: the tool does, after this returns or throws.
    */
-  async function saveVersion({ ctx, projectId, title, matterDocumentId = null, documentTypeId = null, expectedVersion = null, bytes, fileName, mime = null, label = null, isAiGenerated = false }) {
+  async function saveVersion({ ctx, projectId, title, matterDocumentId = null, documentTypeId = null, expectedVersion = null, bytes, fileName, mime = null, label = null, labelVerbatim = null, isAiGenerated = false }) {
     const userId = uuid(ctx?.userId);
     if (!userId) throw new Error(SIGN_IN_ENDED_SENTENCE);
     const matterId = uuid(projectId);
@@ -311,7 +311,11 @@ export function createProjectWrites({ supabase, hubUrl = DEFAULT_HUB_URL, now = 
     const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, body, { contentType, upsert: false });
     if (uploadError) throw new Error(`The file could not be stored${uploadError.message ? ` (${uploadError.message})` : ""}; try again.`);
 
-    const finalLabel = versionLabel(label, at);
+    // A tool whose label already says where the version came from (3.2:
+    // "Drafted from the firm's standard in claude.ai — <date>") passes it
+    // as labelVerbatim; otherwise the label is composed here.
+    const verbatim = typeof labelVerbatim === "string" ? labelVerbatim.replace(/\s+/g, " ").trim() : "";
+    const finalLabel = verbatim ? verbatim.slice(0, MAX_LABEL_CHARS) : versionLabel(label, at);
     const args = {
       p_user_id: userId, p_matter_id: matterId, p_document_type_id: typeId, p_document_id: docId, p_create_new: createNew,
       p_expected_version_id: expectedId, p_title: docTitle, p_storage_path: storagePath, p_file_stem: stem,

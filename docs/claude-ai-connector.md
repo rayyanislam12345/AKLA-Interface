@@ -32,9 +32,11 @@ The sign-in page says what the connector may do: read, and save into
 projects. The tools marked "saves" in the table below are the ones that
 change anything: two file what Claude wrote (`save_note_to_project` as a
 Markdown file, `save_draft_to_project` as a Word file in the house format),
-and six are small housekeeping (a project's standing instructions, a
-version's label, a document's title or status, an empty document record, a
-re-read of a version). What to expect:
+one fills the firm's own Word standard and files the result
+(`fill_standard_to_project`, see "Drafting from the firm's standard"
+below), and six are small housekeeping (a project's standing instructions,
+a version's label, a document's title or status, an empty document record,
+a re-read of a version). What to expect:
 
 - **It asks first.** claude.ai asks you ("Allow once / Always allow")
   before each of these runs. In claude.ai's Research mode tools run
@@ -58,6 +60,29 @@ re-read of a version). What to expect:
   filing, not legal approval.
 - A connection made before saving existed is read-only until you remove
   the connector and add it again.
+
+## Drafting from the firm's standard
+
+Where the firm has a Word standard for a document type (a concession
+agreement, say), ask for the document from the facts you have: "Draft a
+concession agreement for the Hyderabad bypass from these facts". Claude
+opens the standard itself (`open_standard_for_filling`: the same file the
+Hub drafts from, its blanks numbered, with the Hub's own fill instructions),
+asks you the firm's drafting questions for that type one at a time (the
+listing tells Claude to ask before any fill), reads any part of the
+standard the listing left out when a change belongs there, and then, once
+you say which project and title to file under and claude.ai has asked you
+to allow it, fills the real standard and files the result as version 1 of
+a new document in the project (`fill_standard_to_project`). One fill runs
+on the Hub at a time; a second is told to try again in a minute.
+Open it in Word: your facts are in the right slots, every value you did not
+give is still `[●]`, each open point is an "AKLA Comments" note in the
+margin, and the numbering, styles, headers and contents page are as the
+firm set them. The reply names any slot it could not fill and why. The
+standard in the library is never changed; if an administrator replaced it
+between the opening and the fill, the fill is refused and Claude opens it
+again. The filed version is your own filing, labelled "Drafted from the
+firm's standard in claude.ai" with the date.
 
 ## What it can do
 
@@ -88,12 +113,14 @@ so Claude can cite what it relied on.
 | `list_document_types` (page?) | The firm's document types by category, 100 a page: which have a Word standard, and which a drafting questionnaire |
 | `read_standard` (documentTypeId, from?, chars?) | A standard's text in slices, with the format rules the Hub drafts under |
 | `get_drafting_decisions` (documentTypeId, from?) | A type's drafting questionnaire as numbered decisions, with the options, the legal basis and when each is asked |
+| `open_standard_for_filling` (documentTypeId, from?, paragraphs?) | The firm's Word standard opened for a fill: every paragraph with a blank numbered ¶n with its exact text, every heading and the paragraphs around each blank, the rest as gaps naming the ¶ numbers they hide (`paragraphs: "100-140"` reads any range, 200 at a time), the Hub's own fill instructions and operations protocol, and a templateHash the fill must echo; paged, the first page carrying the instructions; bracketed footnotes are said to be the firm's drafting notes, not slots; the standard is never changed |
 | `list_skills` (from?) | The firm's own skills by name: what each is for, written in the Hub or uploaded as a Claude skill, whether it produces a document, who added it and when; in pages |
 | `read_skill` (skillId, from?, chars?) | A skill's instructions (the SKILL.md body of an uploaded skill) in slices of up to 20,000 characters, with the files the skill carries named; its scripts and templates run only in the Hub |
 | `check_text` (text, from?) | The Hub's proof check on text Claude has written, before it is filed: blanks, undefined and unused terms, broken cross-references, number/word mismatches, numbering gaps, by clause; no model, nothing saved; up to 300,000 characters, in pages (the text is sent again with each page) |
 | `compare_text_with_version` (versionId, text, from?, includeFormatting?) | What Claude's redraft changes against one stored version, clause by clause, before it is filed; the version's file is read on the spot when it is not already in memory (one such read at a time, kept for the next page); no model, nothing saved |
 | `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
 | `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project` |
+| `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
 | `set_project_instructions` (projectId, content) — saves | Writes the project's standing instructions (the Project Context every Hub chat and overview sees), replacing the whole text; recorded with who wrote it and when |
 | `label_version` (versionId, label) — saves | Gives one version a short label (up to 120 characters), replacing any it had |
 | `rename_document` (documentId or versionId, title) — saves | Changes a document's title only; its type, status and versions are untouched (the type is changed on the Hub) |

@@ -25,6 +25,20 @@ export const COMPLETENESS_RULES = `The document must be COMPLETE and ready to ed
 - Length is not a reason to stop. A long agreement is expected to be long; keep writing until the document is genuinely finished.
 - If you genuinely cannot complete it in one turn, finish the clause you are on and say plainly where you stopped — do not pretend the document is done.`;
 
+/**
+ * FILLING IN THE FIRM'S WORD STANDARD: how the deal's facts go into the
+ * standard and nothing else changes. server.js says this in its
+ * "draft from the standard" turn (the Hub's own chat); the connector's
+ * open_standard_for_filling (connector/tools/fillStandard.js) hands the same
+ * words to a lawyer's claude.ai, so a draft made there is filled the way the
+ * Hub fills one. The sentence that follows the ops protocol in that prompt,
+ * FILL_DIRECT_NOTE, says the fills are written straight in rather than as
+ * tracked changes.
+ */
+export const FILL_INSTRUCTIONS = `This is a fill-in job, not a drafting job. The standard's wording is the firm's: put the deal's facts into it and change nothing else. Fill each [●], [•], [____] or [bracketed] placeholder with the fact the lawyer has given for it — the same party, date or amount goes into every slot it belongs in (cover page, preamble, execution block). Where the standard offers alternatives in brackets, keep the one that applies and drop the other. Where the standard has an optional block, keep or remove it only when told. Spell numbers the firm's way: "thirty (30)", "fifty percent (50%)", "PKR 1,000,000 (Pakistani Rupees One Million only)". A value you were not given stays as its placeholder and is listed as an open item in your reply — never take a figure from a precedent. Do not stop to ask the lawyer before filling in: fill every placeholder the project's documents, the attached documents and this conversation support, in this turn. Where a value is not given, leave its placeholder and put an AKLA comment on that paragraph saying what is needed and where it would come from. Where the standard's wording assumes something the project's documents contradict — a different contracting structure, a party acting in its own right rather than on behalf of a government — make the change the documents support and comment on it, rather than asking first. Your changes are written straight into the draft, not as tracked changes, so the comments are how the lawyer sees what to check. Ask a question only if nothing at all can be filled without the answer.`;
+
+export const FILL_DIRECT_NOTE = `IN THIS DRAFT: "applied as a tracked change" above does not apply — every change is written directly into the document.`;
+
 export const ARTIFACT_RULES = `When you produce a complete document (a draft, a memo, a note), wrap ONLY the document itself in an artifact block so it opens in its own panel:
 <artifact kind="draft|memo" title="Short document title">
 …the document in Markdown…

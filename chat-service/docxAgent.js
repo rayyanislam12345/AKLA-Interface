@@ -388,8 +388,14 @@ function liveRuns(items, insideIns = false, out = []) {
   return out;
 }
 
+// Characters XML 1.0 does not allow at all (escaping cannot help): they would
+// pass the parser here and make Word refuse the file as unreadable.
+const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g;
+/** `text` without the characters XML 1.0 forbids; the rest untouched. */
+export const stripXmlIllegal = (text) => String(text ?? "").replace(XML_ILLEGAL, "");
+
 const pieces = (text, tag) =>
-  text
+  stripXmlIllegal(text)
     .split(/(\t|\n)/)
     .filter((part) => part !== "")
     .map((part) => (part === "\t" ? "<w:tab/>" : part === "\n" ? "<w:br/>" : `<${tag} xml:space="preserve">${escapeXml(part)}</${tag}>`))
@@ -660,7 +666,11 @@ function idFloorOf(entries, idFloor) {
   return floor;
 }
 
-export async function applyDocxOps(bytes, ops, byRef, { idFloor } = {}) {
+// `signal`: an AbortSignal a caller with a deadline passes (the connector's
+// fill_standard_to_project); the work stops at the next part and at the next
+// fallback operation once it is aborted, throwing the signal's reason. Hub
+// callers pass none.
+export async function applyDocxOps(bytes, ops, byRef, { idFloor, signal } = {}) {
   const entries = readZip(bytes); const original = xmlParts(entries);
   const groups = new Map(); const results = []; let applied = 0;
   for (let i = 0; i < ops.length; i++) {
@@ -676,8 +686,9 @@ export async function applyDocxOps(bytes, ops, byRef, { idFloor } = {}) {
   // One counter for the whole call, carried from part to part.
   let maxId = idFloorOf(entries, idFloor);
   for (const [part, work] of groups) {
+    signal?.throwIfAborted();
     const refs = new Map(work.map(w => [w.ref.localIndex, w.ref]));
-    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs, { idFloor: maxId });
+    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs, { idFloor: maxId, signal });
     maxId = Math.max(maxId, output.maxId);
     entries[part] = readZip(output.bytes)['word/document.xml'];
     if (part === 'word/document.xml') writeComments(entries, output.comments ?? []);
@@ -699,7 +710,7 @@ export async function applyDocxOps(bytes, ops, byRef, { idFloor } = {}) {
  * back — applied, or why not — so the lawyer is told about the ones that
  * could not be made rather than left to find the gap themselves.
  */
-async function applyPartOps(bytes, ops, byRef, { idFloor } = {}) {
+async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
   const results = [];
   const parsed = [];
   ops.forEach((raw, i) => {
@@ -847,6 +858,9 @@ async function applyPartOps(bytes, ops, byRef, { idFloor } = {}) {
   // alone, which may already be recorded for another part or for a change
   // decided away, so each new id is renumbered from this call's counter.
   for (const { op, lib } of fallback) {
+    // Each pass re-opens the whole package: a caller whose deadline has
+    // passed gets its abort here rather than minutes later.
+    signal?.throwIfAborted();
     const before = revisionIdsIn(out);
     const res = await openDocx(out).applyOperations([lib], {
       author: DOCX_AUTHOR, atomic: false, validate: true, strictTargets: true, continueOnError: true,
