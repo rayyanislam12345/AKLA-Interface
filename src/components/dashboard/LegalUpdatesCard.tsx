@@ -4,6 +4,7 @@ import {
   useLatestLawDigest,
   useRecentLawUpdates,
   usePendingLawCandidates,
+  useWatchedPages,
   lawUpdateTypeLabel,
   incorporationLabel,
   type LawUpdate,
@@ -109,6 +110,29 @@ function PendingRow({ candidate }: { candidate: LawMonitorCandidate }) {
   );
 }
 
+// One line on what is being watched, so a source that has gone quiet or
+// dead is visible rather than silently missing from the briefing.
+function WatchFooter() {
+  const { data: pages } = useWatchedPages();
+  if (!pages || pages.length === 0) return null;
+  const listings = pages.filter((p) => p.kind === "listing" && p.enabled);
+  const sources = pages.filter((p) => p.kind === "library_source" && p.enabled);
+  const failing = pages.filter((p) => p.enabled && p.consecutive_failures >= 3);
+  const lastChange = pages
+    .map((p) => p.last_changed_at)
+    .filter((d): d is string => !!d)
+    .sort()
+    .at(-1);
+  return (
+    <p className="text-[11px] text-muted-foreground border-t pt-2">
+      Watching {listings.length} official notice-board page{listings.length === 1 ? "" : "s"}
+      {sources.length > 0 ? ` and the source pages of ${sources.length} library Act${sources.length === 1 ? "" : "s"}` : ""}
+      {lastChange ? ` · last change seen ${new Date(lastChange).toLocaleDateString("en-GB")}` : ""}
+      {failing.length > 0 ? ` · ${failing.length} page${failing.length === 1 ? " has" : "s have"} not answered for days: ${failing.map((p) => p.name).join(", ")}` : ""}
+    </p>
+  );
+}
+
 export default function LegalUpdatesCard() {
   const { data: digest, isLoading: digestLoading } = useLatestLawDigest();
   const { data: updates } = useRecentLawUpdates(8);
@@ -166,6 +190,8 @@ export default function LegalUpdatesCard() {
             ))}
           </div>
         )}
+
+        <WatchFooter />
       </CardContent>
     </Card>
   );

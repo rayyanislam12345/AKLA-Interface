@@ -137,6 +137,37 @@ export function usePendingLawCandidates(limit = 8) {
   });
 }
 
+// An official listing page the monitor reads every morning, or an Act's own
+// official source page it re-checks on rotation.
+export interface LawWatchPage {
+  url: string;
+  name: string;
+  kind: "listing" | "library_source";
+  act_name: string | null;
+  entry_count: number;
+  last_checked_at: string | null;
+  last_changed_at: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
+  enabled: boolean;
+}
+
+export function useWatchedPages() {
+  return useQuery({
+    queryKey: ["law-watch-pages"],
+    queryFn: async (): Promise<LawWatchPage[]> => {
+      const { data, error } = await supabase
+        .from("law_watch_pages")
+        .select(
+          "url, name, kind, act_name, entry_count, last_checked_at, last_changed_at, last_error, consecutive_failures, enabled",
+        )
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as LawWatchPage[];
+    },
+  });
+}
+
 // Developments affecting the Acts this matter actually depends on, minus the
 // ones someone here has already dealt with. Excluded on purpose:
 //  - bills and drafts: a proposal hasn't changed anything yet, so flagging a

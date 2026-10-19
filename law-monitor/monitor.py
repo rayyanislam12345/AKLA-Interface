@@ -435,19 +435,33 @@ def extract_text(body: bytes, content_type: str, url: str) -> tuple[str | None, 
     return text, None
 
 
+# Hosts that did not answer this VM directly. Once a host has timed out it
+# goes straight to the relay for the rest of the run instead of costing
+# another 30-second wait per document. sources.json can pre-seed the list.
+RELAY_FIRST_HOSTS: set[str] = set()
+
+
 def fetch_bytes(url: str, config: dict) -> tuple[bytes | None, str, str, str | None]:
     """Download from an approved domain: directly first, then — for official
     sites only — through the relay. (body, content_type, final_url, error)."""
     tier = domain_tier(url, config)
+    host = (urlparse(url).hostname or "").lower()
     if tier is None:
-        return None, "", url, f"domain not allowlisted ({(urlparse(url).hostname or 'no host').lower()})"
+        return None, "", url, f"domain not allowlisted ({host or 'no host'})"
+    if not RELAY_FIRST_HOSTS:
+        RELAY_FIRST_HOSTS.update(h.lower() for h in config.get("relay_first_hosts", []))
     domains = config["allowed_domains"] if tier == "verified" else config.get("news_domains", [])
-    body, ctype, final, err = _download_direct(url, domains, timeout=30 if tier == "verified" else 45)
-    if body is not None or tier != "verified" or not relay_available():
-        return body, ctype, final, err
+    use_relay = tier == "verified" and relay_available()
+    err = None
+    if not (use_relay and _host_in(host, sorted(RELAY_FIRST_HOSTS))):
+        body, ctype, final, err = _download_direct(url, domains, timeout=30 if tier == "verified" else 45)
+        if body is not None or not use_relay:
+            return body, ctype, final, err
+        if err and err.startswith("fetch failed") and "HTTPError" not in err:
+            RELAY_FIRST_HOSTS.add(host)
     body, ctype, final, rerr = _download_relay(url)
     if body is None:
-        return None, "", url, f"{err}; {rerr}"
+        return None, "", url, f"{err}; {rerr}" if err else rerr
     if domain_tier(final, config) != "verified":
         return None, "", final, "redirect source is not an approved HTTPS site"
     return body, ctype, final, None
@@ -527,8 +541,16 @@ def dedupe_key_for(finding: dict, source_name: str) -> str:
     ref = normalise(finding.get("authority_ref") or "")
     if ref:
         return f"{normalise(source_name)}:{ref}"
-    url = (finding.get("document_url") or finding.get("source_url") or "").split("?")[0].rstrip("/").lower()
-    return f"url:{url}"
+    # The document's own address identifies it. A listing page's address does
+    # not — every unlinked entry on a bills page shares it — so an entry with
+    # no document of its own is keyed on its title.
+    url = (finding.get("document_url") or "").split("?")[0].rstrip("/").lower()
+    if url:
+        return f"url:{url}"
+    title = normalise(finding.get("title") or "")[:120]
+    if title:
+        return f"title:{title}"
+    return f"url:{(finding.get('source_url') or '').split('?')[0].rstrip('/').lower()}"
 
 
 # ------------------------------------------------------------- the library
@@ -659,6 +681,24 @@ class Hub:
     def existing_update(self, dedupe_key: str) -> dict | None:
         rows = self.get("law_updates", {"select": "*", "dedupe_key": f"eq.{dedupe_key}", "limit": "1"})
         return rows[0] if rows else None
+
+    def statute_sources(self) -> list[dict]:
+        resp = _request_with_retry(
+            "POST", f"{self.client.base_url}/rest/v1/rpc/statute_sources", headers=self.headers, json={}, timeout=60
+        )
+        rows = resp.json()
+        # statute_sources() carries no pdf_url; pick it up from the first chunk
+        # of each Act so a PDF source can be re-fetched as the document.
+        return rows
+
+    # -- watched pages ------------------------------------------------------
+
+    def watch_page(self, url: str) -> dict | None:
+        rows = self.get("law_watch_pages", {"select": "*", "url": f"eq.{url}", "limit": "1"})
+        return rows[0] if rows else None
+
+    def upsert_watch_page(self, row: dict) -> None:
+        self.upsert("law_watch_pages", row, on_conflict="url")
 
     # -- the candidate memory ---------------------------------------------
 
@@ -1004,9 +1044,288 @@ def select_acts(hub: Hub, config: dict, cursor: str | None) -> list[str]:
     return attached + rotation
 
 
+# ------------------------------------------------------------ watched pages
+#
+# Web search lags the authorities by days and surfaces press releases. The
+# places law actually appears — the bills pages of the assemblies, Pakistan
+# Code's recently-added list, PPRA's rules page — are ordinary listing
+# pages. Each is read every morning and compared with the previous
+# snapshot; new entries become candidates and go through the same
+# verification as everything else. Classification is by rule, not by model:
+# Pakistani titles say what they are ("The X (Amendment) Bill, 2026"), and a
+# rule still works on a morning the API refuses every call.
+
+LAWISH = re.compile(
+    r"\b(bill|act|ordinance|rules?|regulations?|s\.?\s?r\.?\s?o\.?|notification|draft|policy|amendment|circular|order)\b",
+    re.I,
+)
+SPECIFIC = re.compile(r"(19|20)\d{2}|\(amendment\)|\bs\.?\s?r\.?\s?o\.?\b|\bno\.?\s*\d", re.I)
+SRO_REF = re.compile(r"S\.?\s?R\.?\s?O\.?\s*(?:No\.?)?\s*(\d+)\s*\(?\s*([IVX1]+)\s*\)?\s*/\s*((?:19|20)\d{2})", re.I)
+MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
+DATE_PATTERNS = (
+    (re.compile(rf"\b((?:{MONTHS})) (\d{{1,2}}), ((?:19|20)\d{{2}})\b", re.I), ("month", "day", "year")),
+    (re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)? ((?:{MONTHS})),? ((?:19|20)\d{{2}})\b", re.I), ("day", "month", "year")),
+    (re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.]((?:19|20)\d{2})\b"), ("day", "monthnum", "year")),
+    (re.compile(r"\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b"), ("year", "monthnum", "day")),
+)
+MAX_NEW_PER_PAGE = 40
+MAX_REMEMBERED_ENTRIES = 1500
+
+
+def load_watchlist() -> list[dict]:
+    path = SCRIPT_DIR / "watchlist.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return [p for p in json.load(f).get("pages", []) if p.get("enabled", True)]
+
+
+def entry_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())[:160]
+
+
+def extract_entries(page_html: str, base_url: str) -> list[dict]:
+    """The law-looking lines on a listing page: anchors first (they carry
+    the document address), then table rows and list items for pages that
+    print titles without links. A title has to name something specific — a
+    year, an amendment, an SRO number — so navigation ('Bills', 'Rules of
+    Procedure') does not count as an entry."""
+    body = re.sub(r"<(script|style|noscript)[\s\S]*?</\1>", " ", page_html, flags=re.I)
+    out: list[dict] = []
+    seen: list[str] = []
+
+    def add(raw: str, href: str | None) -> None:
+        text = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw))).strip(" -–—|·:")
+        if not (12 <= len(text) <= 250):
+            return
+        if not LAWISH.search(text) or not SPECIFIC.search(text):
+            return
+        key = entry_key(text)
+        if any(key == s or key.startswith(s) for s in seen):
+            return
+        seen.append(key)
+        if href:
+            href = html.unescape(href.strip())
+            href = None if href.startswith(("#", "javascript:", "mailto:")) else urljoin(base_url, href)
+        out.append({"text": text, "href": href})
+
+    for href, inner in re.findall(r'<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)</a>', body, re.I):
+        add(inner, href)
+    for block in re.findall(r"<(?:tr|li|h[1-6]|p)\b[^>]*>([\s\S]*?)</(?:tr|li|h[1-6]|p)>", body, re.I):
+        m = re.search(r'href="([^"]*)"', block)
+        add(block, m.group(1) if m else None)
+    return out
+
+
+def find_date(text: str) -> str | None:
+    months = MONTHS.split("|")
+    for pattern, order in DATE_PATTERNS:
+        m = pattern.search(text)
+        if not m:
+            continue
+        parts = dict(zip(order, m.groups()))
+        try:
+            year = int(parts["year"])
+            month = months.index(parts["month"].lower()) + 1 if "month" in parts else int(parts["monthnum"])
+            day = int(parts["day"])
+            return date(year, month, day).isoformat()
+        except (ValueError, KeyError):
+            continue
+    m = re.search(r"\b((?:19|20)\d{2})\b", text)
+    return m.group(1) if m else None
+
+
+def classify_entry(text: str, default_type: str) -> tuple[str, str | None]:
+    """(update_type, authority_ref) from a title alone."""
+    ref = None
+    m = SRO_REF.search(text)
+    if m:
+        ref = f"S.R.O. {m.group(1)}({m.group(2).upper()})/{m.group(3)}"
+    if re.search(r"\bbill\b", text, re.I):
+        return "bill", ref
+    if re.search(r"\bdraft\b|consultation", text, re.I):
+        return "draft", ref
+    if re.search(r"\(amendment\)|\bamendment\b|\bamending\b|further to amend", text, re.I) and re.search(r"\b(act|ordinance)\b", text, re.I):
+        return "amending_instrument", ref
+    if re.search(r"\b(act|ordinance)\b,?\s*(?:no\.?\s*[ivxl0-9]+\s*of\s*)?(19|20)\d{2}", text, re.I):
+        return "new_act", ref
+    if ref or re.search(r"\bs\.?\s?r\.?\s?o\.?\b|notification|circular", text, re.I):
+        return "notice", ref
+    if re.search(r"\brules?\b|\bregulations?\b|\bpolicy\b", text, re.I):
+        return "notice", ref
+    return default_type, ref
+
+
+def act_base(name: str) -> str:
+    base = re.sub(r"\((?:amendment|repeal|second amendment|third amendment)\)", " ", name, flags=re.I)
+    base = re.sub(r"\b(the|bill|act|ordinance|no\.?\s*[ivxl0-9]+\s*of|\d{4})\b", " ", base, flags=re.I)
+    # British and American spellings are both in use on official sites
+    # ("Re-organisation" / "Re-organization").
+    base = re.sub(r"isation|ising|ised", lambda m: m.group(0).replace("is", "iz"), base, flags=re.I)
+    return re.sub(r"[^a-z0-9]+", "", base.lower())
+
+
+def match_library_act(text: str, library_acts: list[str]) -> str | None:
+    """Which library Act (if any) a title is about. 'The National Highway
+    Authority (Amendment) Bill, 2026' -> 'National Highway Authority Act,
+    1991'. 'further to amend the Companies Act, 2017' is also recognised."""
+    cited = re.search(r"(?:further )?to amend the ([^,.;]+?(?:act|ordinance),?\s*(?:19|20)\d{2})", text, re.I)
+    bases = [act_base(text)]
+    if cited:
+        bases.insert(0, act_base(cited.group(1)))
+    for base in bases:
+        if len(base) < 8:
+            continue
+        for act in library_acts:
+            ab = act_base(act)
+            if base == ab or (len(base) >= 12 and (base in ab or ab in base)):
+                return act
+    return None
+
+
+def watch_pages(hub: Hub, config: dict, counts: dict, library_acts: list[str]) -> list[dict]:
+    """Diff every watched listing page against its snapshot. Returns the new
+    entries as candidates; records a baseline for pages seen the first time."""
+    out: list[dict] = []
+    window = 366 * int(config.get("library_lookback_years", 2))
+    for page in load_watchlist():
+        url, name = page["url"], page["name"]
+        if domain_tier(url, config) != "verified":
+            log(f"watch page: {name} — domain not in allowed_domains, skipped")
+            continue
+        log(f"watch page: {name}")
+        previous = hub.watch_page(url)
+        now = datetime.now(timezone.utc).isoformat()
+        body, ctype, final, err = fetch_bytes(url, config)
+        if body is None:
+            failures = (previous or {}).get("consecutive_failures", 0) + 1
+            log(f"  could not read page ({err}); failure {failures} in a row")
+            hub.upsert_watch_page({
+                **(previous or {"url": url, "name": name, "kind": "listing", "entries": [], "entry_count": 0}),
+                "name": name, "last_checked_at": now, "last_error": (err or "")[:400], "consecutive_failures": failures,
+            })
+            continue
+        entries = extract_entries(body.decode("utf-8", "replace"), final)
+        counts["pages"] += 1
+        if previous is None:
+            log(f"  baseline recorded: {len(entries)} entries (nothing reported on a first visit)")
+            hub.upsert_watch_page({
+                "url": url, "name": name, "kind": "listing", "entries": entries[:MAX_REMEMBERED_ENTRIES],
+                "entry_count": len(entries), "last_checked_at": now, "last_changed_at": now,
+                "last_error": None, "consecutive_failures": 0,
+            })
+            continue
+        old_entries = previous.get("entries") or []
+        old_keys = {entry_key(e.get("text", "")) for e in old_entries}
+        new = [e for e in entries if entry_key(e["text"]) not in old_keys]
+        # Remember the union: a paginated or rotating page must not re-report
+        # an entry that merely scrolled off and came back.
+        merged = (new + old_entries)[:MAX_REMEMBERED_ENTRIES]
+        hub.upsert_watch_page({
+            "url": url, "name": name, "kind": "listing", "entries": merged, "entry_count": len(entries),
+            "last_checked_at": now, "last_changed_at": now if new else previous.get("last_changed_at"),
+            "last_error": None, "consecutive_failures": 0,
+        })
+        if not new:
+            log("  no new entries")
+            continue
+        counts["pages_changed"] += 1
+        log(f"  {len(new)} new entr{'y' if len(new) == 1 else 'ies'}")
+        if len(new) > MAX_NEW_PER_PAGE:
+            log(f"  (only the first {MAX_NEW_PER_PAGE} are taken this morning; the rest are remembered)")
+        for e in new[:MAX_NEW_PER_PAGE]:
+            update_type, ref = classify_entry(e["text"], page.get("default_type", "notice"))
+            act = match_library_act(e["text"], library_acts)
+            finding = {
+                "title": e["text"],
+                "authority_ref": ref,
+                "update_type": update_type,
+                "act_name": act,
+                "summary": f"New entry on {name}" + (f" ({page['jurisdiction']})" if page.get("jurisdiction") else "") + ".",
+                "source_url": url,
+                "document_url": e.get("href"),
+                "published_date": find_date(e["text"]),
+                "confidence": "medium",
+            }
+            out.append({"finding": finding, "source_name": name, "found_by": "watch_page", "max_age": window})
+    return out
+
+
+def text_fingerprint(text: str) -> str:
+    """Hash of the text with digits removed, so visitor counters and dates
+    do not read as amendments. (A change that only alters numbers in an
+    Act is therefore not seen by this route; the amendment sweep still is.)"""
+    return hashlib.sha256(re.sub(r"\d+", "", normalise(text)).encode()).hexdigest()
+
+
+def recheck_library_sources(hub: Hub, config: dict, counts: dict, acts: list[str]) -> list[dict]:
+    """For each Act in today's rotation whose stored source is an official
+    page, re-fetch it and compare with the last snapshot. A change becomes a
+    consolidated-replacement candidate and goes through the existing
+    safeguards (length within 40%, identity check, archive before delete)."""
+    out: list[dict] = []
+    if not acts:
+        return out
+    sources = {r["act_name"]: r for r in hub.statute_sources() if r.get("act_name")}
+    for act in acts:
+        src = sources.get(act) or {}
+        url = src.get("source_url")
+        if not url or domain_tier(url, config) != "verified":
+            continue
+        log(f"library source: {act}")
+        previous = hub.watch_page(url)
+        now = datetime.now(timezone.utc).isoformat()
+        body, ctype, final, err = fetch_bytes(url, config)
+        text = None
+        if body is not None:
+            text, err = extract_text(body, ctype, final)
+        if text is None:
+            failures = (previous or {}).get("consecutive_failures", 0) + 1
+            log(f"  could not read source ({err}); failure {failures} in a row")
+            hub.upsert_watch_page({
+                **(previous or {"url": url, "name": act, "kind": "library_source", "act_name": act}),
+                "last_checked_at": now, "last_error": (err or "")[:400], "consecutive_failures": failures,
+            })
+            continue
+        counts["pages"] += 1
+        fp = text_fingerprint(text)
+        row = {
+            "url": url, "name": act, "kind": "library_source", "act_name": act, "content_hash": fp,
+            "content_length": len(text), "last_checked_at": now, "last_error": None, "consecutive_failures": 0,
+        }
+        if previous is None:
+            log(f"  baseline recorded ({len(text)} chars)")
+            hub.upsert_watch_page({**row, "last_changed_at": now})
+            continue
+        if previous.get("content_hash") == fp:
+            log("  unchanged")
+            hub.upsert_watch_page({**row, "last_changed_at": previous.get("last_changed_at")})
+            continue
+        counts["pages_changed"] += 1
+        log(f"  CHANGED: {previous.get('content_length')} -> {len(text)} chars")
+        hub.upsert_watch_page({**row, "last_changed_at": now})
+        out.append({
+            "finding": {
+                "title": f"{act} — official text changed at its source",
+                "authority_ref": None,
+                "update_type": "consolidated_replacement",
+                "act_name": act,
+                "summary": f"The official page the library copy was taken from now reads differently ({previous.get('content_length')} -> {len(text)} characters).",
+                "source_url": url,
+                "document_url": src.get("pdf_url") if domain_tier(src.get("pdf_url") or "", config) == "verified" else url,
+                "published_date": None,
+                "confidence": "medium",
+            },
+            "source_name": config["library_source_name"],
+            "found_by": "library_source",
+            "max_age": 366 * int(config.get("library_lookback_years", 2)),
+        })
+    return out
+
+
 def gather_search_candidates(hub: Hub, config: dict, args, counts: dict) -> list[dict]:
     out: list[dict] = []
-    if args.acts_only:
+    if args.acts_only or args.watch_only:
         return out
     for source in config["sources"]:
         log(f"source sweep: {source['name']}")
@@ -1020,13 +1339,14 @@ def gather_search_candidates(hub: Hub, config: dict, args, counts: dict) -> list
     return out
 
 
-def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tuple[list[dict], str | None]:
+def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tuple[list[dict], str | None, list[str]]:
     """The rotating 'has this Act changed?' sweep. Its window is the library
     window (years, not days): an amendment the library never picked up is
-    news to the library however old it is."""
+    news to the library however old it is. Also returns today's Acts so
+    their official sources can be re-checked."""
     out: list[dict] = []
-    if args.sources_only:
-        return out, None
+    if args.sources_only or args.watch_only:
+        return out, None, []
     previous = hub.get(
         "law_monitor_runs",
         {"select": "library_cursor", "status": "eq.ok", "order": "started_at.desc", "limit": "1"},
@@ -1034,7 +1354,8 @@ def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tup
     cursor = previous[0]["library_cursor"] if previous else None
     years = int(config.get("library_lookback_years", 2))
     last_act: str | None = None
-    for act in select_acts(hub, config, cursor):
+    acts = select_acts(hub, config, cursor)
+    for act in acts:
         log(f"library sweep: {act}")
         found = sweep_act(act, hub.known_for_act(act), years)
         counts["acts"] += 1
@@ -1045,7 +1366,7 @@ def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tup
             {"finding": f, "source_name": config["library_source_name"], "found_by": "library_sweep", "max_age": years * 366}
             for f in found
         ]
-    return out, last_act
+    return out, last_act, acts
 
 
 def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict]:
@@ -1184,6 +1505,8 @@ def finish_run(hub: Hub, run_id: str | None, status: str, counts: dict, *, last_
         "rejected": counts["rejected"] + counts["pending"],
         "reported": counts["reported"],
         "retried": counts["retried"],
+        "pages_checked": counts["pages"],
+        "pages_changed": counts["pages_changed"],
     }
     if status == "ok":
         patch["library_cursor"] = last_act
@@ -1198,6 +1521,8 @@ def main() -> int:
     parser.add_argument("--sources-only", action="store_true", help="skip the rotating library sweep")
     parser.add_argument("--acts-only", action="store_true", help="skip the source sweep")
     parser.add_argument("--no-retry", action="store_true", help="skip re-fetching candidates that failed to download before")
+    parser.add_argument("--watch-only", action="store_true", help="only read the watched listing pages (no AI searches)")
+    parser.add_argument("--no-watch", action="store_true", help="skip the watched listing pages and library source re-check")
     args = parser.parse_args()
 
     config = load_config()
@@ -1219,7 +1544,7 @@ def main() -> int:
     run_id = run["id"] if run else None
     log(f"run {run_id or '(dry run)'} starting" + ("" if relay_available() else " — download relay not configured, unreachable sites will be skipped"))
 
-    counts = {k: 0 for k in ("found", "written", "reported", "rejected", "pending", "known", "retried", "sources", "acts")}
+    counts = {k: 0 for k in ("found", "written", "reported", "rejected", "pending", "known", "retried", "sources", "acts", "pages", "pages_changed")}
     stored: list[dict] = []
     last_act: str | None = None
 
@@ -1227,9 +1552,14 @@ def main() -> int:
         candidates: list[dict] = []
         if not args.no_retry:
             candidates += gather_pending_candidates(hub, config, counts)
+        library_acts = sorted(hub.library_acts())
+        if not args.no_watch and not args.acts_only:
+            candidates += watch_pages(hub, config, counts, library_acts)
         candidates += gather_search_candidates(hub, config, args, counts)
-        library, last_act = gather_library_candidates(hub, config, args, counts)
+        library, last_act, todays_acts = gather_library_candidates(hub, config, args, counts)
         candidates += library
+        if not args.no_watch:
+            candidates += recheck_library_sources(hub, config, counts, todays_acts)
 
         counts["found"] = len(candidates)
         log(f"{len(candidates)} candidate(s) to verify")
@@ -1246,7 +1576,10 @@ def main() -> int:
         if blackout and not stored:
             raise RuntimeError(blackout)
 
-        write_digest(hub, run_id, stored)
+        # A pages-only run is a supplement, not the morning briefing: it must
+        # not overwrite the day's digest with "nothing today".
+        if not args.watch_only or stored:
+            write_digest(hub, run_id, stored)
         finish_run(hub, run_id, "ok", counts, last_act=last_act)
         log(
             f"done: {counts['written']} verified, {counts['reported']} reported, {counts['pending']} pending retry, "

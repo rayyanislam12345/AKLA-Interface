@@ -1261,6 +1261,8 @@ export type Database = {
           found: number
           id: string
           library_cursor: string | null
+          pages_changed: number
+          pages_checked: number
           rejected: number
           reported: number
           retried: number
@@ -1276,6 +1278,8 @@ export type Database = {
           found?: number
           id?: string
           library_cursor?: string | null
+          pages_changed?: number
+          pages_checked?: number
           rejected?: number
           reported?: number
           retried?: number
@@ -1291,6 +1295,8 @@ export type Database = {
           found?: number
           id?: string
           library_cursor?: string | null
+          pages_changed?: number
+          pages_checked?: number
           rejected?: number
           reported?: number
           retried?: number
@@ -1415,6 +1421,57 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      law_watch_pages: {
+        Row: {
+          act_name: string | null
+          consecutive_failures: number
+          content_hash: string | null
+          content_length: number | null
+          enabled: boolean
+          entries: Json
+          entry_count: number
+          first_seen_at: string
+          kind: string
+          last_changed_at: string | null
+          last_checked_at: string | null
+          last_error: string | null
+          name: string
+          url: string
+        }
+        Insert: {
+          act_name?: string | null
+          consecutive_failures?: number
+          content_hash?: string | null
+          content_length?: number | null
+          enabled?: boolean
+          entries?: Json
+          entry_count?: number
+          first_seen_at?: string
+          kind: string
+          last_changed_at?: string | null
+          last_checked_at?: string | null
+          last_error?: string | null
+          name: string
+          url: string
+        }
+        Update: {
+          act_name?: string | null
+          consecutive_failures?: number
+          content_hash?: string | null
+          content_length?: number | null
+          enabled?: boolean
+          entries?: Json
+          entry_count?: number
+          first_seen_at?: string
+          kind?: string
+          last_changed_at?: string | null
+          last_checked_at?: string | null
+          last_error?: string | null
+          name?: string
+          url?: string
+        }
+        Relationships: []
       }
       live_activity: {
         Row: {

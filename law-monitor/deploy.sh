@@ -25,6 +25,7 @@ ssh -i "$KEY" "$HOST" 'rm -rf /tmp/law-monitor-deploy && mkdir -p /tmp/law-monit
 scp -i "$KEY" \
   "$HERE/monitor.py" \
   "$HERE/sources.json" \
+  "$HERE/watchlist.json" \
   "$HERE/requirements.txt" \
   "$HERE/law-monitor.service" \
   "$HERE/law-monitor.timer" \
@@ -33,7 +34,7 @@ scp -i "$KEY" \
 
 ssh -i "$KEY" "$HOST" 'set -euo pipefail
 sudo mkdir -p /opt/law-monitor
-sudo cp /tmp/law-monitor-deploy/{monitor.py,sources.json,requirements.txt,supabase_io.py} /opt/law-monitor/
+sudo cp /tmp/law-monitor-deploy/{monitor.py,sources.json,watchlist.json,requirements.txt,supabase_io.py} /opt/law-monitor/
 sudo cp /tmp/law-monitor-deploy/law-monitor.service /etc/systemd/system/
 sudo cp /tmp/law-monitor-deploy/law-monitor.timer /etc/systemd/system/
 sudo chown -R opc:opc /opt/law-monitor
