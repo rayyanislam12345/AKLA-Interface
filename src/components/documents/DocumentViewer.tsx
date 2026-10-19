@@ -197,7 +197,8 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
             <Button size="sm" onClick={() => onDownload(version)}><Download className="h-4 w-4 mr-1.5" />Download</Button>
           </div>
         )}
-        {kind === "docx" && <div ref={docxRef} className="min-h-full [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-2 sm:[&_.docx-wrapper]:p-6" />}
+        {/* docx-preview writes the Word page margins (an inch each side) as inline padding on each section; below the sm breakpoint (a phone, or the companion's side panel) that would leave about 150px for the text, so the margins are overridden there. */}
+        {kind === "docx" && <div ref={docxRef} className="min-h-full [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-2 sm:[&_.docx-wrapper]:p-6 max-sm:[&_section.docx]:!px-3 max-sm:[&_section.docx]:!py-4" />}
         {kind === "pdf" && state.url && (
           <iframe src={state.url} title={doc.title} className="h-full w-full border-0 bg-background" />
         )}

@@ -98,20 +98,24 @@ afterwards (`/auth?next=<route>&embed=1`, written by `ProtectedRoute`).
 Being inside a frame is only a hint; the query parameter is the switch.
 Code: `src/lib/embedMode.ts`, `src/ai/layout/AiLayout.tsx`.
 
-**Framing.** `vercel.json` sets no `X-Frame-Options` and no
-`Content-Security-Policy: frame-ancestors` today, so any page may frame the
-Hub; nothing in the app navigates `window.top` or breaks out of a frame.
-To allow only the companion once it has a fixed extension id, add to
-`vercel.json`:
-
-```json
-"headers": [{ "source": "/(.*)", "headers": [{ "key": "Content-Security-Policy", "value": "frame-ancestors 'self' chrome-extension://<the companion's id>" }] }]
-```
-
+**Framing.** Only the Hub itself and the companion may frame the Hub.
+`vercel.json` sends `Content-Security-Policy: frame-ancestors 'self'
+chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp` on every path (next to
+the catch-all rewrite). That id is fixed by the `key` field in
+`hub-companion/manifest.json`, so every unpacked install and every machine
+gets the same one; nothing else can show the Hub's sign-in page inside a
+frame of its own. If the Chrome Web Store ever assigns a different id (the
+`scripts/package.sh --no-key` route), the header must name that id too, or
+the panel shows Chrome's grey "refused to connect" page instead of the Hub
+(the companion's README describes the symptom). Check after a deploy with
+`curl -I https://akla-interface.vercel.app/ai` that the header is there.
 (`vercel.json` is JSON, so this note lives here and not in the file.)
 Chrome partitions a framed site's storage by the framing site, so the
 panel's sign-in is separate from the lawyer's own Hub tab: once in the
-panel, once in the tab, each kept until it expires.
+panel, once in the tab, each kept until it expires. If the browser blocks
+that storage altogether (third-party cookies off), the Hub keeps the
+session in memory for as long as the panel page lives and asks for the
+password again next time (`src/integrations/supabase/client.ts`).
 
 ## What it cannot do (this version)
 

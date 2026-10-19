@@ -28,9 +28,20 @@ function initialStep(): AuthStep {
   return 'login';
 }
 
+// Where to go once signed in: the page that sent us here (?next=, written
+// by ProtectedRoute), when it is one of this site's own paths; the
+// dashboard otherwise. A full address, or a protocol-relative one, is never
+// followed, so a crafted link cannot send someone elsewhere after signing in.
+function afterSignIn(): string {
+  const next = new URLSearchParams(window.location.search).get('next');
+  if (next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')) return next;
+  return '/dashboard';
+}
+
 export default function Auth() {
   const { user, signIn, signUp } = useAuth();
   const navigate = useNavigate();
+  const [destination] = useState(afterSignIn);
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +96,13 @@ export default function Auth() {
           }
         }
         
-        // No MFA or already verified, proceed to home
-        navigate('/dashboard', { replace: true });
+        // No MFA or already verified, proceed to where they were going
+        navigate(destination, { replace: true });
       }
     };
 
     checkAuthAndMFA();
-  }, [user, authStep, navigate]);
+  }, [user, authStep, navigate, destination]);
 
   const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -128,9 +139,9 @@ export default function Auth() {
         title: "Welcome back!",
         description: "You have successfully signed in."
       });
-      navigate('/dashboard', { replace: true });
+      navigate(destination, { replace: true });
     }
-    
+
     setIsLoading(false);
   };
 
@@ -170,7 +181,7 @@ export default function Auth() {
       title: "Welcome back!",
       description: "You have successfully signed in."
     });
-    navigate('/dashboard', { replace: true });
+    navigate(destination, { replace: true });
   };
 
   const handleMFACancel = async () => {
@@ -185,7 +196,7 @@ export default function Auth() {
       title: "MFA set up successfully!",
       description: "You can now sign in."
     });
-    navigate('/dashboard', { replace: true });
+    navigate(destination, { replace: true });
   };
 
   const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {

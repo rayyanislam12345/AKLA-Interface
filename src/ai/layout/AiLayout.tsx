@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
-import { Menu, SquarePen } from "lucide-react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { ExternalLink, Menu, SquarePen } from "lucide-react";
 import "@fontsource/source-serif-4/400.css";
 import "@fontsource/source-serif-4/400-italic.css";
 import "@fontsource/source-serif-4/600.css";
@@ -9,6 +9,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { AiWorkspaceProvider, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import AiSidebar from "@/ai/layout/AiSidebar";
 import { enterDarkOnlyMode, isDarkOnlyAiTheme } from "@/ai/theme";
+import { EMBED_PARAM, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,9 @@ import { cn } from "@/lib/utils";
 // The viewport is told to fill an iPhone's screen edge to edge only while
 // the workspace is open (its chat pads for the home indicator); the site's
 // own pages keep the viewport they were built for.
+// Opened with ?embed=1 (the companion's side panel beside a claude.ai chat,
+// see src/lib/embedMode.ts) there is no sidebar at all: a one-line header
+// names the place and links to the same page in the ordinary Hub.
 export default function AiLayout() {
   useEffect(() => {
     document.body.classList.add("ai-app");
@@ -42,8 +46,18 @@ export default function AiLayout() {
 function AiShell() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const location = useLocation();
+  const embed = useEmbedMode();
   const { mobileSidebarOpen, setMobileSidebarOpen, pageTitle, sidebarCollapsed, aiTheme } = useAiWorkspace();
   const { theme, setTheme } = useTheme();
+  // ?embed=0 has done its work (the mode is off): take it out of the address.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get(EMBED_PARAM) !== "0") return;
+    params.delete(EMBED_PARAM);
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash }, { replace: true });
+  }, [location.pathname, location.search, location.hash, navigate]);
   // Mirrored on <body> before paint so portals (menus, dialogs, sheets)
   // are in the same theme as the page.
   useLayoutEffect(() => {
@@ -60,6 +74,29 @@ function AiShell() {
   useEffect(() => {
     if (isDarkOnlyAiTheme(aiTheme)) enterDarkOnlyMode(theme, setTheme);
   }, [aiTheme, theme, setTheme]);
+  if (embed) {
+    return (
+      <div className="ai-app flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app" data-embed="1">
+        <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
+          <div className="min-w-0 flex-1 truncate text-sm font-medium" title={pageTitle}>{pageTitle}</div>
+          <a
+            href={withoutEmbed(location)}
+            target="_blank"
+            rel="noopener"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="The same page in the Hub, in a new tab"
+            data-testid="open-in-hub"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open in the Hub
+          </a>
+        </header>
+        <main className="relative flex min-h-0 flex-1 flex-col">
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
   return (
     <div className="ai-app flex h-dvh w-full overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app">
       {isMobile ? (

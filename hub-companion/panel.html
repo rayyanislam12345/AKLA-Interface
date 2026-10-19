@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hub</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="bar">
+    <button id="home" type="button" title="Hub home">Home</button>
+    <button id="back" type="button" title="Back">Back</button>
+    <form id="go" class="go">
+      <input id="address" type="text" placeholder="Paste a Hub link" autocomplete="off" spellcheck="false">
+      <button type="submit" title="Show this link">Go</button>
+    </form>
+    <button id="tab" type="button" title="Open this page in a new tab">Open in tab</button>
+  </header>
+  <p id="notice" class="notice" hidden></p>
+  <iframe id="frame" title="AKLA Hub" allow="clipboard-read; clipboard-write"></iframe>
+  <script src="links.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

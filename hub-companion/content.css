@@ -1,0 +1,28 @@
+/* The "Open beside" button placed after each Hub link on claude.ai. Kept
+   small and quiet so it reads as part of the line, not a banner. */
+.hub-companion-open {
+  all: unset;
+  display: inline-block;
+  box-sizing: border-box;
+  margin: 0 0 0 0.4em;
+  padding: 0 0.5em;
+  font: 600 11px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  opacity: 0.6;
+  cursor: pointer;
+  vertical-align: baseline;
+  white-space: nowrap;
+  user-select: none;
+}
+.hub-companion-open:hover,
+.hub-companion-open:focus-visible {
+  opacity: 1;
+}
+.hub-companion-open[data-hint]::after {
+  content: attr(data-hint);
+  font-weight: 400;
+  margin-left: 0.5em;
+  opacity: 0.8;
+}

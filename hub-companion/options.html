@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AKLA Hub companion settings</title>
+  <style>
+    body { margin: 0; padding: 16px; min-width: 320px; font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2430; }
+    label { display: block; margin: 0 0 12px; }
+    input[type=text] { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 5px 8px; font: inherit; border: 1px solid #d9dce3; border-radius: 6px; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    button { padding: 5px 12px; font: inherit; border: 1px solid #d9dce3; border-radius: 6px; background: #fff; cursor: pointer; }
+    #status { margin-left: 8px; color: #5b6270; }
+    p.note { color: #5b6270; margin: 16px 0 0; }
+  </style>
+</head>
+<body>
+  <form id="form">
+    <label>
+      Hub address
+      <input id="origin" type="text" placeholder="https://akla-interface.vercel.app" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="row">
+      <input id="follow" type="checkbox">
+      Follow new links: when Claude mentions a new Hub page, the panel shows it
+    </label>
+    <button type="submit">Save</button><span id="status"></span>
+  </form>
+  <p class="note">This extension reads Hub links on claude.ai and shows the Hub beside the chat. It sends nothing anywhere.</p>
+  <script src="links.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

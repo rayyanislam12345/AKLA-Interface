@@ -17,6 +17,7 @@ import { buildFirmDocxBlob, type PMNode } from "@/lib/firmDocx";
 import { buildTemplateDocxBlob } from "@/lib/templateDocx";
 import { patchArtifactKeys, saveBlobToProject } from "@/lib/documentSave";
 import { headerFacts, waitingOf, type WorkingDocData } from "@/lib/documentSaveRules";
+import { openSitePage } from "@/lib/embedMode";
 import { useWorkingDocument } from "@/hooks/useDocumentChanges";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -326,7 +327,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
 
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
         <Select value={documentTypeId ?? "none"} onValueChange={(v) => setDocumentTypeId(v === "none" ? undefined : v)} disabled={saveMode === "version" && !!(lastSave?.documentTypeId ?? initialDocTypeId)}>
-          <SelectTrigger className="h-8 w-56 text-xs" data-testid="artifact-doc-type">
+          <SelectTrigger className="h-8 w-full text-xs sm:w-56" data-testid="artifact-doc-type">
             <SelectValue placeholder="Document type (optional)" />
           </SelectTrigger>
           <SelectContent>
@@ -341,7 +342,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
             ))}
           </SelectContent>
         </Select>
-        <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? initialDocTypeId ?? undefined); }}><SelectTrigger className="h-8 w-44 text-xs" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !(artifact.data as any)?.savedMatterDocumentId && !editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
+        <Select value={saveMode} onValueChange={v => { setSaveMode(v as "new" | "version"); if (v === "version") setDocumentTypeId(lastSave?.documentTypeId ?? initialDocTypeId ?? undefined); }}><SelectTrigger className="h-8 w-full text-xs sm:w-44" aria-label="Save destination"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="new">New document</SelectItem><SelectItem value="version" disabled={!lastSave && !(artifact.data as any)?.savedMatterDocumentId && !editSource?.matterDocumentId}>New version</SelectItem></SelectContent></Select>
         <Button size="sm" className="h-8" onClick={() => handleSaveToMatter()} disabled={saving} data-testid="save-to-matter">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
           {truncated ? "Save incomplete draft" : saveMode === "version" ? "Save new version" : "Create document"}
@@ -353,7 +354,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
           </span>
         )}
         {saved && (
-          <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => navigate(`/matters/${lastSave?.matterId ?? matterId}`)}>
+          <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => openSitePage(navigate, `/matters/${lastSave?.matterId ?? matterId}`)}>
             <FileText className="mr-1 h-3.5 w-3.5" />
             Saved as v{lastSave?.versionNumber ?? (artifact.data as any)?.savedVersion} · open project
           </Button>

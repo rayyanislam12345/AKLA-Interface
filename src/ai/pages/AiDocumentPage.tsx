@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, MessageSquare, PencilLine } from "lucide-react
 import { useToast } from "@/hooks/use-toast";
 import { editTargetOf, useDocumentVersion } from "@/hooks/useDocumentVersion";
 import { attachParam } from "@/lib/projectSeeds";
+import { useEmbedMode } from "@/lib/embedMode";
 import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
 import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import SiteLink from "@/ai/components/SiteLink";
@@ -14,11 +15,14 @@ import { Button } from "@/components/ui/button";
 // A stored project version, full page (/ai/d/:versionId): the same viewer
 // as the document window, with room to read. "Ask about this" goes to the
 // project page with the file in the prompt box; "Edit with AI" opens it in
-// a chat of its own.
+// a chat of its own. In the companion's panel (embed mode) the layout's own
+// header already names the document, so the page's bar is left out and the
+// project's name goes on the line under it.
 export default function AiDocumentPage() {
   const { versionId } = useParams<{ versionId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const embed = useEmbedMode();
   const openEdit = useOpenEditChat();
   const { data: detail, isLoading, error, refetch } = useDocumentVersion(versionId);
   useAiPageTitle(detail?.document.title ?? "Document");
@@ -62,30 +66,32 @@ export default function AiDocumentPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="ai-document-page">
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2 md:px-4">
-        <Button variant="ghost" size="sm" className="h-8" onClick={back} aria-label="Back">
-          <ArrowLeft className="h-4 w-4 md:mr-1.5" />
-          <span className="hidden md:inline">Back</span>
-        </Button>
-        <div className="min-w-0 flex-1 truncate px-1 text-sm">
-          <span className="font-medium">{detail.document.title}</span>
-          {detail.matter?.name && (
-            <>
-              <span className="text-muted-foreground"> · </span>
-              <Link to={projectPath} className="text-muted-foreground hover:text-foreground hover:underline">{detail.matter.name}</Link>
-            </>
-          )}
+      {!embed && (
+        <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2 md:px-4">
+          <Button variant="ghost" size="sm" className="h-8" onClick={back} aria-label="Back">
+            <ArrowLeft className="h-4 w-4 md:mr-1.5" />
+            <span className="hidden md:inline">Back</span>
+          </Button>
+          <div className="min-w-0 flex-1 truncate px-1 text-sm">
+            <span className="font-medium">{detail.document.title}</span>
+            {detail.matter?.name && (
+              <>
+                <span className="text-muted-foreground"> · </span>
+                <Link to={projectPath} className="text-muted-foreground hover:text-foreground hover:underline">{detail.matter.name}</Link>
+              </>
+            )}
+          </div>
+          <SiteLink
+            to={`/matters/${detail.document.matter_id}?document=${detail.document.id}#version-${detail.version.id}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Open on Project Hub"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Open on Project Hub</span>
+            <span className="sm:hidden">Project Hub</span>
+          </SiteLink>
         </div>
-        <SiteLink
-          to={`/matters/${detail.document.matter_id}?document=${detail.document.id}#version-${detail.version.id}`}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="Open on Project Hub"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Open on Project Hub</span>
-          <span className="sm:hidden">Project Hub</span>
-        </SiteLink>
-      </div>
+      )}
       <div className="mx-auto flex w-full max-w-[72rem] min-h-0 flex-1 flex-col">
         <DocumentViewer
           document={detail.document}
@@ -93,9 +99,15 @@ export default function AiDocumentPage() {
           versionId={detail.version.id}
           onVersionChange={(id) => navigate(`/ai/d/${id}`, { replace: true })}
           onDownload={download}
-          headerClassName="px-4 py-3 md:px-6"
+          headerClassName={embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
           heading={
-            <p className="text-xs text-muted-foreground" title={detail.version.file_name ?? undefined}>
+            <p className="break-words text-xs text-muted-foreground" title={detail.version.file_name ?? undefined}>
+              {embed && detail.matter?.name && (
+                <>
+                  <Link to={projectPath} className="hover:text-foreground hover:underline" title="The project's page: its files, chats and instructions">{detail.matter.name}</Link>
+                  {" · "}
+                </>
+              )}
               {detail.version.file_name ?? `Version ${detail.version.version_number}`} · added {new Date(detail.version.created_at).toLocaleDateString()}
               {detail.version.is_ai_generated ? " · written with AI" : ""}
             </p>

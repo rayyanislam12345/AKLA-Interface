@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "AKLA Hub companion",
+  "version": "0.1.0",
+  "description": "Shows the firm's Hub beside your claude.ai chat. It only reads Hub links on claude.ai and sends nothing anywhere.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtwBZdvaK1PB/HbYMBHif2xxNx1YirRct07w7yD23zrJrABrV+VDib24J2qCttnHer4FJwcpvBs67cZIWoKiGjKp2+IY5ctfGflIeDKUqFfWpOPKo+MO/yblq/oi9IXhY6Ms6iGrmSEhheSfdrsuj7eH42SGXH+7FXTf5AR6GI4ZWDoSTlKokr4qLb7JyTwMJmO7AN15g3dGvBBvd3qkdsAY5qykRad+/6Wakkw1qb4REcgwNt7m/wutkbgH6f5OaW/r7F0k3WsuM91Q171JiqXuSekEV4gNFjGCly6mrKailZ8cNNK4+LmMYaDJxX/zgiKsSZda3eOxIwl/VCBC/+QIDAQAB",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open the Hub beside this chat",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "links.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 import { ReactNode, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { useAuth } from '@/hooks/useAuth';
+import { resolveEmbedMode, withEmbed } from '@/lib/embedMode';
 import { MFAVerification } from '@/components/MFAVerification';
 import { useOwnProfileStatus } from '@/hooks/useProfiles';
 import { Button } from '@/components/ui/button';
@@ -61,8 +62,19 @@ function pendingSecondFactor(session: Session | null): string | null {
   return sessionAssuranceLevel(session) === 'aal2' ? null : factor.id;
 }
 
+/** The sign-in page, told where to come back to: the page asked for, with
+ * embed mode kept on it (the companion's panel opens a page with ?embed=1;
+ * the sign-in must land back inside the panel's layout, not the full Hub). */
+function signInPath(location: { pathname: string; search: string; hash: string }): string {
+  let next = `${location.pathname}${location.search}${location.hash}`;
+  if (resolveEmbedMode(location.search)) next = withEmbed(next);
+  if (next === '/' || next === '/dashboard') return '/auth';
+  return `/auth?next=${encodeURIComponent(next)}`;
+}
+
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const { user, session, loading, signOut } = useAuth();
+  const location = useLocation();
   const { data: status, isLoading: statusLoading } = useOwnProfileStatus();
   // Set once the code is accepted, so the page shows straight away rather
   // than waiting for the upgraded session to arrive through useAuth.
@@ -77,7 +89,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!user) {
-    return <Navigate to="/auth" replace />;
+    return <Navigate to={signInPath(location)} replace />;
   }
 
   // Two-step sign-in: someone who has set up an authenticator app but has

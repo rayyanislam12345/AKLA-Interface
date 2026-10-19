@@ -23,6 +23,7 @@ import {
   type ChangeCard,
 } from "@/lib/documentSave";
 import { saveButtonLabel, saveStateOf, saveTargetFor, waitingOf, type WorkingDocData } from "@/lib/documentSaveRules";
+import { openSitePage } from "@/lib/embedMode";
 import ChangesPanel from "@/components/ai/chat/ChangesPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -264,7 +265,7 @@ export default function DocxArtifact({
         <div className="ml-auto flex items-center gap-1">
           {!data.original && (
             <Select value={previewForm} onValueChange={(v) => setPreviewForm(v as "tracked" | "accepted")}>
-              <SelectTrigger className="h-8 w-48 text-xs" data-testid="docx-form" aria-label="How the page is shown">
+              <SelectTrigger className="h-8 w-48 max-w-full text-xs" data-testid="docx-form" aria-label="How the page is shown">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -448,7 +449,7 @@ function SaveBar({ matterId, head, data, waiting, workingDocumentId }: { matterI
   const busy = saving || autoStatus?.state === "saving";
   const nextVersion = latest?.nextVersion ?? null;
   const savedLink = data.savedVersion && (state === "saved" || state === "changed-since-save") && (
-    <Button size="sm" variant="link" className="h-7 px-1 text-xs" onClick={() => navigate(`/matters/${projectId ?? ""}`)} disabled={!projectId}>
+    <Button size="sm" variant="link" className="h-7 px-1 text-xs" onClick={() => openSitePage(navigate, `/matters/${projectId ?? ""}`)} disabled={!projectId}>
       <FileText className="mr-1 h-3.5 w-3.5" />
       {state === "saved" ? `Saved as v${data.savedVersion}` : `v${data.savedVersion} saved earlier`} · open project
     </Button>
