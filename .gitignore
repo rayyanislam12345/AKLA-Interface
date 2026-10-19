@@ -78,3 +78,6 @@ law-monitor/supabase_io.py
 law-monitor/.env
 .vercel
 .smoke-tmp/
+
+# Pre-cut table exports (scripts/export-before-cuts.mjs): firm data, never source
+exports/
