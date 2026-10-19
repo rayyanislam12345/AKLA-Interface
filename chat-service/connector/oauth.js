@@ -16,7 +16,18 @@
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
-export const SCOPE = "hub:read";
+// The two permissions a sign-in can carry. hub:read: search and read.
+// hub:write: save new versions into projects (slice 2 of the connector
+// plan; every write tool asks first in claude.ai and is recorded, nothing
+// deletes). A token issued before hub:write existed carries hub:read only
+// and sees the read tools until the lawyer reconnects.
+export const KNOWN_SCOPES = Object.freeze(["hub:read", "hub:write"]);
+export const READ_SCOPE = KNOWN_SCOPES[0];
+export const WRITE_SCOPE = KNOWN_SCOPES[1];
+/** What a sign-in grants when the client asks for nothing in particular: both. */
+export const DEFAULT_SCOPE = KNOWN_SCOPES.join(" ");
+/** What a sign-in without hub:write is told when it calls a write tool. */
+export const READ_ONLY_REFUSAL = "This sign-in is read-only: to save into projects, reconnect the AKLA Hub connector in claude.ai (Customize > Connectors) and sign in again.";
 export const ACCESS_TTL_S = 60 * 60;
 export const REFRESH_TTL_S = 30 * 24 * 60 * 60;
 export const CODE_TTL_S = 5 * 60;
@@ -80,14 +91,14 @@ export function metadata(issuer) {
       code_challenge_methods_supported: ["S256"],
       token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
       revocation_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
-      scopes_supported: [SCOPE],
+      scopes_supported: [...KNOWN_SCOPES],
       service_documentation: `${base}/oauth/about`,
     },
     protectedResource: {
       resource: `${base}/mcp`,
       authorization_servers: [base],
       bearer_methods_supported: ["header"],
-      scopes_supported: [SCOPE],
+      scopes_supported: [...KNOWN_SCOPES],
       resource_name: "AKLA Hub",
     },
   };
@@ -164,7 +175,7 @@ export async function registerClient(store, body, { now = () => new Date(), redi
     grant_types: grants,
     response_types: responseTypes,
     token_endpoint_auth_method: method,
-    scope: SCOPE,
+    scope: DEFAULT_SCOPE,
   };
 }
 
@@ -207,17 +218,24 @@ export async function checkAuthorizeRequest(store, params, { issuer } = {}) {
   return { client, redirectUri, state, codeChallenge: challenge, scope, resource, ignoredScopes, redirectHost: redirectHostOf(redirectUri) };
 }
 
-// Only hub:read exists, so that is what every sign-in grants. A client that
-// asks for more (offline_access, a scope of its own) is not turned away:
-// RFC 6749 §3.3 lets the server narrow the scope, and the token response
-// says what was granted. What was dropped is returned for the log.
+// What a sign-in grants: the known scopes the client asked for, in the
+// connector's order, and both when it asked for none (the owner's choice:
+// the 401 challenge names both, so claude.ai asks for both; every write
+// still asks in claude.ai and is recorded). A client that asks for more
+// (offline_access, a scope of its own) is not turned away: RFC 6749 §3.3
+// lets the server narrow the scope, and the token response says what was
+// granted. What was dropped is returned for the log.
 export function scopeOf(raw) {
   const asked = typeof raw === "string" ? raw.split(/\s+/).filter(Boolean) : [];
-  return { scope: SCOPE, ignored: asked.filter((s) => s !== SCOPE) };
+  const known = KNOWN_SCOPES.filter((s) => asked.includes(s));
+  return { scope: known.length ? known.join(" ") : DEFAULT_SCOPE, ignored: asked.filter((s) => !KNOWN_SCOPES.includes(s)) };
 }
 
+/** Whether a token's scope string ("hub:read hub:write") carries one scope. */
+export const hasScope = (scope, want) => String(scope ?? "").split(/\s+/).includes(want);
+
 /** After a successful sign-in: the code to send back to the client. */
-export async function issueCode(store, { client, userId, redirectUri, codeChallenge, scope = SCOPE, resource = null }, { now = () => new Date() } = {}) {
+export async function issueCode(store, { client, userId, redirectUri, codeChallenge, scope = DEFAULT_SCOPE, resource = null }, { now = () => new Date() } = {}) {
   const code = `akh_a_${random(32)}`;
   const at = now();
   await store.insertCode({
@@ -294,7 +312,7 @@ export async function exchangeToken(store, params, { now = () => new Date(), cli
     if (new Date(row.expires_at).getTime() <= at.getTime()) throw new OAuthError("invalid_grant", "This code has expired. Sign in again.");
     if (typeof p.redirect_uri === "string" && p.redirect_uri && p.redirect_uri !== row.redirect_uri) throw new OAuthError("invalid_grant", "redirect_uri does not match the one the code was issued for.");
     if (!pkceMatches(p.code_verifier, row.code_challenge)) throw new OAuthError("invalid_grant", "The PKCE verifier does not match the challenge.");
-    return mintPair(store, { client, userId: row.user_id, scope: row.scope ?? SCOPE, familyId: randomUUID() }, now);
+    return mintPair(store, { client, userId: row.user_id, scope: row.scope ?? READ_SCOPE, familyId: randomUUID() }, now);
   }
   if (p.grant_type === "refresh_token") {
     if (!client.grant_types.includes("refresh_token")) throw new OAuthError("unauthorized_client", "This client may not refresh tokens.");
@@ -311,7 +329,9 @@ export async function exchangeToken(store, params, { now = () => new Date(), cli
       await killFamily(row.family_id);
       throw new OAuthError("invalid_grant", "Your Hub account is no longer an approved firm member. Ask an administrator.");
     }
-    const pair = { client, userId: row.user_id, scope: row.scope ?? SCOPE, familyId: row.family_id };
+    // A refresh keeps the scope the sign-in granted: a token from before
+    // hub:write existed stays read-only until the lawyer reconnects.
+    const pair = { client, userId: row.user_id, scope: row.scope ?? READ_SCOPE, familyId: row.family_id };
     const won = await store.rotateToken(hash, at);
     if (won) return mintPair(store, pair, now);
     // Someone rotated it first: a retry or a concurrent refresh inside the
@@ -348,13 +368,16 @@ export async function revokeToken(store, params, { now = () => new Date(), clien
 
 /**
  * Who a bearer token speaks for: { userId, clientId, scope, tokenId } or
- * null when it is unknown, expired, revoked, or not an access token.
+ * null when it is unknown, expired, revoked, or not an access token. The
+ * store is keyed by the token's hash, so this is also how a write re-checks
+ * the sign-in afresh (app.js gives each tool call a `recheck` that runs it
+ * with the request's own bearer, past the minute's cache).
  */
 export async function authenticateBearer(store, token, { now = () => new Date() } = {}) {
   if (typeof token !== "string" || !token.startsWith("akh_t_")) return null;
   const row = await store.getToken(sha256(token));
   if (!row || row.kind !== "access" || !live(row, now())) return null;
-  return { userId: row.user_id, clientId: row.client_id, scope: row.scope ?? SCOPE, tokenId: row.id, familyId: row.family_id, expiresAt: row.expires_at };
+  return { userId: row.user_id, clientId: row.client_id, scope: row.scope ?? READ_SCOPE, tokenId: row.id, familyId: row.family_id, expiresAt: row.expires_at };
 }
 
 /** "Bearer x" / "Basic base64(id:secret)" from a request's Authorization header. */

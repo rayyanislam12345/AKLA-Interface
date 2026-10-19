@@ -20,10 +20,21 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { DEFAULT_REDIRECT_HOSTS, OAuthError, authenticateBearer, checkAuthorizeRequest, exchangeToken, issueCode, metadata, parseAuthorization, redirectWith, registerClient, revokeToken, sha256 } from "./oauth.js";
+import { DEFAULT_REDIRECT_HOSTS, DEFAULT_SCOPE, OAuthError, READ_ONLY_REFUSAL, WRITE_SCOPE, authenticateBearer, checkAuthorizeRequest, exchangeToken, hasScope, issueCode, metadata, parseAuthorization, redirectWith, registerClient, revokeToken, sha256 } from "./oauth.js";
 import { aboutPage, errorPage, signInPage } from "./pages.js";
 
 export const MAX_BODY_BYTES = 1_000_000;
+// How a tool is marked for claude.ai. A tool without annotations of its own
+// is read-only. A write tool (one with `write: true`, registered only when
+// the token carries hub:write) ships as not read-only AND destructive, so
+// claude.ai asks "Allow once / Always allow" before every one of them:
+// "destructive always prompts" is the only documented rule, and whether a
+// merely not-read-only tool prompts is checked live on the first save
+// (plan, Try later 6). Research mode calls tools without asking whatever
+// the annotation says; the sign-in page tells the lawyer to set the write
+// tools to "Needs approval" under the connector's Tool permissions.
+export const READ_ONLY = Object.freeze({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+export const WRITE = Object.freeze({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
 // Sign-in: failures per (email, address) pair and per address in a window.
 // A right password never counts; a lawyer who mistypes five times waits a
 // quarter of an hour. Keying the email counter on the address too means an
@@ -165,32 +176,59 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
   // withdrawn approval must stop the connector just as quickly.
   const stillMember = async (userId) => (await isMember(userId)) === true;
 
+  // A write re-checks the sign-in afresh (the token row, by its hash: gone,
+  // revoked or expired means null), never the minute's cache; membership
+  // was asked at the top of this same request. The token's last use is
+  // noted. Null drops the cache entry too.
+  async function recheckBearer(bearer) {
+    const fresh = await authenticateBearer(store, bearer, { now });
+    if (!fresh) { bearerCache.delete(sha256(bearer)); return null; }
+    store.touchToken(fresh.tokenId, now()).catch(() => {});
+    return fresh;
+  }
+
   const challenge = (res, error, description, status = 401) => {
     // RFC 9728 §3: the well-known path is inserted between the host and the
     // resource's path, so a resource at /mcp has its document at
     // /.well-known/oauth-protected-resource/mcp (the root document is also
     // served, for clients that look there first).
-    const parts = [`Bearer realm="AKLA Hub"`, `resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`];
+    // The scope named here is what claude.ai asks for at sign-in (its docs:
+    // the challenge's scope wins, else everything in scopes_supported).
+    const parts = [`Bearer realm="AKLA Hub"`, `resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`, `scope="${DEFAULT_SCOPE}"`];
     if (error) parts.push(`error="${error}"`, `error_description="${description.replace(/"/g, "'")}"`);
     return json(res, status, { error: error ?? "unauthorized", error_description: description }, { "WWW-Authenticate": parts.join(", ") });
   };
 
   // One MCP server per request (stateless Streamable HTTP): claude.ai keeps
   // no session with us, and a restart loses nothing.
-  async function handleMcp(req, res, body, auth) {
+  async function handleMcp(req, res, body, auth, bearer) {
+    const canWrite = hasScope(auth.scope, WRITE_SCOPE);
     const server = new McpServer({ name: "AKLA Hub", version: serverVersion }, {
       // The same sourcing rule the Hub's own assistant works under
       // (firmRules.js); get_firm_rules gives the full text.
-      instructions: "Read-only access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an \"Open in Hub:\" address; pass it on. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards. Nothing here can change or save a document.",
+      instructions: `Access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an "Open in Hub:" address; pass it on. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards. ${canWrite
+        ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version) or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval."
+        : "This sign-in is read-only: nothing here can change or save a document (reconnecting the connector allows saving into projects)."}`,
     });
+    // Write tools are listed only for a sign-in that carries hub:write. A
+    // read-only sign-in that calls one anyway (an old conversation, a
+    // guess) gets the one sentence below as a tool result, not the SDK's
+    // "not found"; the tool is registered for that one request so the
+    // listing stays clean (one server per request, so nothing persists).
+    const called = body && !Array.isArray(body) && body.method === "tools/call" ? body.params?.name : null;
+    const ctx = { userId: auth.userId, clientId: auth.clientId, scope: auth.scope, tokenId: auth.tokenId, canWrite, recheck: () => recheckBearer(bearer) };
     for (const t of tools) {
-      server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }, async (args) => {
+      const write = t.write === true;
+      if (write && !canWrite && t.name !== called) continue;
+      const refused = write && !canWrite;
+      server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: refused ? WRITE : (t.annotations ?? READ_ONLY) }, async (args) => {
+        if (refused) return { content: [{ type: "text", text: READ_ONLY_REFUSAL }], isError: true };
         try {
-          const text = await t.run(args ?? {}, { userId: auth.userId, clientId: auth.clientId });
+          const text = await t.run(args ?? {}, ctx);
           return { content: [{ type: "text", text }] };
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
-          return { content: [{ type: "text", text: `The lookup failed: ${reason}` }], isError: true };
+          return { content: [{ type: "text", text: `The ${write ? "save" : "lookup"} failed: ${reason}` }], isError: true };
         }
       });
     }
@@ -216,7 +254,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
       throw err;
     }
     if (checked.ignoredScopes?.length) log(`authorize: client ${checked.client.id} asked for scope "${checked.ignoredScopes.join(" ")}" too; granting ${checked.scope} only`);
-    return html(res, 200, signInPage({ fields: pick(params, AUTHORIZE_FIELDS), clientName: checked.client.client_name, redirectHost: checked.redirectHost }));
+    return html(res, 200, signInPage({ fields: pick(params, AUTHORIZE_FIELDS), clientName: checked.client.client_name, redirectHost: checked.redirectHost, canWrite: hasScope(checked.scope, WRITE_SCOPE) }));
   }
 
   async function authorizePost(req, res) {
@@ -229,7 +267,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
       if (err instanceof OAuthError) return html(res, 400, errorPage({ title: "This sign-in link is not valid", message: err.message }));
       throw err;
     }
-    const page = (extra) => html(res, 200, signInPage({ fields, email: String(form.email ?? ""), clientName: checked.client.client_name, redirectHost: checked.redirectHost, ...extra }));
+    const page = (extra) => html(res, 200, signInPage({ fields, email: String(form.email ?? ""), clientName: checked.client.client_name, redirectHost: checked.redirectHost, canWrite: hasScope(checked.scope, WRITE_SCOPE), ...extra }));
     const email = String(form.email ?? "").trim().toLowerCase();
     const ip = ipOf(req);
     const emailKey = `${email}|${ip}`;
@@ -318,7 +356,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
         let body;
         try { body = parseBody(await readBody(req), req.headers["content-type"] ?? "application/json"); }
         catch (err) { return json(res, err?.status === 413 ? 413 : 400, { jsonrpc: "2.0", error: { code: -32700, message: err?.status === 413 ? err.message : "The request body is not JSON." }, id: null }); }
-        return await handleMcp(req, res, body, auth);
+        return await handleMcp(req, res, body, auth, parseAuthorization(req.headers.authorization).bearer);
       }
 
       if (req.method === "GET" && path === "/") return html(res, 200, aboutPage({ mcpUrl: `${base}/mcp` }));

@@ -25,12 +25,22 @@ const shell = (title, body) => `<!doctype html>
 <title>${escapeHtml(title)}</title><style>${STYLE}</style></head>
 <body><main>${body}</main></body></html>`;
 
+// What a sign-in that may save is told, on the sign-in page and the about
+// page: the three facts of the write foundation (asks first, recorded,
+// never deletes) and the one setting claude.ai's Research mode needs.
+const SAVING_TERMS = `<ul>
+<li>It can search and read the firm's projects, documents, precedents and law library.</li>
+<li>It can save a <strong>new</strong> version of a document into a project. claude.ai asks you before every save, and every save is recorded against your name. It never replaces or deletes anything, and saving is filing, not legal approval.</li>
+<li>In claude.ai's Research mode tools run without asking, so under the connector's <strong>Tool permissions</strong> set the saving tools to <strong>Needs approval</strong>.</li>
+</ul>`;
+
 /**
  * The sign-in form. `fields` are the OAuth parameters carried through as
  * hidden inputs; `error` is a sentence to show; `needsTotp` opens the form
- * on the authenticator code.
+ * on the authenticator code; `canWrite` says whether this sign-in will
+ * grant hub:write (the page then says what saving means).
  */
-export function signInPage({ action = "/oauth/authorize", fields = {}, email = "", error = null, needsTotp = false, clientName = null, redirectHost = "" } = {}) {
+export function signInPage({ action = "/oauth/authorize", fields = {}, email = "", error = null, needsTotp = false, clientName = null, redirectHost = "", canWrite = false } = {}) {
   const hidden = Object.entries(fields)
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`)
@@ -39,9 +49,15 @@ export function signInPage({ action = "/oauth/authorize", fields = {}, email = "
   // to is what the server checked, so that is what the lawyer is told.
   const who = clientName ? `<strong>${escapeHtml(clientName)}</strong>` : "The app you are connecting";
   const where = redirectHost ? `<p class="note">After you sign in you will be sent back to <strong>${escapeHtml(redirectHost)}</strong>.</p>` : "";
+  const asking = canWrite
+    ? "is asking to read the firm's projects, documents and law library on your behalf, and to save new versions into projects as you."
+    : "is asking to read the firm's projects, documents and law library on your behalf.";
+  const terms = canWrite
+    ? SAVING_TERMS
+    : `<p class="muted">Read-only: the app can search and read; it cannot change or save anything on the Hub.</p>`;
   return shell("Sign in to AKLA Hub", `
 <h1>Sign in to AKLA Hub</h1>
-<p class="muted">${who} is asking to read the firm's projects, documents and law library on your behalf. Sign in with your Hub login. Your password stays here; the app receives only a key for the Hub, which you can withdraw at any time.</p>
+<p class="muted">${who} ${asking} Sign in with your Hub login. Your password stays here; the app receives only a key for the Hub, which you can withdraw at any time.</p>
 ${where}
 <form method="post" action="${escapeHtml(action)}" autocomplete="on">
 ${hidden}
@@ -55,7 +71,7 @@ ${needsTotp ? '<div class="note">Enter the 6-digit code from your authenticator 
 ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
 <button type="submit">Sign in and connect</button>
 </form>
-<p class="muted">Read-only: the app can search and read; it cannot change or save anything on the Hub.</p>`);
+${terms}`);
 }
 
 /** A plain error page. */
@@ -68,10 +84,10 @@ export function errorPage({ title = "Something went wrong", message = "", status
 export function aboutPage({ mcpUrl }) {
   return shell("AKLA Hub connector", `
 <h1>AKLA Hub connector</h1>
-<p>This is the firm's connector for claude.ai. It lets a lawyer's own Claude search the Hub's projects, documents, precedents and law library, with citations.</p>
-<p>To add it: in claude.ai open <strong>Customize &gt; Connectors &gt; Add custom connector</strong>, give it the address <code>${escapeHtml(mcpUrl)}</code>, and sign in with your Hub login when asked.</p>
+<p>This is the firm's connector for claude.ai. It lets a lawyer's own Claude search the Hub's projects, documents, precedents and law library, with citations, and file what it writes into a project.</p>
+<p>To add it: in claude.ai open <strong>Customize &gt; Connectors &gt; Add custom connector</strong>, give it the address <code>${escapeHtml(mcpUrl)}</code>, and sign in with your Hub login when asked. If you connected before saving existed, remove the connector and add it again to allow saving.</p>
+${SAVING_TERMS}
 <ul>
-<li>Read-only: it can search and read, never change or save.</li>
 <li>Only approved firm members can connect.</li>
 <li>It does not see the Hub's chats or chat files.</li>
 </ul>

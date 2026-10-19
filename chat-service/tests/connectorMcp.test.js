@@ -9,8 +9,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../connector/app.js';
 import { createMemoryStore } from '../connector/store.js';
-import { createHubTools, loadToolModules, BUILT_IN_TOOL_NAMES, ALL_TOOL_NAMES, MAX_RESULT_CHARS } from '../connector/tools.js';
-import { registerClient, issueCode, exchangeToken } from '../connector/oauth.js';
+import { createHubTools, loadToolModules, BUILT_IN_TOOL_NAMES, ALL_TOOL_NAMES, WRITE_TOOL_NAMES, MAX_RESULT_CHARS } from '../connector/tools.js';
+import { registerClient, issueCode, exchangeToken, DEFAULT_SCOPE, READ_SCOPE, READ_ONLY_REFUSAL } from '../connector/oauth.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 const USER = '11111111-1111-4111-8111-111111111111';
@@ -31,12 +31,12 @@ function fakeSupabase(tables) {
   return { from: chain, storage: { from: () => ({ download: async () => ({ data: null, error: { message: 'none' } }) }) } };
 }
 
-async function signedInToken(store) {
+async function signedInToken(store, scope = DEFAULT_SCOPE) {
   const client = await registerClient(store, { client_name: 'Claude', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] });
   const full = await store.getClient(client.client_id);
   const verifier = randomBytes(48).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
-  const code = await issueCode(store, { client: full, userId: USER, redirectUri: client.redirect_uris[0], codeChallenge: challenge });
+  const code = await issueCode(store, { client: full, userId: USER, redirectUri: client.redirect_uris[0], codeChallenge: challenge, scope });
   const tokens = await exchangeToken(store, { grant_type: 'authorization_code', code, client_id: client.client_id, redirect_uri: client.redirect_uris[0], code_verifier: verifier });
   return tokens.access_token;
 }
@@ -58,7 +58,8 @@ async function start() {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const url = new URL(`http://127.0.0.1:${server.address().port}/mcp`);
   const token = await signedInToken(store);
-  return { store, url, token, close: () => new Promise((r) => server.close(r)) };
+  const readToken = await signedInToken(store, READ_SCOPE);
+  return { store, url, token, readToken, close: () => new Promise((r) => server.close(r)) };
 }
 
 const connect = async (url, token) => {
@@ -73,17 +74,29 @@ test('initialize, list the tools and call them through the SDK client', async ()
   try {
     const client = await connect(t.url, t.token);
     assert.equal(client.getServerVersion()?.name, 'AKLA Hub');
-    assert.match(client.getInstructions() ?? '', /Read-only access to AKLA's Project Hub/);
+    assert.match(client.getInstructions() ?? '', /^Access to AKLA's Project Hub/);
     assert.match(client.getInstructions() ?? '', /Call get_firm_rules once at the start/);
+    assert.match(client.getInstructions() ?? '', /Saving: the tools marked as not read-only save a new version/, 'a sign-in with hub:write is told what saving means');
+    assert.match(client.getInstructions() ?? '', /nothing here can delete anything/);
     const { tools } = await client.listTools();
     const names = tools.map((x) => x.name);
     assert.deepEqual(names.slice(0, 8), ['search_law_library', 'read_act_section', 'search_precedents', 'list_projects', 'list_project_documents', 'search_project_documents', 'read_document', 'get_document_summary']);
     assert.deepEqual(names.slice(0, 8), [...BUILT_IN_TOOL_NAMES]);
-    // The loaded modules' tools follow, every one of them read-only.
+    // The loaded modules' tools follow. This sign-in carries hub:write, so
+    // the slice 2 write tools are listed too, each marked so claude.ai asks
+    // first (owner decision 5); everything else is read-only.
     assert.ok(names.includes('get_firm_rules'));
     assert.equal(new Set(names).size, names.length);
     assert.deepEqual(names, [...ALL_TOOL_NAMES], 'claude.ai sees every tool, in registration order');
-    for (const x of tools) assert.equal(x.annotations?.readOnlyHint, true, `${x.name} is read-only`);
+    assert.deepEqual(names.filter((n) => WRITE_TOOL_NAMES.includes(n)), [...WRITE_TOOL_NAMES], 'every write tool is listed, in order');
+    for (const x of tools) {
+      if (WRITE_TOOL_NAMES.includes(x.name)) {
+        assert.equal(x.annotations?.readOnlyHint, false, `${x.name} writes`);
+        assert.equal(x.annotations?.destructiveHint, true, `${x.name} always prompts`);
+      } else {
+        assert.equal(x.annotations?.readOnlyHint, true, `${x.name} is read-only`);
+      }
+    }
     const read = tools.find((x) => x.name === 'read_document');
     assert.deepEqual(read.inputSchema.required, ['versionId']);
     assert.equal(read.inputSchema.properties.chars.type, 'integer');
@@ -113,6 +126,24 @@ test('initialize, list the tools and call them through the SDK client', async ()
     // A wrong argument is refused by the schema before the tool runs.
     const wrong = await client.callTool({ name: 'read_document', arguments: { versionId: 'x', chars: 'many' } });
     assert.equal(wrong.isError, true);
+    await client.close();
+  } finally { await t.close(); }
+});
+
+test('a read-only sign-in lists every read tool and no write tool; calling one anyway gets one sentence', async () => {
+  const t = await start();
+  try {
+    const client = await connect(t.url, t.readToken);
+    assert.match(client.getInstructions() ?? '', /This sign-in is read-only/);
+    const { tools } = await client.listTools();
+    const names = tools.map((x) => x.name);
+    assert.deepEqual(names, ALL_TOOL_NAMES.filter((n) => !WRITE_TOOL_NAMES.includes(n)), 'the write tools are hidden, the rest are in order');
+    for (const x of tools) assert.equal(x.annotations?.readOnlyHint, true, `${x.name} is read-only`);
+    for (const name of WRITE_TOOL_NAMES) {
+      const refused = await client.callTool({ name, arguments: { projectId: P1, versionId: P1, documentId: P1, title: 'x', text: 'x', markdown: 'x', content: 'x', label: 'x', status: 'drafting' } });
+      assert.equal(refused.isError, true, `${name} is refused`);
+      assert.equal(refused.content[0].text, READ_ONLY_REFUSAL);
+    }
     await client.close();
   } finally { await t.close(); }
 });

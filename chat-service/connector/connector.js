@@ -1,5 +1,8 @@
-// AKLA Hub for claude.ai: a read-only MCP connector with its own OAuth,
-// served on 127.0.0.1:8095 behind Caddy at https://aklachat.duckdns.org/mcp.
+// AKLA Hub for claude.ai: an MCP connector with its own OAuth, served on
+// 127.0.0.1:8095 behind Caddy at https://aklachat.duckdns.org/mcp. It reads
+// the Hub (hub:read) and, since slice 2, saves new versions into projects
+// (hub:write: every save asks in claude.ai first and is recorded in
+// connector_actions; nothing deletes).
 //
 //   node connector/connector.js         (systemd: hub-connector.service)
 //
@@ -15,7 +18,8 @@
 //
 // What it is made of: oauth.js (the authorization server), store.js (its
 // tables), signIn.js (the Hub login, server-side), tools.js (what a lawyer's
-// Claude can look up, plus every module under tools/), hubLinks.js (the
+// Claude can look up, plus every module under tools/), projectWrites.js
+// (the one way a tool saves, the record and the caps), hubLinks.js (the
 // links back to the site), app.js (the routes). See docs/claude-ai-connector.md.
 
 import "dotenv/config";

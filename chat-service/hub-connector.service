@@ -1,5 +1,5 @@
 [Unit]
-Description=AKLA Hub connector for claude.ai (read-only MCP server with its own OAuth)
+Description=AKLA Hub connector for claude.ai (MCP server with its own OAuth: reads the Hub; saves new versions into projects after asking, recorded, never deletes)
 After=network.target
 
 [Service]
@@ -19,6 +19,14 @@ Environment=CONNECTOR_HUB_URL=https://akla-interface.vercel.app
 # (default claude.ai,claude.com and their subdomains). Never set
 # CONNECTOR_ALLOW_LOOPBACK here: it is for a dev box only.
 #Environment=CONNECTOR_REDIRECT_HOSTS=claude.ai,claude.com
+# Saving into projects (scope hub:write, granted at sign-in alongside
+# hub:read) needs migration 20261020120000_connector_writes.sql applied:
+# save_document_version_as and the connector_actions record, both service
+# role only. The write caps (30 an hour, 200 a day per person) are fixed in
+# connector/projectWrites.js and counted from that table, so a restart of
+# this unit does not reset them. There is no setting to switch saving off
+# for one person: block the saving tools under Tool permissions in claude.ai
+# or withdraw the person's tokens (docs/claude-ai-connector.md).
 ExecStart=/usr/bin/node /opt/chat-service/connector/connector.js
 # One vCPU shared with chat-service and the index worker: a lawyer's claude.ai
 # waits a moment rather than a Hub chat reply being starved.

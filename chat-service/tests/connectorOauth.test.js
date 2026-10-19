@@ -9,7 +9,7 @@ import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { createApp, SIGN_IN_LIMIT } from '../connector/app.js';
 import { createMemoryStore } from '../connector/store.js';
-import { ACCESS_TTL_S, CODE_TTL_S, REFRESH_GRACE_S, SCOPE, hostAllowed, metadata, pkceMatches, sha256, validRedirectUri } from '../connector/oauth.js';
+import { ACCESS_TTL_S, CODE_TTL_S, DEFAULT_SCOPE, KNOWN_SCOPES, READ_SCOPE, REFRESH_GRACE_S, hostAllowed, metadata, pkceMatches, scopeOf, sha256, validRedirectUri } from '../connector/oauth.js';
 
 const USER = '11111111-1111-4111-8111-111111111111';
 const PENDING = '22222222-2222-4222-8222-222222222222';
@@ -56,11 +56,11 @@ async function register(t, extra = {}) {
 }
 
 function authorizeUrl(client, { challenge, state = 'xyz', ...rest } = {}) {
-  const q = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: client.redirect_uris[0], code_challenge: challenge, code_challenge_method: 'S256', state, scope: SCOPE, ...rest });
+  const q = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: client.redirect_uris[0], code_challenge: challenge, code_challenge_method: 'S256', state, scope: DEFAULT_SCOPE, ...rest });
   return `/oauth/authorize?${q}`;
 }
 
-const formFields = (client, challenge, extra) => ({ response_type: 'code', client_id: client.client_id, redirect_uri: client.redirect_uris[0], code_challenge: challenge, code_challenge_method: 'S256', state: 'xyz', scope: SCOPE, ...extra });
+const formFields = (client, challenge, extra) => ({ response_type: 'code', client_id: client.client_id, redirect_uri: client.redirect_uris[0], code_challenge: challenge, code_challenge_method: 'S256', state: 'xyz', scope: DEFAULT_SCOPE, ...extra });
 
 test('the discovery documents point claude.ai at the endpoints', async () => {
   const clock = { ms: Date.parse('2026-10-19T10:00:00Z') };
@@ -72,9 +72,11 @@ test('the discovery documents point claude.ai at the endpoints', async () => {
     assert.equal(as.token_endpoint, 'https://hub.test/oauth/token');
     assert.equal(as.registration_endpoint, 'https://hub.test/oauth/register');
     assert.deepEqual(as.code_challenge_methods_supported, ['S256']);
+    assert.deepEqual(as.scopes_supported, ['hub:read', 'hub:write'], 'both permissions are advertised');
     const pr = await (await t.call('/.well-known/oauth-protected-resource/mcp')).json();
     assert.equal(pr.resource, 'https://hub.test/mcp');
     assert.deepEqual(pr.authorization_servers, ['https://hub.test']);
+    assert.deepEqual(pr.scopes_supported, [...KNOWN_SCOPES]);
     assert.deepEqual(metadata('https://hub.test/').authorizationServer.issuer, 'https://hub.test');
     const about = await t.call('/oauth/about');
     assert.equal(about.status, 200);
@@ -97,6 +99,8 @@ test('register, sign in with PKCE, exchange the code, refresh, revoke', async ()
     const bare = await t.json('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     assert.equal(bare.status, 401);
     assert.match(bare.headers.get('www-authenticate'), /resource_metadata="https:\/\/hub\.test\/\.well-known\/oauth-protected-resource\/mcp"/);
+    // The challenge names both scopes, so claude.ai asks for both (its docs: the challenge's scope wins).
+    assert.match(bare.headers.get('www-authenticate'), /scope="hub:read hub:write"/);
     const prm = await (await t.call('/.well-known/oauth-protected-resource/mcp')).json();
     assert.equal(prm.resource, 'https://hub.test/mcp');
 
@@ -108,6 +112,10 @@ test('register, sign in with PKCE, exchange the code, refresh, revoke', async ()
     assert.match(body, /name="code_challenge" value="/);
     assert.match(body, /<strong>Claude<\/strong>/);
     assert.match(body, /sent back to <strong>claude\.ai<\/strong>/, 'the page names the address the lawyer will be sent to');
+    assert.match(body, /save new versions into projects as you/, 'a sign-in that grants hub:write says so');
+    assert.match(body, /asks you before every save/);
+    assert.match(body, /never replaces or deletes anything/);
+    assert.match(body, /Needs approval/, 'and tells the lawyer about Research mode');
     assert.doesNotMatch(body, /<script/i);
 
     // The sign-in form posts the parameters back with the credentials.
@@ -140,7 +148,8 @@ test('register, sign in with PKCE, exchange the code, refresh, revoke', async ()
     const tokens = await tok.json();
     assert.equal(tokens.token_type, 'Bearer');
     assert.equal(tokens.expires_in, ACCESS_TTL_S);
-    assert.equal(tokens.scope, SCOPE);
+    assert.equal(tokens.scope, DEFAULT_SCOPE, 'read and write, as asked');
+    assert.equal(tokens.scope, 'hub:read hub:write');
     assert.match(tokens.access_token, /^akh_t_/);
     assert.match(tokens.refresh_token, /^akh_r_/);
     assert.ok(!tokens.access_token.includes('.'), 'an opaque token, not a JWT');
@@ -396,15 +405,22 @@ test('the authorize request is checked: unknown client, foreign redirect, missin
     assert.equal(back.searchParams.get('state'), 'xyz');
     const plain = await t.call(authorizeUrl(client, { challenge, code_challenge_method: 'plain' }));
     assert.equal(new URL(plain.headers.get('location')).searchParams.get('error'), 'invalid_request');
-    // A scope the connector does not know is narrowed to hub:read, not refused.
+    // A scope the connector does not know is dropped, not refused; the known
+    // ones asked for are granted, and none asked for means both.
     const wide = await t.call(authorizeUrl(client, { challenge, scope: 'hub:read offline_access claudeai' }));
     assert.equal(wide.status, 200, 'the sign-in page opens');
+    assert.match(await wide.text(), /Read-only: the app can search and read/, 'a sign-in asking for hub:read only is told it is read-only');
     const { verifier: v2 } = pkce();
     const signed = await t.form('/oauth/authorize', formFields(client, challenge, { scope: 'offline_access', email: 'lawyer@akla.com.pk', password: 'right' }));
     assert.equal(signed.status, 302);
     const narrowed = await (await t.form('/oauth/token', { grant_type: 'authorization_code', code: new URL(signed.headers.get('location')).searchParams.get('code'), redirect_uri: client.redirect_uris[0], client_id: client.client_id, code_verifier: v2 })).json();
     assert.equal(narrowed.error, 'invalid_grant', 'the verifier here is deliberately the wrong one; the point is that a code was issued');
-    assert.equal([...t.store.codes.values()].at(-1).scope, SCOPE, 'the code carries hub:read only');
+    assert.equal([...t.store.codes.values()].at(-1).scope, DEFAULT_SCOPE, 'nothing known asked for: the code carries both');
+    const readOnly = await t.form('/oauth/authorize', formFields(client, challenge, { scope: 'claudeai hub:read', email: 'lawyer@akla.com.pk', password: 'right' }));
+    assert.equal(readOnly.status, 302);
+    assert.equal([...t.store.codes.values()].at(-1).scope, READ_SCOPE, 'hub:read asked for: hub:read only');
+    assert.deepEqual(scopeOf('hub:write hub:read x'), { scope: 'hub:read hub:write', ignored: ['x'] }, 'granted in the connector\'s order');
+    assert.deepEqual(scopeOf(undefined), { scope: DEFAULT_SCOPE, ignored: [] });
     // Tampering with the hidden fields on the way back is caught too.
     const tampered = await t.form('/oauth/authorize', formFields(client, challenge, { redirect_uri: 'https://evil.example/cb', email: 'lawyer@akla.com.pk', password: 'right' }));
     assert.equal(tampered.status, 400);

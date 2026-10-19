@@ -4,7 +4,7 @@
 // nothing ever exceeds MAX_RESULT_CHARS.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHubTools, loadToolModules, clipText, stitchPassages, showPassages, BUILT_IN_TOOL_NAMES, MODULE_TOOL_NAMES, ALL_TOOL_NAMES, MAX_RESULT_CHARS, MAX_READ_CHARS, DEFAULT_READ_CHARS } from '../connector/tools.js';
+import { createHubTools, loadToolModules, clipText, stitchPassages, showPassages, BUILT_IN_TOOL_NAMES, MODULE_TOOL_NAMES, WRITE_TOOL_NAMES, ALL_TOOL_NAMES, MAX_RESULT_CHARS, MAX_READ_CHARS, DEFAULT_READ_CHARS } from '../connector/tools.js';
 import { DEFAULT_HUB_URL } from '../connector/hubLinks.js';
 
 const P1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -116,10 +116,21 @@ test('the modules under connector/tools/ register after the built-in eight, in f
   assert.deepEqual(names.slice(0, BUILT_IN_TOOL_NAMES.length), [...BUILT_IN_TOOL_NAMES]);
   assert.ok(names.includes('get_firm_rules'));
   assert.equal(new Set(names).size, names.length, 'no name twice');
-  // The whole directory, every slice 1 tool, exactly as tools.js lists them.
+  // The whole directory, every slice 1 and slice 2 tool, exactly as tools.js lists them.
   assert.deepEqual(names.slice(BUILT_IN_TOOL_NAMES.length), [...MODULE_TOOL_NAMES]);
   assert.deepEqual(names, [...ALL_TOOL_NAMES]);
-  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'documentInsight.js', 'firmRules.js', 'precedents.js', 'projects.js', 'searchEverything.js', 'standards.js']);
+  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'documentInsight.js', 'firmRules.js', 'housekeeping.js', 'precedents.js', 'projects.js', 'saves.js', 'searchEverything.js', 'skills.js', 'standards.js', 'textChecks.js']);
+  // The write tools, exactly as tools.js pins them: each marked write with
+  // annotations that make claude.ai ask first; every other tool read-only.
+  assert.deepEqual(list.filter((t) => t.write === true).map((t) => t.name), [...WRITE_TOOL_NAMES]);
+  for (const t of list) {
+    if (WRITE_TOOL_NAMES.includes(t.name)) {
+      assert.equal(t.annotations?.readOnlyHint, false, `${t.name} writes`);
+      assert.equal(t.annotations?.destructiveHint, true, `${t.name} asks first`);
+    } else {
+      assert.notEqual(t.annotations?.readOnlyHint, false, `${t.name} is read-only`);
+    }
+  }
   for (const t of list.slice(BUILT_IN_TOOL_NAMES.length)) {
     assert.ok(t.description.length > 40, `${t.name} describes itself`);
     assert.ok(t.inputSchema && typeof t.inputSchema === 'object', `${t.name} has an input schema`);

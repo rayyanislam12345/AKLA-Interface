@@ -1,7 +1,11 @@
-// The connector's tools: what a lawyer's claude.ai can look up in the Hub.
-// Read-only. Each tool answers with text the lawyer can read, with the same
-// [Source n] labels the Hub's assistant uses (libraryTools.js:
-// createSourceRegistry, sourceText), and never more than MAX_RESULT_CHARS.
+// The connector's tools: what a lawyer's claude.ai can look up in the Hub,
+// and (slice 2) file into a project. Each tool answers with text the lawyer
+// can read, with the same [Source n] labels the Hub's assistant uses
+// (libraryTools.js: createSourceRegistry, sourceText), and never more than
+// MAX_RESULT_CHARS. The built-in eight are read-only; a module's tool that
+// saves says so with `write: true` and its own `annotations` (app.js WRITE),
+// is registered only for a sign-in that carries hub:write, and does its
+// writing through `deps.writes` (connector/projectWrites.js).
 //
 // The library tools are the assistant's own (searchLaw, readActSection,
 // searchPrecedentsTool, searchProject, all through retrieve.js), imported
@@ -29,6 +33,8 @@ import { z } from "zod";
 import { searchLaw, readActSection, searchPrecedentsTool, searchProject, createSourceRegistry, sourceText } from "../libraryTools.js";
 import { extractForIndex } from "../indexing/extract.js";
 import { DEFAULT_HUB_URL, hubBase, hubLink, openInHub } from "./hubLinks.js";
+import { createProjectWrites } from "./projectWrites.js";
+import { READ_ONLY_REFUSAL, WRITE_SCOPE, hasScope } from "./oauth.js";
 
 export const MAX_RESULT_CHARS = 30_000;
 export const MAX_READ_CHARS = 20_000;
@@ -61,10 +67,25 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "list_acts", "get_act_outline", // acts.js
   "get_document_checks", "compare_document_versions", // documentInsight.js
   "get_firm_rules", // firmRules.js
+  "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js (writes)
   "list_precedents", "find_precedent_clauses", "read_precedent", // precedents.js
   "get_project_overview", "find_document_by_title", // projects.js
+  "save_note_to_project", "save_draft_to_project", // saves.js (writes)
   "search_everything", // searchEverything.js
+  "list_skills", "read_skill", // skills.js
   "list_document_types", "read_standard", "get_drafting_decisions", // standards.js
+  "check_text", "compare_text_with_version", // textChecks.js
+]);
+/**
+ * The tools that save or change something (slice 2), in registration order.
+ * Each is `write: true` with `annotations: WRITE` in its module, is listed
+ * only for a sign-in that carries hub:write, and records every call in
+ * connector_actions. Pinned here, as MODULE_TOOL_NAMES is, so a read tool
+ * that starts claiming to write, or a write tool that stops, fails a test.
+ */
+export const WRITE_TOOL_NAMES = Object.freeze([
+  "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js
+  "save_note_to_project", "save_draft_to_project", // saves.js
 ]);
 /** Every tool the connector offers, in registration order. */
 export const ALL_TOOL_NAMES = Object.freeze([...BUILT_IN_TOOL_NAMES, ...MODULE_TOOL_NAMES]);
@@ -139,6 +160,10 @@ function toolsOfModule(entry, deps) {
     if (typeof t.description !== "string" || !t.description.trim()) throw new Error(`connector/tools/${file}: ${t.name} needs a description.`);
     if (!t.inputSchema || typeof t.inputSchema !== "object") throw new Error(`connector/tools/${file}: ${t.name} needs an inputSchema (an object of zod fields, {} for none).`);
     if (typeof t.run !== "function") throw new Error(`connector/tools/${file}: ${t.name} needs a run(input, ctx) function.`);
+    if (t.write !== undefined && typeof t.write !== "boolean") throw new Error(`connector/tools/${file}: ${t.name}'s write flag must be true or false.`);
+    if (t.annotations !== undefined && (!t.annotations || typeof t.annotations !== "object")) throw new Error(`connector/tools/${file}: ${t.name}'s annotations must be an object (app.js READ_ONLY or WRITE).`);
+    if (t.write === true && t.annotations?.readOnlyHint !== false) throw new Error(`connector/tools/${file}: ${t.name} writes, so its annotations must say readOnlyHint: false (app.js WRITE).`);
+    if (t.write !== true && t.annotations && t.annotations.readOnlyHint !== true) throw new Error(`connector/tools/${file}: ${t.name} is not marked write: true, so its annotations must stay read-only.`);
   }
   return made;
 }
@@ -182,12 +207,14 @@ export function stitchPassages(rows) {
  * @param {Function} [deps.log]
  * @param {string} [deps.hubUrl]   the site's address for "Open in Hub" lines (CONNECTOR_HUB_URL)
  * @param {Array} [deps.modules]   from loadToolModules(): [{ file, tools }], or bare default exports
- * @returns {Array<{ name, title, description, inputSchema, run: (input, ctx) => Promise<string> }>}
+ * @param {object} [deps.writes]   { saveVersion, recordAction, checkCaps } (projectWrites.js; tests pass stubs)
+ * @returns {Array<{ name, title, description, inputSchema, run: (input, ctx) => Promise<string>, write?: boolean, annotations?: object }>}
  */
-export function createHubTools({ supabase, voyageKey, anthropicJson = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [] }) {
+export function createHubTools({ supabase, voyageKey, anthropicJson = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null }) {
   const lib = { ...defaultLibrary, ...library };
   const textCache = new Map();
   const site = hubBase(hubUrl);
+  const projectWrites = writes ?? createProjectWrites({ supabase, hubUrl: site, now: () => new Date(now()), log });
   const link = (kind, id) => hubLink(kind, id, site);
   const open = (kind, id) => openInHub(kind, id, site);
   const passagesText = (passages, scope, heading) => showPassages(passages, scope, heading, { hubUrl: site });
@@ -504,6 +531,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
   const deps = {
     supabase, voyageKey, anthropicJson, library: lib, readFile, log, now, hubUrl: site,
     helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, link, open, showPassages: passagesText },
+    writes: projectWrites,
   };
   const seen = new Set(tools.map((t) => t.name));
   for (const m of modules) {
@@ -515,13 +543,16 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
     }
   }
 
-  // Every tool answers text under the cap, and logs who asked for what.
+  // Every tool answers text under the cap, and logs who asked for what. A
+  // write tool run for a sign-in without hub:write is refused here too
+  // (app.js does not register it for such a sign-in; this is the floor).
   return tools.map((t) => ({
     ...t,
     async run(input, ctx = {}) {
       const started = now();
       const args = input && typeof input === "object" ? input : {};
       try {
+        if (t.write === true && !hasScope(ctx.scope, WRITE_SCOPE)) throw new Error(READ_ONLY_REFUSAL);
         const text = clipText(await t.run.call(t, args, ctx));
         log(`${t.name} for ${ctx.userId ?? "?"}: ${text.length} chars in ${now() - started} ms`);
         return text;

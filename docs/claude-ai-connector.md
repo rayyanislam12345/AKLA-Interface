@@ -1,9 +1,11 @@
 # The claude.ai connector ("AKLA Hub")
 
 A lawyer can use the firm's documents inside their own claude.ai. The Hub
-runs a small read-only MCP server with its own sign-in; claude.ai talks to
-it as a custom connector. Code: `chat-service/connector/`. Built 19 Oct
-2026.
+runs a small MCP server with its own sign-in; claude.ai talks to it as a
+custom connector. It reads the Hub, and (since slice 2 of the connector
+plan) can save new versions into projects: claude.ai asks before every
+save, every save is recorded, nothing is ever deleted. Code:
+`chat-service/connector/`. Built 19 Oct 2026; saving added 20 Oct.
 
 ## For a lawyer: adding it
 
@@ -23,6 +25,39 @@ Only approved firm members can connect; an account awaiting approval is
 refused at the sign-in page. Your password stays on the Hub's server. The
 connector stays connected for thirty days of use at a time; after that, or
 after an administrator withdraws it, claude.ai asks you to sign in again.
+
+## Saving from claude.ai
+
+The sign-in page says what the connector may do: read, and save into
+projects. The tools marked "saves" in the table below are the ones that
+change anything: two file what Claude wrote (`save_note_to_project` as a
+Markdown file, `save_draft_to_project` as a Word file in the house format),
+and six are small housekeeping (a project's standing instructions, a
+version's label, a document's title or status, an empty document record, a
+re-read of a version). What to expect:
+
+- **It asks first.** claude.ai asks you ("Allow once / Always allow")
+  before each of these runs. In claude.ai's Research mode tools run
+  without asking, so under the connector's **Tool permissions** set the
+  saving tools to **Needs approval**.
+- **Nothing is deleted or overwritten.** A save is always a *new* version
+  number under your name, labelled "saved from claude.ai" with the date
+  (you can give your own label); if a colleague saved a newer version in
+  the meantime, yours is refused with "A newer version exists" rather than
+  buried. There is no delete tool. The housekeeping tools replace one
+  field (a label, the instructions) and say what the old value was.
+- **Every save is recorded.** Who, which tool, which project, document and
+  version, when, and whether it went through; never the text itself.
+  Administrators can see the record.
+- **Caps.** 30 saves an hour and 200 a day per person; the 31st in an hour
+  is refused with one sentence. Only saves that went through count: a
+  refused or failed attempt is on the record but does not use up the
+  allowance. The Hub itself has no such limit.
+- A version saved from claude.ai is your own filing: it is not marked as
+  AI-generated, the Hub's search finds it like any other, and saving is
+  filing, not legal approval.
+- A connection made before saving existed is read-only until you remove
+  the connector and add it again.
 
 ## What it can do
 
@@ -53,6 +88,18 @@ so Claude can cite what it relied on.
 | `list_document_types` (page?) | The firm's document types by category, 100 a page: which have a Word standard, and which a drafting questionnaire |
 | `read_standard` (documentTypeId, from?, chars?) | A standard's text in slices, with the format rules the Hub drafts under |
 | `get_drafting_decisions` (documentTypeId, from?) | A type's drafting questionnaire as numbered decisions, with the options, the legal basis and when each is asked |
+| `list_skills` (from?) | The firm's own skills by name: what each is for, written in the Hub or uploaded as a Claude skill, whether it produces a document, who added it and when; in pages |
+| `read_skill` (skillId, from?, chars?) | A skill's instructions (the SKILL.md body of an uploaded skill) in slices of up to 20,000 characters, with the files the skill carries named; its scripts and templates run only in the Hub |
+| `check_text` (text, from?) | The Hub's proof check on text Claude has written, before it is filed: blanks, undefined and unused terms, broken cross-references, number/word mismatches, numbering gaps, by clause; no model, nothing saved; up to 300,000 characters, in pages (the text is sent again with each page) |
+| `compare_text_with_version` (versionId, text, from?, includeFormatting?) | What Claude's redraft changes against one stored version, clause by clause, before it is filed; the version's file is read on the spot when it is not already in memory (one such read at a time, kept for the next page); no model, nothing saved |
+| `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
+| `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project` |
+| `set_project_instructions` (projectId, content) — saves | Writes the project's standing instructions (the Project Context every Hub chat and overview sees), replacing the whole text; recorded with who wrote it and when |
+| `label_version` (versionId, label) — saves | Gives one version a short label (up to 120 characters), replacing any it had |
+| `rename_document` (documentId or versionId, title) — saves | Changes a document's title only; its type, status and versions are untouched (the type is changed on the Hub) |
+| `set_document_status` (documentId or versionId, status) — saves | Moves a document along the status line (not started → drafting → internal review → with counterparty → negotiation → finalized → executed) |
+| `create_document_record` (projectId, title, documentTypeId?) — saves | An empty document record on a project, status drafting, created by the lawyer, for a first version to be saved into |
+| `reindex_document` (versionId) — saves | Asks the Hub to read one version again (text, index card, checks); a version already queued or being read is left alone |
 
 Every project, version and project passage in an answer carries an
 "Open in Hub: https://…" line (the site's address is `CONNECTOR_HUB_URL`),
@@ -119,11 +166,15 @@ password again next time (`src/integrations/supabase/client.ts`).
 
 ## What it cannot do (this version)
 
-- It is **read-only**: no editing, drafting into the project, saving
-  versions, reviews or tracked changes. Those stay on the Hub.
-- It does not see the Hub's **chats or chat files** (`ai-chat-files`), the
-  firm's skills, timesheets, clients' contact details or anything outside
-  projects, documents, precedents and the law library.
+- It never **deletes** or replaces anything: a save is always a new
+  version number, and a save onto a version a colleague has since
+  superseded is refused with "A newer version exists". There is no delete
+  tool. Reviews and tracked changes stay on the Hub for now (later slices).
+- It does not see the Hub's **chats or chat files** (`ai-chat-files`),
+  timesheets, clients' contact details or anything outside projects,
+  documents, precedents, the firm's skills and the law library. A skill's
+  scripts and templates run only in the Hub: `read_skill` gives the
+  instructions, not a way to run them.
 - Each tool call is on its own: source numbers start at 1 in every result
   (the Hub's chat keeps one numbering for a whole conversation).
 - Case law is not included (the Hub's rule).
@@ -168,8 +219,14 @@ touched), and issues its own tokens:
   `claude.com` (and their subdomains; `CONNECTOR_REDIRECT_HOSTS` to change),
   so the firm's sign-in page cannot be pointed at an outsider's address.
   `http://localhost` is accepted only with `CONNECTOR_ALLOW_LOOPBACK=1` on a
-  dev box. A scope the connector does not know is narrowed to `hub:read`
-  rather than refused; the token response says what was granted.
+  dev box. Two scopes exist: `hub:read` (search and read) and `hub:write`
+  (save new versions into projects). The 401 challenge and the discovery
+  documents name both, so claude.ai asks for both; a client that asks for
+  neither is granted both (the owner's choice); a scope the connector does
+  not know is dropped rather than refused, and the token response says what
+  was granted. A token issued before `hub:write` existed carries `hub:read`
+  only, through every refresh, until the lawyer reconnects; such a sign-in
+  is never shown the saving tools and is told so if it calls one.
 - Only SHA-256 hashes are stored, in `connector_clients`,
   `connector_auth_codes` and `connector_tokens`
   (`supabase/migrations/20261019150000_connector_tokens.sql`, service role
@@ -189,6 +246,44 @@ touched), and issues its own tokens:
 for a firm member: every approved member sees every project, document,
 precedent and Act, as the site does. `list_projects` hides closed projects
 unless `includeClosed` is true. Results are text, at most 30,000 characters.
+
+**Writes** (`connector/projectWrites.js`). Every saving tool is marked for
+claude.ai as not read-only *and* destructive (`WRITE` in `app.js`), so
+claude.ai asks before every call ("destructive always prompts" is the only
+documented rule; whether a merely not-read-only tool prompts is checked
+live on the first save, after which the new-version-only saves may be
+relaxed). Each one: re-checks the sign-in afresh (the token row by its
+hash, not the minute's cache), counts the person's writes in
+`connector_actions` (the rows with outcome `saved` or `done`, plus the
+writes this process has begun and not yet recorded, so several calls in
+one claude.ai turn cannot slip past the cap together: 30 in the last hour,
+200 in the last day; the 31st is refused with one sentence; the counts
+survive a restart because they live in the table), uploads the file to
+the `matter-documents` bucket under the site's own path shape, calls
+`save_document_version_as` as the lawyer
+(migration `20261020120000_connector_writes.sql`: the site's
+`save_document_version` with the user id as a parameter; the site's
+function is now a wrapper around it), takes the upload back if the
+function refuses, and writes one `connector_actions` row (who, tool,
+project, document, version, label, outcome, when; never the text). The
+version is the lawyer's own filing: `uploaded_by` is them,
+`is_ai_generated` is false so the Hub's meaning search finds it, and the
+label says "saved from claude.ai". Indexing is queued by the database
+trigger on `document_versions`, as for a save on the site. Any firm member
+may save into any project (there is no per-project membership on the Hub);
+the record is the control.
+
+**Housekeeping writes** (`connector/tools/housekeeping.js`). The six small
+writes (instructions, label, title, status, an empty record, a re-read)
+pass the same gate (`checkCaps`: the sign-in afresh, then the caps) and
+leave the same `connector_actions` row, but write what the site's own page
+writes rather than a version: `matter_context` upserted on `matter_id` with
+`updated_by`, `document_versions.label`, `matter_documents.title` or
+`.status` (the `document_status` enum; never `document_type_id`), a
+`matter_documents` row with `created_by`, or the `enqueue_index_job`
+function. A refusal before the statement (not found, same value, too long)
+is recorded as `refused`, a database error as `failed`. None needs the
+connector-writes migration beyond the `connector_actions` table.
 
 ## Administrators
 
@@ -223,6 +318,21 @@ select u.email, t.kind, t.created_at, t.last_used_at, t.expires_at
 
 Prune old rows (codes a day past expiry, tokens a week past): `select public.connector_prune();`
 
+See what the connector has saved, and by whom (the record never holds the
+document's text):
+
+```sql
+select u.email, a.tool, a.outcome, a.label, a.project_id, a.version_id, a.created_at
+  from public.connector_actions a join auth.users u on u.id = a.user_id
+ order by a.created_at desc limit 50;
+```
+
+The write caps are per person: 30 rows in the last hour, 200 in the last
+day (`HOURLY_CAP`, `DAILY_CAP` in `connector/projectWrites.js`). To stop
+one person saving without withdrawing their reading, block the saving
+tools for them under Tool permissions in claude.ai; to stop everything,
+withdraw their tokens as above.
+
 **Rotating.** The connector has no signing key to rotate: tokens are random
 and stored hashed. To rotate the Supabase keys, change them in
 `/opt/chat-service/.env` and `sudo systemctl restart hub-connector` (and
@@ -238,7 +348,9 @@ discovery documents and the resource claude.ai asks for),
 `CONNECTOR_HUB_URL` (the site's address for the "Open in Hub" lines on
 results; default `https://akla-interface.vercel.app`) and
 `CONNECTOR_ALLOW_LOOPBACK` (never on the VM). The rest comes from
-`/opt/chat-service/.env`.
+`/opt/chat-service/.env`. Saving has no setting of its own: the scope
+`hub:write` is granted at every sign-in, the caps are fixed in
+`connector/projectWrites.js`, and the migration below must be applied.
 
 **Logs:** `sudo journalctl -u hub-connector -f`. One line per sign-in,
 registration and tool call (tool, user id, length, milliseconds), and a
@@ -255,7 +367,18 @@ line for every refusal with its reason.
    site's own `search_project_content` becomes a wrapper around it; also
    safe to run twice). Until it is applied `search_everything` answers with
    a sentence naming the migration and every other tool works. Confirm with
-   `select has_function_privilege('service_role', 'public.search_project_content_as(uuid,text,uuid,text,boolean,integer,integer)', 'execute');`.
+   `select has_function_privilege('service_role', 'public.search_project_content_as(uuid,text,uuid,text,boolean,integer,integer)', 'execute');`
+   Then, before any saving tool is deployed,
+   `supabase/migrations/20261020120000_connector_writes.sql`:
+   `save_document_version_as` (service role only; the site's
+   `save_document_version` becomes a wrapper around it, so a save on the
+   site must be tried once afterwards) and the `connector_actions` record.
+   Safe to run twice. Confirm with
+   `select has_function_privilege('service_role', 'public.save_document_version_as(uuid,uuid,uuid,uuid,boolean,uuid,text,text,text,boolean,text,text)', 'execute');`
+   and `select count(*) from public.connector_actions;`. After deploying,
+   each lawyer removes and re-adds the connector in claude.ai (a token from
+   before carries `hub:read` only), checks the sign-in page's wording, and
+   sets the saving tools to "Needs approval" under Tool permissions.
 2. **Code.** From the repo, `chat-service/deploy.sh`. It copies
    `connector/*.js` and `connector/tools/*.js` to
    `/opt/chat-service/connector/` (with `firmRules.js` and
@@ -303,3 +426,16 @@ Caddy block, reload Caddy. The tables can stay.
   here on Node 26; the VM has Node 20.20. The grep for Node 22-only
   builtins is clean in our code; the SDK's own `dist` was checked for the
   same names and uses none. The first start on the box is the proof.
+- Saving (slice 2), once the connector-writes migration is applied and the
+  connector reconnected in claude.ai: that the first save prompts "Allow
+  once / Always allow" (every saving tool is marked destructive for now,
+  the one documented way to make claude.ai ask; if a not-read-only tool
+  also prompts on its own, the new-version-only saves can be relaxed); that
+  the sign-in page's new copy shows; that `save_document_version_as`, owned
+  by postgres, can still read `storage.objects` for its "uploaded file is
+  unavailable" check (the site's original ran as the signed-in user); how
+  long one `save_draft_to_project` takes on the box (python3, `.akla-venv`
+  and `akla/build_docx.py` beside `aklaRender.js` under `/opt/chat-service`;
+  the local machine has no venv, so the tests stub the renderer); and that
+  `read_skill` on an uploaded skill returns the SKILL.md body (written to
+  `ai_skills.instructions` at upload) rather than only its description.
