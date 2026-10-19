@@ -232,7 +232,7 @@ test('a read-only sign-in never sees the write tool; calling it anyway gets one 
   const t = await startServer({ scope: READ_SCOPE });
   try {
     const client = await connect(t.url, t.tokens.access_token);
-    assert.match(client.getInstructions() ?? '', /This sign-in is read-only: nothing here can change or save a document/);
+    assert.match(client.getInstructions() ?? '', /This sign-in is read-only: nothing here can change, fill or save a document\. If the lawyer asks you to draft, fill, file or save anything/);
     const { tools } = await client.listTools();
     const names = tools.map((x) => x.name);
     assert.ok(!names.includes('save_test_note'), 'hidden');
