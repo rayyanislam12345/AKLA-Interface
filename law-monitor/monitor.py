@@ -700,6 +700,13 @@ class Hub:
     def upsert_watch_page(self, row: dict) -> None:
         self.upsert("law_watch_pages", row, on_conflict="url")
 
+    # -- notifications ------------------------------------------------------
+
+    def notification_exists(self, row: dict) -> bool:
+        params = {"select": "id", "user_id": f"eq.{row['user_id']}", "law_update_id": f"eq.{row['law_update_id']}", "limit": "1"}
+        params["matter_id"] = f"eq.{row['matter_id']}" if row.get("matter_id") else "is.null"
+        return bool(self.get("law_update_notifications", params))
+
     # -- the candidate memory ---------------------------------------------
 
     def candidate(self, dedupe_key: str) -> dict | None:
@@ -1323,6 +1330,179 @@ def recheck_library_sources(hub: Hub, config: dict, counts: dict, acts: list[str
     return out
 
 
+# ------------------------------------------------------------ notifications
+#
+# Who is told what:
+#   * the team of every matter that depends on an affected Act (lead
+#     partner, creator, task assignees, anyone who has recorded time on it)
+#     for verified amendments, re-issues and new Acts touching that Act;
+#   * everyone approved, for bills, drafts, new Acts and amendments to any
+#     library Act, unless they have switched the firm-wide stream off;
+#   * nobody, for press reports, plain notices, or amendments the library
+#     copy already includes.
+# Email is one message per person per morning, through Resend, and only
+# when RESEND_API_KEY and LAW_MONITOR_EMAIL_FROM are set in the VM's .env.
+
+FIRM_WIDE_TYPES = {"bill", "draft", "new_act", "amending_instrument", "consolidated_replacement"}
+HUB_URL = os.environ.get("HUB_URL", "https://factoriq.app").rstrip("/")
+
+
+def notify(hub: Hub, stored: list[dict], counts: dict) -> list[dict]:
+    """Write law_update_notifications for the morning's findings. Returns the
+    rows written (for the email step)."""
+    written: list[dict] = []
+    if not stored or hub.dry_run:
+        if stored:
+            log(f"  [dry run] would notify about {len(stored)} finding(s)")
+        return written
+
+    prefs = {r["user_id"]: r for r in hub.get("notification_preferences", {"select": "user_id,firm_wide_law_updates,email_law_updates"})}
+    everyone = [r["id"] for r in hub.get("profiles", {"select": "id", "status": "eq.approved"})]
+
+    for update in stored:
+        update_id = update.get("id")
+        if not update_id or update.get("tier") != "verified":
+            continue
+        if update.get("incorporation") == "incorporated":
+            continue
+        kind = update["update_type"]
+        told: set[str] = set()
+
+        act = update.get("act_name")
+        if act and kind not in ("bill", "draft", "notice"):
+            resp = _request_with_retry(
+                "POST", f"{hub.client.base_url}/rest/v1/rpc/law_update_recipients",
+                headers=hub.headers, json={"p_act_name": act}, timeout=60,
+            )
+            for r in resp.json():
+                row = {"user_id": r["user_id"], "law_update_id": update_id, "matter_id": r["matter_id"], "reason": "matter"}
+                if hub.notification_exists(row):
+                    told.add(r["user_id"])
+                    continue
+                hub.insert("law_update_notifications", row)
+                written.append({**row, "matter_name": r.get("matter_name"), "update": update})
+                told.add(r["user_id"])
+
+        # Firm-wide only when it touches a library Act, or came from the
+        # sector-focused searches. The assemblies' pages list every bill in
+        # the country; those stay in the briefing without ringing every bell.
+        if kind in FIRM_WIDE_TYPES and (act or update.get("found_by") != "watch_page"):
+            for user_id in everyone:
+                if user_id in told:
+                    continue
+                if not prefs.get(user_id, {}).get("firm_wide_law_updates", True):
+                    continue
+                row = {"user_id": user_id, "law_update_id": update_id, "matter_id": None, "reason": "firm"}
+                if hub.notification_exists(row):
+                    continue
+                hub.insert("law_update_notifications", row)
+                written.append({**row, "matter_name": None, "update": update})
+
+    counts["notified"] = len(written)
+    log(f"  {len(written)} notification(s) written")
+    return written
+
+
+def email_configured() -> bool:
+    return bool(os.environ.get("RESEND_API_KEY") and os.environ.get("LAW_MONITOR_EMAIL_FROM"))
+
+
+def send_email(to: str, subject: str, text: str) -> str | None:
+    """Returns None on success, else the reason."""
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {os.environ['RESEND_API_KEY']}", "Content-Type": "application/json"},
+            json={"from": os.environ["LAW_MONITOR_EMAIL_FROM"], "to": [to], "subject": subject, "text": text},
+            timeout=30,
+        )
+        if resp.status_code >= 300:
+            return f"{resp.status_code} {resp.text[:200]}"
+        return None
+    except requests.exceptions.RequestException as err:
+        return str(err)[:200]
+
+
+def email_digests(hub: Hub, counts: dict) -> None:
+    """One email per person covering every notification not yet emailed
+    from the last two days. Nothing older is sent, so switching mail on
+    later does not flood anyone with the backlog."""
+    if hub.dry_run:
+        return
+    if not email_configured():
+        log("  email not configured (RESEND_API_KEY / LAW_MONITOR_EMAIL_FROM) — in-app only")
+        return
+    since = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    pending = hub.get(
+        "law_update_notifications",
+        {
+            "select": "id,user_id,matter_id,reason,law_update_id,law_updates(title,act_name,update_type,source_name,source_url,document_url,published_date,summary,incorporation),matters(name)",
+            "emailed_at": "is.null",
+            "created_at": f"gte.{since}",
+            "order": "created_at.desc",
+            "limit": "1000",
+        },
+    )
+    if not pending:
+        return
+    prefs = {r["user_id"]: r for r in hub.get("notification_preferences", {"select": "user_id,email_law_updates"})}
+    profiles = {r["id"]: r for r in hub.get("profiles", {"select": "id,email,full_name", "status": "eq.approved"})}
+
+    by_user: dict[str, list[dict]] = {}
+    for n in pending:
+        by_user.setdefault(n["user_id"], []).append(n)
+
+    sent = 0
+    for user_id, items in by_user.items():
+        profile = profiles.get(user_id)
+        if not profile or not profile.get("email"):
+            continue
+        if not prefs.get(user_id, {}).get("email_law_updates", True):
+            # Opted out: mark as handled so it is never sent later either.
+            hub.patch("law_update_notifications", {"id": f"in.({','.join(i['id'] for i in items)})"}, {"emailed_at": datetime.now(timezone.utc).isoformat()})
+            continue
+        lines = [f"Good morning{(' ' + profile['full_name'].split()[0]) if profile.get('full_name') else ''},", ""]
+        matter_items = [i for i in items if i.get("matter_id")]
+        firm_items = [i for i in items if not i.get("matter_id")]
+        if matter_items:
+            lines.append("Laws your projects depend on:")
+            for i in matter_items:
+                u = i.get("law_updates") or {}
+                m = (i.get("matters") or {}).get("name") or "a project"
+                inc = {"not_incorporated": " The library copy does not yet include this change.", "unknown": " Not yet confirmed whether the library copy includes this."}.get(u.get("incorporation") or "", "")
+                lines.append(f"  - {m}: {u.get('title')} ({lawtype(u.get('update_type'))}, {u.get('source_name')}). Affects {u.get('act_name')}.{inc}")
+                lines.append(f"    {HUB_URL}/matters/{i['matter_id']}")
+            lines.append("")
+        if firm_items:
+            lines.append("Firm-wide:")
+            for i in firm_items:
+                u = i.get("law_updates") or {}
+                src = u.get("document_url") or u.get("source_url") or ""
+                lines.append(f"  - {u.get('title')} ({lawtype(u.get('update_type'))}, {u.get('source_name')})" + (f" — affects {u['act_name']}" if u.get("act_name") else "") + (f"\n    {src}" if src else ""))
+            lines.append("")
+        lines += [f"Full briefing: {HUB_URL}/dashboard", "", "You can switch these emails off from the bell in the Hub header."]
+        subject = f"Legal updates — {len(items)} new for you ({date.today().strftime('%d %b %Y')})"
+        err = send_email(profile["email"], subject, "\n".join(lines))
+        if err:
+            log(f"  email to {profile['email']} failed: {err}")
+            continue
+        hub.patch("law_update_notifications", {"id": f"in.({','.join(i['id'] for i in items)})"}, {"emailed_at": datetime.now(timezone.utc).isoformat()})
+        sent += 1
+    counts["emailed"] = sent
+    log(f"  {sent} email(s) sent")
+
+
+def lawtype(kind: str | None) -> str:
+    return {
+        "consolidated_replacement": "consolidated re-issue",
+        "amending_instrument": "amendment",
+        "new_act": "new Act",
+        "bill": "bill, not yet law",
+        "draft": "draft for consultation",
+        "notice": "notice",
+    }.get(kind or "", kind or "")
+
+
 def gather_search_candidates(hub: Hub, config: dict, args, counts: dict) -> list[dict]:
     out: list[dict] = []
     if args.acts_only or args.watch_only:
@@ -1507,6 +1687,8 @@ def finish_run(hub: Hub, run_id: str | None, status: str, counts: dict, *, last_
         "retried": counts["retried"],
         "pages_checked": counts["pages"],
         "pages_changed": counts["pages_changed"],
+        "notified": counts["notified"],
+        "emailed": counts["emailed"],
     }
     if status == "ok":
         patch["library_cursor"] = last_act
@@ -1544,7 +1726,7 @@ def main() -> int:
     run_id = run["id"] if run else None
     log(f"run {run_id or '(dry run)'} starting" + ("" if relay_available() else " — download relay not configured, unreachable sites will be skipped"))
 
-    counts = {k: 0 for k in ("found", "written", "reported", "rejected", "pending", "known", "retried", "sources", "acts", "pages", "pages_changed")}
+    counts = {k: 0 for k in ("found", "written", "reported", "rejected", "pending", "known", "retried", "sources", "acts", "pages", "pages_changed", "notified", "emailed")}
     stored: list[dict] = []
     last_act: str | None = None
 
@@ -1580,6 +1762,8 @@ def main() -> int:
         # not overwrite the day's digest with "nothing today".
         if not args.watch_only or stored:
             write_digest(hub, run_id, stored)
+        notify(hub, stored, counts)
+        email_digests(hub, counts)
         finish_run(hub, run_id, "ok", counts, last_act=last_act)
         log(
             f"done: {counts['written']} verified, {counts['reported']} reported, {counts['pending']} pending retry, "

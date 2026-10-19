@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useActivityTracking } from "@/hooks/useActivityTracking";
 import { AppSidebar } from "@/components/AppSidebar";
+import { LawNotificationsBell } from "@/components/LawNotificationsBell";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -26,6 +27,9 @@ export function AppLayout({ children }: AppLayoutProps) {
             <span className="text-lg font-semibold text-white tracking-tight">
               <span className="text-accent">AKLA</span> Project Hub
             </span>
+            <div className="ml-auto">
+              <LawNotificationsBell />
+            </div>
           </header>
           <main className="flex-1 min-w-0 p-4 md:p-6 overflow-x-hidden">{children}</main>
         </div>

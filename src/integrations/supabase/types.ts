@@ -1256,11 +1256,13 @@ export type Database = {
       law_monitor_runs: {
         Row: {
           acts_checked: number
+          emailed: number
           error: string | null
           finished_at: string | null
           found: number
           id: string
           library_cursor: string | null
+          notified: number
           pages_changed: number
           pages_checked: number
           rejected: number
@@ -1273,11 +1275,13 @@ export type Database = {
         }
         Insert: {
           acts_checked?: number
+          emailed?: number
           error?: string | null
           finished_at?: string | null
           found?: number
           id?: string
           library_cursor?: string | null
+          notified?: number
           pages_changed?: number
           pages_checked?: number
           rejected?: number
@@ -1290,11 +1294,13 @@ export type Database = {
         }
         Update: {
           acts_checked?: number
+          emailed?: number
           error?: string | null
           finished_at?: string | null
           found?: number
           id?: string
           library_cursor?: string | null
+          notified?: number
           pages_changed?: number
           pages_checked?: number
           rejected?: number
@@ -1335,6 +1341,54 @@ export type Database = {
             columns: ["run_id"]
             isOneToOne: false
             referencedRelation: "law_monitor_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      law_update_notifications: {
+        Row: {
+          created_at: string
+          emailed_at: string | null
+          id: string
+          law_update_id: string
+          matter_id: string | null
+          read_at: string | null
+          reason: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          law_update_id: string
+          matter_id?: string | null
+          read_at?: string | null
+          reason: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          law_update_id?: string
+          matter_id?: string | null
+          read_at?: string | null
+          reason?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_update_notifications_law_update_id_fkey"
+            columns: ["law_update_id"]
+            isOneToOne: false
+            referencedRelation: "law_updates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "law_update_notifications_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
             referencedColumns: ["id"]
           },
         ]
@@ -2091,6 +2145,27 @@ export type Database = {
           },
         ]
       }
+      notification_preferences: {
+        Row: {
+          email_law_updates: boolean
+          firm_wide_law_updates: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          email_law_updates?: boolean
+          firm_wide_law_updates?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          email_law_updates?: boolean
+          firm_wide_law_updates?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       precedent_passages: {
         Row: {
           body: string
@@ -2811,6 +2886,14 @@ export type Database = {
       index_supported_extension: { Args: { p_path: string }; Returns: boolean }
       is_firm_member: { Args: { _user_id: string }; Returns: boolean }
       is_supervisor: { Args: { _user_id: string }; Returns: boolean }
+      law_update_recipients: {
+        Args: { p_act_name: string }
+        Returns: {
+          matter_id: string
+          matter_name: string
+          user_id: string
+        }[]
+      }
       match_documents: {
         Args: {
           filter_act_names?: string[]
@@ -2837,6 +2920,12 @@ export type Database = {
           matter_document_id: string
           mentions: number
           title: string
+        }[]
+      }
+      matter_team: {
+        Args: { p_matter_id: string }
+        Returns: {
+          user_id: string
         }[]
       }
       pgrst_pre_request: { Args: never; Returns: undefined }
@@ -3002,6 +3091,7 @@ export type Database = {
         Args: { p_job_id: string; p_run_id: string }
         Returns: boolean
       }
+      unread_law_notification_count: { Args: never; Returns: number }
     }
     Enums: {
       app_role:
