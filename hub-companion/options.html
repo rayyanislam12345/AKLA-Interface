@@ -4,17 +4,33 @@
   <meta charset="utf-8">
   <title>AKLA Hub companion settings</title>
   <style>
-    body { margin: 0; padding: 16px; min-width: 320px; font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2430; }
+    body { margin: 0; padding: 16px; min-width: 340px; font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2430; }
+    h2 { font-size: 13px; margin: 18px 0 8px; }
     label { display: block; margin: 0 0 12px; }
     input[type=text] { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 5px 8px; font: inherit; border: 1px solid #d9dce3; border-radius: 6px; }
     .row { display: flex; align-items: center; gap: 8px; }
     button { padding: 5px 12px; font: inherit; border: 1px solid #d9dce3; border-radius: 6px; background: #fff; cursor: pointer; }
     #status { margin-left: 8px; color: #5b6270; }
     p.note { color: #5b6270; margin: 16px 0 0; }
+    .themes { display: grid; gap: 6px; margin: 0 0 12px; }
+    .theme { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid #d9dce3; border-radius: 8px; cursor: pointer; }
+    .theme:has(input:checked) { border-color: #12264a; box-shadow: 0 0 0 1px #12264a inset; }
+    .theme input { margin: 0; }
+    .swatch { display: inline-flex; width: 54px; height: 22px; border-radius: 5px; overflow: hidden; border: 1px solid rgba(0,0,0,.15); }
+    .swatch span { flex: 1 1 0; }
+    .theme b { font-weight: 600; }
+    .theme small { display: block; color: #5b6270; }
+    #tokens { display: none; margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; background: #fff6e0; color: #6b4e00; }
+    #tokens.show { display: block; }
   </style>
 </head>
 <body>
   <form id="form">
+    <h2>Chat colours</h2>
+    <p id="tokens">claude.ai seems to have changed how it names its colours. Themes may only partly apply until the companion is updated; the chat itself keeps working.</p>
+    <div id="themes" class="themes" role="radiogroup" aria-label="Chat colour theme"></div>
+
+    <h2>Hub</h2>
     <label>
       Hub address
       <input id="origin" type="text" placeholder="https://akla-interface.vercel.app" autocomplete="off" spellcheck="false">
@@ -25,8 +41,9 @@
     </label>
     <button type="submit">Save</button><span id="status"></span>
   </form>
-  <p class="note">This extension reads Hub links on claude.ai and shows the Hub beside the chat. It sends nothing anywhere.</p>
+  <p class="note">This extension reads Hub links on claude.ai, recolours the chat only on this computer, and shows the Hub beside the chat. It sends nothing anywhere.</p>
   <script src="links.js"></script>
+  <script src="themes.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

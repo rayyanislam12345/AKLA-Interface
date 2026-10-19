@@ -76,9 +76,16 @@ try {
     await page.goto(`chrome-extension://${id}/${file}`);
     await page.waitForTimeout(800);
     if (file === "panel.html") {
+      // A fresh profile has no remembered page, so the panel shows its
+      // "No document yet" state and leaves the frame empty; a remembered
+      // page shows in the frame with embed=1.
       const src = await page.getAttribute("#frame", "src");
-      note(`panel frame src: ${src}`);
-      if (!src || !src.includes("embed=1")) problems.push("panel frame did not get an embed URL");
+      const idleShown = await page.$eval("#idle", (el) => !el.hidden);
+      note(`panel frame src: ${src}; idle shown: ${idleShown}`);
+      if (!idleShown && (!src || !src.includes("embed=1"))) problems.push("panel showed neither its idle state nor an embed URL");
+      const themes = await page.$$eval("#theme option", (o) => o.map((x) => x.value));
+      note(`panel theme options: ${themes.join(",")}`);
+      if (!themes.includes("default") || !themes.includes("akla")) problems.push("panel theme picker is missing themes");
     }
     if (errors.length) problems.push(`${file}: ${errors.join(" | ")}`);
     else note(`${file}: loaded, no errors`);

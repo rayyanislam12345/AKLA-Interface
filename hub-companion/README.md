@@ -20,7 +20,26 @@ What it does, and all it does:
   in the panel (text in the composer, an accept/reject pass, a file still
   uploading) is lost under you.
 - The toolbar button opens the panel on the last page shown.
-- The panel's bar has Home, Back, a paste-a-link box, and Open in tab.
+- The panel's bar has Home, Back, a paste-a-link box, Open in tab, and a
+  theme picker.
+- **Chat colours.** Looks for the claude.ai chat itself: Claude (no change),
+  AKLA navy, Sky blue, Rose pink, Warm paper, Slate, Forest and High
+  contrast, each in light and dark. Pick one in the panel bar or the settings page; it
+  applies at once on every claude.ai tab and the panel bar matches.
+
+How the themes work: claude.ai paints everything from CSS variables on its
+root element. One grey ramp (`--cds-gray-0` white to `--cds-gray-900` near
+black) drives surfaces, text, borders and the older `--bg-*`/`--text-*`
+tokens, read forwards in light mode and flipped in dark; an accent ramp
+drives links and buttons. A theme in `themes.js` is a paper colour, an ink
+colour, an accent ramp and a brand colour; the grey ramp is rebuilt between
+paper and ink and claude.ai's own rules derive the rest in both modes; `theme.js` adds them as one
+`<style>` on claude.ai and a `data-hub-theme` attribute on `<html>`, and
+removes both for the default. Nothing in claude.ai's layout or class names
+is touched, no `!important` is used, and a token the themes do not name
+keeps claude.ai's own value. If claude.ai renames its tokens a theme falls
+back to claude.ai's colours for whatever changed; the settings page shows a
+note when that has happened (`theme.js` checks a few tokens after load).
 
 Privacy: the extension sends nothing anywhere. It reads links on claude.ai
 pages, talks only to its own side panel, and loads the Hub in a frame exactly
@@ -131,6 +150,9 @@ in the toolbar"; the address is already stored, so the toolbar button
 - `icons/`: navy square with an H, 16/32/48/128.
 - `scripts/package.sh`: zip for the store.
 - `tests/links.test.js`: `node --test hub-companion/tests/links.test.js`.
+- `tests/themes.test.js`: `node --test hub-companion/tests/themes.test.js`
+  checks every theme has both modes, reads at 7:1 or better, and that the
+  generated CSS sets the tokens claude.ai uses and leaves the rest alone.
 - `tests/load-check.mjs`: `node hub-companion/tests/load-check.mjs` loads the
   extension in Playwright's Chromium (Chrome for Testing; branded Google
   Chrome 137+ ignores `--load-extension`) with a visible window, checks the

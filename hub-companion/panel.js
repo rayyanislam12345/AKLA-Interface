@@ -9,6 +9,49 @@
   var idle = document.getElementById("idle");
   var address = document.getElementById("address");
 
+  var themeSelect = document.getElementById("theme");
+
+  // The chat colour theme. Chosen here or in the options page, stored once
+  // in chrome.storage.sync; theme.js applies it on claude.ai, and the
+  // panel's own bar takes the same page and text colours so the two halves
+  // of the screen match.
+  function tintPanel(id) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var sw = HubThemes.swatches(id, dark);
+    var rootStyle = document.documentElement.style;
+    if (!sw) {
+      rootStyle.removeProperty("--bar");
+      rootStyle.removeProperty("--text");
+      rootStyle.removeProperty("--navy");
+      return;
+    }
+    rootStyle.setProperty("--bar", sw.bg);
+    rootStyle.setProperty("--text", sw.text);
+    rootStyle.setProperty("--navy", sw.accent);
+  }
+  if (themeSelect && typeof HubThemes !== "undefined") {
+    HubThemes.THEMES.forEach(function (theme) {
+      var option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = theme.name;
+      themeSelect.appendChild(option);
+    });
+    chrome.storage.sync.get({ theme: HubThemes.DEFAULT_THEME }, function (items) {
+      var id = HubThemes.isTheme(items.theme) ? items.theme : HubThemes.DEFAULT_THEME;
+      themeSelect.value = id;
+      tintPanel(id);
+    });
+    themeSelect.addEventListener("change", function () {
+      chrome.storage.sync.set({ theme: themeSelect.value });
+    });
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area !== "sync" || !changes.theme) return;
+      var id = HubThemes.isTheme(changes.theme.newValue) ? changes.theme.newValue : HubThemes.DEFAULT_THEME;
+      themeSelect.value = id;
+      tintPanel(id);
+    });
+  }
+
   var LOAD_WAIT = 12000; // ms before "did not load" is shown
   var FRESH = 4000; // ms after a page is shown during which a new link may replace it outright
   var settings = { hubOrigin: HubLinks.DEFAULT_ORIGIN, followNewLinks: true };

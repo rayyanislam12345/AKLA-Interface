@@ -45,6 +45,17 @@ body {
   white-space: nowrap;
 }
 .bar button:hover { border-color: var(--navy); }
+.bar select {
+  flex: 0 0 auto;
+  max-width: 120px;
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
 .go {
   display: flex;
   flex: 1 1 140px;
