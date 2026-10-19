@@ -1,15 +1,18 @@
 {
-  "_comment": "Edit this file to change what the morning sweep watches — no code change needed. allowed_domains is a hard gate: a finding whose document lives outside these domains is rejected before it can reach the database, so add a domain here before adding a source that uses it.",
+  "_comment": "Edit this file to change what the morning sweep watches — no code change needed. allowed_domains is a hard gate for the VERIFIED tier: a finding whose document lives outside these domains cannot enter the library. news_domains is the gate for the REPORTED tier: a press report from one of these is shown on the card as 'reported in press', never touches the library and never flags a matter. Anything from any other domain is rejected.",
 
   "lookback_days": 2,
   "max_acts_per_run": 10,
   "max_published_age_days": 30,
+  "library_lookback_years": 2,
+  "max_fetch_attempts": 5,
   "library_source_name": "Law library check",
 
   "allowed_domains": [
     "gov.pk",
     "secp.gov.pk",
     "pppa.gov.pk",
+    "p3a.gov.pk",
     "pakistancode.gov.pk",
     "na.gov.pk",
     "senate.gov.pk",
@@ -20,24 +23,45 @@
     "ppra.org.pk",
     "punjab.gov.pk",
     "pppa.punjab.gov.pk",
+    "pap.gov.pk",
     "sindh.gov.pk",
     "pppunit.sindh.gov.pk",
+    "pas.gov.pk",
     "kp.gov.pk",
     "kppppu.gov.pk",
-    "balochistan.gov.pk"
+    "pakp.gov.pk",
+    "balochistan.gov.pk",
+    "pabalochistan.gov.pk",
+    "molaw.gov.pk",
+    "pta.gov.pk",
+    "cci.gov.pk"
+  ],
+
+  "news_domains": [
+    "dawn.com",
+    "brecorder.com",
+    "tribune.com.pk",
+    "thenews.com.pk",
+    "nation.com.pk",
+    "thefridaytimes.com",
+    "pakistantoday.com.pk",
+    "app.com.pk",
+    "radio.gov.pk",
+    "propakistani.pk",
+    "profit.pakistantoday.com.pk"
   ],
 
   "sources": [
     {
       "name": "SECP",
-      "description": "Securities and Exchange Commission of Pakistan — circulars, SROs, notifications and amendments to company and securities law",
+      "description": "Securities and Exchange Commission of Pakistan — circulars, SROs, notifications, draft regulations for public consultation, and amendments to company and securities law",
       "sites": ["secp.gov.pk"],
       "max_searches": 4
     },
     {
       "name": "PPP Authority (Federal)",
-      "description": "Pakistan Public Private Partnership Authority — PPP policy, rules, guidelines and amendments to the PPP Authority Act",
-      "sites": ["pppa.gov.pk"],
+      "description": "Pakistan Public Private Partnership Authority (P3A) — PPP policy, rules, regulations, guidelines and amendments to the PPP Authority Act",
+      "sites": ["pppa.gov.pk", "p3a.gov.pk"],
       "max_searches": 4
     },
     {
@@ -66,9 +90,22 @@
     },
     {
       "name": "NEPRA",
-      "description": "National Electric Power Regulatory Authority — rules, tariff regimes and amendments affecting power projects",
+      "description": "National Electric Power Regulatory Authority — rules, regulations, draft regulations for consultation, tariff regimes and amendments affecting power projects",
       "sites": ["nepra.org.pk"],
       "max_searches": 3
+    },
+    {
+      "name": "Parliament",
+      "description": "National Assembly and Senate of Pakistan — bills introduced or passed, ordinances laid, Acts assented to, particularly corporate, commercial, procurement, PPP, energy, telecom and arbitration law",
+      "sites": ["na.gov.pk", "senate.gov.pk"],
+      "max_searches": 4
+    },
+    {
+      "name": "Legal press",
+      "description": "Pakistani business and legal press — reports of new ordinances, Acts, bills, SROs, draft regulations and amendments affecting corporate, commercial, procurement, PPP, energy and telecom law. Press reports are shown as 'reported' until the official text is found.",
+      "sites": ["dawn.com", "brecorder.com", "tribune.com.pk", "thenews.com.pk", "propakistani.pk"],
+      "max_searches": 4,
+      "tier": "reported"
     }
   ]
 }

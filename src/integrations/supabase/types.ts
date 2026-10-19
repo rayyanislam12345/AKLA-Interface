@@ -10,41 +10,10 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.15"
   }
   public: {
     Tables: {
-      ai_review_runs: {
-        // A run reviews a saved version (document_version_id, legacy) or a working
-        // Word document in the chat (artifact_id, the lineage root); one of the two
-        // is always set. output_artifact_id is the copy with the suggestions written in.
-        Row: { id: string; document_version_id: string | null; artifact_id: string | null; output_artifact_id: string | null; status: string; passes: Json; coverage: Json; source_hash: string | null; template_path: string | null; error: string | null; created_by: string | null; created_at: string }
-        Insert: { id?: string; document_version_id?: string | null; artifact_id?: string | null; output_artifact_id?: string | null; status?: string; passes?: Json; coverage?: Json; source_hash?: string | null; template_path?: string | null; error?: string | null; created_by?: string | null; created_at?: string }
-        Update: { document_version_id?: string | null; artifact_id?: string | null; output_artifact_id?: string | null; status?: string; passes?: Json; coverage?: Json; error?: string | null }
-        Relationships: [
-          {
-            foreignKeyName: "ai_review_runs_artifact_id_fkey"
-            columns: ["artifact_id"]
-            isOneToOne: false
-            referencedRelation: "ai_artifacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ai_review_runs_document_version_id_fkey"
-            columns: ["document_version_id"]
-            isOneToOne: false
-            referencedRelation: "document_versions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ai_review_runs_output_artifact_id_fkey"
-            columns: ["output_artifact_id"]
-            isOneToOne: false
-            referencedRelation: "ai_artifacts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ai_artifacts: {
         Row: {
           content: string | null
@@ -155,8 +124,8 @@ export type Database = {
           document_type_id: string | null
           document_version_id: string | null
           id: string
-          laws: Json
           last_message_at: string | null
+          laws: Json
           matter_id: string | null
           pinned: boolean
           questionnaire: Json | null
@@ -171,8 +140,8 @@ export type Database = {
           document_type_id?: string | null
           document_version_id?: string | null
           id?: string
-          laws?: Json
           last_message_at?: string | null
+          laws?: Json
           matter_id?: string | null
           pinned?: boolean
           questionnaire?: Json | null
@@ -187,8 +156,8 @@ export type Database = {
           document_type_id?: string | null
           document_version_id?: string | null
           id?: string
-          laws?: Json
           last_message_at?: string | null
+          laws?: Json
           matter_id?: string | null
           pinned?: boolean
           questionnaire?: Json | null
@@ -220,35 +189,161 @@ export type Database = {
           },
         ]
       }
+      ai_research_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          jurisdiction: string | null
+          matter_id: string | null
+          question: string
+          sources: Json
+          status: string
+          unresolved: Json
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          jurisdiction?: string | null
+          matter_id?: string | null
+          question: string
+          sources?: Json
+          status: string
+          unresolved?: Json
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          jurisdiction?: string | null
+          matter_id?: string | null
+          question?: string
+          sources?: Json
+          status?: string
+          unresolved?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_research_runs_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_review_runs: {
+        Row: {
+          artifact_id: string | null
+          coverage: Json
+          created_at: string
+          created_by: string | null
+          document_version_id: string | null
+          error: string | null
+          id: string
+          output_artifact_id: string | null
+          passes: Json
+          source_hash: string | null
+          status: string
+          template_path: string | null
+        }
+        Insert: {
+          artifact_id?: string | null
+          coverage?: Json
+          created_at?: string
+          created_by?: string | null
+          document_version_id?: string | null
+          error?: string | null
+          id?: string
+          output_artifact_id?: string | null
+          passes?: Json
+          source_hash?: string | null
+          status?: string
+          template_path?: string | null
+        }
+        Update: {
+          artifact_id?: string | null
+          coverage?: Json
+          created_at?: string
+          created_by?: string | null
+          document_version_id?: string | null
+          error?: string | null
+          id?: string
+          output_artifact_id?: string | null
+          passes?: Json
+          source_hash?: string | null
+          status?: string
+          template_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_runs_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "ai_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_review_runs_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_review_runs_output_artifact_id_fkey"
+            columns: ["output_artifact_id"]
+            isOneToOne: false
+            referencedRelation: "ai_artifacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_skills: {
         Row: {
+          anthropic_skill_id: string | null
+          anthropic_version_id: string | null
           created_at: string
           created_by: string | null
           description: string | null
           id: string
           instructions: string
+          kind: string
           name: string
           produces_document: boolean
+          skill_files: Json
           updated_at: string
         }
         Insert: {
+          anthropic_skill_id?: string | null
+          anthropic_version_id?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
           id?: string
           instructions: string
+          kind?: string
           name: string
           produces_document?: boolean
+          skill_files?: Json
           updated_at?: string
         }
         Update: {
+          anthropic_skill_id?: string | null
+          anthropic_version_id?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
           id?: string
           instructions?: string
+          kind?: string
           name?: string
           produces_document?: boolean
+          skill_files?: Json
           updated_at?: string
         }
         Relationships: []
@@ -289,6 +384,184 @@ export type Database = {
         }
         Relationships: []
       }
+      caselaw_cache: {
+        Row: {
+          body: string
+          case_id: number
+          citation: string | null
+          court: string | null
+          fetched_at: string
+          metadata: Json
+          section: string
+          title: string | null
+          year: number | null
+        }
+        Insert: {
+          body?: string
+          case_id: number
+          citation?: string | null
+          court?: string | null
+          fetched_at?: string
+          metadata?: Json
+          section: string
+          title?: string | null
+          year?: number | null
+        }
+        Update: {
+          body?: string
+          case_id?: number
+          citation?: string | null
+          court?: string | null
+          fetched_at?: string
+          metadata?: Json
+          section?: string
+          title?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
+      caselaw_messages: {
+        Row: {
+          content: string
+          created_at: string
+          created_by: string | null
+          id: string
+          metadata: Json
+          role: string
+          thread_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          metadata?: Json
+          role: string
+          thread_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          metadata?: Json
+          role?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caselaw_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "caselaw_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      caselaw_runs: {
+        Row: {
+          coverage: Json | null
+          created_at: string
+          created_by: string | null
+          error: string | null
+          id: string
+          message_id: string | null
+          plan: Json | null
+          question: string
+          ranked: Json | null
+          status: string
+          thread_id: string | null
+          tier: string | null
+        }
+        Insert: {
+          coverage?: Json | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          message_id?: string | null
+          plan?: Json | null
+          question: string
+          ranked?: Json | null
+          status?: string
+          thread_id?: string | null
+          tier?: string | null
+        }
+        Update: {
+          coverage?: Json | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          message_id?: string | null
+          plan?: Json | null
+          question?: string
+          ranked?: Json | null
+          status?: string
+          thread_id?: string | null
+          tier?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caselaw_runs_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "caselaw_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caselaw_runs_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "caselaw_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      caselaw_threads: {
+        Row: {
+          archived: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          last_message_at: string | null
+          matter_id: string | null
+          pinned: boolean
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_message_at?: string | null
+          matter_id?: string | null
+          pinned?: boolean
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_message_at?: string | null
+          matter_id?: string | null
+          pinned?: boolean
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caselaw_threads_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           created_at: string
@@ -315,6 +588,239 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      connector_auth_codes: {
+        Row: {
+          client_id: string
+          code_challenge: string
+          code_challenge_method: string
+          code_hash: string
+          created_at: string
+          expires_at: string
+          redirect_uri: string
+          resource: string | null
+          scope: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          code_challenge: string
+          code_challenge_method?: string
+          code_hash: string
+          created_at?: string
+          expires_at: string
+          redirect_uri: string
+          resource?: string | null
+          scope?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          code_challenge?: string
+          code_challenge_method?: string
+          code_hash?: string
+          created_at?: string
+          expires_at?: string
+          redirect_uri?: string
+          resource?: string | null
+          scope?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_auth_codes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "connector_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_clients: {
+        Row: {
+          client_name: string | null
+          client_secret_hash: string | null
+          client_uri: string | null
+          created_at: string
+          grant_types: string[]
+          id: string
+          last_used_at: string | null
+          redirect_uris: string[]
+          software_id: string | null
+          token_endpoint_auth_method: string
+        }
+        Insert: {
+          client_name?: string | null
+          client_secret_hash?: string | null
+          client_uri?: string | null
+          created_at?: string
+          grant_types?: string[]
+          id: string
+          last_used_at?: string | null
+          redirect_uris: string[]
+          software_id?: string | null
+          token_endpoint_auth_method?: string
+        }
+        Update: {
+          client_name?: string | null
+          client_secret_hash?: string | null
+          client_uri?: string | null
+          created_at?: string
+          grant_types?: string[]
+          id?: string
+          last_used_at?: string | null
+          redirect_uris?: string[]
+          software_id?: string | null
+          token_endpoint_auth_method?: string
+        }
+        Relationships: []
+      }
+      connector_tokens: {
+        Row: {
+          client_id: string
+          created_at: string
+          expires_at: string
+          family_id: string
+          id: string
+          kind: string
+          last_used_at: string | null
+          revoked_at: string | null
+          rotated_at: string | null
+          scope: string
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          expires_at: string
+          family_id: string
+          id?: string
+          kind: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          rotated_at?: string | null
+          scope?: string
+          token_hash: string
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          expires_at?: string
+          family_id?: string
+          id?: string
+          kind?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          rotated_at?: string | null
+          scope?: string
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_tokens_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "connector_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_index_jobs: {
+        Row: {
+          attempts: number
+          bucket: string
+          created_at: string
+          document_version_id: string | null
+          finished_at: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          locked_until: string | null
+          priority: number
+          run_id: string | null
+          started_at: string | null
+          state: string
+          storage_path: string
+          worker: string | null
+        }
+        Insert: {
+          attempts?: number
+          bucket: string
+          created_at?: string
+          document_version_id?: string | null
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          locked_until?: string | null
+          priority?: number
+          run_id?: string | null
+          started_at?: string | null
+          state?: string
+          storage_path: string
+          worker?: string | null
+        }
+        Update: {
+          attempts?: number
+          bucket?: string
+          created_at?: string
+          document_version_id?: string | null
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          locked_until?: string | null
+          priority?: number
+          run_id?: string | null
+          started_at?: string | null
+          state?: string
+          storage_path?: string
+          worker?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_index_jobs_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_search_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          search_vector: unknown
+          source_document_id: string
+        }
+        Insert: {
+          chunk_index: number
+          content: string
+          search_vector?: unknown
+          source_document_id: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          search_vector?: unknown
+          source_document_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_search_chunks_source_document_id_fkey"
+            columns: ["source_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       document_template_versions: {
         Row: {
@@ -417,71 +923,108 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          questionnaire: string | null
           required_fields: Json
           typical_stage: string | null
           updated_at: string
-          questionnaire: string | null
         }
         Insert: {
           category: string
           created_at?: string
           id?: string
           name: string
+          questionnaire?: string | null
           required_fields?: Json
           typical_stage?: string | null
           updated_at?: string
-          questionnaire?: string | null
         }
         Update: {
           category?: string
           created_at?: string
           id?: string
           name?: string
+          questionnaire?: string | null
           required_fields?: Json
           typical_stage?: string | null
           updated_at?: string
-          questionnaire?: string | null
         }
         Relationships: []
       }
       document_versions: {
         Row: {
-          indexing_status: string
+          card: Json | null
+          changes_from_previous: Json | null
+          compared_with_version_id: string | null
+          content_hash: string | null
           created_at: string
           file_name: string | null
           id: string
+          indexing_attempts: number
+          indexing_error: string | null
+          indexing_finished_at: string | null
+          indexing_started_at: string | null
+          indexing_status: string
           is_ai_generated: boolean
           label: string | null
           matter_document_id: string
+          page_count: number | null
+          proof_check: Json | null
           storage_path: string
           uploaded_by: string | null
           version_number: number
         }
         Insert: {
-          indexing_status?: string
+          card?: Json | null
+          changes_from_previous?: Json | null
+          compared_with_version_id?: string | null
+          content_hash?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
+          indexing_attempts?: number
+          indexing_error?: string | null
+          indexing_finished_at?: string | null
+          indexing_started_at?: string | null
+          indexing_status?: string
           is_ai_generated?: boolean
           label?: string | null
           matter_document_id: string
+          page_count?: number | null
+          proof_check?: Json | null
           storage_path: string
           uploaded_by?: string | null
           version_number: number
         }
         Update: {
-          indexing_status?: string
+          card?: Json | null
+          changes_from_previous?: Json | null
+          compared_with_version_id?: string | null
+          content_hash?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
+          indexing_attempts?: number
+          indexing_error?: string | null
+          indexing_finished_at?: string | null
+          indexing_started_at?: string | null
+          indexing_status?: string
           is_ai_generated?: boolean
           label?: string | null
           matter_document_id?: string
+          page_count?: number | null
+          proof_check?: Json | null
           storage_path?: string
           uploaded_by?: string | null
           version_number?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "document_versions_compared_with_version_id_fkey"
+            columns: ["compared_with_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "document_versions_matter_document_id_fkey"
             columns: ["matter_document_id"]
@@ -493,43 +1036,76 @@ export type Database = {
       }
       documents: {
         Row: {
+          char_end: number | null
+          char_start: number | null
           content: string
           created_at: string
           created_by: string | null
           document_type_id: string | null
+          document_version_id: string | null
           embedding: string | null
+          heading_path: string | null
           id: string
+          ingest_run_id: string | null
+          is_ai_generated: boolean | null
           is_precedent: boolean
           is_statute: boolean
+          matter_document_id: string | null
           matter_id: string | null
           metadata: Json
+          page: number | null
+          text_hash: string | null
+          tsv: unknown
           updated_at: string
+          version_number: number | null
         }
         Insert: {
+          char_end?: number | null
+          char_start?: number | null
           content: string
           created_at?: string
           created_by?: string | null
           document_type_id?: string | null
+          document_version_id?: string | null
           embedding?: string | null
+          heading_path?: string | null
           id?: string
+          ingest_run_id?: string | null
+          is_ai_generated?: boolean | null
           is_precedent?: boolean
           is_statute?: boolean
+          matter_document_id?: string | null
           matter_id?: string | null
           metadata?: Json
+          page?: number | null
+          text_hash?: string | null
+          tsv?: unknown
           updated_at?: string
+          version_number?: number | null
         }
         Update: {
+          char_end?: number | null
+          char_start?: number | null
           content?: string
           created_at?: string
           created_by?: string | null
           document_type_id?: string | null
+          document_version_id?: string | null
           embedding?: string | null
+          heading_path?: string | null
           id?: string
+          ingest_run_id?: string | null
+          is_ai_generated?: boolean | null
           is_precedent?: boolean
           is_statute?: boolean
+          matter_document_id?: string | null
           matter_id?: string | null
           metadata?: Json
+          page?: number | null
+          text_hash?: string | null
+          tsv?: unknown
           updated_at?: string
+          version_number?: number | null
         }
         Relationships: [
           {
@@ -537,6 +1113,13 @@ export type Database = {
             columns: ["document_type_id"]
             isOneToOne: false
             referencedRelation: "document_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
             referencedColumns: ["id"]
           },
           {
@@ -586,6 +1169,90 @@ export type Database = {
           },
         ]
       }
+      law_monitor_candidates: {
+        Row: {
+          act_name: string | null
+          authority_ref: string | null
+          confidence: string | null
+          dedupe_key: string
+          fetch_attempts: number
+          final: boolean
+          first_seen_at: string
+          found_by: string
+          last_seen_at: string
+          law_update_id: string | null
+          published_date: string | null
+          reason: string | null
+          run_id: string | null
+          source_name: string
+          status: string
+          summary: string | null
+          times_seen: number
+          title: string
+          update_type: string | null
+          url: string | null
+        }
+        Insert: {
+          act_name?: string | null
+          authority_ref?: string | null
+          confidence?: string | null
+          dedupe_key: string
+          fetch_attempts?: number
+          final?: boolean
+          first_seen_at?: string
+          found_by?: string
+          last_seen_at?: string
+          law_update_id?: string | null
+          published_date?: string | null
+          reason?: string | null
+          run_id?: string | null
+          source_name: string
+          status: string
+          summary?: string | null
+          times_seen?: number
+          title: string
+          update_type?: string | null
+          url?: string | null
+        }
+        Update: {
+          act_name?: string | null
+          authority_ref?: string | null
+          confidence?: string | null
+          dedupe_key?: string
+          fetch_attempts?: number
+          final?: boolean
+          first_seen_at?: string
+          found_by?: string
+          last_seen_at?: string
+          law_update_id?: string | null
+          published_date?: string | null
+          reason?: string | null
+          run_id?: string | null
+          source_name?: string
+          status?: string
+          summary?: string | null
+          times_seen?: number
+          title?: string
+          update_type?: string | null
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_monitor_candidates_law_update_id_fkey"
+            columns: ["law_update_id"]
+            isOneToOne: false
+            referencedRelation: "law_updates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "law_monitor_candidates_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "law_monitor_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       law_monitor_runs: {
         Row: {
           acts_checked: number
@@ -595,6 +1262,8 @@ export type Database = {
           id: string
           library_cursor: string | null
           rejected: number
+          reported: number
+          retried: number
           sources_checked: number
           started_at: string
           status: string
@@ -608,6 +1277,8 @@ export type Database = {
           id?: string
           library_cursor?: string | null
           rejected?: number
+          reported?: number
+          retried?: number
           sources_checked?: number
           started_at?: string
           status?: string
@@ -621,6 +1292,8 @@ export type Database = {
           id?: string
           library_cursor?: string | null
           rejected?: number
+          reported?: number
+          retried?: number
           sources_checked?: number
           started_at?: string
           status?: string
@@ -668,7 +1341,10 @@ export type Database = {
           dedupe_key: string
           discovered_at: string
           document_url: string | null
+          found_by: string
           id: string
+          incorporation: string | null
+          incorporation_note: string | null
           last_seen_at: string
           library_action: string
           library_action_at: string | null
@@ -678,6 +1354,7 @@ export type Database = {
           source_name: string
           source_url: string | null
           summary: string | null
+          tier: string
           title: string
           update_type: string
         }
@@ -688,7 +1365,10 @@ export type Database = {
           dedupe_key: string
           discovered_at?: string
           document_url?: string | null
+          found_by?: string
           id?: string
+          incorporation?: string | null
+          incorporation_note?: string | null
           last_seen_at?: string
           library_action?: string
           library_action_at?: string | null
@@ -698,6 +1378,7 @@ export type Database = {
           source_name: string
           source_url?: string | null
           summary?: string | null
+          tier?: string
           title: string
           update_type: string
         }
@@ -708,7 +1389,10 @@ export type Database = {
           dedupe_key?: string
           discovered_at?: string
           document_url?: string | null
+          found_by?: string
           id?: string
+          incorporation?: string | null
+          incorporation_note?: string | null
           last_seen_at?: string
           library_action?: string
           library_action_at?: string | null
@@ -718,6 +1402,7 @@ export type Database = {
           source_name?: string
           source_url?: string | null
           summary?: string | null
+          tier?: string
           title?: string
           update_type?: string
         }
@@ -886,6 +1571,7 @@ export type Database = {
           created_by: string | null
           document_type_id: string | null
           id: string
+          last_version_number: number
           matter_id: string
           owner_id: string | null
           status: Database["public"]["Enums"]["document_status"]
@@ -897,6 +1583,7 @@ export type Database = {
           created_by?: string | null
           document_type_id?: string | null
           id?: string
+          last_version_number?: number
           matter_id: string
           owner_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
@@ -908,6 +1595,7 @@ export type Database = {
           created_by?: string | null
           document_type_id?: string | null
           id?: string
+          last_version_number?: number
           matter_id?: string
           owner_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
@@ -1127,6 +1815,32 @@ export type Database = {
           },
         ]
       }
+      matter_stars: {
+        Row: {
+          created_at: string
+          matter_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          matter_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          matter_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matter_stars_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       matter_tasks: {
         Row: {
           assignee_id: string | null
@@ -1320,6 +2034,50 @@ export type Database = {
           },
         ]
       }
+      precedent_passages: {
+        Row: {
+          body: string
+          chunk_index: number | null
+          document_id: string
+          document_type_id: string | null
+          filename: string | null
+          id: number
+          ordinal: number
+          storage_path: string | null
+          tsv: unknown
+        }
+        Insert: {
+          body: string
+          chunk_index?: number | null
+          document_id: string
+          document_type_id?: string | null
+          filename?: string | null
+          id?: never
+          ordinal: number
+          storage_path?: string | null
+          tsv?: unknown
+        }
+        Update: {
+          body?: string
+          chunk_index?: number | null
+          document_id?: string
+          document_type_id?: string | null
+          filename?: string | null
+          id?: never
+          ordinal?: number
+          storage_path?: string | null
+          tsv?: unknown
+        }
+        Relationships: [
+          {
+            foreignKeyName: "precedent_passages_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -1348,9 +2106,6 @@ export type Database = {
         Relationships: []
       }
       redline_suggestions: {
-        // One AI change. Legacy rows anchor on document_version_id (text-matched
-        // against a saved version); working-document rows anchor on artifact_id
-        // (the lineage root) and are found again in the Word file by revision_ids.
         Row: {
           artifact_id: string | null
           clause_reference: string | null
@@ -1497,6 +2252,230 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      timekeeper_activity: {
+        Row: {
+          app: string | null
+          billable: boolean
+          captures: Json
+          confirmed: boolean
+          day: string
+          ended_at: number
+          is_work: boolean
+          kind: string
+          matter_id: string | null
+          matter_name: string | null
+          segment_id: number
+          started_at: number
+          task_id: string | null
+          task_title: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          app?: string | null
+          billable?: boolean
+          captures?: Json
+          confirmed?: boolean
+          day: string
+          ended_at: number
+          is_work?: boolean
+          kind: string
+          matter_id?: string | null
+          matter_name?: string | null
+          segment_id: number
+          started_at: number
+          task_id?: string | null
+          task_title?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          app?: string | null
+          billable?: boolean
+          captures?: Json
+          confirmed?: boolean
+          day?: string
+          ended_at?: number
+          is_work?: boolean
+          kind?: string
+          matter_id?: string | null
+          matter_name?: string | null
+          segment_id?: number
+          started_at?: number
+          task_id?: string | null
+          task_title?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timekeeper_activity_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_activity_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "matter_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_activity_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      timekeeper_plans: {
+        Row: {
+          assigned_by: string | null
+          created_at: string
+          day: string
+          id: string
+          keywords: Json
+          matter_id: string
+          task_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string
+          day: string
+          id?: string
+          keywords?: Json
+          matter_id: string
+          task_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string
+          day?: string
+          id?: string
+          keywords?: Json
+          matter_id?: string
+          task_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timekeeper_plans_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_plans_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_plans_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "matter_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_plans_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      timekeeper_tags: {
+        Row: {
+          applied_at: string | null
+          created_at: string
+          day: string | null
+          id: string
+          is_work: boolean
+          key: string
+          matter_id: string | null
+          segment_id: number | null
+          tagged_by: string | null
+          task_id: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string | null
+          created_at?: string
+          day?: string | null
+          id?: string
+          is_work?: boolean
+          key: string
+          matter_id?: string | null
+          segment_id?: number | null
+          tagged_by?: string | null
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          applied_at?: string | null
+          created_at?: string
+          day?: string | null
+          id?: string
+          is_work?: boolean
+          key?: string
+          matter_id?: string | null
+          segment_id?: number | null
+          tagged_by?: string | null
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timekeeper_tags_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_tags_tagged_by_fkey"
+            columns: ["tagged_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_tags_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "matter_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timekeeper_tags_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
@@ -1685,23 +2664,85 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      save_ai_document: {
-        Args: { p_matter_id: string; p_document_type_id: string; p_document_id: string; p_create_new: boolean; p_expected_version_id: string | null; p_title: string; p_storage_path: string; p_file_stem: string }
-        Returns: Json
-      }
-      search_project_content: {
-        Args: { p_query: string; p_matter_id?: string | null; p_kind?: string; p_all_versions?: boolean; p_limit?: number; p_offset?: number }
-        Returns: { kind: string; item_id: string; matter_id: string; matter_name: string; title: string; snippet: string; document_id: string | null; version_id: string | null; version_number: number | null; storage_path: string | null; file_name: string | null; created_at: string; rank: number; total_count: number; matched_in: string }[]
-      }
-
-      save_document_version: {
-        Args: { p_matter_id: string; p_document_type_id: string | null; p_document_id: string; p_create_new: boolean; p_expected_version_id: string | null; p_title: string; p_storage_path: string; p_file_stem: string; p_is_ai_generated?: boolean; p_extension?: string }
-        Returns: Json
-      }
-
       can_access_whatsapp_document: {
         Args: { _path: string }
         Returns: boolean
+      }
+      claim_index_job: {
+        Args: { p_worker: string }
+        Returns: {
+          attempts: number
+          bucket: string
+          created_at: string
+          document_version_id: string | null
+          finished_at: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          locked_until: string | null
+          priority: number
+          run_id: string | null
+          started_at: string | null
+          state: string
+          storage_path: string
+          worker: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "document_index_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      complete_ai_review: {
+        Args: {
+          p_coverage: Json
+          p_passes: Json
+          p_run_id: string
+          p_suggestions: Json
+        }
+        Returns: {
+          artifact_id: string | null
+          clause_reference: string | null
+          created_at: string
+          created_by: string | null
+          decided_at: string | null
+          decided_by: string | null
+          document_version_id: string | null
+          id: string
+          message_id: string | null
+          op: string
+          original_text: string | null
+          paragraph_index: number | null
+          part: string
+          placement: string
+          placement_reason: string | null
+          rationale: string | null
+          review_run_id: string | null
+          review_type: string
+          revision_ids: number[]
+          status: Database["public"]["Enums"]["redline_status"]
+          suggested_text: string | null
+          superseded_by: string | null
+          thread_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "redline_suggestions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      connector_prune: { Args: never; Returns: number }
+      enqueue_index_job: { Args: { p_version_id: string }; Returns: Json }
+      fail_index_job: {
+        Args: {
+          p_error: string
+          p_job_id: string
+          p_retry?: boolean
+          p_run_id?: string
+        }
+        Returns: string
       }
       has_role: {
         Args: {
@@ -1710,7 +2751,9 @@ export type Database = {
         }
         Returns: boolean
       }
+      index_supported_extension: { Args: { p_path: string }; Returns: boolean }
       is_firm_member: { Args: { _user_id: string }; Returns: boolean }
+      is_supervisor: { Args: { _user_id: string }; Returns: boolean }
       match_documents: {
         Args: {
           filter_act_names?: string[]
@@ -1739,6 +2782,19 @@ export type Database = {
           title: string
         }[]
       }
+      pgrst_pre_request: { Args: never; Returns: undefined }
+      precedent_common_lexemes: {
+        Args: { min_passages: number; terms: string[] }
+        Returns: string[]
+      }
+      precedent_lexeme_df: { Args: { terms: string[] }; Returns: number[] }
+      precedent_paragraphs: {
+        Args: { p_content: string }
+        Returns: {
+          body: string
+          ordinal: number
+        }[]
+      }
       precedent_sources: {
         Args: never
         Returns: {
@@ -1748,6 +2804,131 @@ export type Database = {
           document_type_name: string
           filename: string
           storage_path: string
+        }[]
+      }
+      publish_index_run: {
+        Args: {
+          p_card?: Json
+          p_job_id: string
+          p_page_count?: number
+          p_run_id: string
+        }
+        Returns: Json
+      }
+      record_version_checks: {
+        Args: {
+          p_changes?: Json
+          p_compared_with?: string
+          p_proof_check?: Json
+          p_run_id: string
+          p_version_id: string
+        }
+        Returns: boolean
+      }
+      release_index_job: {
+        Args: { p_job_id: string; p_run_id: string }
+        Returns: boolean
+      }
+      save_ai_document: {
+        Args: {
+          p_create_new: boolean
+          p_document_id: string
+          p_document_type_id: string
+          p_expected_version_id: string
+          p_file_stem: string
+          p_matter_id: string
+          p_storage_path: string
+          p_title: string
+        }
+        Returns: Json
+      }
+      save_document_version: {
+        Args: {
+          p_create_new: boolean
+          p_document_id: string
+          p_document_type_id: string
+          p_expected_version_id: string
+          p_extension?: string
+          p_file_stem: string
+          p_is_ai_generated?: boolean
+          p_matter_id: string
+          p_storage_path: string
+          p_title: string
+        }
+        Returns: Json
+      }
+      search_passages: {
+        Args: {
+          act_names?: string[]
+          all_versions?: boolean
+          document_type_id?: string
+          exclude_document_id?: string
+          k?: number
+          matter_id?: string
+          max_ms?: number
+          phrasings?: Json
+          query_embedding: string
+          query_text: string
+          scope: string
+        }
+        Returns: {
+          content: string
+          document_version_id: string
+          heading_path: string
+          id: string
+          keyword_rank: number
+          matter_document_id: string
+          metadata: Json
+          name_rank: number
+          page: number
+          rrf_score: number
+          vector_rank: number
+          version_number: number
+        }[]
+      }
+      search_precedent_passages: {
+        Args: {
+          p_document_type_id?: string
+          p_limit?: number
+          p_phrases: string[]
+        }
+        Returns: {
+          body: string
+          chunk_index: number
+          document_id: string
+          document_type_id: string
+          filename: string
+          id: number
+          ordinal: number
+          rank: number
+          storage_path: string
+        }[]
+      }
+      search_project_content: {
+        Args: {
+          p_all_versions?: boolean
+          p_kind?: string
+          p_limit?: number
+          p_matter_id?: string
+          p_offset?: number
+          p_query: string
+        }
+        Returns: {
+          created_at: string
+          document_id: string
+          file_name: string
+          item_id: string
+          kind: string
+          matched_in: string
+          matter_id: string
+          matter_name: string
+          rank: number
+          snippet: string
+          storage_path: string
+          title: string
+          total_count: number
+          version_id: string
+          version_number: number
         }[]
       }
       statute_sources: {
@@ -1760,15 +2941,19 @@ export type Database = {
           source_url: string
         }[]
       }
+      touch_index_job: {
+        Args: { p_job_id: string; p_run_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role:
         | "admin"
-        | "founder"
         | "partner"
         | "associate"
         | "paralegal"
         | "senior_counsel"
+        | "founder"
       document_status:
         | "not_started"
         | "drafting"
@@ -1909,11 +3094,11 @@ export const Constants = {
     Enums: {
       app_role: [
         "admin",
-        "founder",
         "partner",
         "associate",
         "paralegal",
         "senior_counsel",
+        "founder",
       ],
       document_status: [
         "not_started",

@@ -34,16 +34,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
 import re
+import socket
+import subprocess
 import sys
 import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -54,15 +57,41 @@ from supabase_io import SupabaseClient, _request_with_retry  # noqa: E402
 
 load_dotenv(SCRIPT_DIR / ".env")
 
+# Government sites publish IPv6 addresses they do not answer on. Python tries
+# them first and waits out each timeout, so IPv4 addresses go first (the same
+# fix official-fetch-relay/official-fetch.py carries).
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(*args, **kwargs):
+    return sorted(_getaddrinfo(*args, **kwargs), key=lambda info: info[0] != socket.AF_INET)
+
+
+socket.getaddrinfo = _ipv4_first
+
+# Sites that do not answer this VM at all (na.gov.pk, senate.gov.pk,
+# pakistancode.gov.pk, the provincial assemblies, PPRA's portal) do answer the
+# firm's DigitalOcean droplet, which runs a download relay reachable only over
+# SSH with a key that can do nothing else (official-fetch-relay/). The chat
+# service already uses it; the monitor shares the same key.
+RELAY_DIR = os.environ.get("OFFICIAL_FETCH_RELAY_DIR", "/opt/chat-service/.relay")
+RELAY_HOST = os.environ.get("OFFICIAL_FETCH_RELAY_HOST", "aklarelay@157.245.240.172")
+
 # Haiku for the sweeps (many cheap calls, same model statuteResolver.ts and
 # scrape.py already use for this kind of locate-and-classify work); Sonnet
-# for the digest, which is prose a person actually reads every morning.
+# for the digest, which is prose a person actually reads every morning. The
+# web_search tool version is tied to the sweep model: the basic variant is
+# what Haiku 4.5 accepts.
 SWEEP_MODEL = "claude-haiku-4-5-20251001"
+WEB_SEARCH_TOOL = "web_search_20250305"
+# Plain classification with no web search (watched-page entries, the
+# incorporation check): the current Haiku.
+CLASSIFY_MODEL = "claude-haiku-5-5"
 DIGEST_MODEL = "claude-sonnet-5"
 
 FINDING_SCHEMA = (
     '[{"title": string, "authority_ref": string|null, "update_type": '
-    '"consolidated_replacement"|"amending_instrument"|"new_act"|"bill"|"notice", '
+    '"consolidated_replacement"|"amending_instrument"|"new_act"|"bill"|"draft"|"notice", '
     '"act_name": string|null, "summary": string, "source_url": string, '
     '"document_url": string|null, "published_date": "YYYY-MM-DD"|null, '
     '"confidence": "high"|"medium"|"low"}]'
@@ -73,8 +102,26 @@ UPDATE_TYPES = {
     "amending_instrument",
     "new_act",
     "bill",
+    "draft",
     "notice",
 }
+
+# Rejections that no retry can change. Anything else (the document did not
+# download, the PDF was unreadable) is retried from the stored url next
+# morning without spending another search.
+FINAL_REASON_PREFIXES = (
+    "unknown update_type",
+    "no title",
+    "no url",
+    "unparseable published_date",
+    "published ",
+    "published_date is in the future",
+    "domain not allowlisted",
+    "reference ",
+    "document does not match",
+    "redirect source",
+    "source exceeds",
+)
 
 
 # ---------------------------------------------------------------- utilities
@@ -124,6 +171,12 @@ def load_config() -> dict:
 # ------------------------------------------------------------------ the AI
 
 
+# Every call's outcome, so a morning where the API refused everything (no
+# credit, bad key, outage) ends as a FAILED run with the reason on the run
+# row — not as a cheerful "no new legal developments were identified today".
+AI_STATS = {"ok": 0, "failed": 0, "last_error": ""}
+
+
 def ai_call(model: str, system: str, user: str, *, max_tokens: int = 2000, web_search_uses: int = 0) -> str | None:
     """One Claude call, optionally with the hosted web_search tool. Returns
     None rather than raising, so one bad call degrades that sweep instead of
@@ -131,6 +184,8 @@ def ai_call(model: str, system: str, user: str, *, max_tokens: int = 2000, web_s
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         log("  ANTHROPIC_API_KEY not set — cannot search")
+        AI_STATS["failed"] += 1
+        AI_STATS["last_error"] = "ANTHROPIC_API_KEY not set"
         return None
 
     body: dict = {
@@ -140,7 +195,7 @@ def ai_call(model: str, system: str, user: str, *, max_tokens: int = 2000, web_s
         "messages": [{"role": "user", "content": user}],
     }
     if web_search_uses:
-        body["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": web_search_uses}]
+        body["tools"] = [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": web_search_uses}]
 
     try:
         resp = requests.post(
@@ -156,14 +211,31 @@ def ai_call(model: str, system: str, user: str, *, max_tokens: int = 2000, web_s
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as err:
-        log(f"  AI call failed: {err}")
+        detail = ""
+        response = getattr(err, "response", None)
+        if response is not None:
+            try:
+                detail = " — " + (response.json().get("error", {}).get("message") or response.text[:300])
+            except ValueError:
+                detail = " — " + response.text[:300]
+        log(f"  AI call failed: {err}{detail}")
+        AI_STATS["failed"] += 1
+        AI_STATS["last_error"] = f"{err}{detail}"[:500]
         return None
 
+    AI_STATS["ok"] += 1
     # With a server-side tool in play the earlier text blocks are the model's
     # own search narration — the answer is the LAST text block, not the first.
     # (Same gotcha documented in statuteResolver.ts.)
     blocks = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
     return blocks[-1].strip() if blocks else None
+
+
+def ai_blackout() -> str | None:
+    """The reason, if the API refused every single call this run."""
+    if AI_STATS["failed"] and not AI_STATS["ok"]:
+        return f"every AI call failed ({AI_STATS['failed']} of {AI_STATS['failed']}): {AI_STATS['last_error']}"
+    return None
 
 
 def parse_findings(reply: str | None) -> list[dict]:
@@ -190,17 +262,22 @@ def sweep_source(source: dict, known_refs: list[str], lookback_days: int) -> lis
             "Report only real, verifiable items you found a page or document for — never "
             "guess, never infer, and never include an item you cannot give a working URL "
             "for. Classify each item honestly:\n"
-            "- 'bill' = a proposed law that has NOT been enacted\n"
+            "- 'bill' = a proposed Act that has NOT been enacted (introduced, passed by one "
+            "House, or awaiting assent)\n"
+            "- 'draft' = draft rules, regulations or a policy circulated for public "
+            "consultation, not yet in force\n"
             "- 'notice' = a circular, notification, guideline, press release or SRO that "
             "does not itself amend an Act's text\n"
-            "- 'amending_instrument' = an instrument that amends a named existing Act\n"
+            "- 'amending_instrument' = an Act, ordinance or SRO that amends a named existing Act\n"
             "- 'consolidated_replacement' = a newly issued full consolidated text of an "
             "existing Act\n"
             "- 'new_act' = a newly enacted Act\n\n"
             f"Respond with ONLY a JSON array, no other text, matching:\n{FINDING_SCHEMA}\n\n"
             "'act_name' is the existing Act this affects, or null. 'authority_ref' is the "
-            "official reference (SRO/circular/notification number) if there is one. Return "
-            "[] if there is genuinely nothing new."
+            "official reference (SRO/circular/notification number) if there is one. Prefer "
+            "the official page or PDF as 'document_url'; a press report is acceptable as "
+            "'source_url' when no official page exists yet. Return [] if there is genuinely "
+            "nothing new."
         ),
         user=(
             f"Authority: {source['name']} — {source.get('description', '')}\n"
@@ -213,23 +290,30 @@ def sweep_source(source: dict, known_refs: list[str], lookback_days: int) -> lis
     return parse_findings(reply)
 
 
-def sweep_act(act_name: str) -> list[dict]:
+def sweep_act(act_name: str, known_titles: list[str], lookback_years: int) -> list[dict]:
     """'Has this specific Act been amended or replaced?'"""
+    known = "; ".join(known_titles[:40]) or "none yet"
     reply = ai_call(
         SWEEP_MODEL,
         system=(
             "You check whether a specific Pakistani statute has changed. Search the web for "
             "any amendment, ordinance, consolidated re-issue or repeal affecting the named "
-            "Act. Only report a change you found an actual official document or page for, "
-            "with a working URL. If the Act appears unchanged, return [].\n\n"
+            "Act, and for any bill before Parliament or a provincial assembly that would "
+            "amend it. Only report a change you found an actual official document or page "
+            "for, with a working URL. If the Act appears unchanged, return [].\n\n"
             "Be precise about the distinction between an amending instrument (a separate "
-            "short instrument that amends the Act) and a consolidated replacement (a newly "
-            "published full text of the Act as amended). Do not report the Act's own "
-            "original enactment as a change.\n\n"
+            "short instrument that amends the Act), a consolidated replacement (a newly "
+            "published full text of the Act as amended) and a bill (proposed, not law). Do "
+            "not report the Act's own original enactment as a change.\n\n"
             f"Respond with ONLY a JSON array, no other text, matching:\n{FINDING_SCHEMA}\n\n"
             "Set 'act_name' to the Act named below, exactly as given."
         ),
-        user=f"Act: {act_name}\n\nHas it been amended, replaced or repealed in the last 2 years?",
+        user=(
+            f"Act: {act_name}\n\n"
+            f"Has it been amended, replaced or repealed in the last {lookback_years} years, "
+            "or is a bill to amend it pending?\n\n"
+            f"Already known, do NOT report these again: {known}"
+        ),
         web_search_uses=3,
     )
     findings = parse_findings(reply)
@@ -243,23 +327,72 @@ def sweep_act(act_name: str) -> list[dict]:
 # ------------------------------------------------------------ the evidence
 
 
-def fetch_document(url: str, allowed_domains: list[str]) -> tuple[str | None, str | None]:
-    """Download a finding's source document and return its text. Returns
-    (text, None) or (None, reason). Nothing gets written to the database
-    without passing through here first."""
-    host = (urlparse(url).hostname or "").lower()
-    if not any(host == d or host.endswith("." + d) for d in allowed_domains):
-        return None, f"domain not allowlisted ({host or 'no host'})"
+MAX_DOWNLOAD = 20 * 1024 * 1024
+UA = "Mozilla/5.0 (compatible) AKLA-law-monitor"
 
+
+def _host_in(host: str, domains: list[str]) -> bool:
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
+def domain_tier(url: str, config: dict) -> str | None:
+    """'verified' for an official authority, 'reported' for an allowlisted
+    press domain, None for anything else. The tier decides what a finding is
+    allowed to do: only verified findings may touch the library or flag a
+    matter."""
+    host = (urlparse(url).hostname or "").lower()
+    if _host_in(host, config["allowed_domains"]):
+        return "verified"
+    if _host_in(host, config.get("news_domains", [])):
+        return "reported"
+    return None
+
+
+def relay_available() -> bool:
+    return os.path.exists(f"{RELAY_DIR}/id_ed25519") and os.path.exists(f"{RELAY_DIR}/known_hosts")
+
+
+def _download_relay(url: str) -> tuple[bytes | None, str, str, str | None]:
+    """(body, content_type, final_url, error). The relay applies its own
+    source gate (HTTPS, official domain, redirects checked, size, timeout)
+    and reports the final address so it can be checked again here."""
     try:
-        from urllib.parse import urljoin
+        proc = subprocess.run(
+            [
+                "ssh", "-i", f"{RELAY_DIR}/id_ed25519",
+                "-o", f"UserKnownHostsFile={RELAY_DIR}/known_hosts",
+                "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                RELAY_HOST, url,
+            ],
+            capture_output=True,
+            timeout=150,
+        )
+    except (subprocess.TimeoutExpired, OSError) as err:
+        return None, "", url, f"relay failed ({err.__class__.__name__})"
+    lines = proc.stderr.decode("utf-8", "replace").split("\n")
+    if proc.returncode != 0:
+        msg = next((l[6:] for l in lines if l.startswith("ERROR ")), f"relay exit {proc.returncode}")
+        return None, "", url, f"relay: {msg}"
+    final = next((l[6:].strip() for l in lines if l.startswith("FINAL ")), url)
+    ctype = next((l[5:].strip() for l in lines if l.startswith("TYPE ")), "")
+    if len(proc.stdout) > MAX_DOWNLOAD:
+        return None, "", final, "source exceeds 20 MB"
+    return proc.stdout, ctype, final, None
+
+
+def _download_direct(url: str, domains: list[str], timeout: int) -> tuple[bytes | None, str, str, str | None]:
+    """(body, content_type, final_url, error). Redirects are followed by
+    hand so every hop is checked against the same domain gate."""
+    try:
         for _ in range(6):
             parsed = urlparse(url)
             host = (parsed.hostname or "").lower()
-            if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None, 443) or not any(host == d or host.endswith("." + d) for d in allowed_domains):
-                return None, "redirect source is not an approved HTTPS authority"
-            resp = requests.get(url, timeout=45, allow_redirects=False, stream=True,
-                                headers={"User-Agent": "Mozilla/5.0 (compatible) AKLA-law-monitor"})
+            if (
+                parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port not in (None, 443) or not _host_in(host, domains)
+            ):
+                return None, "", url, "redirect source is not an approved HTTPS site"
+            resp = requests.get(url, timeout=timeout, allow_redirects=False, stream=True, headers={"User-Agent": UA})
             if resp.status_code in (301, 302, 303, 307, 308):
                 url = urljoin(url, resp.headers.get("Location", ""))
                 resp.close()
@@ -268,81 +401,123 @@ def fetch_document(url: str, allowed_domains: list[str]) -> tuple[str | None, st
             chunks, size = [], 0
             for chunk in resp.iter_content(65536):
                 size += len(chunk)
-                if size > 20 * 1024 * 1024:
+                if size > MAX_DOWNLOAD:
                     resp.close()
-                    return None, "source exceeds 20 MB"
+                    return None, "", url, "source exceeds 20 MB"
                 chunks.append(chunk)
-            resp._content = b"".join(chunks)
             resp.close()
-            break
-        else:
-            return None, "too many source redirects"
+            return b"".join(chunks), resp.headers.get("Content-Type", ""), url, None
+        return None, "", url, "too many source redirects"
     except requests.exceptions.RequestException as err:
-        return None, f"fetch failed ({err})"
+        return None, "", url, f"fetch failed ({err.__class__.__name__}: {str(err)[:120]})"
 
-    content_type = resp.headers.get("Content-Type", "").lower()
-    if "pdf" in content_type or url.lower().endswith(".pdf"):
+
+def extract_text(body: bytes, content_type: str, url: str) -> tuple[str | None, str | None]:
+    content_type = (content_type or "").lower()
+    if "pdf" in content_type or url.lower().split("?")[0].endswith(".pdf") or body[:5] == b"%PDF-":
         try:
             import pdfplumber
 
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
-                tmp.write(resp.content)
+                tmp.write(body)
                 tmp.flush()
                 with pdfplumber.open(tmp.name) as pdf:
                     text = "\n".join(page.extract_text() or "" for page in pdf.pages)
         except Exception as err:  # noqa: BLE001 — a broken PDF is a rejection, not a crash
             return None, f"pdf unreadable ({err})"
     else:
-        stripped = re.sub(r"<(script|style)[\s\S]*?</\1>", " ", resp.text, flags=re.I)
+        raw = body.decode("utf-8", "replace")
+        stripped = re.sub(r"<(script|style)[\s\S]*?</\1>", " ", raw, flags=re.I)
         text = html.unescape(re.sub(r"<[^>]+>", " ", stripped))
-
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) < 200:
         return None, f"document had almost no text ({len(text)} chars)"
     return text, None
 
 
-def verify_finding(finding: dict, config: dict) -> tuple[bool, str, str | None]:
+def fetch_bytes(url: str, config: dict) -> tuple[bytes | None, str, str, str | None]:
+    """Download from an approved domain: directly first, then — for official
+    sites only — through the relay. (body, content_type, final_url, error)."""
+    tier = domain_tier(url, config)
+    if tier is None:
+        return None, "", url, f"domain not allowlisted ({(urlparse(url).hostname or 'no host').lower()})"
+    domains = config["allowed_domains"] if tier == "verified" else config.get("news_domains", [])
+    body, ctype, final, err = _download_direct(url, domains, timeout=30 if tier == "verified" else 45)
+    if body is not None or tier != "verified" or not relay_available():
+        return body, ctype, final, err
+    body, ctype, final, rerr = _download_relay(url)
+    if body is None:
+        return None, "", url, f"{err}; {rerr}"
+    if domain_tier(final, config) != "verified":
+        return None, "", final, "redirect source is not an approved HTTPS site"
+    return body, ctype, final, None
+
+
+def fetch_document(url: str, config: dict) -> tuple[str | None, str | None, str | None]:
+    """Download a finding's source document and return its text. Returns
+    (text, tier, None) or (None, None, reason). Nothing gets written to the
+    database without passing through here first."""
+    tier = domain_tier(url, config)
+    body, ctype, final, err = fetch_bytes(url, config)
+    if body is None:
+        return None, None, err
+    text, terr = extract_text(body, ctype, final)
+    if text is None:
+        return None, None, terr
+    return text, tier, None
+
+
+def is_final_rejection(reason: str) -> bool:
+    return reason.startswith(FINAL_REASON_PREFIXES)
+
+
+def verify_finding(finding: dict, config: dict, *, max_age_days: int) -> tuple[bool, str, str | None, str | None]:
     """Every gate a finding must pass before it becomes a row. A sweep that
     starts hallucinating produces rejections here rather than fiction in the
-    newsletter."""
+    newsletter. Returns (ok, reason, text, tier)."""
     if finding.get("update_type") not in UPDATE_TYPES:
-        return False, f"unknown update_type {finding.get('update_type')!r}", None
+        return False, f"unknown update_type {finding.get('update_type')!r}", None, None
     if not finding.get("title"):
-        return False, "no title", None
+        return False, "no title", None, None
 
     url = finding.get("document_url") or finding.get("source_url")
     if not url:
-        return False, "no url", None
+        return False, "no url", None, None
 
     published = finding.get("published_date")
     if published:
         period = parse_published_period(str(published))
         if period is None:
-            return False, f"unparseable published_date {published!r}", None
+            return False, f"unparseable published_date {published!r}", None, None
         first_day, latest_possible = period
         age = (date.today() - latest_possible).days
-        if age > config["max_published_age_days"]:
-            return False, f"published {age} days ago", None
+        if age > max_age_days:
+            return False, f"published {age} days ago (window {max_age_days})", None, None
         if (date.today() - first_day).days < -1:
-            return False, f"published_date is in the future ({published})", None
+            return False, f"published_date is in the future ({published})", None, None
         finding["published_date"] = first_day.isoformat()
 
-    text, reason = fetch_document(url, config["allowed_domains"])
+    text, tier, reason = fetch_document(url, config)
     if text is None:
-        return False, reason or "could not read document", None
+        # A press link that fails may still have an official page behind it.
+        alt = finding.get("source_url") if url == finding.get("document_url") else None
+        if alt and alt != url:
+            text, tier, reason2 = fetch_document(alt, config)
+            reason = reason if text is None else reason2
+    if text is None:
+        return False, reason or "could not read document", None, None
 
     # The document has to actually be the thing the model said it was.
     ref = finding.get("authority_ref")
     if ref and normalise(ref) and normalise(ref) not in normalise(text):
-        return False, f"reference {ref!r} not found in the document", None
+        return False, f"reference {ref!r} not found in the document", None, None
     if not ref:
         words = [w for w in re.findall(r"[A-Za-z]{4,}", finding["title"])][:6]
         hits = sum(1 for w in words if w.lower() in text.lower())
         if len(words) >= 3 and hits < 3:
-            return False, "document does not match the reported title", None
+            return False, "document does not match the reported title", None, None
 
-    return True, "ok", text
+    return True, "ok", text, tier
 
 
 def dedupe_key_for(finding: dict, source_name: str) -> str:
@@ -444,6 +619,9 @@ class Hub:
         )
 
     def known_refs(self, source_name: str, days: int = 90) -> list[str]:
+        """Everything this source has already surfaced — confirmed or
+        rejected — so the morning search does not keep paying to re-find the
+        same items."""
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = self.get(
             "law_updates",
@@ -454,11 +632,88 @@ class Hub:
                 "limit": "100",
             },
         )
-        return [r["authority_ref"] or r["title"] for r in rows if r.get("authority_ref") or r.get("title")]
+        known = [r["authority_ref"] or r["title"] for r in rows if r.get("authority_ref") or r.get("title")]
+        seen = self.get(
+            "law_monitor_candidates",
+            {
+                "select": "authority_ref,title",
+                "source_name": f"eq.{source_name}",
+                "last_seen_at": f"gte.{since}",
+                "order": "last_seen_at.desc",
+                "limit": "100",
+            },
+        )
+        for r in seen:
+            item = r.get("authority_ref") or r.get("title")
+            if item and item not in known:
+                known.append(item)
+        return known
+
+    def known_for_act(self, act_name: str) -> list[str]:
+        rows = self.get(
+            "law_monitor_candidates",
+            {"select": "title", "act_name": f"eq.{act_name}", "order": "last_seen_at.desc", "limit": "60"},
+        )
+        return [r["title"] for r in rows if r.get("title")]
 
     def existing_update(self, dedupe_key: str) -> dict | None:
         rows = self.get("law_updates", {"select": "*", "dedupe_key": f"eq.{dedupe_key}", "limit": "1"})
         return rows[0] if rows else None
+
+    # -- the candidate memory ---------------------------------------------
+
+    def candidate(self, dedupe_key: str) -> dict | None:
+        rows = self.get("law_monitor_candidates", {"select": "*", "dedupe_key": f"eq.{dedupe_key}", "limit": "1"})
+        return rows[0] if rows else None
+
+    def pending_candidates(self, max_attempts: int) -> list[dict]:
+        """Candidates whose document did not download last time. Retried from
+        the stored url, no search needed."""
+        return self.get(
+            "law_monitor_candidates",
+            {
+                "select": "*",
+                "status": "eq.pending_fetch",
+                "fetch_attempts": f"lt.{max_attempts}",
+                "order": "first_seen_at.asc",
+                "limit": "40",
+            },
+        )
+
+    def record_candidate(self, key: str, finding: dict, source_name: str, found_by: str, *,
+                         status: str, reason: str | None, final: bool, run_id: str | None,
+                         law_update_id: str | None = None, previous: dict | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "dedupe_key": key,
+            "source_name": source_name,
+            "found_by": found_by,
+            "title": str(finding.get("title") or "")[:300],
+            "authority_ref": finding.get("authority_ref"),
+            "act_name": finding.get("act_name"),
+            "update_type": finding.get("update_type"),
+            "url": finding.get("document_url") or finding.get("source_url"),
+            "published_date": finding.get("published_date"),
+            "summary": finding.get("summary"),
+            "confidence": finding.get("confidence"),
+            "status": status,
+            "reason": (reason or "")[:500] or None,
+            "final": final,
+            "fetch_attempts": (previous or {}).get("fetch_attempts", 0) + (1 if status == "pending_fetch" else 0),
+            "times_seen": (previous or {}).get("times_seen", 0) + 1,
+            "first_seen_at": (previous or {}).get("first_seen_at") or now,
+            "last_seen_at": now,
+            "law_update_id": law_update_id or (previous or {}).get("law_update_id"),
+            "run_id": run_id,
+        }
+        self.upsert("law_monitor_candidates", row, on_conflict="dedupe_key")
+
+    def touch_candidate(self, key: str, previous: dict) -> None:
+        self.patch(
+            "law_monitor_candidates",
+            {"dedupe_key": f"eq.{key}"},
+            {"last_seen_at": datetime.now(timezone.utc).isoformat(), "times_seen": previous.get("times_seen", 0) + 1},
+        )
 
 
 def looks_like_amendment(title: str) -> bool:
@@ -493,29 +748,106 @@ def confirm_consolidated(act_name: str, title: str, text: str) -> tuple[bool, st
     return False, reply.strip()
 
 
-def apply_library_action(hub: Hub, finding: dict, doc_text: str, update_id: str | None) -> tuple[str, str]:
-    """Returns (library_action, note). Bills and notices never reach the
-    library; an amending instrument is added beside the Act it amends; only a
-    verified consolidated re-issue replaces anything."""
+# Pakistani amending instruments follow a fixed drafting grammar: 'for the
+# words "X" the words "Y" shall be substituted', 'the words "X" shall be
+# omitted', 'after the words "X" the words "Y" shall be inserted', and whole
+# provisions 'shall be inserted, namely:- "..."'. Pulling the OLD and NEW
+# wording out of that grammar makes it possible to ask the library's stored
+# text a concrete question: does it already read the new way?
+_Q = r"[\"“”']"
+_SUBSTITUTE = re.compile(
+    rf"for the (?:words?|figures?|expressions?|letters?|commas?|full stop|brackets?)[^\"“”']{{0,40}}{_Q}([^\"“”']{{3,400}}){_Q}[^\"“”']{{0,80}}?the (?:words?|figures?|expressions?|letters?|commas?|full stop|brackets?)[^\"“”']{{0,40}}{_Q}([^\"“”']{{3,400}}){_Q}[^\"“”']{{0,40}}shall be substituted",
+    re.I,
+)
+_OMIT = re.compile(rf"the (?:words?|figures?|expressions?)[^\"“”']{{0,40}}{_Q}([^\"“”']{{3,400}}){_Q}[^\"“”']{{0,40}}shall be omitted", re.I)
+_INSERT = re.compile(
+    rf"(?:after|before) the (?:words?|figures?|expressions?)[^\"“”']{{0,40}}{_Q}[^\"“”']{{3,400}}{_Q}[^\"“”']{{0,80}}?the (?:words?|figures?|expressions?)[^\"“”']{{0,40}}{_Q}([^\"“”']{{3,400}}){_Q}[^\"“”']{{0,40}}shall be (?:inserted|added)",
+    re.I,
+)
+_NAMELY = re.compile(rf"shall be (?:inserted|added|substituted)[^\"“”']{{0,30}}namely[:;,\-–— ]*{_Q}([^\"“”']{{25,600}})", re.I)
+
+
+def amendment_wording(doc_text: str) -> tuple[list[str], list[str]]:
+    """(new wording, old wording) quoted by an amending instrument, each as a
+    normalised phrase of at least 15 characters."""
+    new: list[str] = []
+    old: list[str] = []
+    for a, b in _SUBSTITUTE.findall(doc_text):
+        old.append(a)
+        new.append(b)
+    old += _OMIT.findall(doc_text)
+    new += _INSERT.findall(doc_text)
+    new += _NAMELY.findall(doc_text)
+
+    def clean(items: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in items:
+            n = normalise(item)
+            if len(n) >= 15 and n not in out:
+                out.append(n)
+        return out[:30]
+
+    return clean(new), clean(old)
+
+
+def check_incorporation(hub: Hub, act_name: str, doc_text: str) -> tuple[str, str]:
+    """Does the library's copy of the principal Act already include this
+    amendment? ('incorporated' | 'not_incorporated' | 'unknown', note)."""
+    existing = hub.act_chunks(act_name)
+    if not existing:
+        return "unknown", "principal Act is not in the library"
+    stored = normalise(" ".join(c["content"] for c in existing))
+    new, old = amendment_wording(doc_text)
+    if len(new) + len(old) < 2:
+        return "unknown", "the amendment quotes no wording that can be checked against the library copy"
+    new_hits = sum(1 for p in new if p in stored)
+    old_hits = sum(1 for p in old if p in stored)
+    new_share = new_hits / len(new) if new else None
+    old_share = old_hits / len(old) if old else None
+    detail = (
+        f"new wording found {new_hits}/{len(new)}"
+        + (f", old wording still present {old_hits}/{len(old)}" if old else "")
+    )
+    if new_share is not None and new_share >= 0.6 and (old_share is None or old_share <= 0.4):
+        return "incorporated", f"library copy already reads as amended ({detail})"
+    if (new_share is None or new_share <= 0.3) and (old_share is None or old_share >= 0.6):
+        return "not_incorporated", f"library copy predates this amendment ({detail})"
+    return "unknown", f"mixed result ({detail})"
+
+
+def apply_library_action(
+    hub: Hub, finding: dict, doc_text: str, update_id: str | None, tier: str
+) -> tuple[str, str, str | None, str | None]:
+    """Returns (library_action, note, incorporation, incorporation_note).
+    Bills, drafts, notices and anything merely reported in the press never
+    reach the library; an amending instrument is added beside the Act it
+    amends unless the library's copy already includes it; only a verified
+    consolidated re-issue replaces anything."""
     kind = finding["update_type"]
     act_name = finding.get("act_name")
     title = finding["title"]
     source_url = finding.get("source_url") or finding.get("document_url")
 
-    if kind in ("bill", "notice"):
-        return "skipped", "bills and notices never enter the library"
+    if tier != "verified":
+        return "skipped", "reported in the press; the official text has not been located yet", None, None
+
+    if kind in ("bill", "notice", "draft"):
+        return "skipped", "bills, drafts and notices never enter the library", None, None
 
     if kind == "new_act":
         # Reported in the digest so a lawyer can add it deliberately; adding
         # every newly enacted Act automatically would grow the library
         # without anyone choosing to rely on it.
-        return "none", "new Act reported for review, not auto-added"
+        return "none", "new Act reported for review, not auto-added", None, None
 
     if kind == "amending_instrument":
         if not act_name:
-            return "none", "no principal Act identified"
+            return "none", "no principal Act identified", None, None
+        incorporation, inc_note = check_incorporation(hub, act_name, doc_text)
+        if incorporation == "incorporated":
+            return "skipped", "the library copy already includes this amendment", incorporation, inc_note
         if hub.act_chunks(title):
-            return "skipped", "already in the library"
+            return "skipped", "already in the library", incorporation, inc_note
         log(f"    ingesting amending instrument as its own entry: {title}")
         if not hub.dry_run:
             hub.client.ingest_document_text(
@@ -530,26 +862,26 @@ def apply_library_action(hub: Hub, finding: dict, doc_text: str, update_id: str 
                     "scraped_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
-        return "ingested_amendment", f"added as its own library entry, amending {act_name}"
+        return "ingested_amendment", f"added as its own library entry, amending {act_name}", incorporation, inc_note
 
     # consolidated_replacement — the only path that overwrites.
     if not act_name:
-        return "none", "no Act named"
+        return "none", "no Act named", None, None
     existing = hub.act_chunks(act_name)
     if not existing:
-        return "none", "Act is not in the library"
+        return "none", "Act is not in the library", None, None
 
     if looks_like_amendment(title):
-        return "skipped", f"title reads as an amending instrument, not a consolidation: {title}"
+        return "skipped", f"title reads as an amending instrument, not a consolidation: {title}", None, None
 
     old_text = "\n\n".join(c["content"] for c in existing)
     ratio = len(doc_text) / max(len(old_text), 1)
     if not 0.6 <= ratio <= 1.4:
-        return "skipped", f"length {ratio:.0%} of the stored text — too different to be a re-issue"
+        return "skipped", f"length {ratio:.0%} of the stored text — too different to be a re-issue", None, None
 
     ok, note = confirm_consolidated(act_name, title, doc_text)
     if not ok:
-        return "skipped", note
+        return "skipped", note, None, None
 
     # Ingest FIRST, verify, and only then remove the old chunks: a failure
     # part-way through leaves the Act with its previous text rather than
@@ -558,7 +890,7 @@ def apply_library_action(hub: Hub, finding: dict, doc_text: str, update_id: str 
     old_ids = [c["id"] for c in existing]
     log(f"    replacing {act_name}: {len(existing)} old chunks -> new batch {batch_id[:8]}")
     if hub.dry_run:
-        return "replaced_act", f"[dry run] would replace {len(existing)} chunks"
+        return "replaced_act", f"[dry run] would replace {len(existing)} chunks", None, None
 
     hub.client.ingest_document_text(
         doc_text,
@@ -576,7 +908,7 @@ def apply_library_action(hub: Hub, finding: dict, doc_text: str, update_id: str 
 
     fresh = [c for c in hub.act_chunks(act_name) if (c.get("metadata") or {}).get("ingest_batch_id") == batch_id]
     if not fresh:
-        return "failed", "new text did not ingest — old text left in place"
+        return "failed", "new text did not ingest — old text left in place", None, None
 
     hub.insert(
         "law_library_versions",
@@ -589,7 +921,7 @@ def apply_library_action(hub: Hub, finding: dict, doc_text: str, update_id: str 
         },
     )
     hub.delete_ids("documents", old_ids)
-    return "replaced_act", f"replaced {len(existing)} chunks with {len(fresh)} (previous text archived)"
+    return "replaced_act", f"replaced {len(existing)} chunks with {len(fresh)} (previous text archived)", None, None
 
 
 # --------------------------------------------------------------- the digest
@@ -599,9 +931,12 @@ def write_digest(hub: Hub, run_id: str | None, findings: list[dict]) -> None:
     today = date.today().isoformat()
     if findings:
         listing = "\n\n".join(
-            f"- {f['title']} ({f['source_name']}, {f['update_type']})\n"
+            f"- {f['title']} ({f['source_name']}, {f['update_type']}, "
+            f"{'OFFICIAL DOCUMENT VERIFIED' if f.get('tier') == 'verified' else 'REPORTED IN PRESS ONLY'})\n"
             f"  ref: {f.get('authority_ref') or 'n/a'}; published: {f.get('published_date') or 'unknown'}\n"
             f"  affects: {f.get('act_name') or 'no Act in our library'}\n"
+            f"  library copy: {f.get('incorporation') or 'n/a'}"
+            f"{' — ' + f['incorporation_note'] if f.get('incorporation_note') else ''}\n"
             f"  library action: {f.get('library_action')} — {f.get('library_action_note')}\n"
             f"  summary: {f.get('summary') or ''}"
             for f in findings
@@ -612,11 +947,15 @@ def write_digest(hub: Hub, run_id: str | None, findings: list[dict]) -> None:
                 "You write a short daily legal-update briefing for lawyers at a Pakistani "
                 "corporate law firm. Be precise and factual — these are practising lawyers, "
                 "so no hype and no padding. Use Markdown: a one-sentence opening, then one "
-                "bullet per development saying what changed and what it affects.\n\n"
-                "Rules: state clearly when something is a BILL or proposal that is not yet "
-                "law. Say when a development affects an Act the firm holds in its library, "
-                "and when it does not. Do not invent detail beyond what you are given. If "
-                "the firm's library was updated automatically, mention it plainly."
+                "bullet per development saying what changed and what it affects. Put "
+                "verified official developments first and press reports last under a short "
+                "'Reported in the press' line.\n\n"
+                "Rules: state clearly when something is a BILL or a DRAFT for consultation "
+                "that is not yet law. Say when a development affects an Act the firm holds "
+                "in its library, and whether the library's copy already includes the change "
+                "(the 'library copy' line: incorporated / not_incorporated / unknown). Do "
+                "not invent detail beyond what you are given. If the firm's library was "
+                "updated automatically, mention it plainly."
             ),
             user=f"Date: {today}\n\nConfirmed developments:\n\n{listing}",
             max_tokens=1500,
@@ -665,11 +1004,200 @@ def select_acts(hub: Hub, config: dict, cursor: str | None) -> list[str]:
     return attached + rotation
 
 
+def gather_search_candidates(hub: Hub, config: dict, args, counts: dict) -> list[dict]:
+    out: list[dict] = []
+    if args.acts_only:
+        return out
+    for source in config["sources"]:
+        log(f"source sweep: {source['name']}")
+        found = sweep_source(source, hub.known_refs(source["name"]), config["lookback_days"])
+        counts["sources"] += 1
+        log(f"  {len(found)} candidate(s)")
+        out += [
+            {"finding": f, "source_name": source["name"], "found_by": "search", "max_age": config["max_published_age_days"]}
+            for f in found
+        ]
+    return out
+
+
+def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tuple[list[dict], str | None]:
+    """The rotating 'has this Act changed?' sweep. Its window is the library
+    window (years, not days): an amendment the library never picked up is
+    news to the library however old it is."""
+    out: list[dict] = []
+    if args.sources_only:
+        return out, None
+    previous = hub.get(
+        "law_monitor_runs",
+        {"select": "library_cursor", "status": "eq.ok", "order": "started_at.desc", "limit": "1"},
+    )
+    cursor = previous[0]["library_cursor"] if previous else None
+    years = int(config.get("library_lookback_years", 2))
+    last_act: str | None = None
+    for act in select_acts(hub, config, cursor):
+        log(f"library sweep: {act}")
+        found = sweep_act(act, hub.known_for_act(act), years)
+        counts["acts"] += 1
+        last_act = act
+        if found:
+            log(f"  {len(found)} candidate(s)")
+        out += [
+            {"finding": f, "source_name": config["library_source_name"], "found_by": "library_sweep", "max_age": years * 366}
+            for f in found
+        ]
+    return out, last_act
+
+
+def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict]:
+    """Candidates whose document failed to download on an earlier morning.
+    No search is spent: the stored url is simply tried again."""
+    out: list[dict] = []
+    for row in hub.pending_candidates(int(config.get("max_fetch_attempts", 5))):
+        finding = {
+            "title": row["title"],
+            "authority_ref": row.get("authority_ref"),
+            "act_name": row.get("act_name"),
+            "update_type": row.get("update_type"),
+            "document_url": row.get("url"),
+            "source_url": row.get("url"),
+            "published_date": row.get("published_date"),
+            "summary": row.get("summary"),
+            "confidence": row.get("confidence"),
+        }
+        # It passed the age gate when first seen; waiting for the site to
+        # answer must not age it out.
+        first_seen = row.get("first_seen_at") or datetime.now(timezone.utc).isoformat()
+        waited = (datetime.now(timezone.utc) - datetime.fromisoformat(first_seen.replace("Z", "+00:00"))).days
+        window = 366 * int(config.get("library_lookback_years", 2)) if row.get("found_by", "").startswith("library") else config["max_published_age_days"]
+        out.append(
+            {
+                "finding": finding,
+                "source_name": row["source_name"],
+                "found_by": row.get("found_by") or "search",
+                "max_age": window + waited + 1,
+                "previous": row,
+                "retry": True,
+            }
+        )
+    counts["retried"] = len(out)
+    if out:
+        log(f"retrying {len(out)} candidate(s) whose document did not download before")
+    return out
+
+
+def process_candidate(hub: Hub, config: dict, run_id: str | None, cand: dict, counts: dict, seen_keys: set[str]) -> dict | None:
+    """Verify one candidate and, if it clears the bar, record it. Returns the
+    stored row (for the digest) or None."""
+    finding, source_name, found_by = cand["finding"], cand["source_name"], cand["found_by"]
+    title = str(finding.get("title", ""))[:90]
+    key = dedupe_key_for(finding, source_name)
+    if key in seen_keys:
+        return None
+    seen_keys.add(key)
+
+    previous = cand.get("previous") or hub.candidate(key)
+
+    if hub.existing_update(key):
+        log(f"  already known, refreshing last seen: {title}")
+        hub.patch("law_updates", {"dedupe_key": f"eq.{key}"}, {"last_seen_at": datetime.now(timezone.utc).isoformat()})
+        if previous:
+            hub.touch_candidate(key, previous)
+        counts["known"] += 1
+        return None
+
+    if previous and previous.get("status") == "rejected" and previous.get("final") and not cand.get("retry"):
+        log(f"  already rejected ({previous.get('reason')}): {title}")
+        hub.touch_candidate(key, previous)
+        counts["known"] += 1
+        return None
+
+    ok, reason, doc_text, tier = verify_finding(finding, config, max_age_days=cand["max_age"])
+    if not ok:
+        final = is_final_rejection(reason)
+        attempts = (previous or {}).get("fetch_attempts", 0) + 1
+        if not final and attempts >= int(config.get("max_fetch_attempts", 5)):
+            final = True
+            reason = f"{reason} — gave up after {attempts} attempts"
+        status = "rejected" if final else "pending_fetch"
+        counts["rejected" if final else "pending"] += 1
+        log(f"  {'REJECTED' if final else 'PENDING (will retry)'} ({reason}): {title}")
+        hub.record_candidate(key, finding, source_name, found_by, status=status, reason=reason, final=final, run_id=run_id, previous=previous)
+        return None
+
+    row = {
+        "dedupe_key": key,
+        "source_name": source_name,
+        "authority_ref": finding.get("authority_ref"),
+        "act_name": finding.get("act_name"),
+        "title": finding["title"],
+        "summary": finding.get("summary"),
+        "update_type": finding["update_type"],
+        "source_url": finding.get("source_url"),
+        "document_url": finding.get("document_url"),
+        "published_date": finding.get("published_date"),
+        "confidence": finding.get("confidence") if finding.get("confidence") in ("high", "medium", "low") else None,
+        "tier": tier,
+        "found_by": found_by,
+        "run_id": run_id,
+    }
+    inserted = hub.insert("law_updates", row)
+    update_id = inserted["id"] if inserted else None
+    counts["written" if tier == "verified" else "reported"] += 1
+    log(f"  {'CONFIRMED' if tier == 'verified' else 'REPORTED (press)'}: {title}")
+
+    # Isolated: refreshing the library involves an ingest call that can
+    # fail on its own (no bot session configured, Voyage timeout, a
+    # malformed PDF). That must cost this one finding its library
+    # action, not the rest of the morning's run.
+    try:
+        action, note, incorporation, inc_note = apply_library_action(hub, finding, doc_text or "", update_id, tier or "reported")
+    except Exception as err:  # noqa: BLE001
+        action, note, incorporation, inc_note = "failed", f"library update failed: {err}", None, None
+    log(f"    library: {action} — {note}" + (f" [{incorporation}: {inc_note}]" if incorporation else ""))
+    patch = {
+        "library_action": action,
+        "library_action_at": datetime.now(timezone.utc).isoformat(),
+        "library_action_note": note,
+        "incorporation": incorporation,
+        "incorporation_note": inc_note,
+    }
+    if update_id:
+        hub.patch("law_updates", {"id": f"eq.{update_id}"}, patch)
+    hub.record_candidate(
+        key, finding, source_name, found_by,
+        status="confirmed" if tier == "verified" else "reported", reason=None, final=True,
+        run_id=run_id, law_update_id=update_id, previous=previous,
+    )
+    return {**row, **patch, "id": update_id}
+
+
+def finish_run(hub: Hub, run_id: str | None, status: str, counts: dict, *, last_act: str | None = None, error: str | None = None) -> None:
+    if not run_id:
+        return
+    patch = {
+        "status": status,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "sources_checked": counts["sources"],
+        "acts_checked": counts["acts"],
+        "found": counts["found"],
+        "written": counts["written"],
+        "rejected": counts["rejected"] + counts["pending"],
+        "reported": counts["reported"],
+        "retried": counts["retried"],
+    }
+    if status == "ok":
+        patch["library_cursor"] = last_act
+    if error:
+        patch["error"] = error[:2000]
+    hub.patch("law_monitor_runs", {"id": f"eq.{run_id}"}, patch)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Daily legal-update monitor")
     parser.add_argument("--dry-run", action="store_true", help="search and verify, but write nothing")
     parser.add_argument("--sources-only", action="store_true", help="skip the rotating library sweep")
     parser.add_argument("--acts-only", action="store_true", help="skip the source sweep")
+    parser.add_argument("--no-retry", action="store_true", help="skip re-fetching candidates that failed to download before")
     args = parser.parse_args()
 
     config = load_config()
@@ -689,137 +1217,46 @@ def main() -> int:
 
     run = hub.insert("law_monitor_runs", {"status": "running"})
     run_id = run["id"] if run else None
-    log(f"run {run_id or '(dry run)'} starting")
+    log(f"run {run_id or '(dry run)'} starting" + ("" if relay_available() else " — download relay not configured, unreachable sites will be skipped"))
 
-    counts = {"found": 0, "written": 0, "rejected": 0, "sources": 0, "acts": 0}
+    counts = {k: 0 for k in ("found", "written", "reported", "rejected", "pending", "known", "retried", "sources", "acts")}
     stored: list[dict] = []
     last_act: str | None = None
 
     try:
-        candidates: list[tuple[dict, str]] = []
-
-        if not args.acts_only:
-            for source in config["sources"]:
-                log(f"source sweep: {source['name']}")
-                found = sweep_source(source, hub.known_refs(source["name"]), config["lookback_days"])
-                counts["sources"] += 1
-                log(f"  {len(found)} candidate(s)")
-                candidates += [(f, source["name"]) for f in found]
-
-        if not args.sources_only:
-            previous = hub.get(
-                "law_monitor_runs",
-                {"select": "library_cursor", "status": "eq.ok", "order": "started_at.desc", "limit": "1"},
-            )
-            cursor = previous[0]["library_cursor"] if previous else None
-            for act in select_acts(hub, config, cursor):
-                log(f"library sweep: {act}")
-                found = sweep_act(act)
-                counts["acts"] += 1
-                last_act = act
-                if found:
-                    log(f"  {len(found)} candidate(s)")
-                candidates += [(f, config["library_source_name"]) for f in found]
+        candidates: list[dict] = []
+        if not args.no_retry:
+            candidates += gather_pending_candidates(hub, config, counts)
+        candidates += gather_search_candidates(hub, config, args, counts)
+        library, last_act = gather_library_candidates(hub, config, args, counts)
+        candidates += library
 
         counts["found"] = len(candidates)
         log(f"{len(candidates)} candidate(s) to verify")
 
-        for finding, source_name in candidates:
-            title = str(finding.get("title", ""))[:90]
-            key = dedupe_key_for(finding, source_name)
+        seen_keys: set[str] = set()
+        for cand in candidates:
+            row = process_candidate(hub, config, run_id, cand, counts, seen_keys)
+            if row:
+                stored.append(row)
 
-            if hub.existing_update(key):
-                log(f"  already known, refreshing last seen: {title}")
-                hub.patch(
-                    "law_updates",
-                    {"dedupe_key": f"eq.{key}"},
-                    {"last_seen_at": datetime.now(timezone.utc).isoformat()},
-                )
-                continue
-
-            ok, reason, doc_text = verify_finding(finding, config)
-            if not ok:
-                counts["rejected"] += 1
-                log(f"  REJECTED ({reason}): {title}")
-                continue
-
-            row = {
-                "dedupe_key": key,
-                "source_name": source_name,
-                "authority_ref": finding.get("authority_ref"),
-                "act_name": finding.get("act_name"),
-                "title": finding["title"],
-                "summary": finding.get("summary"),
-                "update_type": finding["update_type"],
-                "source_url": finding.get("source_url"),
-                "document_url": finding.get("document_url"),
-                "published_date": finding.get("published_date"),
-                "confidence": finding.get("confidence") if finding.get("confidence") in ("high", "medium", "low") else None,
-                "run_id": run_id,
-            }
-            inserted = hub.insert("law_updates", row)
-            update_id = inserted["id"] if inserted else None
-            counts["written"] += 1
-            log(f"  CONFIRMED: {title}")
-
-            # Isolated: refreshing the library involves an ingest call that can
-            # fail on its own (no bot session configured, Voyage timeout, a
-            # malformed PDF). That must cost this one finding its library
-            # action, not the rest of the morning's run.
-            try:
-                action, note = apply_library_action(hub, finding, doc_text or "", update_id)
-            except Exception as err:  # noqa: BLE001
-                action, note = "failed", f"library update failed: {err}"
-            log(f"    library: {action} — {note}")
-            if update_id:
-                hub.patch(
-                    "law_updates",
-                    {"id": f"eq.{update_id}"},
-                    {
-                        "library_action": action,
-                        "library_action_at": datetime.now(timezone.utc).isoformat(),
-                        "library_action_note": note,
-                    },
-                )
-            stored.append({**row, "library_action": action, "library_action_note": note})
+        # Nothing found because nothing could be searched is a failure, and
+        # yesterday's briefing must stay on the homepage with its date.
+        blackout = ai_blackout()
+        if blackout and not stored:
+            raise RuntimeError(blackout)
 
         write_digest(hub, run_id, stored)
-
-        if run_id:
-            hub.patch(
-                "law_monitor_runs",
-                {"id": f"eq.{run_id}"},
-                {
-                    "status": "ok",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                    "library_cursor": last_act,
-                    "sources_checked": counts["sources"],
-                    "acts_checked": counts["acts"],
-                    "found": counts["found"],
-                    "written": counts["written"],
-                    "rejected": counts["rejected"],
-                },
-            )
-        log(f"done: {counts['written']} written, {counts['rejected']} rejected, {counts['found']} seen")
+        finish_run(hub, run_id, "ok", counts, last_act=last_act)
+        log(
+            f"done: {counts['written']} verified, {counts['reported']} reported, {counts['pending']} pending retry, "
+            f"{counts['rejected']} rejected, {counts['known']} already known, {counts['found']} seen"
+        )
         return 0
 
     except Exception as err:  # noqa: BLE001 — the run row must record why it died
         log(f"FAILED: {err}")
-        if run_id:
-            hub.patch(
-                "law_monitor_runs",
-                {"id": f"eq.{run_id}"},
-                {
-                    "status": "failed",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                    "error": str(err)[:2000],
-                    "sources_checked": counts["sources"],
-                    "acts_checked": counts["acts"],
-                    "found": counts["found"],
-                    "written": counts["written"],
-                    "rejected": counts["rejected"],
-                },
-            )
+        finish_run(hub, run_id, "failed", counts, error=str(err))
         return 1
 
 

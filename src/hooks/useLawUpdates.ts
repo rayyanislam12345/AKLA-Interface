@@ -6,7 +6,18 @@ export type LawUpdateType =
   | "amending_instrument"
   | "new_act"
   | "bill"
+  | "draft"
   | "notice";
+
+// verified: the monitor fetched the official document and confirmed the
+// reference in it. reported: a press report from an allowlisted paper; the
+// official text has not been located. Reported items never touch the library
+// and never flag a matter.
+export type LawUpdateTier = "verified" | "reported";
+
+// For an amending instrument: whether the library's stored text of the
+// principal Act already reads as amended.
+export type LawUpdateIncorporation = "incorporated" | "not_incorporated" | "unknown";
 
 export interface LawUpdate {
   id: string;
@@ -23,6 +34,10 @@ export interface LawUpdate {
   library_action: string;
   library_action_note: string | null;
   confidence: string | null;
+  tier: LawUpdateTier;
+  incorporation: LawUpdateIncorporation | null;
+  incorporation_note: string | null;
+  found_by: string;
 }
 
 export interface LawUpdateDigest {
@@ -30,6 +45,26 @@ export interface LawUpdateDigest {
   summary_markdown: string;
   update_count: number;
   generated_at: string;
+}
+
+// A candidate the monitor saw but could not verify yet: the official site
+// did not answer, or the PDF would not read. It is retried from the stored
+// address each morning. Shown so associates know a development exists even
+// before the document is in hand.
+export interface LawMonitorCandidate {
+  dedupe_key: string;
+  source_name: string;
+  title: string;
+  authority_ref: string | null;
+  act_name: string | null;
+  update_type: string | null;
+  url: string | null;
+  published_date: string | null;
+  status: string;
+  reason: string | null;
+  fetch_attempts: number;
+  first_seen_at: string;
+  last_seen_at: string;
 }
 
 // The newsletter itself — one row per day, written by the law-monitor job on
@@ -83,10 +118,31 @@ export function useLawUpdate(updateId: string | undefined) {
   });
 }
 
+// Candidates still waiting for their document, newest first.
+export function usePendingLawCandidates(limit = 8) {
+  return useQuery({
+    queryKey: ["law-candidates-pending", limit],
+    queryFn: async (): Promise<LawMonitorCandidate[]> => {
+      const { data, error } = await supabase
+        .from("law_monitor_candidates")
+        .select(
+          "dedupe_key, source_name, title, authority_ref, act_name, update_type, url, published_date, status, reason, fetch_attempts, first_seen_at, last_seen_at",
+        )
+        .eq("status", "pending_fetch")
+        .order("last_seen_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return (data ?? []) as LawMonitorCandidate[];
+    },
+  });
+}
+
 // Developments affecting the Acts this matter actually depends on, minus the
-// ones someone here has already dealt with. Bills are deliberately excluded:
-// a proposed law hasn't changed anything yet, so flagging a matter amber for
-// one would be crying wolf. They still appear in the daily newsletter.
+// ones someone here has already dealt with. Excluded on purpose:
+//  - bills and drafts: a proposal hasn't changed anything yet, so flagging a
+//    matter amber for one would be crying wolf (they stay in the newsletter);
+//  - press reports: no official text in hand;
+//  - amendments the library's copy already includes: nothing to revise.
 export function useMatterLawUpdates(matterId: string | undefined) {
   return useQuery({
     queryKey: ["matter-law-updates", matterId],
@@ -106,7 +162,8 @@ export function useMatterLawUpdates(matterId: string | undefined) {
           .from("law_updates")
           .select("*")
           .in("act_name", actNames)
-          .neq("update_type", "bill")
+          .not("update_type", "in", '("bill","draft")')
+          .eq("tier", "verified")
           .order("discovered_at", { ascending: false }),
         supabase.from("matter_law_update_acks").select("law_update_id").eq("matter_id", matterId!),
       ]);
@@ -114,7 +171,9 @@ export function useMatterLawUpdates(matterId: string | undefined) {
       if (acksResult.error) throw acksResult.error;
 
       const acknowledged = new Set((acksResult.data ?? []).map((a) => a.law_update_id));
-      return ((updatesResult.data ?? []) as LawUpdate[]).filter((u) => !acknowledged.has(u.id));
+      return ((updatesResult.data ?? []) as LawUpdate[]).filter(
+        (u) => !acknowledged.has(u.id) && u.incorporation !== "incorporated",
+      );
     },
   });
 }
@@ -173,10 +232,27 @@ export function lawUpdateTypeLabel(type: string) {
       return "New Act";
     case "bill":
       return "Bill (not yet law)";
+    case "draft":
+      return "Draft for consultation";
     case "notice":
       return "Notice";
     default:
       return type;
+  }
+}
+
+// Plain words for the incorporation check, for the card and the matter flag.
+export function incorporationLabel(update: Pick<LawUpdate, "incorporation" | "update_type">) {
+  if (update.update_type !== "amending_instrument") return null;
+  switch (update.incorporation) {
+    case "incorporated":
+      return "Library copy already includes this change";
+    case "not_incorporated":
+      return "Library copy does not include this change";
+    case "unknown":
+      return "Not yet confirmed whether the library copy includes this";
+    default:
+      return null;
   }
 }
 
@@ -188,10 +264,12 @@ export function buildRevisePrompt(update: LawUpdate, documentTitle?: string) {
   const ref = update.authority_ref ? ` (${update.authority_ref})` : "";
   const published = update.published_date ? `, published ${update.published_date}` : "";
   const source = update.document_url || update.source_url;
+  const incorporation = incorporationLabel(update);
 
   return [
     `${act} has been affected by: ${update.title}${ref}${published} — ${lawUpdateTypeLabel(update.update_type)} via ${update.source_name}.`,
     update.summary ? `What changed: ${update.summary}` : null,
+    incorporation ? `Library status: ${incorporation}.` : null,
     source ? `Source: ${source}` : null,
     "",
     `Review ${documentTitle ? `"${documentTitle}"` : "this document"} against that change. Identify every clause that relies on, cites, or is shaped by ${act}, and flag anything now inconsistent, outdated, or missing as a result. Propose specific redline changes with the exact replacement wording.`,
