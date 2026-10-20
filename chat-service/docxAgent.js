@@ -48,8 +48,21 @@ Rules:
 - "replace" gives the COMPLETE new text of that one paragraph, copied from above with your change made in it. Word shows only the words that differ, so keep everything you are not changing exactly as it is — same wording, same spacing, same defined terms. One paragraph per op; never merge or split paragraphs.
 - "insert_after" adds exactly one paragraph; use several ops (same "p", in reading order) for several paragraphs. The new paragraph takes the formatting and numbering of ¶p, so anchor a clause on a body paragraph and a heading on a heading. Start the text with "# ", "## " or "### " to make it a heading of that level instead; it takes the look of the document's own headings of that level, so use only a level the document's [H1]/[H2]/[H3] paragraphs show (a heading of a level it has none of is not added).
 - Never type clause numbers — Word numbers headings and list items itself.
-- "comment" puts a Word margin comment, titled "AKLA Comments", on that paragraph and leaves its text as it is. Outstanding matters, gaps, figures to confirm and remarks for the reader go in comments — never into the document's text, and never as footnotes or an end section. A paragraph may take a change and a comment in the same turn.
+- "comment" puts a Word margin comment, titled "AKLA Comments", on that paragraph and leaves its text as it is. Outstanding matters, gaps, figures to confirm and remarks for the reader go in comments — never into the document's text, and never as an end section. A footnote is only for what the document itself cites (a "footnote" block of "write"), never for a remark to the reader. A paragraph may take a change and a comment in the same turn.
 - **bold** marks a defined term; use no other markup.
+When a firm pack is open, the document is shown with a "KINDS YOU CAN WRITE" line, and four more operations can be used:
+\`\`\`json
+{"ops": [
+  {"op": "write", "after": 12, "expected": "Exact text of ¶12", "blocks": [{"kind": "h1", "text": "Termination"}, {"kind": "body", "text": "Either Party may terminate this Agreement:"}, {"kind": "limb", "text": "on thirty (30) days' notice; or"}, {"kind": "footnote", "text": "Section 4 of the Act."}, {"kind": "issues_table", "rows": [["Issue", "Comment"], ["Title", "Clear"]]}]},
+  {"op": "repeat_block", "from": 20, "to": 24, "after": 24, "expected": "Exact text of ¶20"},
+  {"op": "add_row", "table": 30, "like_row": 33, "expected": "Exact text of ¶33", "cells": ["First cell", "Second cell"]},
+  {"op": "remove_block", "from": 40, "to": 47, "expected": "Exact text of ¶40"}
+]}
+\`\`\`
+- "write" adds paragraphs, in order, after ¶after (after a paragraph in a table, after the whole table). Each block takes the exact look of the firm's own example of its kind; use only the kinds listed. A list kind ((a), (i)) written after something that is not the same list starts again at its first number. A "footnote" block puts a footnote on the paragraph block just before it. A table kind takes "rows" instead of "text"; its first row is the header.
+- "repeat_block" copies ¶from to ¶to (whole paragraphs and whole tables) after ¶after: a party, a signature block, a schedule. Change the copy's words in a later turn, once it has its own ¶ numbers.
+- "add_row" adds a row, formatted like the row holding ¶like_row, straight after that row; ¶table is any paragraph of the same table. "cells" gives each cell's text, left to right.
+- "remove_block" deletes ¶from to ¶to whole: an optional section with its heading. A range that cuts through a table is refused.
 - "why" is optional on any op: one short line on why this change, shown to the lawyer beside it.
 - Change only what the instruction requires. Everything not listed stays exactly as it is.
 - Before the block, write two or three sentences for the lawyer saying what you changed and anything you could not do. If you need more information first, ask, and send no block.`;
@@ -280,6 +293,9 @@ function revisionStamps(documentXml, floor = 9000) {
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const stamp = (author = DOCX_AUTHOR) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${date}"`;
   stamp.max = () => max;
+  // A fresh id for something that is not a revision (a copied bookmark), so
+  // it never collides with one.
+  stamp.next = () => ++max;
   // A fresh id for the second half of another author's insertion when ours
   // lands inside it; their name and date stay on it.
   stamp.foreign = (author, when) => `w:id="${++max}" w:author="${escapeXml(author)}" w:date="${escapeXml(when ?? date)}"`;
@@ -793,27 +809,56 @@ function idFloorOf(entries, idFloor) {
 // fill_standard_to_project); the work stops at the next part and at the next
 // fallback operation once it is aborted, throwing the signal's reason. Hub
 // callers pass none.
-export async function applyDocxOps(bytes, ops, byRef, { idFloor, signal } = {}) {
+//
+// `kinds`: the open pack's kinds list ({ kinds, tables, footnote }, see
+// validateKinds), which the "write" operation takes its formatting from.
+// Without it "write" is refused and the other operations work as ever.
+export async function applyDocxOps(bytes, ops, byRef, { idFloor, signal, kinds } = {}) {
   const entries = readZip(bytes); const original = xmlParts(entries);
   const groups = new Map(); const results = []; let applied = 0;
   for (let i = 0; i < ops.length; i++) {
-    const raw = ops[i]; const ref = byRef.get(Number(raw?.p));
+    const raw = ops[i];
+    // A block operation names its paragraphs by more than "p"; "expected"
+    // is checked against the one it is mainly about.
+    const block = BLOCK_OPS[String(raw?.op ?? '').toLowerCase()];
+    const ref = byRef.get(Number(block ? raw?.[block.main] : raw?.p));
     // A refused change still says what it was aimed at, so it can be shown.
-    const reject = reason => results.push({ i, kind: raw?.op, p: raw?.p, text: raw?.text, status: 'skipped', reason, original: ref?.exactText ?? (typeof raw?.expected === 'string' ? raw.expected : null) });
+    const reject = reason => results.push({ i, kind: raw?.op, p: block ? raw?.[block.main] : raw?.p, text: raw?.text, status: 'skipped', reason, original: ref?.exactText ?? (typeof raw?.expected === 'string' ? raw.expected : null) });
     if (!ref || !ref.shown) { reject('Paragraph was not supplied to this turn; request that section first.'); continue; }
     if (typeof raw.expected !== 'string' || raw.expected !== ref.exactText) { reject('Expected paragraph text does not match the source; no change was made.'); continue; }
     if (String(raw.op).toLowerCase() === 'comment' && ref.part !== 'word/document.xml') { reject('Word does not allow comments in headers, footers or notes.'); continue; }
+    const local = {};
+    if (block) {
+      const problem = block.refs.map((key) => {
+        if (raw[key] === undefined && !block.required.includes(key)) return null;
+        const other = byRef.get(Number(raw[key]));
+        if (!other || !other.shown) return `¶${raw[key]} ("${key}") was not supplied to this turn; request that section first.`;
+        if (other.part !== 'word/document.xml') return `${raw.op} works in the body of the document only, not in headers, footers or notes.`;
+        local[key] = other.localIndex;
+        return null;
+      }).find(Boolean);
+      if (problem) { reject(problem); continue; }
+    }
     const list = groups.get(ref.part) ?? [];
-    list.push({ raw: { ...raw, p: ref.localIndex, clause: clauseFor(byRef, ref) }, ref, i }); groups.set(ref.part, list);
+    list.push({ raw: { ...raw, ...local, p: ref.localIndex, clause: clauseFor(byRef, ref) }, ref, i }); groups.set(ref.part, list);
   }
+  // Which body paragraphs the turn was shown: a block is only repeated or
+  // removed when every paragraph of it with words in it was seen.
+  const shown = ops.some((raw) => BLOCK_OPS[String(raw?.op ?? '').toLowerCase()])
+    ? new Set([...byRef.values()].filter((r) => r.shown && r.part === 'word/document.xml').map((r) => r.localIndex))
+    : null;
   // One counter for the whole call, carried from part to part.
   let maxId = idFloorOf(entries, idFloor);
   for (const [part, work] of groups) {
     signal?.throwIfAborted();
     const refs = new Map(work.map(w => [w.ref.localIndex, w.ref]));
-    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs, { idFloor: maxId, signal });
+    const output = await applyPartOps(writeZip({ ...entries, 'word/document.xml': entries[part] }), work.map(w => w.raw), refs, { idFloor: maxId, signal, ...(shown ? { kinds, shown } : {}) });
     maxId = Math.max(maxId, output.maxId);
-    entries[part] = readZip(output.bytes)['word/document.xml'];
+    // A block operation may also have written the numbering (a list started
+    // again), the notes, and the package's lists of its parts.
+    const written = readZip(output.bytes);
+    for (const name of output.extra ?? []) entries[name] = written[name];
+    entries[part] = written['word/document.xml'];
     if (part === 'word/document.xml') writeComments(entries, output.comments ?? []);
     for (const result of output.results) { const w = work[result.i]; results.push({ ...result, i: w.i, p: w.ref.index, part }); }
     applied += output.applied;
@@ -826,6 +871,861 @@ export async function applyDocxOps(bytes, ops, byRef, { idFloor, signal } = {}) 
   return { bytes: output, applied, results: results.sort((a,b) => a.i-b.i), maxId, validation: { ...quality, format, sourceHash: createHash('sha256').update(bytes).digest('hex'), outputHash: createHash('sha256').update(output).digest('hex') } };
 }
 
+// ---------------------------------------------------------------- blocks
+//
+// Four operations work on whole stretches of the body rather than on one
+// paragraph: write paragraphs of a named kind, repeat a block, add a table
+// row, remove a block. Each is checked against the paragraph its "expected"
+// text names (`main`); the others it reaches (`refs`) must have been shown.
+// They work on the body only, and only on the inline path.
+const BLOCK_OPS = {
+  write: { main: "after", refs: ["after"], required: ["after"] },
+  repeat_block: { main: "from", refs: ["from", "to", "after"], required: ["from", "to", "after"] },
+  add_row: { main: "like_row", refs: ["like_row", "table"], required: ["like_row"] },
+  remove_block: { main: "from", refs: ["from", "to"], required: ["from", "to"] },
+};
+
+const W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml";
+const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const NOTE_PARTS = {
+  footnote: ["application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml", `${R_NS}/footnotes`],
+  endnote: ["application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml", `${R_NS}/endnotes`],
+};
+
+// The kinds list a pack carries (written by the pack builder, read here):
+// { kinds: { name: { pPr, rPr, styleId, numId, ilvl, label } },
+//   tables: { name: { tblPr, tblGrid, header: { trPr, tcPr, pPr, rPr }, body: {…}, label } },
+//   footnote: { pPr, rPr, refRPr } | null }
+// One optional key beyond that: a paragraph kind with "restart": false is a
+// list that runs on through the document (paragraphs numbered 1, 2, 3 across
+// unnumbered headings) and is never started again by "write".
+function kindOf(kinds, block) {
+  const name = typeof block?.kind === "string" ? block.kind : null;
+  if (!name || !kinds) return null;
+  if (name === "footnote") return kinds.footnote ? { type: "footnote", spec: kinds.footnote, name } : null;
+  if (kinds.kinds && Object.hasOwn(kinds.kinds, name)) return { type: "paragraph", spec: kinds.kinds[name], name };
+  const table = name === "table" && typeof block.like === "string" ? block.like : name;
+  if (kinds.tables && Object.hasOwn(kinds.tables, table)) return { type: "table", spec: kinds.tables[table], name: table };
+  return null;
+}
+const kindNames = (kinds) => {
+  const names = [...Object.keys(kinds?.kinds ?? {}), ...(kinds?.footnote ? ["footnote"] : []), ...Object.keys(kinds?.tables ?? {})];
+  return names.length ? names.join(", ") : "none";
+};
+
+// What a block operation is, for its record: its paragraphs, and the words
+// it writes, so the lawyer's change list can show them.
+function blockFields(kind, raw, ref) {
+  const num = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+  if (kind === "write") {
+    const blocks = Array.isArray(raw?.blocks) ? raw.blocks : null;
+    const words = (b) => (typeof b?.text === "string" ? b.text : Array.isArray(b?.rows) ? b.rows.map((r) => (Array.isArray(r) ? r.join(" | ") : "")).join("\n") : "");
+    return { after: num(raw.after), blocks, text: (blocks ?? []).map(words).filter(Boolean).join("\n"), original: "", anchor: ref.exactText };
+  }
+  if (kind === "add_row") {
+    const cells = Array.isArray(raw?.cells) ? raw.cells : null;
+    return { table: num(raw.table), like_row: num(raw.like_row), cells, text: (cells ?? []).map((c) => String(c ?? "")).join(" | "), original: "", anchor: ref.exactText };
+  }
+  if (kind === "repeat_block") return { from: num(raw.from), to: num(raw.to), after: num(raw.after), original: "", anchor: ref.exactText };
+  return { from: num(raw.from), to: num(raw.to), original: ref.exactText };
+}
+
+// Why a block operation cannot be made, judged from the operation alone.
+function blockProblem(op, kinds) {
+  if (op.kind === "write") {
+    if (!op.blocks?.length) return 'write needs "blocks": a list of {"kind": …, "text": …}';
+    if (!kinds || typeof kinds !== "object") return "no kinds of paragraph are listed for this document (no firm pack is open), so nothing can be written by kind; use insert_after instead";
+    let previous = null;
+    for (const [n, block] of op.blocks.entries()) {
+      const k = kindOf(kinds, block);
+      if (!k) return `this document's pack has no kind "${block?.kind}", so nothing in this write was added; the kinds are ${kindNames(kinds)}`;
+      if (k.type === "table") {
+        const ok = Array.isArray(block.rows) && block.rows.length && block.rows.every((r) => Array.isArray(r) && r.length && r.every((c) => typeof c === "string"));
+        if (!ok) return `the table "${block.kind}" (block ${n + 1}) needs "rows": a list of rows, each a list of cell texts`;
+      } else if (typeof block.text !== "string" || !block.text.trim()) {
+        return `block ${n + 1} ("${block.kind}") has no text`;
+      }
+      if (k.type === "footnote" && previous !== "paragraph" && previous !== "footnote") return `a footnote goes on the paragraph written just before it, and block ${n + 1} has none before it`;
+      previous = k.type;
+    }
+    return null;
+  }
+  if (op.kind === "repeat_block" || op.kind === "remove_block") {
+    if (!Number.isFinite(op.from) || !Number.isFinite(op.to)) return `${op.kind} needs "from" and "to"`;
+    if (op.to < op.from) return `"to" (¶${op.to}) comes before "from" (¶${op.from})`;
+    if (op.kind === "repeat_block" && !Number.isFinite(op.after)) return 'repeat_block needs "after"';
+    return null;
+  }
+  if (op.kind === "add_row" && !(op.cells?.length && op.cells.every((c) => typeof c === "string"))) return 'add_row needs "cells": the text of each cell, left to right';
+  return null;
+}
+
+// The elements named, at the top level of xml[from, to): nested ones (a
+// table in a cell, a text box's paragraphs inside a run) are inside the
+// element that holds them, never listed on their own.
+function topLevel(xml, names, from = 0, to = xml.length) {
+  const re = new RegExp(`<(\\/?)w:(${names.join("|")})(?=[\\s/>])[^>]*?(\\/?)>`, "g");
+  re.lastIndex = from;
+  const out = [];
+  let depth = 0;
+  let open = null;
+  for (let m; (m = re.exec(xml)) && m.index < to; ) {
+    if (m[1]) {
+      if (--depth === 0 && open) { out.push({ name: open.name, start: open.start, end: m.index + m[0].length }); open = null; }
+    } else if (m[3]) {
+      if (depth === 0) out.push({ name: m[2], start: m.index, end: m.index + m[0].length });
+    } else if (depth++ === 0) {
+      open = { name: m[2], start: m.index };
+    }
+  }
+  return out;
+}
+
+// Every element of one name, at any depth.
+function allOf(xml, name) {
+  const re = new RegExp(`<(\\/?)w:${name}(?=[\\s/>])[^>]*?(\\/?)>`, "g");
+  const out = [];
+  const stack = [];
+  for (let m; (m = re.exec(xml)); ) {
+    if (m[1]) { const start = stack.pop(); if (start !== undefined) out.push({ start, end: m.index + m[0].length }); }
+    else if (m[2]) out.push({ start: m.index, end: m.index + m[0].length });
+    else stack.push(m.index);
+  }
+  return out;
+}
+
+const PROP_CHANGES = /<w:(pPrChange|rPrChange|sectPrChange|tblPrChange|tblPrExChange|trPrChange|tcPrChange|tblGridChange|numberingChange)\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/w:\1>)/g;
+// Properties copied for a new element: no record of an earlier change and
+// no revision mark of anyone's.
+const withoutChanges = (xml) => (xml ?? "").replace(PROP_CHANGES, "").replace(/<w:(?:ins|del|cellIns|cellDel|cellMerge)\b[^>]*\/>/g, "");
+
+// A copy of some of the document as a reader sees it: other people's
+// insertions taken in, their deletions left out, no record of formatting
+// changes, no comment anchors (the copy is not what the comment was about).
+function readerCopy(xml) {
+  return xml
+    .replace(PROP_CHANGES, "")
+    .replace(/<w:(del|moveFrom)\b(?:\s[^>]*)?(?<!\/)>[\s\S]*?<\/w:\1>/g, "")
+    .replace(/<w:(?:ins|del|moveFrom|moveTo|cellIns|cellDel|cellMerge)\b[^>]*\/>/g, "")
+    .replace(/<\/?w:(?:ins|moveTo)\b[^>]*>/g, "")
+    .replace(/<w:(?:moveFromRange|moveToRange|customXmlInsRange|customXmlDelRange|customXmlMoveFromRange|customXmlMoveToRange)(?:Start|End)\b[^>]*\/>/g, "")
+    .replace(/<w:comment(?:RangeStart|RangeEnd)\b[^>]*\/>/g, "")
+    .replace(/<w:r(?:\s[^>]*)?>(?:(?!<\/?w:r[\s>])[\s\S])*?<\/w:r>/g, (r) => (r.includes("<w:commentReference") ? "" : r));
+}
+
+// Runs (and run-level content controls) wrapped in our insertion, one
+// insertion per stretch of them; a hyperlink or simple field is not allowed
+// inside an insertion, so its own runs are wrapped inside it instead.
+function wrapRuns(xml, stamp) {
+  let out = "";
+  let group = "";
+  let hasRun = false;
+  let at = 0;
+  const flush = () => { out += hasRun ? `<w:ins ${stamp()}>${group}</w:ins>` : group; group = ""; hasRun = false; };
+  for (const el of topLevel(xml, ["r", "sdt", "hyperlink", "smartTag", "fldSimple", "customXml"])) {
+    group += xml.slice(at, el.start);
+    at = el.end;
+    const x = xml.slice(el.start, el.end);
+    if (el.name === "r" || el.name === "sdt") { group += x; hasRun = true; continue; }
+    flush();
+    const open = /^<w:\w+(?:\s[^>]*)?>/.exec(x)[0];
+    if (open === x) { out += x; continue; }
+    const close = x.lastIndexOf("</");
+    out += open + wrapRuns(x.slice(open.length, close), stamp) + x.slice(close);
+  }
+  group += xml.slice(at);
+  flush();
+  return out;
+}
+
+const expandEmpty = (pXml) => pXml.replace(/^<w:p(\s[^>]*?)?\s*\/>$/, (_, a = "") => `<w:p${a}></w:p>`);
+
+// One paragraph of a copy, marked as inserted: paragraph mark and runs.
+function insertedParagraph(pXml, stamp) {
+  const p = expandEmpty(pXml);
+  const open = /^<w:p(?:\s[^>]*)?>/.exec(p)[0];
+  const pPr = paraPropsOf(p);
+  const rest = p.slice(open.length);
+  const lead = /^\s*/.exec(rest)[0];
+  const content = (pPr ? rest.slice(lead.length + pPr.length) : rest).slice(0, -"</w:p>".length);
+  return `${open}${markParagraphMark(copiedPPr(pPr), "ins", stamp)}${wrapRuns(content, stamp)}</w:p>`;
+}
+
+// A table row's properties with our mark added (CT_TrPr: the mark comes
+// after the row's own settings).
+function rowMark(trPr, mark) {
+  const x = withoutChanges(trPr);
+  if (!x || /^<w:trPr\s*\/>$/.test(x)) return `<w:trPr>${mark}</w:trPr>`;
+  return x.replace(/<\/w:trPr>$/, `${mark}</w:trPr>`);
+}
+// The start of a row (<w:tr>, its exceptions, its properties) with a mark
+// on the row's properties.
+function markRow(head, mark) {
+  const at = head.indexOf("<w:trPr");
+  if (at < 0) return `${head}<w:trPr>${mark}</w:trPr>`;
+  const self = /^<w:trPr\s*\/>/.exec(head.slice(at));
+  const end = self ? at + self[0].length : head.lastIndexOf("</w:trPr>") + "</w:trPr>".length;
+  return head.slice(0, at) + rowMark(head.slice(at, end), mark) + head.slice(end);
+}
+// The same, for a deletion: anyone else's marks on the row stay.
+function markRowDeleted(head, mark) {
+  const at = head.indexOf("<w:trPr");
+  if (at < 0) return `${head}<w:trPr>${mark}</w:trPr>`;
+  const self = /^<w:trPr\s*\/>/.exec(head.slice(at));
+  if (self) return head.slice(0, at) + `<w:trPr>${mark}</w:trPr>` + head.slice(at + self[0].length);
+  const end = head.lastIndexOf("</w:trPr>");
+  const change = head.indexOf("<w:trPrChange", at);
+  const into = change >= 0 && change < end ? change : end;
+  return head.slice(0, into) + mark + head.slice(into);
+}
+const rowParts = (tr) => {
+  const cells = topLevel(tr, ["tc"]);
+  return { cells, headEnd: cells.length ? cells[0].start : tr.lastIndexOf("</w:tr>") };
+};
+const cellParts = (tc) => {
+  const open = /^<w:tc(?:\s[^>]*)?>/.exec(tc)[0];
+  return { open, inner: tc.slice(open.length, -"</w:tc>".length) };
+};
+
+// Paragraphs and tables (body or cell content) copied and marked inserted.
+function insertedBlocks(xml, stamp) {
+  let out = "";
+  let at = 0;
+  for (const el of topLevel(xml, ["p", "tbl"])) {
+    out += readerCopy(xml.slice(at, el.start));
+    at = el.end;
+    const x = xml.slice(el.start, el.end);
+    out += el.name === "p" ? insertedParagraph(readerCopy(x), stamp) : insertedTable(x, stamp);
+  }
+  return out + readerCopy(xml.slice(at));
+}
+function insertedTable(tbl, stamp) {
+  let out = "";
+  let at = 0;
+  for (const row of topLevel(tbl, ["tr"])) {
+    out += readerCopy(tbl.slice(at, row.start));
+    at = row.end;
+    const tr = tbl.slice(row.start, row.end);
+    const { cells, headEnd } = rowParts(tr);
+    // A row someone deleted is not part of what a reader sees.
+    if (/<w:del\b/.test(tr.slice(0, headEnd).replace(PROP_CHANGES, ""))) continue;
+    let o = markRow(readerCopy(tr.slice(0, headEnd)), `<w:ins ${stamp()}/>`);
+    let k = headEnd;
+    for (const c of cells) {
+      o += readerCopy(tr.slice(k, c.start));
+      k = c.end;
+      const { open, inner } = cellParts(tr.slice(c.start, c.end));
+      o += `${open}${insertedBlocks(inner, stamp)}</w:tc>`;
+    }
+    out += o + readerCopy(tr.slice(k));
+  }
+  return out + readerCopy(tbl.slice(at));
+}
+
+// A table struck through: each row marked deleted, each paragraph in it
+// struck out with its mark.
+function deletedBlocks(xml, stamp) {
+  let out = "";
+  let at = 0;
+  for (const el of topLevel(xml, ["p", "tbl"])) {
+    out += xml.slice(at, el.start);
+    at = el.end;
+    const x = xml.slice(el.start, el.end);
+    out += el.name === "p" ? deleteParagraph(expandEmpty(x), stamp) : deletedTable(x, stamp);
+  }
+  return out + xml.slice(at);
+}
+function deletedTable(tbl, stamp) {
+  let out = "";
+  let at = 0;
+  for (const row of topLevel(tbl, ["tr"])) {
+    out += tbl.slice(at, row.start);
+    at = row.end;
+    const tr = tbl.slice(row.start, row.end);
+    const { cells, headEnd } = rowParts(tr);
+    let o = markRowDeleted(tr.slice(0, headEnd), `<w:del ${stamp()}/>`);
+    let k = headEnd;
+    for (const c of cells) {
+      o += tr.slice(k, c.start);
+      k = c.end;
+      const { open, inner } = cellParts(tr.slice(c.start, c.end));
+      o += `${open}${deletedBlocks(inner, stamp)}</w:tc>`;
+    }
+    out += o + tr.slice(k);
+  }
+  return out + tbl.slice(at);
+}
+
+// A new table from a table kind: the kind's table properties, its header
+// row's formatting for the first row and its body row's for the rest.
+function tableFromKind(spec, rows, stamp) {
+  const n = Math.max(...rows.map((r) => r.length));
+  const tblPr = withoutChanges(spec.tblPr || "<w:tblPr/>");
+  let grid = spec.tblGrid ? withoutChanges(spec.tblGrid) : null;
+  let widths = grid ? [...grid.matchAll(/<w:gridCol\b[^>]*?\bw:w="(\d+)"/g)].map((m) => Number(m[1])) : [];
+  if (widths.length !== n) {
+    const tblW = /<w:tblW\b[^>]*?\bw:w="(\d+)"[^>]*?\bw:type="dxa"/.exec(tblPr)?.[1];
+    const total = widths.reduce((a, b) => a + b, 0) || Number(tblW) || 9026;
+    widths = Array.from({ length: n }, () => Math.floor(total / n));
+    grid = `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`;
+  }
+  const cellProps = (tcPr, width) => {
+    const x = withoutChanges(tcPr).replace(/<w:(?:gridSpan|vMerge|hMerge)\b[^>]*\/>/g, "");
+    if (!x || /^<w:tcPr\s*\/>$|^<w:tcPr><\/w:tcPr>$/.test(x)) return `<w:tcPr><w:tcW w:w="${width}" w:type="dxa"/></w:tcPr>`;
+    return x.replace(/<w:tcW\b[^>]*\/>/, `<w:tcW w:w="${width}" w:type="dxa"/>`);
+  };
+  const cell = (s, width, text) => `<w:tc>${cellProps(s.tcPr ?? "", width)}<w:p>${markParagraphMark(copiedPPr(s.pPr ?? ""), "ins", stamp)}${text.trim() ? `<w:ins ${stamp()}>${runsFor(text.trim(), s.rPr ?? "")}</w:ins>` : ""}</w:p></w:tc>`;
+  const row = (cells, s) => `<w:tr>${rowMark(s.trPr ?? "", `<w:ins ${stamp()}/>`)}${widths.map((w, k) => cell(s, w, cells[k] ?? "")).join("")}</w:tr>`;
+  return `<w:tbl>${tblPr}${grid}${rows.map((cells, r) => row(cells, (r === 0 ? spec.header : spec.body) ?? {})).join("")}</w:tbl>`;
+}
+
+// A paragraph's section break, whole (a recorded change to it sits inside).
+function sectionBreakOf(pXml) {
+  const pPr = paraPropsOf(pXml);
+  const at = pPr.indexOf("<w:sectPr");
+  if (at < 0) return null;
+  const self = /^<w:sectPr\b[^>]*\/>/.exec(pPr.slice(at));
+  return self ? self[0] : pPr.slice(at, pPr.lastIndexOf("</w:sectPr>") + "</w:sectPr>".length);
+}
+// A paragraph's section break put on a paragraph that has none: in its
+// properties, before any recorded formatting change (CT_PPr order).
+function withSectionBreak(pXml, sect) {
+  const p = expandEmpty(pXml);
+  const open = /^<w:p(?:\s[^>]*)?>/.exec(p)[0];
+  const pPr = paraPropsOf(p);
+  if (!pPr) return `${open}<w:pPr>${sect}</w:pPr>${p.slice(open.length)}`;
+  let into;
+  if (/\/>$/.test(pPr)) into = `<w:pPr>${sect}</w:pPr>`;
+  else {
+    const change = pPr.indexOf("<w:pPrChange");
+    const at = change >= 0 ? change : pPr.length - "</w:pPr>".length;
+    into = pPr.slice(0, at) + sect + pPr.slice(at);
+  }
+  const at = p.indexOf(pPr, open.length);
+  return p.slice(0, at) + into + p.slice(at + pPr.length);
+}
+
+// What the block operations need of the file: where each body element
+// starts and ends, the lists and which of them number headings, the notes,
+// and ids no element of the file uses yet.
+function blockContext({ entries, pristineXml, headings, stamp }) {
+  const text = (name) => (entries[name] ? dec.decode(entries[name]) : null);
+  const open = /<w:body(?:\s[^>]*)?>/.exec(pristineXml);
+  const body = open ? topLevel(pristineXml, ["p", "tbl", "sdt", "customXml"], open.index + open[0].length, pristineXml.lastIndexOf("</w:body>")) : [];
+  const holderOf = (pos) => {
+    let lo = 0;
+    let hi = body.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (pos < body[mid].start) hi = mid - 1;
+      else if (pos >= body[mid].end) lo = mid + 1;
+      else return body[mid];
+    }
+    return null;
+  };
+  let rows = null;
+  let tables = null;
+  const innermost = (name, pos) => {
+    const list = name === "tr" ? (rows ??= allOf(pristineXml, "tr")) : (tables ??= allOf(pristineXml, "tbl"));
+    let best = null;
+    for (const x of list) if (x.start < pos && pos < x.end && (!best || x.start > best.start)) best = x;
+    return best;
+  };
+
+  // Lists: which list format (abstractNum) each list (num) follows, and
+  // the style each paragraph style takes its numbering from.
+  let numbering = text("word/numbering.xml");
+  let numberingChanged = false;
+  const abstracts = new Map();
+  const numAbs = new Map();
+  for (const m of (numbering ?? "").matchAll(/<w:abstractNum\b[^>]*?\bw:abstractNumId="(\d+)"[^>]*>([\s\S]*?)<\/w:abstractNum>/g)) abstracts.set(m[1], m[2]);
+  for (const m of (numbering ?? "").matchAll(/<w:num\b[^>]*?\bw:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g)) numAbs.set(m[1], /<w:abstractNumId w:val="(\d+)"/.exec(m[2])?.[1] ?? null);
+  const styleNum = new Map();
+  const basedOn = new Map();
+  for (const m of (text("word/styles.xml") ?? "").matchAll(/<w:style\s[^>]*w:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g)) {
+    const n = /<w:numId w:val="(\d+)"/.exec(m[2])?.[1];
+    if (n) styleNum.set(m[1], n);
+    const b = attr(child(m[2], "w:basedOn") ?? "", "w:val");
+    if (b) basedOn.set(m[1], b);
+  }
+  const numOfStyle = (id, seen = new Set()) => {
+    if (!id || seen.has(id)) return null;
+    seen.add(id);
+    return styleNum.get(id) ?? numOfStyle(basedOn.get(id), seen);
+  };
+  const styleOf = (pPr) => attr(child(pPr ?? "", "w:pStyle") ?? "", "w:val");
+  const listOf = (pPr) => {
+    const own = copiedPPr(pPr ?? "");
+    const direct = /<w:numId w:val="(\d+)"/.exec(own)?.[1];
+    const numId = direct ?? numOfStyle(styleOf(own));
+    if (!numId || numId === "0") return null;
+    return { numId, abstract: numAbs.get(numId) ?? null, direct: direct !== undefined };
+  };
+  // A list that numbers headings runs through the whole document (clause
+  // 1, 1.1, 2 …) and is never started again.
+  const headingAbstracts = new Set();
+  for (const id of headings.map.keys()) {
+    const a = numAbs.get(numOfStyle(id));
+    if (a != null) headingAbstracts.add(a);
+  }
+  for (const [id, x] of abstracts) for (const m of x.matchAll(/<w:pStyle w:val="([^"]+)"/g)) if (headings.map.has(m[1])) headingAbstracts.add(id);
+  // A list started again: a new w:num on the same list format, starting
+  // the level at the format's own first number.
+  const restart = (abstract, ilvl) => {
+    const id = String(Math.max(0, ...[...numAbs.keys()].map(Number)) + 1);
+    const lvl = new RegExp(`<w:lvl\\b[^>]*?\\bw:ilvl="${ilvl}"[^>]*>([\\s\\S]*?)<\\/w:lvl>`).exec(abstracts.get(abstract) ?? "");
+    const start = /<w:start w:val="(\d+)"/.exec(lvl?.[1] ?? "")?.[1] ?? "1";
+    const xml = `<w:num w:numId="${id}"><w:abstractNumId w:val="${abstract}"/><w:lvlOverride w:ilvl="${ilvl}"><w:startOverride w:val="${start}"/></w:lvlOverride></w:num>`;
+    const last = numbering.lastIndexOf("</w:num>");
+    const mac = numbering.indexOf("<w:numIdMacAtCleanup");
+    const at = last >= 0 ? last + "</w:num>".length : mac >= 0 ? mac : numbering.lastIndexOf("</w:numbering>");
+    numbering = numbering.slice(0, at) + xml + numbering.slice(at);
+    numAbs.set(id, abstract);
+    numberingChanged = true;
+    return id;
+  };
+
+  // Ids nothing in the file uses: paragraph ids, drawing ids, bookmark names.
+  let used = null;
+  const ids = () => (used ??= (() => {
+    const all = Object.keys(entries).filter((n) => STORY_PART.test(n)).map((n) => (n === "word/document.xml" ? pristineXml : dec.decode(entries[n]))).join("");
+    return {
+      para: new Set([...all.matchAll(/\bw14:(?:paraId|textId)="([0-9A-Fa-f]{8})"/g)].map((m) => m[1].toUpperCase())),
+      docPr: [...all.matchAll(/<wp:docPr\b[^>]*?\sid="(\d+)"/g)].reduce((n, m) => Math.max(n, Number(m[1])), 0),
+      names: new Set([...all.matchAll(/<w:bookmarkStart\b[^>]*?\bw:name="([^"]*)"/g)].map((m) => m[1])),
+      next: 0x2b000000,
+    };
+  })());
+  const paraId = () => {
+    const u = ids();
+    let v;
+    do v = (u.next++).toString(16).toUpperCase().padStart(8, "0"); while (u.para.has(v));
+    u.para.add(v);
+    return v;
+  };
+  const bookmarkName = (name) => {
+    const u = ids();
+    for (let n = 1; ; n++) {
+      const c = `${name.slice(0, 33)}_${n}`;
+      if (!u.names.has(c)) { u.names.add(c); return c; }
+    }
+  };
+
+  // The notes parts, read when first needed and written back at the end.
+  const noteParts = {};
+  const notePart = (kind) => (noteParts[kind] ??= { name: `word/${kind}s.xml`, kind, xml: text(`word/${kind}s.xml`), created: false, changed: false });
+  const notes = {
+    add(kind, inner) {
+      const part = notePart(kind);
+      if (!part.xml) {
+        part.xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:${kind}s xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:w14="${W14_NS}"><w:${kind} w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:${kind}><w:${kind} w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:${kind}></w:${kind}s>`;
+        part.created = true;
+      }
+      const id = [...part.xml.matchAll(new RegExp(`<w:${kind}\\b[^>]*?\\bw:id="(-?\\d+)"`, "g"))].reduce((n, m) => Math.max(n, Number(m[1])), 0) + 1;
+      part.xml = part.xml.replace(new RegExp(`</w:${kind}s>\\s*$`), `<w:${kind} w:id="${id}">${inner}</w:${kind}></w:${kind}s>`);
+      part.changed = true;
+      return id;
+    },
+    // A copied paragraph's footnote is a copy of the footnote: one note is
+    // never referred to twice.
+    copy(kind, id, st) {
+      const part = notePart(kind);
+      const m = part.xml && new RegExp(`<w:${kind}\\b(?=[^>]*\\bw:id="${id}")[^>]*>([\\s\\S]*?)</w:${kind}>`).exec(part.xml);
+      return m ? notes.add(kind, fresh(insertedBlocks(m[1], st), st)) : null;
+    },
+  };
+
+  // A copy given ids of its own: paragraph ids, drawing ids, bookmarks (a
+  // bookmark only half inside the copy is left out), and its own notes.
+  function fresh(xml, st) {
+    const u = ids();
+    let out = xml.replace(/\bw14:(paraId|textId)="[0-9A-Fa-f]{8}"/g, (_, k) => `w14:${k}="${paraId()}"`);
+    out = out.replace(/(<wp:docPr\b[^>]*?\sid=")\d+"/g, (_, head) => `${head}${++u.docPr}"`);
+    const starts = new Map();
+    const ends = new Set();
+    for (const m of out.matchAll(/<w:bookmarkStart\b[^>]*\/>/g)) starts.set(attr(m[0], "w:id"), attr(m[0], "w:name") ?? "_Copy");
+    for (const m of out.matchAll(/<w:bookmarkEnd\b[^>]*\/>/g)) ends.add(attr(m[0], "w:id"));
+    const map = new Map();
+    for (const [id, name] of starts) if (ends.has(id)) map.set(id, { id: stamp.next(), name: bookmarkName(name) });
+    out = out.replace(/<w:bookmark(?:Start|End)\b[^>]*\/>/g, (tag) => {
+      const to = map.get(attr(tag, "w:id"));
+      if (!to) return "";
+      const t = tag.replace(/\bw:id="[^"]*"/, `w:id="${to.id}"`);
+      return tag.startsWith("<w:bookmarkStart") ? t.replace(/\bw:name="[^"]*"/, `w:name="${to.name}"`) : t;
+    });
+    return out.replace(/<w:(footnote|endnote)Reference\b([^>]*?)\bw:id="(-?\d+)"/g, (m, kind, pre, id) => {
+      const n = notes.copy(kind, id, st);
+      return n == null ? m : `<w:${kind}Reference${pre}w:id="${n}"`;
+    });
+  }
+
+  const ctx = {
+    body, holderOf, innermost, listOf, restart, fresh, notes,
+    abstractOf: (numId) => numAbs.get(numId) ?? null,
+    heading: false,
+    isHeading: (pPr, spec) => headings.map.has(spec?.styleId ?? styleOf(pPr)),
+    headingList: (abstract, styleId) => headingAbstracts.has(abstract) || headings.map.has(styleId),
+    styleOf,
+    // The parts other than the body that were written, put in the package.
+    finish(target) {
+      const names = [];
+      if (numberingChanged) { target["word/numbering.xml"] = enc.encode(numbering); names.push("word/numbering.xml"); }
+      for (const part of Object.values(noteParts)) {
+        if (!part.changed) continue;
+        target[part.name] = enc.encode(part.xml);
+        names.push(part.name);
+        if (!part.created) continue;
+        const [type, rel] = NOTE_PARTS[part.kind];
+        const types = dec.decode(target["[Content_Types].xml"]);
+        if (!types.includes(`PartName="/${part.name}"`)) target["[Content_Types].xml"] = enc.encode(types.replace("</Types>", `<Override PartName="/${part.name}" ContentType="${type}"/></Types>`));
+        const relsPath = "word/_rels/document.xml.rels";
+        const rels = target[relsPath] ? dec.decode(target[relsPath]) : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+        if (!rels.includes(rel)) {
+          let rid = 1;
+          while (rels.includes(`Id="rIdAkla${part.kind}${rid}"`)) rid++;
+          target[relsPath] = enc.encode(rels.replace("</Relationships>", `<Relationship Id="rIdAkla${part.kind}${rid}" Type="${rel}" Target="${part.kind}s.xml"/></Relationships>`));
+        }
+        names.push("[Content_Types].xml", relsPath);
+      }
+      return [...new Set(names)];
+    },
+  };
+  return ctx;
+}
+
+// Works out every block operation against the file as it arrived, as
+// splices of the body (start, end, and the XML to put there, made when the
+// splice is applied so its revision ids follow on from the turn's).
+// `blocks(index)` says why a paragraph change cannot be made (it is inside
+// a block being removed). Refusals are added to `results` as they are found.
+function planBlocks({ blockOps, parsed, entries, pristineXml, paragraphs, byIndex, headings, stamp, kinds, shown, results }) {
+  const ctx = blockContext({ entries, pristineXml, headings, stamp });
+  const { body } = ctx;
+  const splices = [];
+  const removed = [];
+  const refuse = (op, reason) => results.push({ ...op, status: "skipped", reason });
+  const within = (box) => paragraphs.filter((p) => p.start >= box.start && p.end <= box.end);
+
+  // ¶from to ¶to as whole body elements, or why not.
+  const rangeOf = (op, removing) => {
+    const a = byIndex.get(op.from);
+    const b = byIndex.get(op.to);
+    const first = a && ctx.holderOf(a.start);
+    const last = b && ctx.holderOf(b.start);
+    if (!first || !last) return { error: `¶${!first ? op.from : op.to} is not in the body of the document` };
+    if (first.name === "tbl" && within(first).find((p) => p.text.trim()) !== a) return { error: `¶${op.from} is inside a table, so the range would cut through it; start at the table's first paragraph, or after the table` };
+    if (last.name === "tbl" && within(last).filter((p) => p.text.trim()).pop() !== b) return { error: `¶${op.to} is inside a table, so the range would cut through it; end at the table's last paragraph, or before the table` };
+    const firstIndex = body.indexOf(first);
+    const elements = body.slice(firstIndex, body.indexOf(last) + 1);
+    if (elements.some((e) => e.name !== "p" && e.name !== "tbl")) return { error: `¶${op.from}–¶${op.to} takes in a content control (a contents page, say), which cannot be ${removing ? "removed" : "repeated"} this way` };
+    const start = first.start;
+    const end = last.end;
+    const paras = paragraphs.filter((p) => p.start >= start && p.end <= end);
+    const unseen = shown && paras.find((p) => p.text.trim() && !shown.has(p.index));
+    if (unseen) return { error: `¶${unseen.index}, inside ¶${op.from}–¶${op.to}, was not supplied to this turn; request that section first` };
+    const shape = removing && paras.find((p) => p.formatting);
+    if (shape) return { error: `¶${shape.index} holds a text box or shape, which cannot be removed this way` };
+    const xml = pristineXml.slice(start, end);
+    const count = (t) => (xml.match(new RegExp(`w:fldCharType="${t}"`, "g")) ?? []).length;
+    if (count("begin") !== count("end")) return { error: `¶${op.from}–¶${op.to} cuts through a field (the contents page, say), which cannot be split` };
+    return { start, end, elements, paras, firstIndex };
+  };
+
+  for (const { op } of blockOps) {
+    if (op.kind !== "remove_block") continue;
+    const r = rangeOf(op, true);
+    if (r.error) { refuse(op, r.error); continue; }
+    if (removed.some((x) => x.start < r.end && r.start < x.end)) { refuse(op, `¶${op.from}–¶${op.to} overlaps a block another change in this turn removes`); continue; }
+    removed.push({ ...r, op });
+  }
+  const removedAt = (pos) => removed.find((x) => x.start <= pos && pos < x.end);
+  const blocks = (index) => {
+    const p = byIndex.get(index);
+    const x = p && removedAt(p.start);
+    return x ? `¶${index} is inside ¶${x.op.from}–¶${x.op.to}, which another change in this turn removes` : null;
+  };
+
+  // Paragraphs of a kind, after the anchor's element.
+  const writeXml = (op, box, anchor) => {
+    const st = stampFor(stamp, op);
+    let prev = box.name === "p" ? ctx.listOf(paraPropsOf(pristineXml.slice(anchor.start, anchor.end))) : null;
+    const out = [];
+    let last = null;
+    for (const block of op.blocks) {
+      const k = kindOf(kinds, block);
+      if (k.type === "footnote") {
+        const spec = k.spec;
+        const id = ctx.notes.add("footnote", `<w:p>${markParagraphMark(copiedPPr(spec.pPr ?? ""), "ins", st)}<w:ins ${st()}><w:r>${spec.refRPr ?? ""}<w:footnoteRef/></w:r><w:r>${spec.rPr ?? ""}<w:t xml:space="preserve"> </w:t></w:r>${runsFor(block.text.trim(), spec.rPr ?? "")}</w:ins></w:p>`);
+        last.refs.push(`<w:r>${spec.refRPr ?? ""}<w:footnoteReference w:id="${id}"/></w:r>`);
+        (op.footnotes ??= []).push(id);
+        continue;
+      }
+      if (k.type === "table") {
+        out.push(tableFromKind(k.spec, block.rows, st));
+        prev = null;
+        last = null;
+        continue;
+      }
+      let pPr = copiedPPr(k.spec.pPr ?? "");
+      const list = ctx.listOf(pPr);
+      if (list?.direct && list.abstract != null && !ctx.headingList(list.abstract, k.spec.styleId ?? ctx.styleOf(pPr))) {
+        // The same list as the block before: carry on with it. Another list,
+        // or none: start this one again at its first number.
+        let numId = list.numId;
+        if (prev?.abstract === list.abstract) numId = prev.numId;
+        else if (k.spec.restart !== false) {
+          numId = ctx.restart(list.abstract, /<w:ilvl w:val="(\d+)"/.exec(pPr)?.[1] ?? k.spec.ilvl ?? "0");
+          (op.restarted ??= []).push(numId);
+        }
+        if (numId !== list.numId) pPr = pPr.replace(/(<w:numId w:val=")\d+(")/, `$1${numId}$2`);
+        prev = { abstract: list.abstract, numId };
+      } else {
+        prev = list;
+      }
+      if (ctx.isHeading(pPr, k.spec)) ctx.heading = true;
+      last = { pPr, rPr: k.spec.rPr ?? "", text: block.text.trim(), refs: [] };
+      out.push(last);
+    }
+    return out.map((x) => (typeof x === "string" ? x : `<w:p>${markParagraphMark(x.pPr, "ins", st)}<w:ins ${st()}>${runsFor(x.text, x.rPr)}${x.refs.join("")}</w:ins></w:p>`)).join("");
+  };
+
+  // The lists a pack says run on through the document (restart: false).
+  const runsOn = new Set(Object.values(kinds?.kinds ?? {}).filter((k) => k?.restart === false).map((k) => ctx.listOf(k.pPr ?? "")?.abstract).filter((a) => a != null));
+  const listAt = (p) => ctx.listOf(paraPropsOf(pristineXml.slice(p.start, p.end)));
+
+  // A copy of whole paragraphs and tables, after the anchor's element. A
+  // list group the copy holds from its first item ((a), (b), (c) of a
+  // clause) is a group of its own in the copy and starts again at (a); a
+  // copy that starts part-way through a group carries on its numbering.
+  const repeatXml = (op, r) => {
+    const st = stampFor(stamp, op);
+    if (r.paras.some((p) => p.headingLevel)) ctx.heading = true;
+    op.copied = r.paras.filter((p) => p.text.trim()).length;
+    const again = new Set();
+    const seen = new Set();
+    for (const p of r.paras) {
+      const list = listAt(p);
+      if (!list?.direct || list.abstract == null || seen.has(list.numId)) continue;
+      seen.add(list.numId);
+      if (ctx.headingList(list.abstract, ctx.styleOf(paraPropsOf(pristineXml.slice(p.start, p.end)))) || runsOn.has(list.abstract)) continue;
+      let q = p.index - 2;
+      while (q >= 0 && !paragraphs[q].text.trim()) q--;
+      if (q < 0 || listAt(paragraphs[q])?.abstract !== list.abstract) again.add(list.numId);
+    }
+    const restarted = new Map();
+    const copy = insertedBlocks(pristineXml.slice(r.start, r.end), st).replace(/(<w:numPr>(?:<w:ilvl w:val="(\d)"\/>)?<w:numId w:val=")(\d+)(")/g, (m, head, ilvl, id, tail) => {
+      if (!again.has(id)) return m;
+      if (!restarted.has(id)) restarted.set(id, ctx.restart(ctx.abstractOf(id), ilvl ?? "0"));
+      return head + restarted.get(id) + tail;
+    });
+    if (restarted.size) op.restarted = [...restarted.values()];
+    return ctx.fresh(copy, st);
+  };
+
+  // A row like another, straight after it.
+  const rowXml = (op, row) => {
+    const st = stampFor(stamp, op);
+    const tr = pristineXml.slice(row.start, row.end);
+    const { cells, headEnd } = rowParts(tr);
+    const head = markRow(readerCopy(tr.slice(0, headEnd)), `<w:ins ${st()}/>`);
+    const made = cells.map((c, k) => {
+      const { open, inner } = cellParts(tr.slice(c.start, c.end));
+      const blocks = topLevel(inner, ["p", "tbl", "sdt", "customXml"]);
+      const before = inner.slice(0, blocks[0]?.start ?? inner.length);
+      const tcPr = withoutChanges(/<w:tcPr\s*\/>|<w:tcPr\b[\s\S]*<\/w:tcPr>/.exec(before)?.[0] ?? "").replace(/<w:vMerge\b[^>]*\/>/g, "");
+      const ps = blocks.filter((b) => b.name === "p").map((b) => inner.slice(b.start, b.end));
+      const pPr = copiedPPr(paraPropsOf(ps[0] ?? ""));
+      // The look of the cell's words; an empty cell's paragraph mark says
+      // what its words would look like.
+      const rPr = ps.map(firstRunRPr).find(Boolean) || child(pPr, "w:rPr") || "";
+      const words = (op.cells[k] ?? "").trim();
+      return `${open}${tcPr}<w:p>${markParagraphMark(pPr, "ins", st)}${words ? `<w:ins ${st()}>${runsFor(words, rPr)}</w:ins>` : ""}</w:p></w:tc>`;
+    });
+    return ctx.fresh(`${head}${made.join("")}</w:tr>`, st);
+  };
+
+  // Whole paragraphs and tables struck through. A section break on the last
+  // paragraph moves to the paragraph before the block when that one is free
+  // to take it; otherwise that paragraph's mark stays, empty, with the
+  // break (as "delete" does).
+  const removeXml = (op, r, move) => {
+    const st = stampFor(stamp, op);
+    const lastEl = r.elements[r.elements.length - 1];
+    let out = "";
+    let at = r.start;
+    for (const el of r.elements) {
+      out += pristineXml.slice(at, el.start);
+      at = el.end;
+      let x = pristineXml.slice(el.start, el.end);
+      if (el.name === "tbl") { out += deletedTable(x, st); continue; }
+      x = expandEmpty(x);
+      if (move && el === lastEl) {
+        const sect = sectionBreakOf(x);
+        const pPr = paraPropsOf(x);
+        x = x.replace(pPr, pPr.replace(sect, ""));
+      }
+      if (isOwnInsertion(x)) { (op.removedIds ??= []).push(...insertionIds(x)); continue; }
+      if (SECTION_BREAK.test(paraPropsOf(x))) op.keptSectionBreak = true;
+      out += deleteParagraph(x, st);
+    }
+    out += pristineXml.slice(at, r.end);
+    if (r.paras.some((p) => p.headingLevel)) ctx.heading = true;
+    op.original = r.paras.map((p) => p.text).filter((t) => t.trim()).join("\n");
+    if (!move) return out;
+    op.movedSectionBreak = true;
+    const sect = sectionBreakOf(pristineXml.slice(lastEl.start, lastEl.end));
+    return withSectionBreak(pristineXml.slice(move.start, move.end), sect) + pristineXml.slice(move.end, r.start) + out;
+  };
+
+  for (const { op } of blockOps) {
+    if (op.kind === "remove_block") continue;
+    const anchorIndex = op.kind === "add_row" ? op.like_row : op.after;
+    const anchor = byIndex.get(anchorIndex);
+    const reason = blocks(anchorIndex) ?? (op.kind === "add_row" && Number.isFinite(op.table) ? blocks(op.table) : null);
+    if (reason) { refuse(op, reason); continue; }
+    const box = anchor && ctx.holderOf(anchor.start);
+    if (!box) { refuse(op, `¶${anchorIndex} is not in the body of the document`); continue; }
+    if (op.kind === "write") {
+      splices.push({ start: box.end, end: box.end, op, make: () => writeXml(op, box, anchor) });
+    } else if (op.kind === "repeat_block") {
+      const r = rangeOf(op, false);
+      if (r.error) { refuse(op, r.error); continue; }
+      splices.push({ start: box.end, end: box.end, op, make: () => repeatXml(op, r) });
+    } else if (op.kind === "add_row") {
+      const row = anchor.inTable && ctx.innermost("tr", anchor.start);
+      if (!row) { refuse(op, `¶${op.like_row} is not in a table`); continue; }
+      const table = ctx.innermost("tbl", anchor.start);
+      const named = Number.isFinite(op.table) ? byIndex.get(op.table) : anchor;
+      if (!named?.inTable || ctx.innermost("tbl", named.start)?.start !== table.start) { refuse(op, `¶${op.like_row} is not in the same table as ¶${op.table}`); continue; }
+      const count = rowParts(pristineXml.slice(row.start, row.end)).cells.length;
+      if (op.cells.length > count) { refuse(op, `the row has ${count} cell${count === 1 ? "" : "s"}, and ${op.cells.length} were given`); continue; }
+      splices.push({ start: row.end, end: row.end, op, make: () => rowXml(op, row) });
+    }
+  }
+
+  const touched = new Set(parsed.map(({ op }) => op.p));
+  for (const r of removed) {
+    const lastEl = r.elements[r.elements.length - 1];
+    let move = null;
+    if (lastEl.name === "p" && SECTION_BREAK.test(paraPropsOf(pristineXml.slice(lastEl.start, lastEl.end)))) {
+      const prev = body[r.firstIndex - 1];
+      const prevPara = prev?.name === "p" ? paragraphs.find((p) => p.start === prev.start) : null;
+      const free = prevPara
+        && !touched.has(prevPara.index)
+        && !removedAt(prev.start)
+        && !SECTION_BREAK.test(paraPropsOf(pristineXml.slice(prev.start, prev.end)))
+        && !splices.some((s) => s.start >= prev.start && s.start <= r.start);
+      if (free) move = prev;
+    }
+    splices.push({ start: move ? move.start : r.start, end: r.end, op: r.op, make: () => removeXml(r.op, r, move) });
+  }
+
+  // Bottom upwards; at one point a removal before an insertion, and of two
+  // insertions the later operation first, so they land in the order given.
+  const queue = splices.sort((x, y) => y.start - x.start || y.end - x.end || y.op.i - x.op.i);
+  return {
+    blocks,
+    headingChanged: () => ctx.heading,
+    finish: (target) => ctx.finish(target),
+    flush(limit, splice, made, refused) {
+      while (queue.length && queue[0].start >= limit) {
+        const s = queue.shift();
+        let xml;
+        try {
+          xml = s.make();
+        } catch (err) {
+          refused(s.op, `this could not be written safely (${err instanceof Error ? err.message : String(err)})`);
+          continue;
+        }
+        splice(s.start, s.end, xml);
+        made(s.op);
+      }
+    },
+  };
+}
+
+/**
+ * Problems with a pack's kinds list, each as a plain sentence; none means
+ * it can be used. The shape (the contract with the pack builder):
+ * { kinds: { name: { pPr, rPr, styleId, numId, ilvl, label, restart? } },
+ *   tables: { name: { tblPr, tblGrid, header: { trPr, tcPr, pPr, rPr }, body: { … }, label } },
+ *   footnote: { pPr, rPr, refRPr } | null }
+ */
+export function validateKinds(obj) {
+  const problems = [];
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return ["The kinds list is not an object."];
+  const NAME = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+  const fragment = (where, value, tag, { optional = true } = {}) => {
+    if (value === null || value === undefined || value === "") {
+      if (!optional) problems.push(`${where} is missing.`);
+      return;
+    }
+    if (typeof value !== "string") { problems.push(`${where} is not text.`); return; }
+    if (!new RegExp(`^<w:${tag}(?:\\s[^>]*)?(?:\\/>|>[\\s\\S]*<\\/w:${tag}>)$`).test(value.trim())) { problems.push(`${where} is not a single <w:${tag}> element.`); return; }
+    try {
+      new DOMParser({ onError: (level, message) => { if (level !== "warning") throw new Error(message); } })
+        .parseFromString(`<x xmlns:w="${W_NS}" xmlns:w14="${W14_NS}" xmlns:r="${R_NS}">${value}</x>`, "application/xml");
+    } catch {
+      problems.push(`${where} is not well-formed XML.`);
+    }
+  };
+  const kinds = obj.kinds;
+  if (!kinds || typeof kinds !== "object" || Array.isArray(kinds) || !Object.keys(kinds).length) problems.push("It lists no paragraph kinds.");
+  for (const [name, k] of Object.entries(kinds && typeof kinds === "object" ? kinds : {})) {
+    if (!NAME.test(name)) problems.push(`The kind name "${name}" is not a plain name (a letter, then letters, digits, - or _).`);
+    if (name === "footnote" || name === "table") problems.push(`The name "${name}" is kept for the ${name}; give the paragraph kind another name.`);
+    if (!k || typeof k !== "object") { problems.push(`Kind "${name}" is not an object.`); continue; }
+    fragment(`Kind "${name}"'s paragraph format (pPr)`, k.pPr, "pPr");
+    fragment(`Kind "${name}"'s run format (rPr)`, k.rPr, "rPr");
+    if (typeof k.pPr === "string" && /<w:sectPr\b/.test(k.pPr)) problems.push(`Kind "${name}"'s paragraph format carries a section break; take it out.`);
+    if (k.styleId != null && typeof k.styleId !== "string") problems.push(`Kind "${name}"'s styleId is not text.`);
+    if (k.numId != null && !/^\d+$/.test(String(k.numId))) problems.push(`Kind "${name}"'s numId is not a number.`);
+    if (k.ilvl != null && !/^[0-8]$/.test(String(k.ilvl))) problems.push(`Kind "${name}"'s ilvl is not a list level from 0 to 8.`);
+    const own = typeof k.pPr === "string" ? /<w:numId w:val="(\d+)"/.exec(k.pPr)?.[1] : undefined;
+    if (k.numId != null && own !== undefined && own !== String(k.numId)) problems.push(`Kind "${name}" says list ${k.numId}, but its paragraph format uses list ${own}.`);
+    if (k.restart !== undefined && typeof k.restart !== "boolean") problems.push(`Kind "${name}"'s restart is not true or false.`);
+    if (typeof k.label !== "string" || !k.label.trim()) problems.push(`Kind "${name}" has no label.`);
+  }
+  const tables = obj.tables ?? {};
+  if (typeof tables !== "object" || Array.isArray(tables)) problems.push("The table kinds are not an object.");
+  else for (const [name, t] of Object.entries(tables)) {
+    if (!NAME.test(name)) problems.push(`The table kind name "${name}" is not a plain name (a letter, then letters, digits, - or _).`);
+    if (kinds && typeof kinds === "object" && Object.hasOwn(kinds, name)) problems.push(`"${name}" is both a paragraph kind and a table kind.`);
+    if (name === "footnote" || name === "table") problems.push(`The name "${name}" is kept for the ${name}; give the table kind another name.`);
+    if (!t || typeof t !== "object") { problems.push(`Table kind "${name}" is not an object.`); continue; }
+    fragment(`Table kind "${name}"'s table format (tblPr)`, t.tblPr, "tblPr", { optional: false });
+    fragment(`Table kind "${name}"'s column grid (tblGrid)`, t.tblGrid, "tblGrid");
+    for (const row of ["header", "body"]) {
+      const r = t[row];
+      if (!r || typeof r !== "object") { problems.push(`Table kind "${name}" has no ${row} row.`); continue; }
+      fragment(`Table kind "${name}"'s ${row} row format (trPr)`, r.trPr, "trPr");
+      fragment(`Table kind "${name}"'s ${row} cell format (tcPr)`, r.tcPr, "tcPr");
+      fragment(`Table kind "${name}"'s ${row} paragraph format (pPr)`, r.pPr, "pPr");
+      fragment(`Table kind "${name}"'s ${row} run format (rPr)`, r.rPr, "rPr");
+    }
+    if (typeof t.label !== "string" || !t.label.trim()) problems.push(`Table kind "${name}" has no label.`);
+  }
+  if (obj.footnote != null) {
+    const f = obj.footnote;
+    if (typeof f !== "object") problems.push("The footnote is not an object.");
+    else {
+      fragment("The footnote's paragraph format (pPr)", f.pPr, "pPr");
+      fragment("The footnote's run format (rPr)", f.rPr, "rPr");
+      fragment("The footnote's reference mark format (refRPr)", f.refRPr, "rPr");
+    }
+  }
+  return problems;
+}
+
+/** The short line a prompt or tool shows of the kinds a pack can write. */
+export function kindsListing(kinds) {
+  if (!kinds?.kinds) return "";
+  const paragraphs = Object.entries(kinds.kinds).map(([name, k]) => `${name} (${k?.label || "paragraph"})`);
+  if (kinds.footnote) paragraphs.push("footnote (a footnote on the paragraph before it)");
+  const tables = Object.entries(kinds.tables ?? {}).map(([name, t]) => `${name} (${t?.label || "table"})`);
+  return `KINDS YOU CAN WRITE: ${paragraphs.join(", ")}${tables.length ? `. TABLES: ${tables.join(", ")}; a table takes "rows", the first row its header` : ""}.`;
+}
+
 // ---------------------------------------------------------------- applying
 
 /**
@@ -833,9 +1733,12 @@ export async function applyDocxOps(bytes, ops, byRef, { idFloor, signal } = {}) 
  * back — applied, or why not — so the lawyer is told about the ones that
  * could not be made rather than left to find the gap themselves.
  */
-async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
+async function applyPartOps(bytes, ops, byRef, { idFloor, signal, kinds, shown } = {}) {
   const results = [];
   const parsed = [];
+  // The block operations (write, repeat_block, add_row, remove_block): they
+  // reach across paragraphs, so they are planned apart from the rest.
+  const blockOps = [];
   ops.forEach((raw, i) => {
     const op = { i, kind: String(raw?.op ?? "").toLowerCase(), p: Number(raw?.p), text: typeof raw?.text === "string" ? raw.text : "" };
     const ref = byRef.get(op.p);
@@ -862,6 +1765,12 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
       if (!op.text.trim()) return results.push({ ...op, status: "skipped", reason: "comment needs text" });
     } else if (op.kind === "delete") {
       op.modified = "";
+    } else if (BLOCK_OPS[op.kind]) {
+      Object.assign(op, blockFields(op.kind, raw, ref));
+      const problem = blockProblem(op, kinds);
+      if (problem) return results.push({ ...op, status: "skipped", reason: problem });
+      blockOps.push({ op, ref });
+      return;
     } else {
       return results.push({ ...op, status: "skipped", reason: `unknown op "${raw?.op}"` });
     }
@@ -877,7 +1786,10 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
   // Whether a heading was added or removed, so the contents page is stale.
   let headingChanged = false;
 
-  if (parsed.length) {
+  // Parts other than the body a block operation wrote.
+  let extra = [];
+
+  if (parsed.length || blockOps.length) {
     let documentXml = dec.decode(entries["word/document.xml"]);
     const headings = headingStyles(entries["word/styles.xml"] ? dec.decode(entries["word/styles.xml"]) : "");
     const stamp = revisionStamps(documentXml, maxId);
@@ -901,13 +1813,32 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
     // given when a heading of another level is asked for.
     const levelsUsed = [...new Set(paragraphs.filter((p) => p.headingLevel && !p.inTable && !p.formatting && p.text.trim()).map((p) => p.headingLevel))].sort((a, b) => a - b);
 
+    // The block operations, worked out against the file as it arrived: each
+    // is one splice of the body, made in the same bottom-up pass as the
+    // paragraph changes below. A change aimed inside a block being removed
+    // is refused (plan.blocks).
+    const plan = blockOps.length
+      ? planBlocks({ blockOps, parsed, entries, pristineXml, paragraphs, byIndex, headings, stamp, kinds, shown, results })
+      : null;
+    const live = plan ? parsed.filter(({ op }) => {
+      const reason = plan.blocks(op.p);
+      if (reason) results.push({ ...op, status: "skipped", reason });
+      return !reason;
+    }) : parsed;
+    const splice = (start, end, xml) => { documentXml = documentXml.slice(0, start) + xml + documentXml.slice(end); };
+    const made = (op) => { done(op); applied++; };
+    const refused = (op, reason) => { delete op.revisionIds; delete op.splits; results.push({ ...op, status: "skipped", reason }); };
+
     // Bottom of the document upwards, so an edit never moves a paragraph
     // another operation is still to find.
     const work = new Map();
-    for (const { op } of parsed) work.set(op.p, [...(work.get(op.p) ?? []), op]);
+    for (const { op } of live) work.set(op.p, [...(work.get(op.p) ?? []), op]);
     for (const index of [...work.keys()].sort((a, b) => b - a)) {
       const para = byIndex.get(index);
       const group = work.get(index);
+      // Block splices below the end of this paragraph go first. One that
+      // lands right after it lands after its insert_after paragraphs.
+      if (para && plan) plan.flush(para.end, splice, made, refused);
       if (!para) {
         group.forEach((op) => results.push({ ...op, status: "skipped", reason: `¶${index} not found` }));
         continue;
@@ -1001,6 +1932,11 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
         applied++;
       });
     }
+    if (plan) {
+      plan.flush(-1, splice, made, refused);
+      if (plan.headingChanged()) headingChanged = true;
+      extra = plan.finish(entries);
+    }
     if (headingChanged) documentXml = markTocDirty(documentXml);
     entries["word/document.xml"] = enc.encode(patchEmptyCells(documentXml));
     maxId = stamp.max();
@@ -1073,7 +2009,7 @@ async function applyPartOps(bytes, ops, byRef, { idFloor, signal } = {}) {
 
   results.sort((a, b) => a.i - b.i);
   adoptSplits(results);
-  return { bytes: out, results, applied, comments, maxId };
+  return { bytes: out, results, applied, comments, maxId, ...(extra.length ? { extra } : {}) };
 }
 
 // When one change of a call lands inside an insertion another change of the
@@ -1139,6 +2075,7 @@ export function acceptAllChanges(bytes) {
   for (const part of Object.keys(entries).filter(p => STORY_PART.test(p))) {
   let xml = dec.decode(entries[part]);
   if (/<w:(?:moveFrom|moveTo|pPrChange|rPrChange|tblPrChange|sectPrChange)\b/.test(xml)) throw new Error("This file contains revision types that must be accepted in Word.");
+  xml = acceptRows(xml, (trPr) => /<w:del\b/.test(trPr), /<w:ins\b[^>]*\/>/g);
   // A struck-through paragraph mark joins the paragraph to the next one;
   // dropping the paragraph is what Word shows and what the lawyer means.
   // The mark is the w:del inside the paragraph properties' own w:rPr — a
@@ -1437,6 +2374,36 @@ export function applyReviewSuggestions(bytes, changes, { idFloor, legacy = false
   return { bytes: writeZip(entries), results, maxId: stamp.max() };
 }
 
+// A table row's own mark accepted: a row whose properties carry a deletion
+// mark (as `deleted` judges it) is removed whole, an insertion mark
+// (`insMark`) is dropped, and a table left with no rows goes as well. A part
+// with no marked row comes back exactly as it was.
+function acceptRows(xml, deleted, insMark) {
+  if (!/<w:trPr\b[^>]*>(?:(?!<\/w:trPr>)[\s\S])*?<w:(?:ins|del)\b/.test(xml)) return xml;
+  const own = (tr) => /^<w:tr\b[^>]*>\s*(?:<w:tblPrEx\b[^>]*?(?:\/>|>[\s\S]*?<\/w:tblPrEx>)\s*)?(<w:trPr\b[^>]*?(?:\/>|>[\s\S]*?<\/w:trPr>))/.exec(tr)?.[1];
+  const drop = [];
+  for (const r of allOf(xml, "tr").sort((a, b) => a.start - b.start)) {
+    if (drop.length && r.start < drop[drop.length - 1].end) continue;
+    const trPr = own(xml.slice(r.start, r.end));
+    if (trPr && deleted(trPr.replace(PROP_CHANGES, ""))) drop.push(r);
+  }
+  for (const r of drop.reverse()) xml = xml.slice(0, r.start) + xml.slice(r.end);
+  xml = xml.replace(/<w:trPr>(?:(?!<\/w:trPr>)[\s\S])*?<\/w:trPr>/g, (t) => {
+    const s = t.replace(insMark, "");
+    return s !== t && s === "<w:trPr></w:trPr>" ? "" : s;
+  });
+  for (let gone = drop.length > 0; gone; ) {
+    gone = false;
+    for (const t of allOf(xml, "tbl")) {
+      if (/<w:tr[\s>]/.test(xml.slice(t.start, t.end))) continue;
+      xml = xml.slice(0, t.start) + xml.slice(t.end);
+      gone = true;
+      break;
+    }
+  }
+  return xml;
+}
+
 // The AI's own tracked changes accepted, and nothing else: revisions already
 // in the file by anyone else stay as they are, and comments stay. A draft
 // filled in from the firm's standard is a new document, so its fills are
@@ -1449,6 +2416,9 @@ export function acceptChangesBy(bytes, author = DOCX_AUTHOR) {
   for (const part of Object.keys(entries).filter((p) => STORY_PART.test(p))) {
     let xml = dec.decode(entries[part]);
     if (!xml.includes(`w:author="${escapeXml(author)}"`)) continue;
+    // Table rows first: a row this author deleted goes whole, with its
+    // cells; one this author inserted loses its mark.
+    xml = acceptRows(xml, (trPr) => delMark.test(trPr), insMark);
     // Paragraph marks first: a paragraph this author deleted goes, one this
     // author inserted simply stays.
     xml = xml.replace(PARAGRAPH, (p) => {
@@ -1471,7 +2441,7 @@ export function acceptChangesBy(bytes, author = DOCX_AUTHOR) {
 
 // One line per operation, for the reply and the artifact's change list.
 export function describeResults(results) {
-  const verb = { replace: "Changed", insert_after: "Added after", delete: "Deleted", comment: "Commented on" };
+  const verb = { replace: "Changed", insert_after: "Added after", delete: "Deleted", comment: "Commented on", write: "Wrote after", repeat_block: "Repeated", add_row: "Added a row after", remove_block: "Removed" };
   return results.map((r) => ({
     op: r.kind,
     paragraph: r.p,

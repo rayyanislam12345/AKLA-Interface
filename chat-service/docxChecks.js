@@ -424,10 +424,18 @@ export function formatGate(out, base, opts = {}) {
   const extra = Object.keys(o.headerFooter).filter(n => !b.headerFooter[n]);
   if (extra.length) add('header_footer', `${plural(extra.length, 'header or footer was', 'headers or footers were')} added that ${ref} does not have`);
 
+  // A paragraph on another list of the same list format as the base
+  // paragraph it copies (a restart, allowed above, or another of the base's
+  // own lists of that format) has that paragraph's format: only which list
+  // it is on differs.
+  const listOf = (n, id) => /<w:abstractNumId w:val="(\d+)"\/>/.exec(n.nums.get(id)?.inner ?? '')?.[1];
+  const onList = (k, n) => k.replace(/<w:numId w:val="(\d+)"\/>/g, (m, id) => { const a = listOf(n, id); return a == null ? m : `<w:numId w:list="${a}"/>`; });
+  let baseOnLists = null;
+  const sameList = k => k.includes('<w:numId ') && (baseOnLists ??= new Set([...b.paragraphFormats].map(x => onList(x, bn)))).has(onList(k, on));
   let novelRuns = 0, novelParagraphs = 0, runExample = null, paragraphExample = null;
   for (const f of Object.values(o.storyFormats)) {
     for (const k of f.rPr) if (k && !b.runFormats.has(k)) { novelRuns++; runExample ??= k; }
-    for (const k of f.pPr) if (k && !b.paragraphFormats.has(k)) { novelParagraphs++; paragraphExample ??= k; }
+    for (const k of f.pPr) if (k && !b.paragraphFormats.has(k) && !sameList(k)) { novelParagraphs++; paragraphExample ??= k; }
   }
   if (novelRuns) add('run_format', `${plural(novelRuns, 'piece of text uses', 'pieces of text use')} formatting ${ref} does not have (for example ${describeRun(runExample)})`);
   if (novelParagraphs) add('paragraph_format', `${plural(novelParagraphs, 'paragraph uses', 'paragraphs use')} a paragraph format ${ref} does not have (for example ${describeParagraph(paragraphExample)})`);
