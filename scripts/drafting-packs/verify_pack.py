@@ -14,8 +14,10 @@ import collections
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 from lxml import etree
@@ -36,8 +38,10 @@ def check_kinds_shape(kj):
     if set(kj) != {"kinds", "tables", "footnote"}:
         errs.append("top-level keys are %s" % sorted(kj))
     for name, k in kj.get("kinds", {}).items():
-        if set(k) != KIND_KEYS:
+        if set(k) - {"restart"} != KIND_KEYS:
             errs.append("kind %s keys %s" % (name, sorted(k)))
+        if "restart" in k and not isinstance(k["restart"], bool):
+            errs.append("kind %s restart not true/false" % name)
         if k.get("pPr") and not (k["pPr"].startswith("<w:pPr") and k["pPr"].endswith("</w:pPr>") or k["pPr"].endswith("/>")):
             errs.append("kind %s pPr is not a w:pPr element" % name)
         if k.get("rPr") and not k["rPr"].startswith("<w:rPr"):
@@ -129,6 +133,116 @@ def hub_checks(repo, pack):
         return {"error": str(e)}
 
 
+def numbering_check(pack):
+    """Every number in the pack read three ways: the builder's counter with
+    one counter per list, with counters shared by a list's nums, and
+    LibreOffice's own rendering (when installed). Also any typed number
+    still at the start of a paragraph."""
+    pkg = bp.Package(pack)
+    styles = bp.style_map(pkg)
+    nb = bp.Numbering(pkg, styles)
+    body = pkg.xml(pkg.main_part()).find(bp.w("body"))
+    paras = bp.body_paragraphs(body)
+    toc = bp._field_state_paragraphs(body)
+    ms = {m: bp.numbering_labels(body, styles, nb, m) for m in bp.MODELS}
+    m1 = ms["own"]
+    out = {"numbered": len(m1), "models_disagree": [], "typed_left": [], "libreoffice": None}
+    for p in paras:
+        if p in m1:
+            if len({ms[m].get(p) for m in bp.MODELS}) > 1:
+                out["models_disagree"].append(dict({"text": bp.para_text(p)[:60]}, **{m: ms[m].get(p) for m in bp.MODELS}))
+            continue
+        ppr = p.find(bp.w("pPr"))
+        sid = bp.wa(ppr.find(bp.w("pStyle")), "val") if ppr is not None else None
+        t = bp.para_text(p)
+        if bp.TYPED_NUM.match(t) and p not in toc and not (sid or "").upper().startswith("TOC") and t[bp.TYPED_NUM.match(t).end():].strip():
+            out["typed_left"].append(t[:70])
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        out["libreoffice"] = "not installed"
+        return out
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "pack.docx")
+        shutil.copy(pack, src)
+        try:
+            subprocess.run([soffice, "--headless", "--convert-to", "txt:Text (encoded):UTF8", "--outdir", tmp, src],
+                           capture_output=True, timeout=300)
+            with open(os.path.join(tmp, "pack.txt"), encoding="utf-8-sig") as f:
+                lines = f.read().split("\n")
+        except Exception as e:  # noqa
+            out["libreoffice"] = "could not render: %s" % e
+            return out
+    # walk the pack's paragraphs and LibreOffice's lines together: a line is
+    # a paragraph's text, after its number when it has one
+    norm = lambda t: re.sub(r"\s+", " ", t.replace("\t", " ")).strip()
+    lines = [norm(x) for x in lines]
+    at, same, differ, unfound = 0, 0, [], 0
+    for p in paras:
+        text = norm(bp.para_text(p))
+        if len(re.sub(r"\[●\]|\W", "", text)) < 6:
+            # too little of its own to find it in the rendered text ("[●]")
+            if p in m1:
+                unfound += 1
+            continue
+        hit = None
+        for k in range(at, min(len(lines), at + 60)):
+            ln = lines[k]
+            numbered = p in m1 and (m1[p] or "").strip()
+            if (not numbered and ln == text) or (numbered and ln.endswith(" " + text) and len(ln) - len(text) <= 16):
+                hit = k
+                break
+        if hit is None:
+            if p in m1:
+                unfound += 1
+            continue
+        at = hit + 1
+        if p not in m1:
+            continue
+        label = lines[hit][:len(lines[hit]) - len(text)].strip()
+        readings = sorted({(ms[m].get(p) or "").strip() for m in bp.MODELS})
+        bullet = lambda t: len(t) == 1 and not t.isalnum()
+        if label in readings or (bullet(label) and all(bullet(r) for r in readings)):
+            same += 1
+        else:
+            differ.append({"text": text[:40], "builder": " or ".join(readings), "libreoffice": label})
+    out["libreoffice"] = {"agree": same, "differ": differ, "not_found": unfound}
+    return out
+
+
+# a project may be federal or under any province: no pack names a
+# government, a province, a provincial body or a province-only law
+FORBIDDEN = re.compile(r"Government of (?!\[)[A-Z][\w-]*|\b(?:GoS|GOS|GoP|GOP|GoPb|GoKP|GoB)\b|Sindh|Punjab|Khyber\s*Pakhtunkhwa|\bKPK\b|"
+                       r"Balochistan|Baluchistan|Islamabad|Karachi|Lahore|Peshawar|Quetta|Hyderabad|Multan|Faisalabad|Rawalpindi|"
+                       r"Province of (?!\[)[A-Z][\w-]*|Provincial Government|Revenue Board|\bSRB\b|\bKPRA\b|\bPRA\b|\bBRA\b|"
+                       r"Public[- ]Private Partnership (?:Authority|Act)|\bP3A\b|PPP (?:Authority|Act)|Procurement Rules|"
+                       r"Procurement Regulatory Authority|\b(?:S|K|B)?PPRA\b|Local Government|Housing (?:&|and) Town")
+# laws and bodies that apply whatever the project: kept, and listed
+NATIONWIDE = re.compile(r"Companies Act(?:,? \d{4})?|\bSECP\b|Securities and Exchange Commission of Pakistan|Arbitration Act(?:,? 1940)?|"
+                        r"Contract Act(?:,? 1872)?|Federal Board of Revenue(?: \(or any other authority\))?|\bFBR\b|State Bank of Pakistan|"
+                        r"Income Tax Ordinance(?:,? 2001)?|Sales Tax Act(?:,? 1990)?|Stamp Act(?:,? 1899)?|Registration Act(?:,? 1908)?|"
+                        r"Code of Civil Procedure(?:,? 1908)?|Limitation Act(?:,? 1908)?")
+NEUTRAL_REASON = re.compile(r"government|provinc|\bGoS\b|sales tax authority", re.I)
+
+
+def government_check(pack, kj):
+    found, kept = [], collections.Counter()
+    with zipfile.ZipFile(pack) as zf:
+        for n in zf.namelist():
+            if not bp.STORY.match(n):
+                continue
+            root = etree.fromstring(zf.read(n), bp.PARSER)
+            for p in root.iter(bp.w("p")):
+                t = bp.para_text(p)
+                for m in FORBIDDEN.finditer(t):
+                    found.append("%s: …%s…" % (n.replace("word/", ""), t[max(0, m.start() - 40):m.end() + 40].replace("\t", " ")))
+                for m in NATIONWIDE.finditer(t):
+                    kept[m.group(0)] += 1
+    for name, k in list(kj.get("kinds", {}).items()) + list(kj.get("tables", {}).items()):
+        for m in FORBIDDEN.finditer(k.get("label", "")):
+            found.append("kinds.json %s label: %s" % (name, k["label"]))
+    return {"found": found, "kept": kept.most_common()}
+
+
 LEAD = {"The", "This", "That", "These", "Those", "Such", "Each", "Any", "All", "No", "Every", "Other", "In", "On", "At", "By",
         "For", "If", "Upon", "Where", "When", "Subject", "Unless", "Notwithstanding", "Without", "Save", "Pursuant", "Under",
         "With", "From", "To", "As", "A", "An", "Its", "Their", "Both", "Either", "Neither", "Following", "Prior", "After",
@@ -202,6 +316,7 @@ def write_review(cfg, out_dir, repo):
     hub = hub_checks(repo, pack)
     shape_errs = check_kinds_shape(kj)
     lo = leftovers(pack)
+    numck = numbering_check(pack)
     L = []
     add = L.append
     title = cfg.get("title", kind)
@@ -245,6 +360,27 @@ def write_review(cfg, out_dir, repo):
         add("  Kept on purpose (time periods are settled terms, not deal facts): " + "; ".join(rep["time_periods_kept"][:30]))
     if rep.get("properties_blanked"):
         add("  File properties: " + "; ".join(rep["properties_blanked"]))
+    gov = government_check(pack, kj)
+    add("  GOVERNMENT AND PROVINCE:")
+    if gov["found"]:
+        add("  !! Still named in the pack (a project may be federal or under any province):")
+        for f in gov["found"][:40]:
+            add("    - " + f)
+    else:
+        add("  No government, province or province-specific law is named; the government party is the Government.")
+    subs = collections.Counter()
+    for b in rep["blankings"]:
+        if NEUTRAL_REASON.search(b["reason"]) or FORBIDDEN.search(b["text"]):
+            to = b["reason"].split(" -> ", 1)[1] if " -> " in b["reason"] else "[●]"
+            subs["'%s' -> '%s'" % (b["text"].replace("\n", " ").replace("\t", " ")[:90], to)] += 1
+    if subs:
+        add("  Substitutions made for this (each with how many times):")
+        for k, n in subs.most_common():
+            add("    - %s  (x%d)" % (k, n))
+    else:
+        add("  Substitutions made for this: none needed.")
+    if gov["kept"]:
+        add("  Kept as written (they apply nationwide whatever the project): " + "; ".join("%s (x%d)" % kv for kv in gov["kept"]))
     add("")
     add("3. KINDS AVAILABLE (kinds.json)")
     for name, k in kj["kinds"].items():
@@ -256,7 +392,73 @@ def write_review(cfg, out_dir, repo):
     if shape_errs:
         add("  !! kinds.json shape problems: " + "; ".join(shape_errs))
     add("")
-    add("4. PAGE SET-UP")
+    add("4. NUMBERING")
+    an = rep.get("auto_number")
+    if numck["typed_left"]:
+        add("  Typed numbers still in the pack (not Word's numbering):")
+        for t in numck["typed_left"]:
+            add("    - " + t.replace("\t", " -> "))
+    else:
+        add("  All numbering is Word's automatic numbering (%d numbered paragraphs; no clause or limb number is typed)." % numck["numbered"])
+    if an:
+        conv = an["converted"]
+        add("  Typed numbers converted to Word list items: %d" % len(conv))
+        for lk, n in sorted(an["lists_used"].items(), key=lambda x: -x[1]):
+            add("    %3d onto %s" % (n, lk))
+        if conv:
+            add("    (one by one: " + "; ".join("%s->num %s/level %s" % (c["typed"], c["numId"], c["ilvl"] + 1) for c in conv[:400]) + ")")
+        ind = an.get("indents") or {}
+        if ind:
+            add("  Indents: %d took the list level's own indent (their own was the same and was dropped); %d kept their own indent,"
+                % (ind.get("dropped", 0) + ind.get("level", 0), ind.get("kept", 0) + ind.get("kept (from its style)", 0)))
+            add("    written out in full where it differs from the list level, so nothing moves on the page.")
+        na = an["numbering_added"]
+        if na["nums"] or na["abstracts"] or na.get("levels_changed"):
+            add("  numbering.xml additions (the pack's numbering becomes the firm's standard for this pack):")
+            by = collections.Counter(n["abstractNumId"] for n in na["nums"])
+            add("    %d list starts (a w:num on an existing list, with a start override where a typed list starts again or"
+                " starts part-way): %s" % (len(na["nums"]), ", ".join("list %s x%d" % kv for kv in sorted(by.items()))))
+            for a in na["abstracts"]:
+                add("    new list %s: %s" % (a["abstractNumId"], a["why"]))
+            for a in na.get("levels_changed", []):
+                add("    list %s level %s, used by no paragraph, changed from %s to %s: %s" % (a["abstractNumId"], a["level"], a["was"], a["now"], a["why"]))
+        else:
+            add("  numbering.xml: nothing added.")
+        for a in an["anomalies_kept"]:
+            add("  !! Kept as the base has it: %s  ['%s']" % (a["why"], a["text"][:60].replace("\t", " ")))
+        for t in an["left_typed"]:
+            add("  !! Left typed: %s" % (t if isinstance(t, str) else "%s ['%s']" % (t["why"], t["text"][:60])))
+        for t in an["not_numbers"]:
+            add("  Not a list number, left as text: '%s'" % t["text"][:60])
+        sc = an.get("sequence_check") or {}
+        add("  Sequence check (builder): %d numbered paragraphs read exactly as before, typed or not, under each of three readings"
+            " of how Word counts lists (%s); %d differences." % (sc.get("paragraphs_checked", 0), "; ".join(sc.get("models", [])), len(sc.get("mismatches", []))))
+    else:
+        add("  Automatic numbering was not run for this pack.")
+    lon = numck["libreoffice"]
+    if isinstance(lon, dict):
+        add("  LibreOffice rendering: %d numbers agree with the builder's count, %d differ, %d not checked (text too short or too"
+            " common to find in LibreOffice's text, e.g. '[●]')."
+            % (lon["agree"], len(lon["differ"]), lon["not_found"]))
+        for d in lon["differ"][:20]:
+            add("    !! '%s': builder %s, LibreOffice %s" % (d["text"], d["builder"], d["libreoffice"]))
+    else:
+        add("  LibreOffice rendering: %s" % lon)
+    base_amb = {d["text"] for d in (an or {}).get("base_ambiguous", [])}
+    own = [d for d in numck["models_disagree"] if d["text"] in base_amb]
+    numck["models_disagree"] = [d for d in numck["models_disagree"] if d["text"] not in base_amb]
+    if own:
+        add("  The base's own numbering (not typed, not changed here) reads differently depending on whether Word shares a list's")
+        add("  counters across its nums at %d places (the readings: %s). Check these in Word" % (
+            len(own), "; ".join("'%s' %s" % (d["text"][:30], " / ".join(sorted({str(d[m]) for m in bp.MODELS}))) for d in own[:12])))
+    if numck["models_disagree"]:
+        add("  !! %d numbers read differently depending on whether Word shares a list's counters across its nums: %s"
+            % (len(numck["models_disagree"]), "; ".join("'%s' %s" % (d["text"][:30], " / ".join(sorted({str(d[m]) for m in bp.MODELS}))) for d in numck["models_disagree"][:10])))
+    if rep.get("kinds_run_on"):
+        add("  Kinds whose list runs on through the document (restart: false; the engine never starts them again): %s"
+            % ", ".join(rep["kinds_run_on"]))
+    add("")
+    add("5. PAGE SET-UP")
     for s in rep["sections"]:
         m = s["margins_twips"] or {}
         add("  Section %d: %s %s, margins top %s / right %s / bottom %s / left %s twips; %s" % (
@@ -269,7 +471,7 @@ def write_review(cfg, out_dir, repo):
     for t in rep.get("wide_tables", []):
         add("  !! Table at block %d is %d twips wide against a %d twip text width: check it does not run into the margin." % (t["block"], t["table_width_twips"] + t["indent"], t["text_width_twips"]))
     add("")
-    add("5. SHAPES, REVISIONS, CONTENTS")
+    add("6. SHAPES, REVISIONS, CONTENTS")
     if rep["shapes"]:
         for s in rep["shapes"]:
             add("  - %s: %s%s%s%s" % (s["part"].replace("word/", ""), "text box" if s["text_box"] else ("picture" if s["picture"] else "drawing/shape"),
@@ -288,7 +490,7 @@ def write_review(cfg, out_dir, repo):
     add("  Parts removed: %s" % (", ".join(rep["removed_parts"]) or "none"))
     add("  Carried byte-for-byte: %s" % ", ".join(p for p in rep["carried_byte_for_byte"] if not p.startswith("customXml")))
     add("")
-    add("6. OPENS, AND WHAT THE HUB READS")
+    add("7. OPENS, AND WHAT THE HUB READS")
     add("  Zip: %s; %d XML parts parse%s." % (oc["zip"], oc["xml_parts"], "" if not oc["xml_errors"] else ("; ERRORS: " + "; ".join(oc["xml_errors"]))))
     add("  python-docx: %s" % oc["python_docx"])
     ins = hub.get("inspect", {}) if "error" not in hub else {"error": hub["error"]}
@@ -309,7 +511,7 @@ def write_review(cfg, out_dir, repo):
         add("    heading styles: %s; table styles: %s; placeholder: %s" % (fp.get("headingStyles"), fp.get("tableStyles"), fp.get("placeholder")))
     add("")
     if rep["mode"] == "form":
-        add("7. NAMES AND NUMBERS STILL IN THE PACK (check none is the old client's)")
+        add("8. NAMES AND NUMBERS STILL IN THE PACK (check none is the old client's)")
         add("  Capitalised names that are not defined terms in the pack (count):")
         add("    " + "; ".join("%s (%d)" % nc for nc in lo["check_names"][:120]) if lo["check_names"] else "    none")
         add("  Acronyms and capitalised words (count):")
@@ -322,20 +524,20 @@ def write_review(cfg, out_dir, repo):
         if len(lo["numbers"]) > 80:
             add("    ... and %d more (see report.json)" % (len(lo["numbers"]) - 80))
         add("")
-    add("%d. ANYTHING ODD" % (8 if rep["mode"] == "form" else 7))
+    add("%d. ANYTHING ODD" % (9 if rep["mode"] == "form" else 8))
     for line in cfg.get("odd", []) or ["nothing beyond the above"]:
         add("  - " + line)
     add("")
-    add("%d. CHECK THESE BY EYE IN WORD" % (9 if rep["mode"] == "form" else 8))
+    add("%d. CHECK THESE BY EYE IN WORD" % (10 if rep["mode"] == "form" else 9))
     for i, line in enumerate(cfg.get("checks", []), 1):
         add("  %d. %s" % (i, line))
     add("")
     with open(os.path.join(out_dir, "REVIEW.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(L))
-    rep["verification"] = {"open": oc, "hub": hub, "kinds_shape_errors": shape_errs, "leftovers": lo}
+    rep["verification"] = {"open": oc, "hub": hub, "kinds_shape_errors": shape_errs, "leftovers": lo, "numbering": numck, "government": gov}
     with open(os.path.join(out_dir, "report.json"), "w", encoding="utf-8") as f:
         json.dump(rep, f, ensure_ascii=False, indent=2)
-    return oc, hub, shape_errs, lo
+    return oc, hub, shape_errs, lo, numck, gov
 
 
 def main(argv):
@@ -346,9 +548,13 @@ def main(argv):
         cfgs = json.load(f)
     cfg = cfgs["packs"][argv[2]]
     out_dir = os.path.join(cfgs["out_root"], cfg["folder"])
-    oc, hub, se, lo = write_review(cfg, out_dir, argv[3])
+    oc, hub, se, lo, numck, gov = write_review(cfg, out_dir, argv[3])
     ok = oc["zip"] == "ok" and not oc["xml_errors"] and not se and "error" not in hub and "error" not in hub.get("inspect", {}) and "error" not in hub.get("fingerprint", {})
-    print("%s: %s" % (argv[2], "OK" if ok else "PROBLEMS"), json.dumps({"open": oc, "shape": se, "hub_err": hub.get("error")})[:600])
+    lo_r = numck["libreoffice"]
+    ok = ok and not numck["typed_left"] and not numck["models_disagree"] and not (isinstance(lo_r, dict) and lo_r["differ"]) and not gov["found"]
+    print("%s: %s" % (argv[2], "OK" if ok else "PROBLEMS"), json.dumps({"open": oc, "shape": se, "hub_err": hub.get("error"),
+                                                                     "typed_left": numck["typed_left"][:5], "government_named": gov["found"][:5], "models_disagree": len(numck["models_disagree"]),
+                                                                     "libreoffice": lo_r if not isinstance(lo_r, dict) else {"agree": lo_r["agree"], "differ": lo_r["differ"][:5], "not_found": lo_r["not_found"]}})[:1500])
     return 0 if ok else 1
 
 

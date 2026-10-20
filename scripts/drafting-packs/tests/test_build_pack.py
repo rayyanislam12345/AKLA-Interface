@@ -119,6 +119,17 @@ class PackTests(unittest.TestCase):
         self.assertIn('w:code="9"', doc)
         self.assertIn('w:left="1440"', doc)
 
+    def test_regex_with_substitutes(self):
+        pack, report, kj, parts = self.build({"mode": "form", "detectors": False,
+                                              "literals": [{"regex": r"\bAcme Water\b", "with": "the Company", "reason": "neutral name"},
+                                                           {"regex": r"(in)serted", "with": r"\1cluded", "reason": "word"}]})
+        text = "".join(bp.para_text(p) for p in bp.etree.fromstring(parts["word/document.xml"]).iter(bp.w("p")))
+        self.assertIn("the Company (Private) Limited", text)
+        self.assertIn("Kept included text.", text)
+        self.assertNotIn("Acme", text)
+        subs = [b for b in report["blankings"] if b["reason"].startswith("neutral name")]
+        self.assertTrue(subs and all(b["reason"] == "neutral name -> the Company" and b["text"] == "Acme Water" for b in subs))
+
     def test_carried_parts_byte_identical(self):
         for mode, cfg in (("form", {"mode": "form"}),
                           ("shell", {"mode": "shell", "shell": {"keep": {"0": "label"}, "examples": {"3": "limb_a"}}})):
@@ -199,6 +210,121 @@ class PackTests(unittest.TestCase):
         self.assertIn("Kept inserted text.", out)
         self.assertIn("num=5/0 lowerLetter '(%1)'", out)
         self.assertIn("TABLE 3x2", out)
+
+
+# a clause list: 1. / 1.1 / (a) / (i), and typed numbers under its heading
+CLAUSE_NUMBERING = DECL + f'<w:numbering {W}><w:abstractNum w:abstractNumId="0">' + "".join(
+    f'<w:lvl w:ilvl="{i}"><w:start w:val="1"/><w:numFmt w:val="{f}"/><w:lvlText w:val="{t}"/><w:lvlJc w:val="left"/>'
+    f'<w:pPr><w:ind w:left="{l}" w:hanging="720"/></w:pPr></w:lvl>'
+    for i, f, t, l in ((0, "decimal", "%1.", 720), (1, "decimal", "%1.%2", 720), (2, "lowerLetter", "(%3)", 1440), (3, "lowerRoman", "(%4)", 2160))
+) + '</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>'
+
+
+def TP(prefix, runs, ind=None):
+    """A paragraph whose number is typed: the prefix and a tab in a run of
+    their own, then runs of (text, rPr)."""
+    ppr = f'<w:pPr><w:ind w:left="{ind[0]}" w:hanging="{ind[1]}"/></w:pPr>' if ind else ""
+    body = "".join(f'<w:r>{rpr}<w:t xml:space="preserve">{t}</w:t></w:r>' for t, rpr in runs)
+    return f'<w:p>{ppr}<w:r><w:t>{prefix}</w:t><w:tab/></w:r>{body}</w:p>'
+
+
+TYPED_BODY = "".join([
+    P("Definitions", ppr='<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>'),           # 0  auto 1.
+    TP("1.1", [("The ", ""), ("first", "<w:rPr><w:b/></w:rPr>"), (" clause:", "")], ind=(720, 720)),  # 1
+    TP("(a)", [("a limb, ", "<w:rPr><w:i/></w:rPr>"), ("in part;", "")], ind=(1440, 720)),           # 2
+    TP("(i)", [("a sub-limb;", "")], ind=(2160, 720)),                                                # 3
+    TP("(ii)", [("a second sub-limb;", "")], ind=(2300, 720)),                                        # 4
+    TP("(b)", [("a second limb.", "")], ind=(1440, 720)),                                             # 5
+    TP("1.2", [("The second clause:", "")]),                                                          # 6
+    TP("(a)", [("one;", "")], ind=(1440, 720)),                                                       # 7
+    TP("(b)", [("two,", "")], ind=(1440, 720)),                                                       # 8
+    P("provided that:", rpr=""),                                                                      # 9
+    TP("(a)", [("three.", "")], ind=(1440, 720)),                                                     # 10 a list started again
+    P("12 months is a period, not a number", rpr=""),                                                 # 11 not a list number
+])
+
+
+class AutoNumberTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.join(self.tmp.name, "typed.docx")
+        parts = dict(PARTS)
+        parts["word/numbering.xml"] = CLAUSE_NUMBERING
+        parts["word/document.xml"] = DECL + f'<w:document {W}><w:body>{TYPED_BODY}{SECT}</w:body></w:document>'
+        with zipfile.ZipFile(self.base, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, xml in parts.items():
+                z.writestr(name, xml.encode("utf-8"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_typed_numbers_become_list_items(self):
+        out = os.path.join(self.tmp.name, "out")
+        pack, report, kj = bp.build({"mode": "form", "base": self.base, "name": "t", "kind": "typed",
+                                     "kinds": {"1": "numbered_2", "2": "limb_a", "3": "sublimb_i"}}, out)
+        parts = read(pack)
+        body = bp.etree.fromstring(parts["word/document.xml"]).find(bp.w("body"))
+        paras = [p for p in body if p.tag == bp.w("p")]
+
+        def num(p):
+            np_ = p.find("w:pPr/w:numPr", bp.NS)
+            return None if np_ is None else (bp.wa(np_.find(bp.w("numId")), "val"), int(bp.wa(np_.find(bp.w("ilvl")), "val")))
+        # the right list and level for each typed number
+        self.assertEqual([num(p) for p in paras[:9]],
+                         [("1", 0), ("1", 1), ("1", 2), ("1", 3), ("1", 3), ("1", 2), ("1", 1), ("1", 2), ("1", 2)])
+        # the typed numbers and their tabs are gone; the words are as they were
+        self.assertEqual([bp.para_text(p) for p in paras[1:9]],
+                         ["The first clause:", "a limb, in part;", "a sub-limb;", "a second sub-limb;", "a second limb.",
+                          "The second clause:", "one;", "two,"])
+        self.assertTrue(all(p.find(".//w:tab", bp.NS) is None for p in paras[1:11]))
+        # run formatting kept: "first" bold, "a limb, " italic, the rest plain
+        runs = {"".join(t.text for t in r.iter(bp.w("t"))): r.find(bp.w("rPr")) for r in paras[1].iter(bp.w("r"))}
+        self.assertIsNotNone(runs["first"].find(bp.w("b")))
+        self.assertIsNone(runs["The "])
+        r2 = [r for r in paras[2].iter(bp.w("r"))]
+        self.assertEqual(bp.etree.tostring(r2[0].find(bp.w("rPr")), encoding="unicode").count("<w:i/>"), 1)
+        # an indent the list level already gives is dropped; one that differs is kept
+        self.assertIsNone(paras[2].find("w:pPr/w:ind", bp.NS))
+        self.assertEqual(bp.wa(paras[4].find("w:pPr/w:ind", bp.NS), "left"), "2300")
+        # "(a)" after "provided that" starts the list again: a num on the same list
+        nid, il = num(paras[10])
+        self.assertEqual(il, 2)
+        self.assertNotEqual(nid, "1")
+        nroot = bp.etree.fromstring(parts["word/numbering.xml"])
+        new = [n for n in nroot.findall(bp.w("num")) if bp.wa(n, "numId") == nid][0]
+        self.assertEqual(bp.wa(new.find(bp.w("abstractNumId")), "val"), "0")
+        self.assertEqual(bp.wa(new.find("w:lvlOverride/w:startOverride", bp.NS), "val"), "1")
+        self.assertEqual(bp.wa(new.find(bp.w("lvlOverride")), "ilvl"), "2")
+        self.assertIsNone(num(paras[11]))
+        # the numbers Word draws are the typed ones, under each reading of its counters
+        pkg = bp.Package(pack)
+        st = bp.style_map(pkg)
+        nb = bp.Numbering(pkg, st)
+        b = pkg.xml("word/document.xml").find(bp.w("body"))
+        bps = [p for p in b if p.tag == bp.w("p")]
+        for mode in bp.MODELS:
+            labels = bp.numbering_labels(b, st, nb, mode)
+            self.assertEqual([labels.get(p) for p in bps[:11]],
+                             ["1.", "1.1", "(a)", "(i)", "(ii)", "(b)", "1.2", "(a)", "(b)", None, "(a)"], mode)
+        an = report["auto_number"]
+        self.assertEqual(len(an["converted"]), 9)
+        self.assertEqual(an["sequence_check"]["mismatches"], [])
+        self.assertEqual(an["left_typed"], [])
+        self.assertEqual(len(an["numbering_added"]["nums"]), 1)
+        # kinds point at the list each now uses; the clause kind runs on
+        k = kj["kinds"]
+        self.assertEqual((k["numbered_2"]["numId"], k["numbered_2"]["ilvl"], k["numbered_2"].get("restart")), (1, 1, False))
+        self.assertEqual((k["limb_a"]["numId"], k["limb_a"]["ilvl"]), (1, 2))
+        self.assertEqual((k["sublimb_i"]["numId"], k["sublimb_i"]["ilvl"]), (1, 3))
+        self.assertNotIn("restart", k["limb_a"])
+        self.assertEqual(vp.check_kinds_shape(kj), [])
+
+    def test_auto_number_off(self):
+        out = os.path.join(self.tmp.name, "off")
+        pack, report, kj = bp.build({"mode": "form", "base": self.base, "name": "t", "kind": "typed", "auto_number": False}, out)
+        self.assertIsNone(report["auto_number"])
+        self.assertEqual(read(pack)["word/numbering.xml"], CLAUSE_NUMBERING.encode("utf-8"))
+        self.assertIn("1.1\tThe first clause:", [bp.para_text(p) for p in bp.etree.fromstring(read(pack)["word/document.xml"]).iter(bp.w("p"))])
 
 
 if __name__ == "__main__":

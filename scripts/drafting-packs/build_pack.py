@@ -21,6 +21,23 @@ Two modes:
         remove comments, keep only the furniture blocks and one example of
         each paragraph kind (text replaced by [●]); delete the rest.
 
+Both modes, straight after revisions are accepted (config "auto_number",
+on unless set to false; a shell converts only what it keeps): clause and
+limb numbers typed by hand ("4.1.1<tab>", "(a)<tab>", "(i)<tab>", "A.<tab>")
+become Word's own numbering. Each goes onto the list the document already
+uses at that place (the clause list's level that numbers the same way, a
+sibling's list, or the closest list by indent); a typed list that starts
+again gets a w:num on the same list with a start override; a list the
+document lacks is a copy of the closest one in the new format. The typed
+number and its tab leave the text (run formatting kept); the paragraph's
+own indent is dropped when the list level gives the same, else written out
+in full so nothing moves. Every number must then read exactly as before,
+typed or not, under three readings of how Word shares a list's counters,
+or the build stops. Kinds on a clause list get "restart": false.
+
+Literals may be regexes; {"regex", "with", "reason"} substitutes the match
+(backreferences allowed) instead of blanking it to [●].
+
 Edits are made on the XML. Parts that are not changed are written back
 byte-for-byte (styles, numbering, theme, fontTable, settings and any header
 or footer the pack does not need to change).
@@ -489,7 +506,9 @@ class Blanker:
             if isinstance(l, str):
                 l = {"text": l, "reason": "named in the config"}
             if "regex" in l:
-                self.regexes.append((re.compile(l["regex"], re.I if l.get("ci") else 0), l["reason"]))
+                # "with" turns a blanking into a substitution: the match is
+                # replaced by that text (backreferences allowed) instead of [●].
+                self.regexes.append((re.compile(l["regex"], re.I if l.get("ci") else 0), l["reason"], l.get("with")))
                 continue
             lits.append(l)
             if l["text"].upper() != l["text"] and not l.get("exact"):
@@ -512,10 +531,14 @@ class Blanker:
                     break
                 found.append((i, i + len(l["text"]), l["reason"]))
                 start = i + len(l["text"])
-        for rx, reason in self.regexes:
+        subs = {}  # (start, end) -> replacement text, for "with" entries
+        for rx, reason, sub in self.regexes:
             for m in rx.finditer(text):
                 if m.end() > m.start():
                     found.append((m.start(), m.end(), reason))
+                    if sub is not None:
+                        subs[(m.start(), m.end())] = m.expand(sub)
+        self._subs = subs
         if self.labels:
             for line_start, line in _lines(text):
                 m = LABELS.match(line)
@@ -556,7 +579,8 @@ class Blanker:
                 keep_spans.append((i, i + len(k)))
                 start = i + len(k)
         found = [f for f in found if not any(a <= f[0] and f[1] <= b for a, b in keep_spans)]
-        found = [f for f in found if text[f[0]:f[1]].strip() and text[f[0]:f[1]].strip() != BLANK]
+        found = [f for f in found if text[f[0]:f[1]].strip() and text[f[0]:f[1]].strip() != BLANK
+                 and (f[0], f[1]) not in subs or (f[0], f[1]) in subs and text[f[0]:f[1]] != subs[(f[0], f[1])]]
         # merge overlaps, keep the earliest-listed reason of the widest span
         found.sort(key=lambda f: (f[0], -(f[1] - f[0])))
         merged = []
@@ -566,9 +590,12 @@ class Blanker:
                 merged[-1] = (ps, max(pe, e), pr)
             else:
                 merged.append((s, e, r))
-        # trim whitespace/punctuation at the edges
+        # trim whitespace/punctuation at the edges (a substitution is kept exact)
         out = []
         for s, e, r in merged:
+            if (s, e) in subs:
+                out.append((s, e, r))
+                continue
             while s < e and text[s] in " ,;":
                 s += 1
             while e > s and text[e - 1] in " ,;:":
@@ -592,6 +619,7 @@ class Blanker:
         if not text.strip():
             return 0
         spans = self.spans(text)
+        subs = getattr(self, "_subs", {})
         if not spans:
             return 0
         bounds = []
@@ -600,7 +628,8 @@ class Blanker:
             bounds.append((pos, pos + len(s[1])))
             pos += len(s[1])
         for s, e, reason in reversed(spans):
-            self.log.append((where[0], where[1], text[s:e], reason))
+            put = subs.get((s, e), BLANK)
+            self.log.append((where[0], where[1], text[s:e], reason if put == BLANK else reason + " -> " + put))
             first = True
             for i, (a, b) in enumerate(bounds):
                 if b <= s or a >= e or segs[i][0] is None:
@@ -608,7 +637,7 @@ class Blanker:
                 t = segs[i][1]
                 ls, le = max(s, a) - a, min(e, b) - a
                 if first:
-                    t = t[:ls] + BLANK + t[le:]
+                    t = t[:ls] + put + t[le:]
                     first = False
                 else:
                     t = t[:ls] + t[le:]
@@ -1154,6 +1183,1084 @@ def toc_reduce(block):
 
 
 # --------------------------------------------------------------------------
+# automatic numbering: clause and limb numbers typed by hand ("4.1.1<tab>",
+# "(a)<tab>", "(i)<tab>", "A.<tab>") become Word list items
+# --------------------------------------------------------------------------
+ROMANS = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+          (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")]
+PPR_BEFORE_NUMPR = ("pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl")
+# a typed number at the very start of a paragraph, then (spaces and) at least
+# one tab: "4.1.1<tab>", "(a)<tab>", "(iv) <tab>", "A.<tab>", "(1)<tab>", "b.<tab>"
+TYPED_NUM = re.compile(r"^( *)(\d{1,3}(?:\.\d{1,3})*[A-Z](?:\.\d{1,3})*\.?(?= *\t| +\S)|"
+                       r"(?:\d{1,3}(?:\.\d{1,3}){1,3}\.?|\d{1,3}\.|\d{1,3}\)|\(\d{1,3}\)|\([a-z]{1,4}\)|\([A-Z]{1,4}\)|"
+                       r"[A-Z]\.|[a-z]\.|[a-z]\))(?= *\t))([ \t]*)")
+# an inserted clause numbered with a letter: "12.3A", "12.3A.1", "8.1.1A"
+SUFFIXED = re.compile(r"(\d{1,3}(?:\.\d{1,3})*[A-Z](?:\.\d{1,3})*)(\.?)")
+# the same without a tab: listed for the owner, never converted
+NEAR_NUM = re.compile(r"^( *)(\d{1,3}(?:\.\d{1,3}){0,3}\.?|\(\d{1,3}\)|\([a-z]{1,4}\)|\([A-Z]{1,4}\)|[A-Z]\.) +(?=\S)")
+
+
+def to_roman(n):
+    out = ""
+    for v, s in ROMANS:
+        while n >= v:
+            out += s
+            n -= v
+    return out
+
+
+def from_roman(s):
+    s = s.lower()
+    if not s or not re.fullmatch(r"[ivxl]+", s):
+        return None
+    for n in range(1, 90):
+        if to_roman(n) == s:
+            return n
+    return None
+
+
+def to_letter(n):
+    return chr(97 + (n - 1) % 26) * ((n - 1) // 26 + 1)
+
+
+def from_letter(s):
+    s = s.lower()
+    if not s or len(set(s)) != 1 or not s[0].isalpha():
+        return None
+    return (len(s) - 1) * 26 + ord(s[0]) - 96
+
+
+def fmt_num(n, fmt):
+    if fmt in ("lowerLetter", "upperLetter"):
+        s = to_letter(n)
+        return s.upper() if fmt == "upperLetter" else s
+    if fmt in ("lowerRoman", "upperRoman"):
+        s = to_roman(n)
+        return s.upper() if fmt == "upperRoman" else s
+    if fmt == "decimalZero":
+        return "%02d" % n
+    if fmt in ("none", "bullet"):
+        return ""
+    return str(n)
+
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+class Level:
+    def __init__(self, el):
+        self.el = el
+        self.ilvl = int(wa(el, "ilvl", "0"))
+        self.fmt = wa(el.find(w("numFmt")), "val", "decimal")
+        self.text = wa(el.find(w("lvlText")), "val", "")
+        self.start = _int(wa(el.find(w("start")), "val", "1"))
+        self.start = 1 if self.start is None else self.start
+        self.pstyle = wa(el.find(w("pStyle")), "val")
+        self.islgl = el.find(w("isLgl")) is not None
+        self.restart = _int(wa(el.find(w("lvlRestart")), "val"))
+        ind = el.find("w:pPr/w:ind", NS)
+        self.ind = ind_of(ind)
+
+    def key(self):
+        """What the level looks like: ('multi', parts, trailing dot) for
+        "%1.%2.%3"-style clause numbers, else (format, template) with the
+        level's own number as '%': ('lowerLetter', '(%)')."""
+        return level_key(self.text, self.fmt, self.ilvl)
+
+    def describe(self):
+        return "'%s' %s" % (self.text, self.fmt)
+
+
+def level_key(text, fmt, ilvl):
+    parts = re.findall(r"%\d|\d+", text)
+    if re.fullmatch(r"(?:%\d|\d+)(?:\.(?:%\d|\d+))+\.?", text) and any(p.startswith("%") for p in parts):
+        return ("multi", len(parts), text.endswith("."))
+    if fmt == "none" and re.fullmatch(r"\d+(?:\.\d+)+\.?", text):
+        return ("multi", len(parts), text.endswith("."))
+    if fmt == "bullet":
+        return ("bullet", text)
+    ph = re.findall(r"%(\d)", text)
+    if len(ph) == 1 and int(ph[0]) == ilvl + 1:
+        return (fmt, text.replace("%" + ph[0], "%"))
+    return ("other", fmt, text)
+
+
+def ind_of(ind):
+    """(left, first) of a w:ind; first is negative for a hanging indent;
+    either may be None when the element does not say."""
+    if ind is None:
+        return (None, None)
+    left = _int(wa(ind, "left", wa(ind, "start")))
+    first = None
+    if wa(ind, "hanging") is not None:
+        first = -(_int(wa(ind, "hanging")) or 0)
+    elif wa(ind, "firstLine") is not None:
+        first = _int(wa(ind, "firstLine")) or 0
+    return (left, first)
+
+
+def merge_ind(base, over):
+    return (over[0] if over[0] is not None else base[0], over[1] if over[1] is not None else base[1])
+
+
+class Numbering:
+    """numbering.xml as lists and levels, kept in step with additions."""
+
+    def __init__(self, pkg, styles):
+        self.pkg = pkg
+        self.styles = styles
+        self.root = pkg.xml("word/numbering.xml") if pkg.has("word/numbering.xml") else None
+        self.abs_el = {}
+        self.nums = {}       # numId -> (abstractId, {ilvl: start override}, {ilvl: Level override})
+        self.added_nums = []
+        self.added_abstracts = []
+        self.changed_levels = []
+        if self.root is None:
+            return
+        for a in self.root.findall(w("abstractNum")):
+            self.abs_el[wa(a, "abstractNumId")] = a
+        for n in self.root.findall(w("num")):
+            self._read_num(n)
+        self._levels = {}
+
+    def _read_num(self, n):
+        starts, lvls = {}, {}
+        for o in n.findall(w("lvlOverride")):
+            il = int(wa(o, "ilvl", "0"))
+            so = o.find(w("startOverride"))
+            if so is not None:
+                starts[il] = _int(wa(so, "val", "1")) or 0
+            lv = o.find(w("lvl"))
+            if lv is not None:
+                lvls[il] = Level(lv)
+        self.nums[wa(n, "numId")] = (wa(n.find(w("abstractNumId")), "val"), starts, lvls)
+
+    def abstract_of(self, num_id):
+        """The abstract that holds the levels (a numStyleLink followed)."""
+        a = self.nums.get(num_id, (None,))[0]
+        seen = set()
+        while a in self.abs_el and a not in seen:
+            seen.add(a)
+            el = self.abs_el[a]
+            link = wa(el.find(w("numStyleLink")), "val")
+            if not link or el.find(w("lvl")) is not None:
+                return a
+            st = self.styles.get(link)
+            nid = wa(st.find("w:pPr/w:numPr/w:numId", NS), "val") if st is not None else None
+            if nid is None or nid not in self.nums:
+                return a
+            a = self.nums[nid][0]
+        return a
+
+    def abstract_levels(self, aid):
+        if aid not in self._levels:
+            el = self.abs_el.get(aid)
+            self._levels[aid] = {int(wa(l, "ilvl", "0")): Level(l) for l in el.findall(w("lvl"))} if el is not None else {}
+        return self._levels[aid]
+
+    def levels(self, num_id):
+        """{ilvl: (Level, start)} for a num, overrides applied."""
+        if num_id not in self.nums:
+            return {}
+        cache = self.__dict__.setdefault("_num_levels", {})
+        if num_id not in cache:
+            cache[num_id] = self._levels_of(num_id)
+        return cache[num_id]
+
+    def _levels_of(self, num_id):
+        _, starts, lvls = self.nums[num_id]
+        out = {}
+        for il, lv in self.abstract_levels(self.abstract_of(num_id)).items():
+            lv = lvls.get(il, lv)
+            out[il] = (lv, starts.get(il, lv.start))
+        for il, lv in lvls.items():
+            if il not in out:
+                out[il] = (lv, starts.get(il, lv.start))
+        return out
+
+    def overrides(self, num_id):
+        return set(self.nums.get(num_id, (None, {}, {}))[1])
+
+    def is_clause_list(self, aid):
+        return any(lv.key()[0] == "multi" for lv in self.abstract_levels(aid).values())
+
+    def deepest_multi(self, aid):
+        return max([il for il, lv in self.abstract_levels(aid).items() if lv.key()[0] == "multi"], default=-1)
+
+    # additions -----------------------------------------------------------
+    def _next_num_id(self):
+        return str(max([int(k) for k in self.nums if str(k).isdigit()] + [0]) + 1)
+
+    def add_num(self, aid, starts, why):
+        """A w:num on an existing list with its start overridden: a list
+        started again (or started part-way, as the typed numbers were)."""
+        nid = self._next_num_id()
+        n = etree.Element(w("num"))
+        n.set(w("numId"), nid)
+        a = etree.SubElement(n, w("abstractNumId"))
+        a.set(w("val"), aid)
+        for il in sorted(starts):
+            o = etree.SubElement(n, w("lvlOverride"))
+            o.set(w("ilvl"), str(il))
+            so = etree.SubElement(o, w("startOverride"))
+            so.set(w("val"), str(starts[il]))
+        last = self.root.findall(w("num"))
+        if last:
+            last[-1].addnext(n)
+        else:
+            mac = self.root.find(w("numIdMacAtCleanup"))
+            if mac is not None:
+                mac.addprevious(n)
+            else:
+                self.root.append(n)
+        self._read_num(n)
+        self.added_nums.append({"numId": int(nid), "abstractNumId": int(aid), "starts": {str(k): v for k, v in starts.items()}, "why": why})
+        self.pkg.touch("word/numbering.xml")
+        return nid
+
+    def change_level(self, aid, ilvl, fmt, text, start, why):
+        """Give a level no paragraph uses a new number format; returns an
+        undo function."""
+        lv = next(l for l in self.abs_el[aid].findall(w("lvl")) if int(wa(l, "ilvl", "0")) == ilvl)
+        old = copy.deepcopy(lv)
+        for tag, val in (("start", str(start)), ("numFmt", fmt), ("lvlText", text)):
+            el = lv.find(w(tag))
+            if el is None:
+                el = etree.SubElement(lv, w(tag))
+            el.set(w("val"), val)
+        self._levels.pop(aid, None)
+        self.__dict__.get("_num_levels", {}).clear()
+        rec = {"abstractNumId": int(aid), "level": ilvl + 1, "was": "'%s' %s" % (wa(old.find(w("lvlText")), "val"), wa(old.find(w("numFmt")), "val")),
+               "now": "'%s' %s" % (text, fmt), "why": why}
+        self.changed_levels.append(rec)
+        self.pkg.touch("word/numbering.xml")
+
+        def undo():
+            lv.getparent().replace(lv, old)
+            self._levels.pop(aid, None)
+            self.__dict__.get("_num_levels", {}).clear()
+            self.changed_levels.remove(rec)
+        return undo
+
+    def add_suffix_abstract(self, model_aid, comps, dot, why):
+        """A list of its own for an inserted clause group ("12.3A", then
+        "12.3A.1", "12.3A.2"): a copy of the clause list it sits in, its
+        levels reading "%1", "%1.%2A", "%1.%2A.%3" and starting where the
+        typed numbers do, so the main clause count is never touched."""
+        el = copy.deepcopy(self.abs_el[model_aid])
+        new_id = str(max(int(k) for k in self.abs_el) + 1)
+        el.set(w("abstractNumId"), new_id)
+        for tag in ("styleLink", "numStyleLink", "multiLevelType"):
+            for x in el.findall(w(tag)):
+                el.remove(x)
+        nsid = el.find(w("nsid"))
+        if nsid is not None:
+            nsid.set(w("val"), "%08X" % (0x5A000000 + int(new_id)))
+        j = next(i for i, c in enumerate(comps) if not c.isdigit())
+        for lv in el.findall(w("lvl")):
+            i = int(wa(lv, "ilvl", "0"))
+            for x in lv.findall(w("pStyle")) + lv.findall(w("lvlRestart")) + lv.findall(w("isLgl")):
+                lv.remove(x)
+            parts = ["%%%d" % (k + 1) + ("A" if k == j else "") for k in range(i + 1)]
+            if i < j:
+                start, text = int(comps[i]), ".".join(parts)
+            elif i == j:
+                start, text = int(re.match(r"\d+", comps[j]).group(0)), ".".join(parts).replace("A", comps[j][-1])
+            else:
+                start, text = 1, ".".join(parts).replace("A", comps[j][-1])
+            for tag, val in (("start", str(start)), ("numFmt", "decimal"), ("lvlText", text + ("." if dot and i >= j else ""))):
+                x = lv.find(w(tag))
+                if x is None:
+                    x = etree.SubElement(lv, w(tag))
+                x.set(w("val"), val)
+        last = self.root.findall(w("abstractNum"))[-1]
+        last.addnext(el)
+        self.abs_el[new_id] = el
+        self._levels.pop(new_id, None)
+        self.added_abstracts.append({"abstractNumId": int(new_id), "modelled_on": int(model_aid), "level": j, "numFmt": "decimal", "why": why})
+        self.pkg.touch("word/numbering.xml")
+        return new_id
+
+    def remove_num(self, nid):
+        for n in self.root.findall(w("num")):
+            if wa(n, "numId") == nid:
+                self.root.remove(n)
+        self.nums.pop(nid, None)
+        self.__dict__.get("_num_levels", {}).pop(nid, None)
+        self.added_nums = [x for x in self.added_nums if str(x["numId"]) != nid]
+
+    def remove_abstract(self, aid):
+        el = self.abs_el.pop(aid)
+        el.getparent().remove(el)
+        self._levels.pop(aid, None)
+        self.added_abstracts = [x for x in self.added_abstracts if str(x["abstractNumId"]) != aid]
+
+    def add_abstract(self, model_aid, ilvl, fmt, why):
+        """A copy of an existing list with one level's number format changed."""
+        el = copy.deepcopy(self.abs_el[model_aid])
+        new_id = str(max(int(k) for k in self.abs_el) + 1)
+        el.set(w("abstractNumId"), new_id)
+        for tag in ("styleLink", "numStyleLink"):
+            for x in el.findall(w(tag)):
+                el.remove(x)
+        nsid = el.find(w("nsid"))
+        if nsid is not None:
+            nsid.set(w("val"), "%08X" % (0x5A000000 + int(new_id)))
+        for lv in el.findall(w("lvl")):
+            if int(wa(lv, "ilvl", "0")) == ilvl:
+                lv.find(w("numFmt")).set(w("val"), fmt)
+            ps = lv.find(w("pStyle"))
+            if ps is not None:
+                lv.remove(ps)
+        last = self.root.findall(w("abstractNum"))[-1]
+        last.addnext(el)
+        self.abs_el[new_id] = el
+        self._levels.pop(new_id, None)
+        self.added_abstracts.append({"abstractNumId": int(new_id), "modelled_on": int(model_aid), "level": ilvl, "numFmt": fmt, "why": why})
+        self.pkg.touch("word/numbering.xml")
+        return new_id
+
+
+def para_numbering(p, styles, nb):
+    """(numId, ilvl) a paragraph is numbered with, or None (numId 0 counts
+    as none). Style numbering without an ilvl takes the level that names the
+    style."""
+    ppr = p.find(w("pPr"))
+    nid = lvl = None
+    np_ = ppr.find(w("numPr")) if ppr is not None else None
+    if np_ is not None:
+        nid = wa(np_.find(w("numId")), "val")
+        lvl = wa(np_.find(w("ilvl")), "val")
+    sid = wa(ppr.find(w("pStyle")), "val") if ppr is not None else None
+    if nid is None:
+        seen = set()
+        s = sid
+        while s and s not in seen:
+            seen.add(s)
+            st = styles.get(s)
+            if st is None:
+                break
+            snp = st.find("w:pPr/w:numPr", NS)
+            if snp is not None:
+                if nid is None:
+                    nid = wa(snp.find(w("numId")), "val")
+                if lvl is None:
+                    lvl = wa(snp.find(w("ilvl")), "val")
+                if nid is not None:
+                    break
+            s = wa(st.find(w("basedOn")), "val")
+        if nid is not None and lvl is None and sid:
+            for il, lv in nb.abstract_levels(nb.abstract_of(nid)).items():
+                if lv.pstyle == sid:
+                    lvl = str(il)
+    if nid is None or nid == "0" or nid not in nb.nums:
+        return None
+    return (nid, int(lvl or 0))
+
+
+def style_ind(p, styles, pkg):
+    """The indent a paragraph gets from its style chain and the defaults."""
+    out = (None, None)
+    if pkg.has("word/styles.xml"):
+        d = pkg.xml("word/styles.xml").find("w:docDefaults/w:pPrDefault/w:pPr/w:ind", NS)
+        out = merge_ind(out, ind_of(d))
+    ppr = p.find(w("pPr"))
+    sid = wa(ppr.find(w("pStyle")), "val") if ppr is not None else None
+    if sid is None:
+        for s in styles.values():
+            if wa(s, "type") == "paragraph" and wa(s, "default") in ("1", "true"):
+                sid = wa(s, "styleId")
+    chain = []
+    while sid and sid not in chain:
+        chain.append(sid)
+        st = styles.get(sid)
+        sid = wa(st.find(w("basedOn")), "val") if st is not None else None
+    for sid in reversed(chain):
+        st = styles.get(sid)
+        if st is not None:
+            out = merge_ind(out, ind_of(st.find("w:pPr/w:ind", NS)))
+    return out
+
+
+MODELS = ("own", "shared", "shared_level")
+MODEL_NAMES = {"own": "one counter per list", "shared": "a list's nums share counters, an override restarts every level it names",
+               "shared_level": "a list's nums share counters, an override restarts only the paragraph's level and below (LibreOffice)"}
+
+
+class Counter:
+    """Word's list counters, three ways, since which nums share a counter is
+    not pinned down: "own" - every w:num counts on its own; "shared" - nums
+    on one list share counters and a num's start overrides restart the
+    levels they name where that num is first used; "shared_level" - the same,
+    but only overrides at or below the paragraph's own level take effect
+    (LibreOffice's reading). A pack must read the same under all three."""
+
+    def __init__(self, nb, mode):
+        self.nb = nb
+        self.mode = mode
+        self.state = {}
+        self.seen = set()
+
+    def clone(self):
+        c = Counter(self.nb, self.mode)
+        c.state = {k: dict(v) for k, v in self.state.items()}
+        c.seen = set(self.seen)
+        return c
+
+    def step(self, num_id, ilvl):
+        levels = self.nb.levels(num_id)
+        shared = self.mode != "own"
+        key = self.nb.abstract_of(num_id) if shared else num_id
+        st = self.state.setdefault(key, {})
+        if shared and num_id not in self.seen:
+            for il in self.nb.overrides(num_id):
+                if self.mode == "shared" or il >= ilvl:
+                    st.pop(il, None)
+        self.seen.add(num_id)
+        if ilvl not in levels:
+            return ""
+        lv, start = levels[ilvl]
+        st[ilvl] = st[ilvl] + 1 if ilvl in st else start
+        for il in [x for x in st if x > ilvl]:
+            r = levels[il][0].restart if il in levels else None
+            if r is None or (r != 0 and ilvl <= r - 1):
+                del st[il]
+        if lv.fmt == "bullet":
+            return lv.text
+
+        def sub(m):
+            j = int(m.group(1)) - 1
+            jl = levels.get(j)
+            v = st.get(j, jl[1] if jl else 1)
+            return fmt_num(v, "decimal" if lv.islgl else (jl[0].fmt if jl else "decimal"))
+        return re.sub(r"%(\d)", sub, lv.text)
+
+
+def typed_readings(label):
+    """Every way a typed label can be read: [(key, value, parts)]."""
+    m = SUFFIXED.fullmatch(label)
+    if m:
+        comps = m.group(1).split(".")
+        j = [i for i, c in enumerate(comps) if re.fullmatch(r"\d+[A-Z]", c)]
+        if len(j) == 1 and all(c.isdigit() for i, c in enumerate(comps) if i != j[0]):
+            last = comps[-1]
+            return [(("suffix", len(comps), j[0], bool(m.group(2))), int(re.match(r"\d+", last).group(0)), comps)]
+        return []
+    m = re.fullmatch(r"(\d+(?:\.\d+)+)(\.?)", label)
+    if m:
+        parts = [int(x) for x in m.group(1).split(".")]
+        return [(("multi", len(parts), bool(m.group(2))), parts[-1], parts)]
+    for rx, tmpl in ((r"(\d+)\.", "%."), (r"(\d+)\)", "%)"), (r"\((\d+)\)", "(%)")):
+        m = re.fullmatch(rx, label)
+        if m:
+            return [(("decimal", tmpl), int(m.group(1)), None)]
+    for rx, tmpl in ((r"\(([A-Za-z]+)\)", "(%)"), (r"([A-Za-z])\.", "%."), (r"([a-z])\)", "%)")):
+        m = re.fullmatch(rx, label)
+        if not m:
+            continue
+        s = m.group(1)
+        up = s.isupper()
+        out = []
+        lv = from_letter(s)
+        if lv is not None:
+            out.append((("upperLetter" if up else "lowerLetter", tmpl), lv, None))
+        rv = from_roman(s)
+        if rv is not None:
+            out.append((("upperRoman" if up else "lowerRoman", tmpl), rv, None))
+        return out
+    return []
+
+
+def _field_state_paragraphs(body):
+    """Paragraphs that sit inside a contents (TOC) field's result."""
+    inside = set()
+    stack = []
+    for el in body.iter(w("fldChar"), w("instrText"), w("p"), w("fldSimple")):
+        if el.tag == w("p"):
+            if any(t == "TOC" and sep for t, sep in stack):
+                inside.add(el)
+            continue
+        if el.tag == w("fldSimple"):
+            continue
+        if el.tag == w("instrText"):
+            if stack and not stack[-1][1] and stack[-1][0] is None:
+                m = re.match(r"\s*(\w+)", el.text or "")
+                if m:
+                    stack[-1] = (m.group(1).upper(), False)
+            continue
+        t = wa(el, "fldCharType")
+        if t == "begin":
+            stack.append((None, False))
+        elif t == "separate" and stack:
+            stack[-1] = (stack[-1][0], True)
+            p = owning_p(el)
+            if stack[-1][0] == "TOC" and p is not None:
+                inside.add(p)
+        elif t == "end" and stack:
+            stack.pop()
+    return inside
+
+
+def _in_field(p, upto):
+    """True when any of the first `upto` characters of the paragraph sit in
+    a field (its code or its result)."""
+    depth = 0
+    pos = 0
+    for el in p.iter(w("fldChar"), w("t"), w("tab"), w("fldSimple")):
+        if owning_p(el) is not p:
+            continue
+        if el.tag == w("fldSimple"):
+            return True
+        if el.tag == w("fldChar"):
+            t = wa(el, "fldCharType")
+            depth += 1 if t == "begin" else (-1 if t == "end" else 0)
+            continue
+        if el.tag == w("tab") and el.getparent().tag != w("r"):
+            continue
+        n = len(el.text or "") if el.tag == w("t") else 1
+        if n and depth > 0 and pos < upto:
+            return True
+        pos += n
+        if pos >= upto:
+            return False
+    return False
+
+
+def strip_prefix(p, n):
+    """Remove the first n characters of a paragraph's text (text and tabs),
+    then any run left with nothing but its formatting."""
+    left = n
+    touched = []
+    for el in list(p.iter(w("t"), w("tab"), w("br"), w("cr"), w("noBreakHyphen"))):
+        if left <= 0:
+            break
+        if owning_p(el) is not p:
+            continue
+        if el.tag == w("tab") and el.getparent().tag != w("r"):
+            continue
+        r = el.getparent()
+        if el.tag == w("t"):
+            s = el.text or ""
+            k = min(len(s), left)
+            set_text(el, s[k:])
+            left -= k
+            if not el.text:
+                r.remove(el)
+        else:
+            r.remove(el)
+            left -= 1
+        touched.append(r)
+    for r in touched:
+        if r.getparent() is not None and all(ch.tag == w("rPr") for ch in r):
+            r.getparent().remove(r)
+    # a leading space left in the first text run
+    for t in p.iter(w("t")):
+        if owning_p(t) is p:
+            if t.text and t.text != t.text.lstrip(" "):
+                set_text(t, t.text.lstrip(" "))
+            if t.text:
+                break
+
+
+def set_numpr(p, num_id, ilvl):
+    ppr = p.find(w("pPr"))
+    if ppr is None:
+        ppr = etree.Element(w("pPr"))
+        p.insert(0, ppr)
+    old = ppr.find(w("numPr"))
+    if old is not None:
+        ppr.remove(old)
+    np_ = etree.Element(w("numPr"))
+    il = etree.SubElement(np_, w("ilvl"))
+    il.set(w("val"), str(ilvl))
+    ni = etree.SubElement(np_, w("numId"))
+    ni.set(w("val"), str(num_id))
+    at = 0
+    for i, ch in enumerate(ppr):
+        if ch.tag in tuple(w(t) for t in PPR_BEFORE_NUMPR):
+            at = i + 1
+    ppr.insert(at, np_)
+
+
+def set_ind(p, before, level_ind):
+    """Keep the paragraph where it was: drop its own indent when the list
+    level gives the same; otherwise write it out in full (left and
+    hanging/first line) so the level's indent does not seep in."""
+    ppr = p.find(w("pPr"))
+    ind = ppr.find(w("ind"))
+    lvl = (level_ind[0] or 0, level_ind[1] or 0)
+    was = (before[0] or 0, before[1] or 0)
+    keys = ("left", "start", "hanging", "firstLine", "leftChars", "startChars", "hangingChars", "firstLineChars")
+    if was == lvl:
+        if ind is None:
+            return "level"
+        for k in keys:
+            if ind.get(w(k)) is not None:
+                del ind.attrib[w(k)]
+        if not ind.attrib:
+            ppr.remove(ind)
+        return "dropped"
+    if ind is None:
+        ind = etree.Element(w("ind"))
+        sib = None
+        for t in ("contextualSpacing", "mirrorIndents", "suppressOverlap", "jc", "textDirection", "textAlignment",
+                  "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange"):
+            sib = ppr.find(w(t))
+            if sib is not None:
+                break
+        if sib is not None:
+            sib.addprevious(ind)
+        else:
+            ppr.append(ind)
+        how = "kept (from its style)"
+    else:
+        how = "kept"
+    for k in keys:
+        if ind.get(w(k)) is not None:
+            del ind.attrib[w(k)]
+    ind.set(w("left"), str(was[0]))
+    if was[1] < 0:
+        ind.set(w("hanging"), str(-was[1]))
+    else:
+        ind.set(w("firstLine"), str(was[1]))
+    return how
+
+
+def body_paragraphs(body):
+    """Body paragraphs in reading order, text boxes left out."""
+    return [p for p in body.iter(w("p")) if not any(a.tag == w("txbxContent") for a in p.iterancestors())]
+
+
+def numbering_labels(body, styles, nb, mode):
+    c = Counter(nb, mode)
+    out = {}
+    for p in body_paragraphs(body):
+        n = para_numbering(p, styles, nb)
+        if n:
+            out[p] = c.step(*n)
+    return out
+
+
+def auto_number(pkg, only=None, skip=()):
+    """Turn typed clause and limb numbers into Word list items, mapped onto
+    the lists the document already uses. Returns the report; raises when the
+    automatic numbers would not read as the typed ones did."""
+    rep = {"converted": [], "lists_used": {}, "numbering_added": {"nums": [], "abstracts": [], "levels_changed": []}, "left_typed": [],
+           "not_numbers": [], "anomalies_kept": [], "indents": {}, "sequence_check": None}
+    if not pkg.has("word/numbering.xml"):
+        rep["left_typed"].append("the document has no numbering part; nothing converted")
+        return rep
+    styles = style_map(pkg)
+    nb = Numbering(pkg, styles)
+    root = pkg.xml(pkg.main_part())
+    body = root.find(w("body"))
+    paras = body_paragraphs(body)
+    in_toc = _field_state_paragraphs(body)
+    before = {m: numbering_labels(body, styles, nb, m) for m in MODELS}
+    # numbers in the base that read differently by how Word shares a list's
+    # counters: the base's own, reported, never caused here
+    rep["base_ambiguous"] = [dict({"text": para_text(p)[:60]}, **{m: before[m].get(p) for m in MODELS})
+                             for p in paras if p in before["own"] and len({before[m].get(p) for m in MODELS}) > 1]
+
+    # 1. what each paragraph shows: an automatic number, a typed one, or none
+    items = []
+    for p in paras:
+        n = para_numbering(p, styles, nb)
+        text = para_text(p)
+        cell = next((a for a in p.iterancestors(w("tc"))), None)
+        ppr = p.find(w("pPr"))
+        sid = wa(ppr.find(w("pStyle")), "val") if ppr is not None else None
+        own = ind_of(ppr.find(w("ind")) if ppr is not None else None)
+        it = {"p": p, "cell": cell, "auto": n, "typed": None}
+        if n:
+            lv, _ = nb.levels(n[0]).get(n[1], (None, None))
+            if lv is None:
+                continue
+            label = before["own"].get(p, "")
+            key = lv.key()
+            val = None
+            for k, v, parts in typed_readings(label):
+                if k == key:
+                    val = v
+            it.update(key=key, value=val, label=label, ind=merge_ind(lv.ind, own), num=n)
+            items.append(it)
+            continue
+        m = TYPED_NUM.match(text)
+        if not m:
+            mm = NEAR_NUM.match(text)
+            if mm and p not in in_toc and not (sid or "").upper().startswith("TOC"):
+                rep["not_numbers"].append({"text": text[:70], "why": "a number-like start with no tab after it: read as running text"})
+            continue
+        label = m.group(2)
+        why = None
+        if p in in_toc or (sid or "").upper().startswith("TOC"):
+            continue   # a contents entry: Word rebuilds it
+        if (only is not None and p not in only) or p in skip:
+            continue
+        if not text[m.end():].strip():
+            why = "nothing follows the number"
+        elif _in_field(p, m.end()):
+            why = "the number is inside a field"
+        elif not typed_readings(label):
+            why = "not a list number"
+        if why:
+            rep["left_typed"].append({"text": text[:70], "why": why})
+            continue
+        it.update(typed=label, cut=m.end(), readings=typed_readings(label), ind=merge_ind(style_ind(p, styles, pkg), own),
+                  own_ind=own)
+        items.append(it)
+
+    # 2. the outline: which typed numbers are siblings, and under what
+    def key_value(it, stack):
+        if not it["typed"]:
+            return it["key"], it["value"]
+        reads = it["readings"]
+        if len(reads) == 1:
+            return reads[0][0], reads[0][1]
+        # (i), (v), (x), (I) ...: a letter when it follows the letter before
+        # it at no deeper indent, else a roman numeral
+        for key, val, _ in reads:
+            if key[0].endswith("Letter"):
+                for e in reversed(stack):
+                    if e["key"] == key and e["last"] == val - 1 and (it["ind"][0] or 0) <= (e["ind"][0] or 0) + 200:
+                        return key, val
+        for key, val, _ in reads:
+            if key[0].endswith("Roman"):
+                for e in reversed(stack):
+                    if e["key"] == key and e["last"] == val - 1:
+                        return key, val
+        roman = [r for r in reads if r[0][0].endswith("Roman")]
+        if roman and roman[0][1] == 1:
+            return roman[0][0], roman[0][1]
+        letter = [r for r in reads if r[0][0].endswith("Letter")]
+        return (letter or reads)[0][0], (letter or reads)[0][1]
+
+    stacks = {}
+    run_no = [0]
+    for i, it in enumerate(items):
+        scope = it["cell"]
+        stack = stacks.setdefault(scope, [])
+        key, val = key_value(it, stack)
+        it["key"] = key
+        if it["typed"]:
+            it["value"] = val
+            if key[0] in ("multi", "suffix"):
+                it["parts"] = [r[2] for r in it["readings"] if r[0] == key][0]
+        if key[0] in ("multi", "suffix"):
+            run_no[0] += 1
+            it["run"], it["parent"] = run_no[0], None
+            stacks[scope] = [{"key": key, "last": val, "item": it, "run": run_no[0], "ind": it["ind"]}]
+            continue
+        j = next((k for k in range(len(stack) - 1, -1, -1) if stack[k]["key"] == key), None)
+        if j is not None:
+            e = stack[j]
+            same = val is not None and e["last"] is not None and val == e["last"] + 1
+            if same:
+                it["run"], it["prev"] = e["run"], e["item"]
+            else:
+                run_no[0] += 1
+                it["run"] = run_no[0]
+                it["broke"] = e["item"]
+            it["parent"] = stack[j - 1]["item"] if j > 0 else None
+            del stack[j:]
+        else:
+            run_no[0] += 1
+            it["run"] = run_no[0]
+            it["parent"] = stack[-1]["item"] if stack else None
+        stack.append({"key": key, "last": val, "item": it, "run": it["run"], "ind": it["ind"]})
+
+    # 3. a list and level for each typed number, in reading order, checked
+    # against both counting models as we go
+    counters = tuple(Counter(nb, m) for m in MODELS)
+    suffix_lists = {}
+    usage = {}
+    for it in items:
+        if it["auto"]:
+            a = nb.abstract_of(it["auto"][0])
+            usage[a] = usage.get(a, 0) + 1
+
+    def levels_like(num_id, key, deeper_than=-1):
+        return [il for il, (lv, _) in sorted(nb.levels(num_id).items())
+                if il > deeper_than and lv.key() == key and not lv.pstyle]
+
+    def global_levels(key, ind):
+        out = []
+        for aid in nb.abs_el:
+            lv_map = nb.abstract_levels(aid)
+            if not lv_map:
+                continue
+            clause = nb.is_clause_list(aid)
+            for il, lv in lv_map.items():
+                if lv.key() != key or lv.pstyle:
+                    continue
+                if clause and key[0] != "multi" and il <= nb.deepest_multi(aid):
+                    continue
+                d = abs((lv.ind[0] or 0) - (ind[0] or 0)) + abs((lv.ind[1] or 0) - (ind[1] or 0))
+                out.append((0 if key[0] == "multi" or not clause else 1, il > 0 and key[0] != "multi", d, -usage.get(aid, 0), int(aid), il))
+        out.sort()
+        return [(str(x[4]), x[5]) for x in out]
+
+    def try_label(num_id, ilvl):
+        return tuple(c.clone().step(num_id, ilvl) for c in counters)
+
+    def fits(num_id, ilvl, idx, label):
+        """The typed label comes out here, and no automatic number after it
+        changes (under either counting model)."""
+        for c in counters:
+            cc = c.clone()
+            if cc.step(num_id, ilvl) != label:
+                return False
+            for x in items[idx + 1:]:
+                if x["auto"] and cc.step(*x["auto"]) != before[c.mode].get(x["p"]):
+                    return False
+        return True
+
+    for idx, it in enumerate(items):
+        if it["auto"]:
+            for c in counters:
+                c.step(*it["auto"])
+            continue
+        key, label = it["key"], it["typed"]
+        cands = []      # (numId, ilvl) to carry on
+        homes = []      # (abstractId, ilvl) to start a list again on
+        if key[0] == "suffix":
+            comps, j = it["parts"], key[2]
+            group = ".".join(comps[:j + 1])
+            il = len(comps) - 1
+            chosen = None
+            if group in suffix_lists and fits(suffix_lists[group], il, idx, label):
+                chosen = (suffix_lists[group], il)
+            else:
+                model = next((nb.abstract_of(x["num"][0]) for x in reversed(items[:idx]) if x.get("num") and x["key"][0] == "multi"), None)
+                model = model or next((a for a in nb.abs_el if nb.is_clause_list(a)), None)
+                if model is not None:
+                    aid = nb.add_suffix_abstract(model, comps, key[3], "%s: an inserted clause numbered with a letter; a list of its own, copied from the clause list %s, so the clauses around it keep their numbers" % (group, model))
+                    nid = nb.add_num(aid, {}, "inserted clause %s" % group)
+                    if fits(nid, il, idx, label):
+                        chosen = (nid, il)
+                        suffix_lists[group] = nid
+                    else:
+                        nb.remove_num(nid)
+                        nb.remove_abstract(aid)
+            if chosen is None:
+                rep["left_typed"].append({"text": para_text(it["p"])[:70], "why": "no list could show %s without changing another number" % label})
+                continue
+            for c in counters:
+                c.step(*chosen)
+            it["num"] = chosen
+            it["restarted"] = None
+            continue
+        if key[0] == "multi":
+            seen_nums = set()
+            near = [x for x in reversed(items[:idx]) if x.get("num")] + [x for x in items[idx + 1:] if x["auto"]][:40]
+            for x in near:
+                nid = x["num"][0]
+                if nid in seen_nums:
+                    continue
+                seen_nums.add(nid)
+                for il in levels_like(nid, key):
+                    cands.append((nid, il))
+                    homes.append((nb.abstract_of(nid), il))
+                if len(seen_nums) > 12:
+                    break
+        else:
+            prev = it.get("prev")
+            if prev is not None and prev.get("num"):
+                cands.append(prev["num"])
+                homes.append((nb.abstract_of(prev["num"][0]), prev["num"][1]))
+            for x in items[idx + 1:]:
+                if x["run"] == it["run"] and x["auto"]:
+                    cands.append(x["auto"])
+                    homes.append((nb.abstract_of(x["auto"][0]), x["auto"][1]))
+                    break
+            # under a clause: the clause list's own level for it, if it has one
+            par = it.get("parent")
+            if par is not None and par.get("num") and it["cell"] is None and nb.is_clause_list(nb.abstract_of(par["num"][0])):
+                for il in levels_like(par["num"][0], key, par["num"][1]):
+                    cands.append((par["num"][0], il))
+                    homes.append((nb.abstract_of(par["num"][0]), il))
+        homes += global_levels(key, it["ind"])
+        chosen = None
+        for nid, il in cands:
+            if fits(nid, il, idx, label):
+                chosen = (nid, il)
+                break
+        if chosen is None and key[0] == "multi":
+            # "3.1" under an automatic "3." whose list has the next level
+            # unused: that level becomes "%1.%2", so the number carries on
+            # from its own heading
+            head = ".".join(str(x) for x in it["parts"][:-1])
+            for x in reversed(items[:idx]):
+                if not (x["auto"] and x.get("label", "").strip() in (head, head + ".")):
+                    continue
+                nid, pil = x["num"]
+                aid = nb.abstract_of(nid)
+                nxt = nb.abstract_levels(aid).get(pil + 1)
+                plv = nb.abstract_levels(aid).get(pil)
+                used = any(y.get("num") and nb.abstract_of(y["num"][0]) == aid and y["num"][1] == pil + 1 for y in items)
+                if nxt is None or plv is None or used or nxt.pstyle or plv.fmt != "decimal":
+                    break
+                text = plv.text.rstrip(".") + ".%" + str(pil + 2) + ("." if key[2] else "")
+                undo = nb.change_level(aid, pil + 1, "decimal", text, 1,
+                                       "%s sits under the automatic %s, whose list had this level unused" % (label, x["label"]))
+                if fits(nid, pil + 1, idx, label):
+                    chosen = (nid, pil + 1)
+                else:
+                    undo()
+                break
+        restarted = None
+        if chosen is None:
+            if not homes:
+                if key[0] == "multi" or key[0] not in ("lowerLetter", "upperLetter", "lowerRoman", "upperRoman", "decimal"):
+                    rep["left_typed"].append({"text": para_text(it["p"])[:70], "why": "no list in the document numbers like %s" % label})
+                    continue
+                # a list like the closest one with this template, in this format
+                models = []
+                for aid in list(nb.abs_el):
+                    for il, lv in nb.abstract_levels(aid).items():
+                        k = lv.key()
+                        if len(k) == 2 and k[1] == key[1] and not lv.pstyle and not (nb.is_clause_list(aid) and il <= nb.deepest_multi(aid)):
+                            d = abs((lv.ind[0] or 0) - (it["ind"][0] or 0)) + abs((lv.ind[1] or 0) - (it["ind"][1] or 0))
+                            models.append((il > 0, d, -usage.get(aid, 0), int(aid), il))
+                if not models:
+                    rep["left_typed"].append({"text": para_text(it["p"])[:70], "why": "no list in the document to model a %s list on" % label})
+                    continue
+                models.sort()
+                _, _, _, maid, mil = models[0]
+                aid = nb.add_abstract(str(maid), mil, key[0],
+                                      "no list in the pack numbers %s; a copy of list %s with its level %d in %s" % (label, maid, mil + 1, key[0]))
+                homes = [(aid, mil)]
+            def starts_for(aid, il):
+                if key[0] != "multi":
+                    return {il: it["value"]}
+                # each part of the typed number is the start of the level
+                # its placeholder names; a fixed part must already agree
+                comps = re.findall(r"%\d|\d+", nb.abstract_levels(aid)[il].text)
+                if len(comps) != len(it["parts"]):
+                    return None
+                out = {}
+                for c, v in zip(comps, it["parts"]):
+                    if c.startswith("%"):
+                        out[int(c[1]) - 1] = v
+                    elif int(c) != v:
+                        return None
+                return out or None
+            if it["value"] in (1, None) or key[0] == "multi":
+                why = "typed list %s" % label
+            else:
+                why = "typed list starts at %s" % label
+                b = it.get("broke")
+                after = (b.get("typed") or b.get("label")) if b is not None else None
+                rep["anomalies_kept"].append({"text": para_text(it["p"])[:70], "typed": label,
+                                              "why": ("the base's typed numbers go from %s to %s" % (after, label) if after else "a typed list that starts at %s" % label)
+                                              + "; the list starts at %s so the pack reads as the base did" % label})
+            seen_homes = set()
+            for aid, il in homes:
+                if (aid, il) in seen_homes:
+                    continue
+                seen_homes.add((aid, il))
+                st = starts_for(aid, il)
+                if not st:
+                    continue
+                nid = nb.add_num(aid, st, why)
+                if fits(nid, il, idx, label):
+                    chosen = (nid, il)
+                    break
+                nb.remove_num(nid)
+            if chosen is None and homes:
+                # every list it could join is also counted later on: a list
+                # of its own, a copy of the first choice
+                aid, il = homes[0]
+                st = starts_for(aid, il)
+                if st:
+                    lv = nb.abstract_levels(aid)[il]
+                    new_aid = nb.add_abstract(aid, il, lv.fmt, "%s: list %s is counted again later in the document, so a copy keeps the two apart" % (label, aid))
+                    nid = nb.add_num(new_aid, st, why)
+                    if fits(nid, il, idx, label):
+                        chosen = (nid, il)
+                    else:
+                        nb.remove_num(nid)
+                        nb.remove_abstract(new_aid)
+            if chosen is None:
+                rep["left_typed"].append({"text": para_text(it["p"])[:70], "why": "no list in the document can show %s without changing another number" % label})
+                continue
+            restarted = chosen[0]
+        for c in counters:
+            c.step(*chosen)
+        it["num"] = chosen
+        it["restarted"] = restarted
+
+    pos = {p: i for i, p in enumerate(paras)}
+    last = None
+    for it in items:
+        between = paras[pos[last["p"]] + 1:pos[it["p"]]] if last is not None else []
+        if it["typed"] and it.get("num") and last is not None and last.get("cell") is it["cell"] and \
+                not any(para_text(q).strip() for q in between) and (last.get("typed") or last.get("label")) == it["typed"]:
+            rep["anomalies_kept"].append({"text": para_text(it["p"])[:70], "typed": it["typed"],
+                                          "why": "the base types %s twice in a row; kept as typed (a list started again at %s)" % (it["typed"], it["typed"])})
+        last = it
+
+    # 4. write it: the number off the text, the list on the paragraph
+    for it in items:
+        if not it["typed"] or not it.get("num"):
+            continue
+        p = it["p"]
+        nid, il = it["num"]
+        lv, _ = nb.levels(nid)[il]
+        strip_prefix(p, it["cut"])
+        set_numpr(p, nid, il)
+        how = set_ind(p, it["ind"], lv.ind)
+        rep["indents"][how] = rep["indents"].get(how, 0) + 1
+        aid = nb.abstract_of(nid)
+        lk = "list %s level %d %s" % (aid, il + 1, lv.describe())
+        rep["lists_used"][lk] = rep["lists_used"].get(lk, 0) + 1
+        rep["converted"].append({"typed": it["typed"], "numId": int(nid), "ilvl": il, "abstractNumId": int(aid),
+                                 "indent": how, "text": para_text(p)[:60]})
+    rep["numbering_added"] = {"nums": nb.added_nums, "abstracts": nb.added_abstracts, "levels_changed": nb.changed_levels}
+    if rep["converted"]:
+        pkg.touch(pkg.main_part())
+
+    # 5. the sequence check: every number reads as before, typed or not
+    bad = []
+    for mode in MODELS:
+        after = numbering_labels(body, styles, nb, mode)
+        for it in items:
+            want = it["typed"] if it["typed"] and it.get("num") else before[mode].get(it["p"])
+            if want is None:
+                continue
+            got = after.get(it["p"])
+            if got != want:
+                bad.append({"model": MODEL_NAMES[mode], "want": want, "got": got, "text": para_text(it["p"])[:60]})
+    rep["sequence_check"] = {"paragraphs_checked": sum(1 for it in items if it["typed"] and it.get("num") or it["auto"]),
+                             "models": [MODEL_NAMES[m] for m in MODELS], "mismatches": bad}
+    if bad:
+        raise SystemExit("auto numbering: %d numbers would change, first: %s" % (len(bad), bad[:3]))
+    return rep
+
+
+def run_on_kinds(kinds, pkg):
+    """Kinds numbered by a clause list ("1.", "1.1", "1.1.1") run on through
+    the document: the drafting engine must not start them again."""
+    if not pkg.has("word/numbering.xml"):
+        return []
+    nb = Numbering(pkg, style_map(pkg))
+    out = []
+    for name, k in kinds.items():
+        if k.get("numId") is None or str(k["numId"]) not in nb.nums:
+            continue
+        aid = nb.abstract_of(str(k["numId"]))
+        lv = nb.levels(str(k["numId"])).get(k.get("ilvl") or 0)
+        if lv and nb.is_clause_list(aid) and (k.get("ilvl") or 0) <= nb.deepest_multi(aid):
+            k["restart"] = False
+            out.append(name)
+    return out
+
+
+# --------------------------------------------------------------------------
 # the build
 # --------------------------------------------------------------------------
 def prepare(pkg):
@@ -1181,6 +2288,27 @@ def build(cfg, out_dir):
     doc = pkg.main_part()
     root = pkg.xml(doc)
     body = root.find(w("body"))
+    # typed clause and limb numbers become Word's own numbering (before any
+    # blanking, so the typed numbers are read as the base has them)
+    if cfg.get("auto_number", cfg["mode"] == "form" or cfg["mode"] == "shell"):
+        blocks0 = body_blocks(body)
+        skip = set()
+        for i in cfg.get("delete_blocks", []):
+            b = blocks0[int(i)]
+            skip |= set([b] if b.tag == w("p") else b.iter(w("p")))
+        for sel in cfg.get("replace_paragraphs", {}):
+            skip.add(select(body, sel))
+        only = None
+        if cfg["mode"] == "shell":
+            # a shell keeps only its furniture and examples: convert those
+            sh = cfg["shell"]
+            only = set()
+            for k in list(sh.get("keep", {})) + list(sh.get("examples", {})) + list(sh.get("example_tables", {})) + list(sh.get("toc", [])):
+                b = blocks0[int(k)]
+                only |= set([b] if b.tag == w("p") else b.iter(w("p")))
+        report["auto_number"] = auto_number(pkg, only=only, skip=skip)
+    else:
+        report["auto_number"] = None
     styles = style_map(pkg)
     blanker = Blanker(cfg.get("literals", []), cfg.get("keep_literals", []),
                       detectors=cfg.get("detectors", True))
@@ -1349,6 +2477,16 @@ def build(cfg, out_dir):
         ref = next(iter(root.iter(w("footnoteReference"))), None)
     if ref is not None and ref.getparent() is not None:
         fn = footnote_kind(pkg, doc, ref)
+    report["kinds_run_on"] = run_on_kinds(kinds, pkg)
+    if report.get("auto_number") is not None and pkg.has("word/numbering.xml"):
+        # the base's own numbers that read differently by how Word shares a
+        # list's counters, as they read in the finished pack (the sequence
+        # check showed the conversion changed none of them)
+        nb = Numbering(pkg, style_map(pkg))
+        st = style_map(pkg)
+        ms = {m: numbering_labels(body, st, nb, m) for m in MODELS}
+        report["auto_number"]["base_ambiguous"] = [dict({"text": para_text(p)[:60]}, **{m: ms[m].get(p) for m in MODELS})
+                                                   for p in body_paragraphs(body) if p in ms["own"] and len({ms[m].get(p) for m in MODELS}) > 1]
     kj = {"kinds": kinds, "tables": tables, "footnote": fn}
     base = cfg["kind"]
     pack = os.path.join(out_dir, "%s-pack.docx" % base)
