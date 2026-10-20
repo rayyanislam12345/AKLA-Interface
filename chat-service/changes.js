@@ -438,6 +438,71 @@ export function countsFor(rows, others = 0) {
   return counts;
 }
 
+// ---------------------------------------------------------------- counts
+
+// AI revisions in the file that no row of the document accounts for: a
+// copy made before rows were kept, or a turn whose rows never landed.
+// Nothing here can decide them, and a clean copy must not accept them.
+export function unlistedIn(rows, ours) {
+  const listed = new Set();
+  for (const row of rows) {
+    if (row.placement !== "placed" && row.placement !== "blocked") continue;
+    for (const id of row.revision_ids ?? []) listed.add(`${row.part ?? "word/document.xml"}#${id}`);
+  }
+  let n = 0;
+  for (const key of ours) if (!listed.has(key)) n++;
+  return n;
+}
+
+// A working document's counts: the rows say what each change is, the file
+// says what else is in it (other people's revisions, unlisted AI ones).
+export function countsWith(rows, revisions) {
+  return { ...countsFor(rows, revisions.others), unlisted: unlistedIn(rows, revisions.ours ?? []) };
+}
+
+// ---------------------------------------------------------------- deciding
+
+// The sentences a decision answers with, for a chat's working document and
+// a stored version alike (server.js, versionChanges.js).
+export const CHANGED_WHILE_DECIDING = "This document changed while you were deciding. Reload and try again.";
+export const NO_CHANGES_YET = "There are no AI changes in this document yet.";
+
+const NOT_DONE_REASON = { accepted: "already_decided", rejected: "already_decided", could_not_place: "could_not_place", needs_word: "needs_word", replaced: "replaced" };
+
+// Why a row that is not waiting cannot be decided, in the panel's words.
+export function notDoneFor(row) {
+  const state = stateOf(row);
+  const note = state === "accepted" || state === "rejected"
+    ? `This change was already ${state}.`
+    : placementNote(row.placement_reason) ?? "This change cannot be decided here.";
+  return { changeId: row.id, reason: NOT_DONE_REASON[state], note };
+}
+
+// What applyDecisions could not do: a change whose ids are gone from the
+// file is recorded as no longer placed, one Word has to decide as blocked.
+// Neither touches the file.
+export function undecidable(result) {
+  const missing = result.status === "missing";
+  return {
+    notDone: { changeId: result.id, reason: missing ? "changed_since" : "needs_word", note: PLACEMENT_TEXT[result.reason] ?? String(result.reason) },
+    patch: missing ? { placement: "unplaced", placement_reason: "changed_since" } : { placement: "blocked", placement_reason: result.reason },
+  };
+}
+
+// Why a clean copy cannot be made yet, or null. Nothing is accepted
+// implicitly: the lawyer's own undecided changes, ones only Word can
+// decide, and other people's revisions all stop it.
+export function cleanRefusal(counts, acceptOthers) {
+  const plural = (n) => (n === 1 ? "" : "s");
+  if (counts.waiting > 0) return `Decide the ${counts.waiting} change${plural(counts.waiting)} waiting for you first.`;
+  if (counts.needsWord > 0) return `${counts.needsWord} change${plural(counts.needsWord)} can only be decided in Word. Download the tracked copy and decide ${counts.needsWord === 1 ? "it" : "them"} there first.`;
+  if (counts.unlisted > 0) return `This file has ${counts.unlisted} AI change${plural(counts.unlisted)} that ${counts.unlisted === 1 ? "is" : "are"} not in the Changes list. Decide ${counts.unlisted === 1 ? "it" : "them"} in Word first.`;
+  if (counts.othersRevisions > 0 && acceptOthers !== true) {
+    return `This file still has ${counts.othersRevisions} tracked change${plural(counts.othersRevisions)} by other people. Accept them in Word, or ask for a copy with them accepted.`;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- locking
 
 // Decisions on one working document run one after another. The service is

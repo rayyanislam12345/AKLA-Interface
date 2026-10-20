@@ -28,7 +28,7 @@ import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbe
 import { retrieve, MIN_RELEVANCE } from "./retrieve.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
-import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, PLACEMENT_TEXT } from "./changes.js";
+import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, countsWith, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, notDoneFor, undecidable, cleanRefusal, CHANGED_WHILE_DECIDING, NO_CHANGES_YET } from "./changes.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { checkFormat, formatRecord, variableLinesFor, storeUnlessRefused, openWorkingCopy } from "./formatFingerprint.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
@@ -36,6 +36,7 @@ import { QUESTIONNAIRES, startQuestionnaire, readAnswer, advance, answerInstruct
 import { parseSkillZip, publishSkill, unpublishSkill, uploadInputFile, downloadOutputFile, runSkillTurn, MAX_SKILL_BYTES } from "./claudeSkills.js";
 import { ON_DEMAND_READ_MS, TOO_LONG_MESSAGE, deadlineStop, proofCheckVersion, compareVersionPair } from "./documentInsight.js";
 import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, ARTIFACT_RULES, FILL_INSTRUCTIONS, FILL_DIRECT_NOTE, lookingUpRules, citingRules } from "./firmRules.js";
+import { listVersionChanges, decideVersionChanges, versionOf, versionRows, workingFileOf, downloadFile as downloadVersionFile, isWordPath, NOT_WORD_SENTENCE } from "./versionChanges.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -662,26 +663,6 @@ async function convertArtifactToWord(supabase, artifact, { prefix, threadId }) {
 }
 
 const ZERO_COUNTS = { waiting: 0, accepted: 0, rejected: 0, couldNotPlace: 0, needsWord: 0, replaced: 0, total: 0, othersRevisions: 0, unlisted: 0 };
-
-// AI revisions in the file that no row of the document accounts for: a
-// copy made before rows were kept, or a turn whose rows never landed.
-// Nothing here can decide them, and a clean copy must not accept them.
-function unlistedIn(rows, ours) {
-  const listed = new Set();
-  for (const row of rows) {
-    if (row.placement !== "placed" && row.placement !== "blocked") continue;
-    for (const id of row.revision_ids ?? []) listed.add(`${row.part ?? "word/document.xml"}#${id}`);
-  }
-  let n = 0;
-  for (const key of ours) if (!listed.has(key)) n++;
-  return n;
-}
-
-// A working document's counts: the rows say what each change is, the file
-// says what else is in it (other people's revisions, unlisted AI ones).
-function countsWith(rows, revisions) {
-  return { ...countsFor(rows, revisions.others), unlisted: unlistedIn(rows, revisions.ours ?? []) };
-}
 
 // Whether an attachment is a Word file, by its path or its name.
 const isWordFile = (a) => /\.docx$/i.test(a?.path ?? "") || /\.docx$/i.test(a?.name ?? "");
@@ -3126,6 +3107,9 @@ async function handleReviewPreview(req, res, { download = false } = {}) {
     .from("redline_suggestions")
     .select("id, clause_reference, original_text, suggested_text, status, created_at")
     .eq("document_version_id", documentVersionId)
+    // Only a review's suggestions: a mark-up's change rows on the same
+    // version (versionChanges.js, review_type 'edit') are already in the file.
+    .in("review_type", ["legal_clauses", "formatting", "content_conflicts", "chat"])
     .neq("status", "rejected")
     .order("created_at", { ascending: true });
   query = reviewRunId ? query.eq("review_run_id", reviewRunId) : query.is("review_run_id", null);
@@ -3185,11 +3169,12 @@ async function handleReviewPreview(req, res, { download = false } = {}) {
 // One Changes list per working document (changes.js says what a change
 // is). These routes read a thread's rows and files as the service role,
 // behind the same membership check as every other route; the client sends
-// ids and paths, never bytes.
+// ids and paths, never bytes. A stored version marked up from claude.ai
+// (connector/tools/markup.js) has its own list, named by { versionId }
+// instead of { artifactId }: its rows are anchored to the version, its
+// decisions land in a decided copy kept beside it (versionChanges.js).
 const DOCUMENT_KINDS = ["docx", "draft", "memo"];
 const MAX_DECISIONS = 200;
-const CHANGED_WHILE_DECIDING = "This document changed while you were deciding. Reload and try again.";
-const NO_CHANGES_YET = "There are no AI changes in this document yet.";
 const NOT_THIS_CHAT = "This document does not belong to this chat.";
 
 // Where a chat's files live, from the thread row alone: the project, the
@@ -3307,10 +3292,15 @@ async function openChangesRoute(req, res) {
     json(400, { error: err.message });
     return null;
   }
-  if (!body || typeof body !== "object" || typeof body.artifactId !== "string" || !body.artifactId) {
-    json(400, { error: "artifactId is required" });
+  // A chat's working document is named by any of its copies (artifactId);
+  // a stored project version whose changes were filed with it (the
+  // claude.ai connector's mark-up, versionChanges.js) by its versionId.
+  const byVersion = body && typeof body === "object" && typeof body.versionId === "string" && UUID_RE.test(body.versionId);
+  if (!body || typeof body !== "object" || (!byVersion && (typeof body.artifactId !== "string" || !body.artifactId))) {
+    json(400, { error: "artifactId or versionId is required" });
     return null;
   }
+  if (byVersion) body.versionId = body.versionId.toLowerCase();
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     json(401, { error: "Authorization header required" });
@@ -3329,6 +3319,10 @@ async function handleChangesList(req, res) {
   if (!route) return;
   const { json, body, user } = route;
   try {
+    if (body.versionId) {
+      const reply = await listVersionChanges(db, body.versionId);
+      return json(reply.status, reply.body);
+    }
     const doc = await resolveDocument(body.artifactId, user);
     if (!doc) return json(404, { error: "Document not found" });
     const file = headFile(doc.head);
@@ -3362,6 +3356,12 @@ async function handleChangesDecide(req, res) {
   const decisions = readDecisions(body.decisions);
   if (typeof decisions === "string") return json(400, { error: decisions });
   try {
+    if (body.versionId) {
+      // A stored version: decided in its own working file, under its own
+      // lock, with no chat in the way (versionChanges.js).
+      const reply = await decideVersionChanges(db, { versionId: body.versionId, decisions, userId: user.id });
+      return json(reply.status, reply.body);
+    }
     const found = await resolveDocument(body.artifactId, user);
     if (!found) return json(404, { error: "Document not found" });
     // The document is read again under its lock: another decision may have
@@ -3372,28 +3372,6 @@ async function handleChangesDecide(req, res) {
     console.error("changes decide failed:", err);
     json(500, { error: err.message });
   }
-}
-
-const NOT_DONE_REASON = { accepted: "already_decided", rejected: "already_decided", could_not_place: "could_not_place", needs_word: "needs_word", replaced: "replaced" };
-
-// Why a row that is not waiting cannot be decided, in the panel's words.
-function notDoneFor(row) {
-  const state = stateOf(row);
-  const note = state === "accepted" || state === "rejected"
-    ? `This change was already ${state}.`
-    : placementNote(row.placement_reason) ?? "This change cannot be decided here.";
-  return { changeId: row.id, reason: NOT_DONE_REASON[state], note };
-}
-
-// What applyDecisions could not do: a change whose ids are gone from the
-// file is recorded as no longer placed, one Word has to decide as blocked.
-// Neither touches the file.
-function undecidable(result) {
-  const missing = result.status === "missing";
-  return {
-    notDone: { changeId: result.id, reason: missing ? "changed_since" : "needs_word", note: PLACEMENT_TEXT[result.reason] ?? String(result.reason) },
-    patch: missing ? { placement: "unplaced", placement_reason: "changed_since" } : { placement: "blocked", placement_reason: result.reason },
-  };
 }
 
 // The head after a decision. A decision copy with no reply of its own moves
@@ -3495,20 +3473,6 @@ async function decideChanges({ artifactId, decisions, user }) {
   return { status: 200, body: { ...body, head: newHead, notDone } };
 }
 
-// Why a clean copy cannot be made yet, or null. Nothing is accepted
-// implicitly: the lawyer's own undecided changes, ones only Word can
-// decide, and other people's revisions all stop it.
-function cleanRefusal(counts, acceptOthers) {
-  const plural = (n) => (n === 1 ? "" : "s");
-  if (counts.waiting > 0) return `Decide the ${counts.waiting} change${plural(counts.waiting)} waiting for you first.`;
-  if (counts.needsWord > 0) return `${counts.needsWord} change${plural(counts.needsWord)} can only be decided in Word. Download the tracked copy and decide ${counts.needsWord === 1 ? "it" : "them"} there first.`;
-  if (counts.unlisted > 0) return `This file has ${counts.unlisted} AI change${plural(counts.unlisted)} that ${counts.unlisted === 1 ? "is" : "are"} not in the Changes list. Decide ${counts.unlisted === 1 ? "it" : "them"} in Word first.`;
-  if (counts.othersRevisions > 0 && acceptOthers !== true) {
-    return `This file still has ${counts.othersRevisions} tracked change${plural(counts.othersRevisions)} by other people. Accept them in Word, or ask for a copy with them accepted.`;
-  }
-  return null;
-}
-
 // A download name every browser reads: ASCII in filename=, the real one in filename*=.
 function contentDisposition(name) {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
@@ -3524,15 +3488,30 @@ async function handleDocumentFile(req, res) {
   const { form, acceptOthers = false } = body;
   if (form !== "tracked" && form !== "clean") return json(400, { error: "form must be 'tracked' or 'clean'" });
   try {
-    const doc = await resolveDocument(body.artifactId, user);
-    if (!doc) return json(404, { error: "Document not found" });
-    const file = headFile(doc.head);
-    if (!file) return json(404, { error: "This document has no Word file yet." });
-    if (!(await headAllowed(doc.thread, doc.scopeKey, file))) return json(403, { error: NOT_THIS_CHAT });
-    const bytes = await downloadHead(file);
+    // The document: a chat's working document, or a stored version's
+    // working file (its decided copy once a change has been decided there).
+    let file, bytes, rows, docTitle;
+    if (body.versionId) {
+      const version = await versionOf(db, body.versionId);
+      if (!version) return json(404, { error: "Document not found" });
+      if (!isWordPath(version.storage_path)) return json(404, { error: NOT_WORD_SENTENCE });
+      file = await workingFileOf(db, version);
+      bytes = await downloadVersionFile(db, file);
+      rows = await versionRows(db, version.id);
+      docTitle = version.matter_document?.title;
+    } else {
+      const doc = await resolveDocument(body.artifactId, user);
+      if (!doc) return json(404, { error: "Document not found" });
+      file = headFile(doc.head);
+      if (!file) return json(404, { error: "This document has no Word file yet." });
+      if (!(await headAllowed(doc.thread, doc.scopeKey, file))) return json(403, { error: NOT_THIS_CHAT });
+      bytes = await downloadHead(file);
+      rows = await rowsFor(doc.root.id);
+      docTitle = doc.root.title;
+    }
     // The file itself is read here, never a stored count: a clean copy
     // accepts every AI revision in it, so each must be one the list names.
-    const counts = countsWith(await rowsFor(doc.root.id), findRevisions(bytes));
+    const counts = countsWith(rows, findRevisions(bytes));
     const refused = form === "clean" ? cleanRefusal(counts, acceptOthers) : null;
     if (refused) return json(409, { error: refused, counts });
     let out = bytes;
@@ -3543,7 +3522,7 @@ async function handleDocumentFile(req, res) {
         return json(422, { error: err.message });
       }
     }
-    const title = String(doc.root.title || file.fileName || "document").replace(/\.docx$/i, "");
+    const title = String(docTitle || file.fileName || "document").replace(/\.docx$/i, "");
     res.writeHead(200, {
       ...corsHeaders,
       "Access-Control-Expose-Headers": "Content-Disposition, X-Changes-Waiting, X-Changes-Not-Placed, X-Other-Revisions",

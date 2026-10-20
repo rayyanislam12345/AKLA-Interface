@@ -94,6 +94,35 @@ the firm's standard (<file name>)." to the reply. A fill that differs is
 not saved, is recorded as refused, and the reply lists what differs; ask
 again without the change that caused it (a typed "1.1" is the usual one).
 
+## Marking up a document
+
+Open the client's draft in the Hub drawer beside the chat and highlight
+the clause: the drawer puts the words and the version's id ("versionId:
+…") into the chat. Without a highlight, "Copy for Claude" gives Claude the
+version and you name the clause. Then say what you want in plain words: "cap liability at fees
+paid", "comment on this that the indemnity is one-sided". Claude finds the
+paragraphs you highlighted (`show_document_paragraphs`; spacing, curly
+quotes and clause numbers do not matter, and a passage over several
+paragraphs is found whole), tells you what it will change, and once
+claude.ai has asked you to allow it, writes the changes into your own Word
+file (`apply_tracked_changes`): each change a tracked change by "AKLA AI",
+each remark a margin comment by "AKLA Comments", nothing accepted, the
+styles, numbering, tables and headers as they were. The result is filed as
+the next version of the same document, labelled "Marked up in claude.ai"
+with the date; the version you highlighted is unchanged. The reply ends
+with an "Open in Hub" link: open it in the drawer, and the new version's
+Changes list shows each change with its before and after, for you to
+accept or reject one by one (or open the file in Word and decide there).
+If a colleague filed a newer version, or a change was decided in the Hub,
+between the reading and the mark-up, nothing is saved and Claude reads the
+document again. Ask for more changes on the marked-up version and the ones
+still waiting travel with it to the next version. When everything is
+decided, ask for a clean copy (`make_clean_copy`): a further version with
+AKLA AI's changes as you decided them (a rejected one stays out), other
+people's tracked changes and the margin comments left for you. It is
+refused while a change is still waiting, unless you say to accept them all
+as they stand.
+
 ## What it can do
 
 Every answer carries the same `[Source n]` labels the Hub's assistant uses,
@@ -131,6 +160,9 @@ so Claude can cite what it relied on.
 | `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
 | `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project` |
 | `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); refused, with a list of what differs, if the filled file's format differs from the standard's (`FORMAT_GATE=report` saves it with the list as a warning); up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
+| `show_document_paragraphs` (versionId, query?, from?, to?) | A Word version's paragraphs numbered ¶n with their exact text, found by the words the lawyer highlighted (whitespace, curly quotes, dashes and list numbers forgiven; a passage over several paragraphs finds each one) with two paragraphs either side and the heading above, or a range of at most 200; with the operations protocol and a `fileHash` the mark-up must echo; says when changes are still waiting and when a newer version exists; Word versions only |
+| `apply_tracked_changes` (versionId, ops, fileHash, label?, instruction?) — saves | Writes the changes into the lawyer's own Word file as tracked changes by "AKLA AI" and remarks as "AKLA Comments" margin comments, nothing accepted, and files it as the next version of the same document ("Marked up in claude.ai — <date>"); one change row per tracked change anchored to the new version, so its Changes list in the Hub accepts or rejects each in the file; waiting changes of the version marked up travel with it; refused with nothing saved if the file changed since it was listed, if a newer version exists, or if the result's format differs from the version it was made from; up to 300 changes a call, one mark-up at a time |
+| `make_clean_copy` (versionId, acceptAll?, label?) — saves | Files a further version with AKLA AI's changes accepted as the lawyer decided them in the Hub, other people's tracked changes and the margin comments left; refused while a change is waiting unless `acceptAll` (the lawyer's word, recorded as their decision); format-checked against the version |
 | `set_project_instructions` (projectId, content) — saves | Writes the project's standing instructions (the Project Context every Hub chat and overview sees), replacing the whole text; recorded with who wrote it and when |
 | `label_version` (versionId, label) — saves | Gives one version a short label (up to 120 characters), replacing any it had |
 | `rename_document` (documentId or versionId, title) — saves | Changes a document's title only; its type, status and versions are untouched (the type is changed on the Hub) |
@@ -220,7 +252,7 @@ once in the drawer and once in Chrome's side panel if they use both.
 - It never **deletes** or replaces anything: a save is always a new
   version number, and a save onto a version a colleague has since
   superseded is refused with "A newer version exists". There is no delete
-  tool. Reviews and tracked changes stay on the Hub for now (later slices).
+  tool. Reviews stay on the Hub for now (a later slice).
 - It does not see the Hub's **chats or chat files** (`ai-chat-files`),
   timesheets, clients' contact details or anything outside projects,
   documents, precedents, the firm's skills and the law library. A skill's
@@ -433,10 +465,18 @@ line for every refusal with its reason.
    each lawyer removes and re-adds the connector in claude.ai (a token from
    before carries `hub:read` only), checks the sign-in page's wording, and
    sets the saving tools to "Needs approval" under Tool permissions.
+   Before the mark-up tools (slice 4) are deployed,
+   `supabase/migrations/20261020130000_connector_change_rows.sql`: the
+   `version_change_heads` table, where a decision made in a marked-up
+   version's Changes list keeps the decided file (the version's own file
+   is never rewritten). Safe to run twice. Confirm with
+   `select count(*) from public.version_change_heads;`. Until it is applied
+   the three tools and the version's Changes list work, but deciding a
+   change in that list fails with the table missing.
 2. **Code.** From the repo, `chat-service/deploy.sh`. It copies
    `connector/*.js` and `connector/tools/*.js` to
-   `/opt/chat-service/connector/` (with `firmRules.js` and
-   `documentInsight.js` at the service root), installs
+   `/opt/chat-service/connector/` (with `firmRules.js`,
+   `documentInsight.js` and `versionChanges.js` at the service root), installs
    `hub-connector.service` (install + restorecon, as for the index worker),
    runs `npm install` (which adds `@modelcontextprotocol/sdk` and `zod`), and
    restarts chat-service, index-worker and hub-connector. The last lines

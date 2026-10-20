@@ -70,6 +70,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "fill_standard_to_project", // fillStandardWrite.js (writes)
   "get_firm_rules", // firmRules.js
   "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js (writes)
+  "show_document_paragraphs", "apply_tracked_changes", "make_clean_copy", // markup.js (the last two write)
   "list_precedents", "find_precedent_clauses", "read_precedent", // precedents.js
   "get_project_overview", "find_document_by_title", // projects.js
   "save_note_to_project", "save_draft_to_project", // saves.js (writes)
@@ -79,7 +80,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "check_text", "compare_text_with_version", // textChecks.js
 ]);
 /**
- * The tools that save or change something (slices 2 and 3), in registration
+ * The tools that save or change something (slices 2 to 4), in registration
  * order. Each is `write: true` with `annotations: WRITE` in its module, is
  * listed only for a sign-in that carries hub:write, and records every call
  * in connector_actions. Pinned here, as MODULE_TOOL_NAMES is, so a read
@@ -89,6 +90,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
 export const WRITE_TOOL_NAMES = Object.freeze([
   "fill_standard_to_project", // fillStandardWrite.js
   "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js
+  "apply_tracked_changes", "make_clean_copy", // markup.js
   "save_note_to_project", "save_draft_to_project", // saves.js
 ]);
 /** Every tool the connector offers, in registration order. */
