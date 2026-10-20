@@ -18,6 +18,7 @@ import { z } from "zod";
 import { QUESTIONNAIRES, startQuestionnaire } from "../../questionnaire.js";
 import { MAX_READ_CHARS, DEFAULT_READ_CHARS, str, uuid, when } from "../tools.js";
 import { hubBase } from "../hubLinks.js";
+import { withPackColumns } from "../../draftingPacks.js";
 
 export const MAX_TYPES = 300;
 /** Types a page of list_document_types shows (about 200 chars each with a standard: well under the wrapper's cap). */
@@ -66,6 +67,15 @@ const isWordFile = (row) => /\.docx$/i.test(row?.storage_path ?? "");
 const oneOf = (v) => (Array.isArray(v) ? v[0] ?? null : v ?? null);
 const labelsOf = (opts) => opts.map((o) => o.label);
 const orList = (items) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`);
+// A firm pack (draftingPacks.js) is a Word standard with a pack mode: its
+// drafts go through open_standard_for_filling and fill_standard_to_project.
+const isPack = (row) => isWordFile(row) && (row?.pack_mode === "form" || row?.pack_mode === "shell");
+/** The line a list or a read gives a pack: what it is and which tools draft from it. */
+export function packLine(mode) {
+  return mode === "shell"
+    ? "a firm pack (shell: the firm's fixed parts and paragraph kinds; the body is written into it): draft with open_standard_for_filling, then fill_standard_to_project, never save_draft_to_project"
+    : "a firm pack (form: the firm's settled text with blanks, and its clause kinds for a new clause): draft with open_standard_for_filling, then fill_standard_to_project, never save_draft_to_project";
+}
 
 /**
  * The rules that tie a decision to earlier answers, in words. questionnaire.js
@@ -176,11 +186,11 @@ export default ({ supabase, hubUrl }) => {
         page: z.number().int().min(1).optional().describe("Which page of the list, from 1. Default 1."),
       },
       async run(input) {
-        const { data, error } = await supabase
+        const { data, error } = await withPackColumns((withPack) => supabase
           .from("document_types")
-          .select("id, name, category, questionnaire, standard:document_type_templates(filename, updated_at, storage_path)")
+          .select(`id, name, category, questionnaire, standard:document_type_templates(filename, updated_at, storage_path${withPack ? ", pack_mode" : ""})`)
           .order("name", { ascending: true })
-          .limit(MAX_TYPES);
+          .limit(MAX_TYPES));
         if (error) throw new Error(`Could not list the document types: ${error.message}`);
         const types = (data ?? []).map((t) => ({ ...t, standard: oneOf(t.standard) }));
         if (!types.length) return "The Hub has no document types yet.";
@@ -205,6 +215,7 @@ export default ({ supabase, hubUrl }) => {
           if (!s) out.push("  no standard yet");
           else {
             out.push(`  ${isWordFile(s) ? "Word standard" : "standard text (no Word file)"}${s.filename ? `: ${s.filename}` : ""}, updated ${when(s.updated_at)}`);
+            if (isPack(s)) out.push(`  ${packLine(s.pack_mode)}`);
             out.push(`  ${openStandard(t.id, hubUrl)}`);
           }
           const qn = t.questionnaire ? QUESTIONNAIRES[t.questionnaire] : null;
@@ -213,7 +224,8 @@ export default ({ supabase, hubUrl }) => {
         }
         const withStandard = types.filter((t) => t.standard).length;
         const withQuestions = types.filter((t) => t.questionnaire && QUESTIONNAIRES[t.questionnaire]).length;
-        const head = `${types.length} document type${types.length === 1 ? "" : "s"} on the Hub: ${withStandard} with a standard, ${withQuestions} with a drafting questionnaire${pages > 1 ? ` (page ${page} of ${pages})` : ""}. read_standard reads a standard's text; get_drafting_decisions lists a type's drafting decisions.`;
+        const withPack = types.filter((t) => isPack(t.standard)).length;
+        const head = `${types.length} document type${types.length === 1 ? "" : "s"} on the Hub: ${withStandard} with a standard${withPack ? ` (${withPack} of them a firm pack: a draft of that type is written into the firm's own Word file with open_standard_for_filling and fill_standard_to_project)` : ""}, ${withQuestions} with a drafting questionnaire${pages > 1 ? ` (page ${page} of ${pages})` : ""}. read_standard reads a standard's text; get_drafting_decisions lists a type's drafting decisions.`;
         const tail = page < pages ? `[The list continues: call list_document_types again with page: ${page + 1}.]` : "[End of the list.]";
         return `${head}\n\n${blocks.join("\n")}\n\n${tail}`;
       },
@@ -229,11 +241,11 @@ export default ({ supabase, hubUrl }) => {
       },
       async run(input) {
         const id = needTypeId(input);
-        const { data: row, error } = await supabase
+        const { data: row, error } = await withPackColumns((withPack) => supabase
           .from("document_type_templates")
-          .select("content_html, format_rules, filename, storage_path, updated_at, document_type:document_types(id, name, questionnaire)")
+          .select(`content_html, format_rules, filename, storage_path, updated_at${withPack ? ", pack_mode" : ""}, document_type:document_types(id, name, questionnaire)`)
           .eq("document_type_id", id)
-          .maybeSingle();
+          .maybeSingle());
         if (error) throw new Error(`Could not read the standard: ${error.message}`);
         if (!row) {
           const type = await typeById(id);
@@ -250,6 +262,7 @@ export default ({ supabase, hubUrl }) => {
         const end = Math.min(text.length, from + chars);
         const head = [`${label[0].toUpperCase()}${label.slice(1)}, updated ${when(row.updated_at)} — characters ${(from + 1).toLocaleString("en")}–${end.toLocaleString("en")} of ${text.length.toLocaleString("en")}.`];
         if (type.questionnaire && QUESTIONNAIRES[type.questionnaire]) head.push(`This type has a drafting questionnaire: get_drafting_decisions lists its decisions.`);
+        if (isPack(row)) head.push(`This standard is ${packLine(row.pack_mode)}.`);
         head.push(openStandard(type.id, hubUrl));
         const rules = str(row.format_rules, MAX_RULES_CHARS);
         if (rules) head.push("", `FORMAT RULES (how the Word file is laid out; a draft of this type follows them):\n${rules}`);

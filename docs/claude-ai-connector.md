@@ -94,6 +94,33 @@ the firm's standard (<file name>)." to the reply. A fill that differs is
 not saved, is recorded as refused, and the reply lists what differs; ask
 again without the change that caused it (a typed "1.1" is the usual one).
 
+### The firm's packs (letters, memos, opinions and other wave-1 kinds)
+
+Twelve kinds of document now have a firm pack as their Word standard
+(`scripts/drafting-packs/README.md`): letter / notice, research memo,
+legal opinion, client proposal, meeting minutes, certificate / consent /
+NOC (shell packs: the firm's fixed parts and one example of each kind of
+paragraph; the body is written fresh) and board resolution, amendment,
+escrow, IE, IA and framework agreements (form packs: the firm's settled
+text with blanks). `list_document_types` and `read_standard` say which
+types have one. For those, `open_standard_for_filling` adds the pack's
+paragraph kinds ("KINDS YOU CAN WRITE: …"), the instructions for its mode
+and, for a shell, which blank paragraph is a fixed part to fill and which
+an example to remove; a shell is listed whole. `fill_standard_to_project`
+then also takes `write` (paragraphs of a named kind, in the firm's own
+look), `repeat_block`, `add_row` and `remove_block`, passes the pack's
+kinds to the engine, and runs the same format check: "draft a letter to
+the PD on …" comes back as the firm's letter with the Ref, Dated, To and
+Subject filled, the body written in the letter's own paragraph and (a)
+formats, and the examples gone. A clause the firm's precedents do not
+have carries the AKLA comment "New clause — not in the firm's precedents:
+<why>". `save_draft_to_project` no longer saves a document of a pack type
+(the type named, the existing document's type, a title such as "Letter to
+…" or a letter's Ref / Subject / salutation lines): it answers with one
+sentence pointing to `open_standard_for_filling` and
+`fill_standard_to_project`, and saves nothing. Notes and other kinds save
+as before.
+
 ## Marking up a document
 
 Open the client's draft in the Hub drawer beside the chat and highlight
@@ -158,8 +185,8 @@ so Claude can cite what it relied on.
 | `check_text` (text, from?) | The Hub's proof check on text Claude has written, before it is filed: blanks, undefined and unused terms, broken cross-references, number/word mismatches, numbering gaps, by clause; no model, nothing saved; up to 300,000 characters, in pages (the text is sent again with each page) |
 | `compare_text_with_version` (versionId, text, from?, includeFormatting?) | What Claude's redraft changes against one stored version, clause by clause, before it is filed; the version's file is read on the spot when it is not already in memory (one such read at a time, kept for the next page); no model, nothing saved |
 | `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
-| `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project` |
-| `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); refused, with a list of what differs, if the filled file's format differs from the standard's (`FORMAT_GATE=report` saves it with the list as a warning); up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
+| `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project`; a document of a type with a firm pack is not saved: the reply is one sentence pointing to `open_standard_for_filling` and `fill_standard_to_project` |
+| `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); refused, with a list of what differs, if the filled file's format differs from the standard's (`FORMAT_GATE=report` saves it with the list as a warning); for a firm pack also `write`, `repeat_block`, `add_row` and `remove_block` in the pack's kinds; up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain |
 | `show_document_paragraphs` (versionId, query?, from?, to?) | A Word version's paragraphs numbered ¶n with their exact text, found by the words the lawyer highlighted (whitespace, curly quotes, dashes and list numbers forgiven; a passage over several paragraphs finds each one) with two paragraphs either side and the heading above, or a range of at most 200; with the operations protocol and a `fileHash` the mark-up must echo; says when changes are still waiting and when a newer version exists; Word versions only |
 | `apply_tracked_changes` (versionId, ops, fileHash, label?, instruction?) — saves | Writes the changes into the lawyer's own Word file as tracked changes by "AKLA AI" and remarks as "AKLA Comments" margin comments, nothing accepted, and files it as the next version of the same document ("Marked up in claude.ai — <date>"); one change row per tracked change anchored to the new version, so its Changes list in the Hub accepts or rejects each in the file; waiting changes of the version marked up travel with it; refused with nothing saved if the file changed since it was listed, if a newer version exists, or if the result's format differs from the version it was made from; up to 300 changes a call, one mark-up at a time |
 | `make_clean_copy` (versionId, acceptAll?, label?) — saves | Files a further version with AKLA AI's changes accepted as the lawyer decided them in the Hub, other people's tracked changes and the margin comments left; refused while a change is waiting unless `acceptAll` (the lawyer's word, recorded as their decision); format-checked against the version |

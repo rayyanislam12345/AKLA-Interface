@@ -23,11 +23,20 @@
 // its place, since deps carries no renderer of its own. If the renderer
 // fails the tool says so and points at save_note_to_project, which needs
 // nothing but the database.
+//
+// A draft of a kind the firm has a pack for (draftingPacks.js: a letter, a
+// memo, an opinion, a resolution…) is never rendered here: it is written
+// into the firm's own Word file with open_standard_for_filling and
+// fill_standard_to_project, and save_draft_to_project answers with one
+// sentence saying so and saves nothing. The kind is the type named (or the
+// existing document's type), else the head of the title or of the "# "
+// heading, else a letter's Ref, Subject and salutation lines.
 
 import { z } from "zod";
 import { WRITE } from "../app.js";
 import { str, uuid } from "../tools.js";
 import { renderAklaDocx } from "../../aklaRender.js";
+import { packTypesOf, packTypeFor, packRedirectSentence } from "../../draftingPacks.js";
 
 /** The most Markdown either tool takes in one save (the plan's cap). */
 export const MAX_MARKDOWN_CHARS = 600_000;
@@ -92,11 +101,12 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
    * the moment of saving. The title stands in when the caller gives none.
    */
   async function existingDocument({ tool, ctx, matter, target }) {
-    const { data, error } = await supabase.from("matter_documents").select("id, title, matter_id").eq("id", target.matterDocumentId).maybeSingle();
+    const { data, error } = await supabase.from("matter_documents").select("id, title, matter_id, document_type_id").eq("id", target.matterDocumentId).maybeSingle();
     if (error) throw new Error(`Could not read the document: ${error.message}`);
     if (!data) throw new Error("There is no project document with that id. list_project_documents gives them.");
     if (data.matter_id !== matter.id) throw new Error(`That document is not on ${matter.name}.`);
     target.documentTitle = titleOf(data.title);
+    target.documentTypeId = data.document_type_id ?? null;
     target.title ??= target.documentTitle;
     if (target.expectedVersionId) {
       const { data: latest, error: latestError } = await supabase.from("document_versions").select("id, version_number").eq("matter_document_id", data.id).order("version_number", { ascending: false }).limit(1).maybeSingle();
@@ -190,7 +200,7 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
     {
       name: DRAFT_TOOL,
       title: "Save a draft into a project as a house-format Word file",
-      description: `Save a draft document written in this chat into a project on the Hub as a Word file in AKLA's house format: A4, Arial 11, the title on the navy banner, numbered 1. / 1.1. headings, and [[AKLA Comment: …]] notes as Word margin comments (get_firm_rules with task draft gives the Markdown shape the renderer expects). Use it when the lawyer asks to save or file a draft agreement, memo or notes in the firm's format; the Hub reads the file for search within a minute. ${SAVE_RULES} documentTypeId (from list_document_types) files a new document under a type; an existing document keeps its type. The rendering takes up to a minute. Takes up to ${MAX_MARKDOWN_CHARS.toLocaleString("en")} characters of Markdown. Returns the new version's id, its Hub page and the house-format check's notes; if the renderer fails, save_note_to_project saves the same text as a Markdown file.`,
+      description: `Save a draft document written in this chat into a project on the Hub as a Word file in AKLA's house format: A4, Arial 11, the title on the navy banner, numbered 1. / 1.1. headings, and [[AKLA Comment: …]] notes as Word margin comments (get_firm_rules with task draft gives the Markdown shape the renderer expects). Use it when the lawyer asks to save or file a draft agreement or notes in the firm's format; the Hub reads the file for search within a minute. A document of a type that has a firm pack (list_document_types says which: letters, memos, opinions, resolutions and others) is not saved here: it is drafted inside the firm's own Word file with open_standard_for_filling and fill_standard_to_project, and this tool answers with one sentence saying so. ${SAVE_RULES} documentTypeId (from list_document_types) files a new document under a type; an existing document keeps its type. The rendering takes up to a minute. Takes up to ${MAX_MARKDOWN_CHARS.toLocaleString("en")} characters of Markdown. Returns the new version's id, its Hub page and the house-format check's notes; if the renderer fails, save_note_to_project saves the same text as a Markdown file.`,
       inputSchema: {
         projectId: z.string().describe("The project's id, from list_projects or find_document_by_title."),
         markdown: z.string().describe("The whole document as Markdown in the firm's shape: # title, ## numbered sections, [[AKLA Comment: …]] for margin comments, [●] for blanks."),
@@ -210,6 +220,10 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
           const matter = await needProject(input);
           if (target.matterDocumentId) await existingDocument({ tool: DRAFT_TOOL, ctx, matter, target });
           if (!target.title) throw new Error("A title for the new document is needed, e.g. \"Notes on the Concession Agreement\".");
+          // A kind of document the firm has a pack for goes into the pack.
+          const packTypes = await packTypesOf(supabase);
+          const packType = packTypeFor({ documentTypeId: target.documentTypeId ?? uuid(input.documentTypeId), title: target.title, markdown }, packTypes);
+          if (packType) return packRedirectSentence(packType);
           // A type applies to a new document only; an existing one keeps its own.
           const type = target.matterDocumentId ? null : await documentTypeOf(input);
           return await fileInto({

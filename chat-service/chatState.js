@@ -9,7 +9,85 @@ export function inferDraftSkill(message, types) {
   const subject = ask[2].split(/\b(?:using|from|based on|on the basis of|with reference to|drawing on|by reference to|in light of|against|per|following|according to)\b|[.;:\n]/i)[0];
   const normalized = ' ' + subject.toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
   const matches = types.filter(t => normalized.includes(' ' + t.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' '));
-  return matches.length === 1 ? { key: 'draft', documentTypeId: matches[0].id } : null;
+  if (matches.length === 1) return { key: 'draft', documentTypeId: matches[0].id };
+  if (matches.length > 1) return null;
+  // No type named in full: "draft a letter to the PD", "write a memo on…",
+  // "prepare the minutes" name the firm's types by their everyday names.
+  const byAlias = typeNamedIn(subject, types);
+  return byAlias ? { key: 'draft', documentTypeId: byAlias.id } : null;
+}
+
+// The everyday names of the firm's document types, by the type's name. Read
+// only at the head of what is asked for: "a letter to the PD" is a letter,
+// "a summary of the letter" is not, "your opinion" is not a legal opinion,
+// "a letter of credit" is not a letter. A type the Hub does not have is
+// never matched, and two types matching equally well match neither.
+export const TYPE_ALIASES = Object.freeze({
+  'Letter / Notice': ['letter', 'notice', 'legal notice', 'notice letter', 'reply letter'],
+  'Research Memo': ['memo', 'memorandum', 'legal memo', 'advice memo', 'research note'],
+  'Legal Opinion': ['opinion', 'opinion letter'],
+  'Meeting Minutes': ['minutes'],
+  'Board Resolution': ['resolution', 'resolutions', 'board resolutions'],
+  'Certificate / Consent / NOC': ['noc', 'no objection certificate', 'no objection letter', 'certificate', 'consent', 'consent letter'],
+  'Client Proposal Letter': ['proposal', 'fee proposal', 'proposal letter', 'engagement proposal'],
+  'Amendment Agreement': ['amending agreement', 'addendum'],
+  'Escrow Agreement': ['escrow'],
+  'Framework Agreement': ['framework'],
+  "Independent Engineer's Agreement": ['ie agreement', 'independent engineer agreement', 'independent engineers agreement'],
+  "Independent Auditors' Agreement": ['ia agreement', 'independent auditor agreement', 'independent auditors agreement'],
+});
+const wordsOf = (text) => String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+// Where the head of a request or title ends.
+const HEAD_ENDS = new Set(['of', 'to', 'for', 'on', 'about', 'regarding', 're', 'with', 'in', 'from', 'by', 'under', 'between', 'addressed', 'and', 'or', 'that', 'which', 'who', 'as', 'at', 'into', 'against', 'per', 'concerning', 'relating', 'setting', 'authorising', 'authorizing', 'confirming', 'approving']);
+const LEADING = new Set(['me', 'us', 'up', 'out', 'please', 'also', 'now', 'then', 'a', 'an', 'the']);
+// Someone's view, or a thing already in front of them: not a document to draft.
+const NOT_A_NEW_DOCUMENT = new Set(['your', 'my', 'our', 'his', 'her', 'their', 'its', 'this', 'that', 'these', 'those', 'it']);
+// A word just before the head noun that makes it another kind of document.
+const OTHER_KIND_BEFORE = {
+  letter: ['side', 'comfort', 'fee', 'engagement', 'offer', 'award', 'support', 'acceptance', 'guarantee', 'mandate', 'commitment', 'intent', 'credit'],
+  proposal: ['project', 'bid', 'technical', 'financial', 'unsolicited', 'tender'],
+  certificate: ['share', 'stock', 'tax', 'completion', 'incorporation', 'insurance', 'commissioning'],
+  resolution: ['dispute'],
+};
+// "a letter of credit", "a letter of intent".
+const OTHER_KIND_AFTER_OF = ['credit', 'intent', 'comfort', 'award', 'acceptance', 'guarantee', 'undertaking', 'authority', 'offer', 'appointment', 'support', 'allotment'];
+const MAX_MODIFIERS = 3;
+
+/**
+ * The type named at the head of a request's subject ("a letter to the PD")
+ * or of a title ({ head: true }: "Letter to the PD — water delivery",
+ * "Minutes of the kick-off meeting"), by its full name or an everyday name
+ * (TYPE_ALIASES), or null. `types` are rows with { id, name }.
+ */
+export function typeNamedIn(text, types, { head = false } = {}) {
+  if (!types?.length) return null;
+  const cut = head ? String(text ?? '').split(/\s[—–-]\s|[:|([]/)[0] : String(text ?? '');
+  const all = wordsOf(cut);
+  let start = 0;
+  while (start < all.length && LEADING.has(all[start])) start++;
+  if (NOT_A_NEW_DOCUMENT.has(all[start])) return null;
+  let end = start;
+  while (end < all.length && !HEAD_ENDS.has(all[end])) end++;
+  const headWords = all.slice(start, end);
+  if (!headWords.length) return null;
+  const after = all.slice(end);
+  let best = null;
+  let tie = false;
+  for (const t of types) {
+    const names = [wordsOf(t.name).join(' '), ...(TYPE_ALIASES[t.name] ?? [])];
+    for (const name of names) {
+      const n = name.split(' ');
+      if (n.length > headWords.length || headWords.length - n.length > MAX_MODIFIERS) continue;
+      if (headWords.slice(-n.length).join(' ') !== name) continue;
+      const noun = n[n.length - 1];
+      const before = headWords[headWords.length - n.length - 1];
+      if (before && OTHER_KIND_BEFORE[noun]?.includes(before)) continue;
+      if ((noun === 'letter' || noun === 'notice') && after[0] === 'of' && OTHER_KIND_AFTER_OF.includes(after[1])) continue;
+      if (!best || n.length > best.length) { best = { type: t, length: n.length }; tie = false; }
+      else if (n.length === best.length && best.type.id !== t.id) tie = true;
+    }
+  }
+  return best && !tie ? best.type : null;
 }
 // The source numbers a reply cites that no passage carries. `valid` is the
 // count of this turn's sources (numbered from 1) or, in a chat whose sources

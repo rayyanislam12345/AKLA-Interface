@@ -213,7 +213,7 @@ test('fillStandardWrite.js adds one write tool with the foundation\'s annotation
 test('readOps, fillLabel, blanksLine and sha256: the cap, the shape of a change, the label with and without the lawyer\'s own, the blanks summary', () => {
   assert.throws(() => readOps([]), /ops must be a list of at least one change/);
   assert.throws(() => readOps(Array.from({ length: 301 }, () => ({ op: 'delete', p: 1, expected: 'x' }))), /^Error: fill_standard_to_project takes at most 300 changes in one call \(301 were sent\); file the first 300 now and the rest as the next version of the same document\.$/);
-  assert.throws(() => readOps([{ op: 'rewrite', p: 1, expected: 'x', text: 'y' }]), /Change 1: op must be one of replace, insert_after, delete, comment\./);
+  assert.throws(() => readOps([{ op: 'rewrite', p: 1, expected: 'x', text: 'y' }]), /Change 1: op must be one of replace, insert_after, delete, comment, write, repeat_block, add_row, remove_block\./);
   assert.throws(() => readOps([{ op: 'replace', p: 0, expected: 'x', text: 'y' }]), /Change 1: p must be the paragraph's number/);
   assert.throws(() => readOps([{ op: 'replace', p: 1, text: 'y' }]), /Change 1: expected must be the paragraph's exact current text\./);
   assert.throws(() => readOps([{ op: 'replace', p: 1, expected: 'x', text: '  ' }]), /Change 1: replace needs text\./);

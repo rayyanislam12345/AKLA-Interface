@@ -56,6 +56,7 @@ import { inspectDocx, applyDocxOps, acceptChangesBy, describeResults, stripXmlIl
 import { alignCommentExpectations } from "../../libraryTools.js";
 import { standardRows, isWordFile } from "./fillStandard.js";
 import { checkFormat, variableLinesFor } from "../../formatFingerprint.js";
+import { packOf } from "../../draftingPacks.js";
 
 export const FILL_TOOL = "fill_standard_to_project";
 /** The bucket the firm's standards live in (server.js guideStart, the same download). */
@@ -67,7 +68,16 @@ export const MAX_OP_TEXT_CHARS = 20_000;
 /** How long the fill may take before nothing is written: under claude.ai's 240 s per call, with the upload still to come. */
 export const APPLY_TIMEOUT_MS = 200_000;
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-export const OP_KINDS = Object.freeze(["replace", "insert_after", "delete", "comment"]);
+export const OP_KINDS = Object.freeze(["replace", "insert_after", "delete", "comment", "write", "repeat_block", "add_row", "remove_block"]);
+/** The block operations (docxAgent.js BLOCK_OPS): the paragraph each names in place of "p", the one "expected" quotes first. */
+export const BLOCK_OP_FIELDS = Object.freeze({
+  write: ["after"],
+  repeat_block: ["from", "to", "after"],
+  add_row: ["like_row", "table"],
+  remove_block: ["from", "to"],
+});
+/** The most blocks one write, or cells one row, carries. */
+export const MAX_BLOCKS = 200;
 const MAX_TITLE_CHARS = 200;
 const MAX_LABEL_CHARS = 200;
 const MAX_WHY_CHARS = 300;
@@ -109,11 +119,31 @@ export function fillLabel(label, at = new Date()) {
   return `${own.length > room ? `${own.slice(0, room - 1)}…` : own}: ${base}`;
 }
 
+// One block of a write: a paragraph kind with its text, or a table kind
+// with its rows (docxAgent.js checks the kind against the pack's list).
+function readBlock(raw, n, b) {
+  const kind = typeof raw?.kind === "string" ? raw.kind.trim() : "";
+  if (!kind) throw new Error(`Change ${n}, block ${b}: kind must be one of the pack's kinds, as open_standard_for_filling listed them.`);
+  if (Array.isArray(raw?.rows)) {
+    const rows = raw.rows.map((row) => (Array.isArray(row) ? row.map((c) => stripXmlIllegal(c)) : null));
+    if (!rows.length || rows.some((row) => !row?.length)) throw new Error(`Change ${n}, block ${b}: rows must be a list of rows, each a list of cell texts.`);
+    if (rows.flat().some((c) => c.length > MAX_OP_TEXT_CHARS)) throw new Error(`Change ${n}, block ${b}: a cell is longer than ${MAX_OP_TEXT_CHARS.toLocaleString("en")} characters.`);
+    return { kind, rows, ...(typeof raw.like === "string" && raw.like.trim() ? { like: raw.like.trim() } : {}) };
+  }
+  const text = stripXmlIllegal(raw?.text ?? "");
+  if (!text.trim()) throw new Error(`Change ${n}, block ${b}: a "${kind}" block needs text.`);
+  if (text.length > MAX_OP_TEXT_CHARS) throw new Error(`Change ${n}, block ${b}: text is longer than ${MAX_OP_TEXT_CHARS.toLocaleString("en")} characters; one paragraph a block.`);
+  return { kind, text };
+}
+
 /**
  * The operations as applyDocxOps takes them, checked here as well as by
  * the zod schema (a test calls run directly): at most MAX_OPS, each with a
  * known op, a paragraph number, the exact expected text, and text where
- * the op needs it. A fault is one sentence naming the operation.
+ * the op needs it. The four block operations a firm pack takes (write,
+ * repeat_block, add_row, remove_block) name their paragraphs by after,
+ * from, to, table and like_row instead of p. A fault is one sentence
+ * naming the operation.
  */
 export function readOps(value) {
   if (!Array.isArray(value) || !value.length) throw new Error("ops must be a list of at least one change ({ op, p, expected, text, why }), as open_standard_for_filling describes.");
@@ -122,6 +152,29 @@ export function readOps(value) {
     const n = i + 1;
     const op = String(raw?.op ?? "").trim().toLowerCase();
     if (!OP_KINDS.includes(op)) throw new Error(`Change ${n}: op must be one of ${OP_KINDS.join(", ")}.`);
+    const why = typeof raw?.why === "string" && raw.why.trim() ? raw.why.replace(/\s+/g, " ").trim().slice(0, MAX_WHY_CHARS) : undefined;
+    if (BLOCK_OP_FIELDS[op]) {
+      const fields = {};
+      for (const key of BLOCK_OP_FIELDS[op]) {
+        if (raw?.[key] == null && key === "table") continue;
+        const v = Number(raw?.[key]);
+        if (!Number.isInteger(v) || v < 1) throw new Error(`Change ${n}: ${op} needs ${key}, a paragraph's number (¶n) from the listing.`);
+        fields[key] = v;
+      }
+      if (typeof raw?.expected !== "string") throw new Error(`Change ${n}: expected must be the exact current text of ¶${fields[BLOCK_OP_FIELDS[op][0]]}.`);
+      const expected = stripXmlIllegal(raw.expected);
+      if (expected.length > MAX_OP_TEXT_CHARS) throw new Error(`Change ${n}: expected is longer than ${MAX_OP_TEXT_CHARS.toLocaleString("en")} characters.`);
+      if (op === "write") {
+        if (!Array.isArray(raw?.blocks) || !raw.blocks.length) throw new Error(`Change ${n}: write needs blocks, a list of {"kind", "text"} in the pack's kinds.`);
+        if (raw.blocks.length > MAX_BLOCKS) throw new Error(`Change ${n}: one write takes at most ${MAX_BLOCKS} blocks.`);
+        fields.blocks = raw.blocks.map((b, j) => readBlock(b, n, j + 1));
+      }
+      if (op === "add_row") {
+        if (!Array.isArray(raw?.cells) || !raw.cells.length || raw.cells.length > MAX_BLOCKS || !raw.cells.every((c) => typeof c === "string")) throw new Error(`Change ${n}: add_row needs cells, the text of each cell left to right.`);
+        fields.cells = raw.cells.map((c) => stripXmlIllegal(c));
+      }
+      return { op, ...fields, expected, ...(why ? { why } : {}) };
+    }
     const p = Number(raw?.p);
     if (!Number.isInteger(p) || p < 1) throw new Error(`Change ${n}: p must be the paragraph's number (¶n) from the listing.`);
     if (typeof raw?.expected !== "string") throw new Error(`Change ${n}: expected must be the paragraph's exact current text.`);
@@ -132,7 +185,6 @@ export function readOps(value) {
     const text = raw?.text == null ? "" : stripXmlIllegal(raw.text);
     if (text.length > MAX_OP_TEXT_CHARS) throw new Error(`Change ${n}: text is longer than ${MAX_OP_TEXT_CHARS.toLocaleString("en")} characters; one paragraph at a time.`);
     if (op !== "delete" && !text.trim()) throw new Error(`Change ${n}: ${op} needs text.`);
-    const why = typeof raw?.why === "string" && raw.why.trim() ? raw.why.replace(/\s+/g, " ").trim().slice(0, MAX_WHY_CHARS) : undefined;
     return { op, p, expected, ...(op === "delete" ? {} : { text }), ...(why ? { why } : {}) };
   });
 }
@@ -214,7 +266,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
     if (error || !blob) throw new Error(`The standard for ${type.name} could not be downloaded${error?.message ? ` (${error.message})` : ""}; try again.`);
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (!bytes.length) throw new Error(`The standard for ${type.name} is empty on the Hub; upload it again under Firm Library → Standards.`);
-    return { type, bytes, storagePath: template.storage_path, fileName: pinned?.filename ?? template.filename ?? template.storage_path.split("/").pop(), snapshotAt: pinned?.created_at ?? template.updated_at ?? null };
+    return { type, bytes, pack: packOf(template), storagePath: template.storage_path, fileName: pinned?.filename ?? template.filename ?? template.storage_path.split("/").pop(), snapshotAt: pinned?.created_at ?? template.updated_at ?? null };
   }
 
   /** The existing document a next version goes on, checked to be on this project so the refusal is plain. */
@@ -232,14 +284,14 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
    * not it honours it, the deadline wins and nothing is written (any work
    * it goes on doing is thrown away).
    */
-  async function applyWithDeadline(bytes, ops, byRef) {
+  async function applyWithDeadline(bytes, ops, byRef, kinds) {
     const controller = new AbortController();
     let timer = null;
     const deadline = new Promise((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new Error(TOO_LONG_SENTENCE)); }, applyTimeoutMs);
     });
     try {
-      return await Promise.race([apply(bytes, ops, byRef, { signal: controller.signal }), deadline]);
+      return await Promise.race([apply(bytes, ops, byRef, { signal: controller.signal, ...(kinds ? { kinds } : {}) }), deadline]);
     } catch (err) {
       if (controller.signal.aborted || err?.name === "AbortError") throw new Error(TOO_LONG_SENTENCE);
       throw err;
@@ -252,16 +304,27 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
     {
       name: FILL_TOOL,
       title: "Fill the firm's Word standard and file it in a project",
-      description: `Draft a document by filling the firm's real Word standard for a document type and filing the result as a NEW version in a project: the facts you gathered go into the standard's placeholder paragraphs as changes against the ¶n numbers from open_standard_for_filling, the fills are accepted so the draft reads clean, every value you were not given stays [●], and open questions go in as "AKLA Comments" margin comments. Numbering, styles, headers and the contents page stay as the firm set them. Use it after open_standard_for_filling and after asking the firm's drafting questions (get_drafting_decisions) one at a time; say which project and title you will file under and wait for the lawyer's yes. It always saves a NEW version, never over one that exists, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. templateHash is the fingerprint open_standard_for_filling printed: if the standard was replaced since, the fill is refused and nothing is saved. At most ${MAX_OPS} changes a call (file the rest as the next version); each must quote the paragraph's exact current text in expected, as open_standard_for_filling listed it or read it with paragraphs: "from-to", so a stale or unseen paragraph changes nothing. One fill runs on the Hub at a time; a second is refused in one sentence and can be sent again a minute later. The standard in the library is never changed. Returns every change that could not be made and why, the blanks still in the file, the new version's id and its Hub page. Filing is not legal approval.`,
+      description: `Draft a document by filling the firm's real Word standard for a document type and filing the result as a NEW version in a project: the facts you gathered go into the standard's placeholder paragraphs as changes against the ¶n numbers from open_standard_for_filling, the fills are accepted so the draft reads clean, every value you were not given stays [●], and open questions go in as "AKLA Comments" margin comments. Numbering, styles, headers and the contents page stay as the firm set them. Use it after open_standard_for_filling and after asking the firm's drafting questions (get_drafting_decisions) one at a time; say which project and title you will file under and wait for the lawyer's yes. It always saves a NEW version, never over one that exists, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. templateHash is the fingerprint open_standard_for_filling printed: if the standard was replaced since, the fill is refused and nothing is saved. At most ${MAX_OPS} changes a call (file the rest as the next version); each must quote the paragraph's exact current text in expected, as open_standard_for_filling listed it or read it with paragraphs: "from-to", so a stale or unseen paragraph changes nothing. When the standard is one of the firm's packs, write, repeat_block, add_row and remove_block are taken too, as open_standard_for_filling describes: the body of a letter, memo or opinion, or a new clause, is written in the pack's own paragraph kinds. One fill runs on the Hub at a time; a second is refused in one sentence and can be sent again a minute later. The standard in the library is never changed. Returns every change that could not be made and why, the blanks still in the file, the new version's id and its Hub page. Filing is not legal approval.`,
       inputSchema: {
         documentTypeId: z.string().describe("The document type's id, from list_document_types or open_standard_for_filling."),
         projectId: z.string().describe("The project's id, from list_projects or find_document_by_title."),
         title: z.string().describe("The title of the NEW document on the Hub, e.g. \"Concession Agreement — Hyderabad Bypass\". For a next version of an existing document the document keeps its own title; this names the file."),
         ops: z.array(z.object({
-          op: z.enum(OP_KINDS).describe("replace (the whole paragraph with the fact in it), insert_after (one new paragraph after ¶p), delete, or comment (an AKLA Comments margin comment on ¶p)."),
-          p: z.number().int().min(1).describe("The paragraph's number ¶n from open_standard_for_filling."),
-          expected: z.string().max(MAX_OP_TEXT_CHARS).describe("The paragraph's exact current text, without the ¶ label."),
-          text: z.string().max(MAX_OP_TEXT_CHARS).optional().describe("replace: the complete new text of the paragraph with the fact in it, everything else word for word as it was; insert_after: the new paragraph; comment: the comment. Not for delete."),
+          op: z.enum(OP_KINDS).describe("replace (the whole paragraph with the fact in it), insert_after (one new paragraph after ¶p), delete, or comment (an AKLA Comments margin comment on ¶p). For a firm pack also: write (paragraphs of the pack's kinds after ¶after), repeat_block (¶from–¶to copied after ¶after), add_row (a row like the one holding ¶like_row) and remove_block (¶from–¶to removed)."),
+          p: z.number().int().min(1).optional().describe("The paragraph's number ¶n from open_standard_for_filling (replace, insert_after, delete, comment)."),
+          expected: z.string().max(MAX_OP_TEXT_CHARS).describe("The paragraph's exact current text, without the ¶ label: of ¶p, or for a block operation of ¶after (write), ¶from (repeat_block, remove_block) or ¶like_row (add_row)."),
+          text: z.string().max(MAX_OP_TEXT_CHARS).optional().describe("replace: the complete new text of the paragraph with the fact in it, everything else word for word as it was; insert_after: the new paragraph; comment: the comment. Not for delete or the block operations."),
+          after: z.number().int().min(1).optional().describe("write, repeat_block: the paragraph the new paragraphs go after."),
+          from: z.number().int().min(1).optional().describe("repeat_block, remove_block: the first paragraph of the block."),
+          to: z.number().int().min(1).optional().describe("repeat_block, remove_block: the last paragraph of the block."),
+          table: z.number().int().min(1).optional().describe("add_row: optional, any paragraph of the same table."),
+          like_row: z.number().int().min(1).optional().describe("add_row: a paragraph in the row the new row copies; it goes straight after that row."),
+          blocks: z.array(z.object({
+            kind: z.string().describe("One of the pack's kinds, as open_standard_for_filling listed them."),
+            text: z.string().max(MAX_OP_TEXT_CHARS).optional().describe("The paragraph's text (a paragraph kind or footnote)."),
+            rows: z.array(z.array(z.string().max(MAX_OP_TEXT_CHARS))).optional().describe("A table kind: the rows, each a list of cell texts; the first row is the header."),
+          })).max(MAX_BLOCKS).optional().describe("write: the paragraphs to write, in order."),
+          cells: z.array(z.string().max(MAX_OP_TEXT_CHARS)).max(MAX_BLOCKS).optional().describe("add_row: each cell's text, left to right."),
           why: z.string().max(MAX_WHY_CHARS).optional().describe("Optional: one short line on why."),
         })).min(1).max(MAX_OPS).describe(`The changes, at most ${MAX_OPS}.`),
         templateHash: z.string().describe("The standard's fingerprint (sha256) as open_standard_for_filling printed it."),
@@ -317,7 +380,8 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           try {
             inspection = inspectDocx(standard.bytes, { budget: Infinity });
             aligned = alignCommentExpectations(ops, inspection.byRef);
-            out = await applyWithDeadline(standard.bytes, aligned, inspection.byRef);
+            // A firm pack's kinds: what write takes its look from.
+            out = await applyWithDeadline(standard.bytes, aligned, inspection.byRef, standard.pack?.kinds);
             fileBytes = out.applied > 0 ? acceptChangesBy(out.bytes, DOCX_AUTHOR) : out.bytes;
           } catch (err) {
             await record({ documentId: matterDocumentId, outcome: "failed" });

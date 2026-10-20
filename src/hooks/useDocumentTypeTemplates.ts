@@ -12,6 +12,21 @@ function plainStandardError(err: unknown): Error {
   return err instanceof Error ? err : new Error(message);
 }
 
+// A drafting pack (scripts/drafting-packs/upload_packs.mjs) carries its
+// paragraph kinds, fingerprint and mode on the standard's row. A file
+// uploaded here is not a pack, so a replacement clears them, and a restore
+// brings back the restored filing's own. Until the migration that adds the
+// columns (20261020140000_drafting_packs.sql) is applied, the write is made
+// without them.
+const PACK_FIELDS = ["kinds", "fingerprint", "pack_mode"] as const;
+const missingPackColumn = (err: unknown) => /\b(kinds|fingerprint|pack_mode)\b|schema cache/i.test((err as { message?: string } | null)?.message ?? "");
+async function upsertStandard(row: Record<string, unknown>) {
+  const first = await supabase.from("document_type_templates").upsert(row as never, { onConflict: "document_type_id" });
+  if (!first.error || !missingPackColumn(first.error)) return first;
+  const without = Object.fromEntries(Object.entries(row).filter(([k]) => !(PACK_FIELDS as readonly string[]).includes(k)));
+  return supabase.from("document_type_templates").upsert(without as never, { onConflict: "document_type_id" });
+}
+
 export interface DocumentTypeTemplateRow {
   document_type_id: string;
   document_type_name: string;
@@ -119,18 +134,18 @@ export function useUploadDocumentTypeTemplate() {
       }
 
       const { data: userData } = await supabase.auth.getUser();
-      const { error } = await supabase.from("document_type_templates").upsert(
-        {
-          document_type_id: documentTypeId,
-          content_html: extracted.text,
-          storage_path: storagePath,
-          filename: file.name,
-          format_rules: formatRules,
-          updated_by: userData.user?.id,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "document_type_id" }
-      );
+      const { error } = await upsertStandard({
+        document_type_id: documentTypeId,
+        content_html: extracted.text,
+        storage_path: storagePath,
+        filename: file.name,
+        format_rules: formatRules,
+        kinds: null,
+        fingerprint: null,
+        pack_mode: null,
+        updated_by: userData.user?.id,
+        updated_at: new Date().toISOString(),
+      });
       if (error) {
         await discardUpload();
         throw plainStandardError(error);
@@ -187,18 +202,25 @@ export function useRestoreDocumentTemplateVersion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ documentTypeId, versionId }: { documentTypeId: string; versionId: string }) => {
-      const { data: version, error: readError } = await supabase
+      const read = (columns: string) => supabase
         .from("document_template_versions")
-        .select("storage_path, filename, content_html, format_rules")
+        .select(columns)
         .eq("id", versionId)
         .eq("document_type_id", documentTypeId)
         .single();
+      let { data: version, error: readError } = await read("storage_path, filename, content_html, format_rules, kinds, fingerprint, pack_mode");
+      if (readError && missingPackColumn(readError)) ({ data: version, error: readError } = await read("storage_path, filename, content_html, format_rules"));
       if (readError || !version) throw readError ?? new Error("That version no longer exists");
       const { data: userData } = await supabase.auth.getUser();
-      const { error } = await supabase.from("document_type_templates").upsert(
-        { document_type_id: documentTypeId, ...version, updated_by: userData.user?.id, updated_at: new Date().toISOString() },
-        { onConflict: "document_type_id" },
-      );
+      const { error } = await upsertStandard({
+        document_type_id: documentTypeId,
+        kinds: null,
+        fingerprint: null,
+        pack_mode: null,
+        ...(version as unknown as Record<string, unknown>),
+        updated_by: userData.user?.id,
+        updated_at: new Date().toISOString(),
+      });
       if (error) throw plainStandardError(error);
     },
     onSuccess: (_data, variables) => {

@@ -31,6 +31,7 @@ import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInst
 import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, countsWith, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, notDoneFor, undecidable, cleanRefusal, CHANGED_WHILE_DECIDING, NO_CHANGES_YET } from "./changes.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { checkFormat, formatRecord, variableLinesFor, storeUnlessRefused, openWorkingCopy } from "./formatFingerprint.js";
+import { packForBase, packPromptBlock, packMap, packTypesOf, packTypeFor, packPointer, withPackColumns, PACK_COLUMNS } from "./draftingPacks.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
 import { QUESTIONNAIRES, startQuestionnaire, readAnswer, advance, answerInstruction } from "./questionnaire.js";
 import { parseSkillZip, publishSkill, unpublishSkill, uploadInputFile, downloadOutputFile, runSkillTurn, MAX_SKILL_BYTES } from "./claudeSkills.js";
@@ -900,11 +901,17 @@ function reviewCountsLine(counts, couldNotPlace) {
 // unterminated block is closed rather than lost. A finished document is
 // stored as a Word file in AKLA house format, so it is edited from then on
 // as a Word file; only an unfinished one stays Markdown until it is complete.
+// A document of a kind the firm has a pack for (a letter, a memo, an
+// opinion…) is never set in the general house layout: it is kept as text,
+// marked with its type, and the reply says how to have it drafted in the
+// firm's own file (draftingPacks.js packTypeFor, packPointer).
 async function persistReply(supabase, p) {
   const opened = (p.text.match(/<artifact\s/g) ?? []).length;
   const closed = (p.text.match(/<\/artifact>/g) ?? []).length;
   const truncated = opened > closed;
   const modelText = truncated ? `${p.text}\n</artifact>` : p.text;
+  const packTypes = opened ? p.packTypes ?? await packTypesOf(supabase) : [];
+  const pointers = new Set();
 
   const artifactIds = [];
   let content = modelText;
@@ -916,11 +923,13 @@ async function persistReply(supabase, p) {
     const kind = /kind="([^"]+)"/.exec(attrs)?.[1] === "draft" ? "draft" : "memo";
     const title = /title="([^"]+)"/.exec(attrs)?.[1] ?? (kind === "draft" ? p.defaultTitle : "Memo");
     const markdown = match[2].trim();
+    const packType = packTypeFor({ documentTypeId: p.artifactData?.documentTypeId, title, markdown }, packTypes);
+    if (packType) pointers.add(packType.name);
     // Stopped part-way or not, the document is a Word file from the moment
     // it exists; an unfinished one says so. Only if the renderer fails twice
     // are the words kept as text, and they become Word when next opened.
     let word = null;
-    for (let attempt = 0; attempt < 2 && !word; attempt++) {
+    for (let attempt = 0; attempt < 2 && !word && !packType; attempt++) {
       try {
         word = await storeAklaWord(supabase, { markdown, title, prefix: p.prefix, threadId: p.threadId });
       } catch (err) {
@@ -935,7 +944,7 @@ async function persistReply(supabase, p) {
         kind: word ? "docx" : kind,
         title,
         content: markdown,
-        data: { ...p.artifactData, ...(word ? { ...word, sourceKind: kind } : {}), ...(truncated ? { truncated: true } : {}) },
+        data: { ...p.artifactData, ...(word ? { ...word, sourceKind: kind } : {}), ...(truncated ? { truncated: true } : {}), ...(packType ? { packTypeId: packType.id, packTypeName: packType.name } : {}) },
         created_by: p.userId,
       })
       .select("*")
@@ -951,6 +960,11 @@ async function persistReply(supabase, p) {
   // A stray tag with no partner — the model sometimes closes an artifact
   // twice — would otherwise sit in the reply as literal text.
   content = content.replace(/<\/?artifact\b[^>]*>/g, "").trim();
+  for (const name of pointers) {
+    const line = packPointer(name);
+    content += `\n\n${line}`;
+    p.send?.("delta", { text: `\n\n${line}` });
+  }
 
   // `incomplete` must not survive — it is what the client loops on.
   const { incomplete: _wasIncomplete, ...rest } = p.metadata;
@@ -1138,8 +1152,10 @@ async function handleChat(req, res) {
   // The firm's standard for this document type, if there is one: its text
   // and formatting notes for the prompt, and the .docx itself when a draft
   // is to be made by filling it in.
+  // A firm pack (draftingPacks.js) is a standard with a kinds list and a
+  // mode; read without them until the migration that adds them is applied.
   let { data: templateRow } = documentType
-    ? await supabase.from("document_type_templates").select("content_html, format_rules, storage_path, filename").eq("document_type_id", documentType.id).maybeSingle()
+    ? await withPackColumns((withPack) => supabase.from("document_type_templates").select(`content_html, format_rules, storage_path, filename${withPack ? `, ${PACK_COLUMNS}` : ""}`).eq("document_type_id", documentType.id).maybeSingle())
     : { data: null };
 
   // ---- thread + the lawyer's message, before any streaming so a failure is visible ----
@@ -1268,7 +1284,10 @@ async function handleChat(req, res) {
     // it is rather than converted to Word on the side.
     const reviewChosen = skill?.key === "review" ? rawAttachments.find((a) => a?.versionId) ?? null : null;
     const reviewOfOtherFile = !!reviewChosen && !isWordFile(reviewChosen);
-    if (latest && latest.kind !== "docx" && !d.editSource && latest.content?.trim() && !isContinuation && !reviewOfOtherFile) {
+    // A document of a kind the firm has a pack for, written as text, is never
+    // set in the general house layout: it waits to be written into the pack
+    // (persistReply, draftingPacks.js packTypeFor).
+    if (latest && latest.kind !== "docx" && !d.editSource && !d.packTypeId && latest.content?.trim() && !isContinuation && !reviewOfOtherFile) {
       try {
         const converted = await convertArtifactToWord(supabase, latest, { prefix: scopeKey, threadId });
         if (converted) {
@@ -1280,7 +1299,7 @@ async function handleChat(req, res) {
         console.error("Converting the draft to Word failed:", err);
       }
     }
-    if (latest?.kind === "draft" && skill) currentDraft = latest.content;
+    if ((latest?.kind === "draft" || d.packTypeId) && skill) currentDraft = latest.content;
     if (latest?.kind === "docx" && d.storagePath) {
       docxBase = { bucket: d.bucket ?? "ai-chat-files", storagePath: d.storagePath, fileName: d.fileName ?? "document.docx", editSource: d.editSource ?? null, savedMatterDocumentId: d.savedMatterDocumentId ?? null, savedVersionId: d.savedVersionId ?? null, savedVersion: d.savedVersion ?? null, documentTypeId: d.documentTypeId ?? null, standard: !!d.standard, revising: !!d.revising, templatePath: d.templatePath ?? null, rendered: d.rendered === "akla" || !!convertedArtifact || rendered, title: choice.root?.title ?? latest.title };
     } else if (skill?.key === "edit") {
@@ -1352,7 +1371,7 @@ async function handleChat(req, res) {
   };
 
   if (docxBase?.standard && docxBase.templatePath && docxBase.templatePath !== templateRow?.storage_path) {
-    const { data: pinned, error } = await supabase.from("document_template_versions").select("content_html, format_rules, storage_path, filename").eq("storage_path", docxBase.templatePath).eq("document_type_id", docxBase.documentTypeId).maybeSingle();
+    const { data: pinned, error } = await withPackColumns((withPack) => supabase.from("document_template_versions").select(`content_html, format_rules, storage_path, filename${withPack ? `, ${PACK_COLUMNS}` : ""}`).eq("storage_path", docxBase.templatePath).eq("document_type_id", docxBase.documentTypeId).maybeSingle());
     if (error || !pinned) return json(409, { error: "The original standard version is unavailable. Reopen a draft from the approved standard." });
     templateRow = pinned;
   }
@@ -2365,7 +2384,17 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       // A verification pass reads the whole master, not the paragraphs a
       // message happens to mention.
       const inspectQuery = guideTurn ? [message, ...guideTurn.decisions.map((d) => `${d.question.title} ${d.question.location}`)].join("\n") : message;
-      docxBase.inspection = inspectDocx(docxBase.bytes, docxBase.standard && !docxBase.revising ? { placeholders: true } : verifyAsked ? { query: message, budget: 320_000 } : { query: inspectQuery });
+      // The firm's pack this file is, or was drafted from: its kinds are what
+      // "write" uses, on the fill and on every later edit of the draft. A
+      // shell pack is shown whole (its fixed parts without a blank are where
+      // the body is written), and focused on the message only once a draft
+      // from it outgrows the listing.
+      docxBase.pack = await packForBase(supabase, docxBase, templateRow);
+      const shellFill = docxBase.standard && !docxBase.revising && docxBase.pack?.mode === "shell";
+      docxBase.inspection = inspectDocx(docxBase.bytes, shellFill ? { query: inspectQuery } : docxBase.standard && !docxBase.revising ? { placeholders: true } : verifyAsked ? { query: message, budget: 320_000 } : { query: inspectQuery });
+      // In a shell pack, which blank paragraphs are fixed parts and which
+      // are examples to remove once the body is written.
+      docxBase.packMap = docxBase.pack ? packMap(docxBase.bytes, docxBase.pack) : "";
       send("notice", { text: `Working on ${docxBase.fileName} (${docxBase.inspection.paragraphCount} paragraphs).` });
     }
 
@@ -2535,9 +2564,16 @@ ${ARTIFACT_RULES}`;
       const src = docxBase.editSource ?? {};
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
       if (docxBase.standard) {
-        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\n${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}\n\n${OPS_PROTOCOL}\n\n${FILL_DIRECT_NOTE}`;
+        // A firm pack (draftingPacks.js): its mode's instructions and the
+        // kinds it writes with, beside the protocol; a document of this kind
+        // written as text earlier in the chat is the body's starting point.
+        const packBlock = docxBase.pack ? `\n\n${packPromptBlock(docxBase.pack, { editing: docxBase.bucket !== "precedent-library" })}${docxBase.packMap ? `\n${docxBase.packMap}` : ""}` : "";
+        const earlierText = docxBase.pack && currentDraft?.trim()
+          ? `\n\nTEXT OF THIS DOCUMENT WRITTEN EARLIER IN THIS CHAT, to be written into the pack: keep its substance and set it in the pack's kinds:\n${currentDraft.slice(0, MAX_EDIT_CHARS)}`
+          : "";
+        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\n${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}${packBlock}${earlierText}\n\n${OPS_PROTOCOL}\n\n${FILL_DIRECT_NOTE}`;
       } else {
-        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the lawyer means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again — never say a document cannot be reached.` : ""}${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy title banner, numbered section headings with a rule beneath, the unindented numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}\n\n${OPS_PROTOCOL}`;
+        skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the lawyer means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again — never say a document cannot be reached.` : ""}${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy title banner, numbered section headings with a rule beneath, the unindented numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}${docxBase.pack ? `\n\n${packPromptBlock(docxBase.pack, { editing: true })}${docxBase.packMap ? `\n${docxBase.packMap}` : ""}` : ""}\n\n${OPS_PROTOCOL}`;
       }
     } else if (skill?.key === "draft" && documentType) {
       const reqFields = Array.isArray(documentType.required_fields) && documentType.required_fields.length
@@ -2787,7 +2823,8 @@ You answer the way a careful senior associate would: precise, conservative, and 
         // A comment on a paragraph this reply also rewrites may quote either
         // wording; it is checked against the paragraph as it stood.
         const aligned = alignCommentExpectations(ops, docxBase.inspection.byRef);
-        const out = await applyDocxOps(docxBase.bytes, aligned, docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id) });
+        // A draft from a firm pack, or an edit of one, writes in the pack's kinds.
+        const out = await applyDocxOps(docxBase.bytes, aligned, docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id), ...(docxBase.pack ? { kinds: docxBase.pack.kinds } : {}) });
         // A draft from the firm's standard is a new document: the facts go
         // straight in, with nothing for the lawyer to accept one by one.
         // Comments stay; so do any revisions the standard itself carried.

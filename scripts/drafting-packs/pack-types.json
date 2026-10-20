@@ -1,0 +1,17 @@
+{
+  "_comment": "Which document type each wave-1 pack is the Word standard for. Pack names are the keys of packs-config.json (which lives with the packs, never here: it holds client facts). The Concession Agreement and RFP standards are never touched by upload_packs.mjs.",
+  "packs": {
+    "letters": "Letter / Notice",
+    "memo": "Research Memo",
+    "framework": "Framework Agreement",
+    "ie-agreement": "Independent Engineer's Agreement",
+    "ia-agreement": "Independent Auditors' Agreement",
+    "opinion": "Legal Opinion",
+    "proposal": "Client Proposal Letter",
+    "amendment": "Amendment Agreement",
+    "escrow": "Escrow Agreement",
+    "board-resolution": "Board Resolution",
+    "consent": "Certificate / Consent / NOC",
+    "minutes": "Meeting Minutes"
+  }
+}

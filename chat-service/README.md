@@ -127,6 +127,31 @@ is kept on the stored row as `data.formatCheck` (status, base, findings,
 mode) and on the reply's metadata. `formatFingerprint.js` must stay in all
 three lists in `deploy.sh`.
 
+## Drafting through the firm's packs
+
+A pack (`scripts/drafting-packs/`) is a type's Word standard with three
+more columns on its `document_type_templates` row and on each filing in
+`document_template_versions` (migration `20261020140000_drafting_packs.sql`):
+`kinds` (the paragraph kinds `docxAgent.js` writes with), `fingerprint` and
+`pack_mode` (`form` or `shell`). `draftingPacks.js` holds what the Hub and
+the connector share. On a turn on a Word file, `packForBase` finds the pack
+the file is or was drafted from (the standard's row, or the filing by its
+storage path for an older draft), its kinds go to `applyDocxOps` on every
+fill and edit (so `write`, `repeat_block`, `add_row` and `remove_block`
+work), and the prompt shows `packPromptBlock` (the mode's instructions and
+"KINDS YOU CAN WRITE") and, for a shell, `packMap` (which blank paragraph is
+a fixed part, which an example) beside `OPS_PROTOCOL`. A shell pack is
+listed whole. The format check runs as before. A request names its type by
+its everyday name too (`chatState.js TYPE_ALIASES`: "draft a letter to
+the PD", "a memo on…", "the minutes of…"), so it reaches the fill path, not
+the Markdown draft. `persistReply` never house-renders a document of a pack
+type that was written as text anyway: it is kept as text, marked
+`packTypeId`, not converted on the next turn, and the reply says to ask
+"Draft this as a <type> from the firm's standard" (that turn writes the
+text into the pack). The pack columns are read with `withPackColumns`, so
+the service works before the migration is applied (no type then has a
+pack). `draftingPacks.js` is in all three lists in `deploy.sh`.
+
 ## Review writes into the working file
 
 Review no longer rebuilds a file from the saved version it reviewed. It runs

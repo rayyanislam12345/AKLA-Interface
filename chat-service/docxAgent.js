@@ -2453,4 +2453,4 @@ export function describeResults(results) {
 
 // The pieces other modules build on: reading and writing the package,
 // walking its XML, and the words a review suggestion quotes.
-export { readZip, writeZip, validateXml, child, attr, STORY_PART, PARAGRAPH, patchEmptyCells, visibleText, suggestionParagraphs, xmlParts };
+export { readZip, writeZip, validateXml, child, attr, STORY_PART, PARAGRAPH, patchEmptyCells, visibleText, suggestionParagraphs, xmlParts, enumerateParagraphs, headingStyles };

@@ -39,6 +39,7 @@
 import { z } from "zod";
 import { inspectDocx, OPS_PROTOCOL } from "../../docxAgent.js";
 import { FILL_INSTRUCTIONS, FILL_DIRECT_NOTE } from "../../firmRules.js";
+import { packOf, packPromptBlock, packMap, withPackColumns, PACK_COLUMNS } from "../../draftingPacks.js";
 import { MAX_RESULT_CHARS, str, uuid, when } from "../tools.js";
 import { openStandard } from "./standards.js";
 
@@ -63,6 +64,13 @@ const RANGE_RE = /^\s*¶?\s*(\d{1,7})\s*(?:[-–—]\s*¶?\s*(\d{1,7}))?\s*$/;
 /** What claude.ai must do with the listing instead of the Hub chat's fenced block. */
 export const CONNECTOR_FILL_NOTE = `IN CLAUDE.AI: do not end your reply with the fenced block. The order is: read the project's documents (search_project_documents, read_document) and, when this type has a drafting questionnaire, call get_drafting_decisions and ask the lawyer each decision in prose, one at a time, waiting for the answer; only then call fill_standard_to_project with the operations as its "ops" argument (op, p, expected, text, why), the project, a title and this reply's templateHash. The sentence "Do not stop to ask the lawyer before filling in" in the fill instructions is about the fill call itself, once the decisions are answered and the project's documents are read; it does not cover the drafting decisions. The {"read": …} protocol is not available here: a paragraph behind a "… not shown …" line (each names the ¶ numbers it hides) is read by calling open_standard_for_filling with paragraphs set to a range such as "100-140" (at most ${MAX_RANGE} at a time); from pages this listing only and never reaches a hidden paragraph. Only a paragraph you have seen with its ¶ number can take an operation, and expected must be its exact text. Only "replace" and "comment" fill a standard; use insert_after and delete only where the standard's own wording calls for a block to be added or removed (a bracketed alternative to drop, an optional block to keep or remove), reading the paragraphs first. At most 300 changes a call; file the rest as the next version of the same document. If the Hub says the standard was replaced (a different templateHash), open it again and redo the fill against the new listing.`;
 
+/**
+ * What claude.ai is told on top of CONNECTOR_FILL_NOTE when the standard is
+ * one of the firm's packs (draftingPacks.js): the four block operations go
+ * through fill_standard_to_project too.
+ */
+export const CONNECTOR_PACK_NOTE = `IN CLAUDE.AI, FOR THIS PACK: fill_standard_to_project also takes "write", "repeat_block", "add_row" and "remove_block", in the shape the protocol above shows (after, from, to, table, like_row, blocks, cells), each with "expected" the exact text of the paragraph it is checked against (after for write, from for repeat_block and remove_block, like_row for add_row). The note above's "Only replace and comment fill a standard" does not apply to a pack. Send the fills, the body and the removals in one call.`;
+
 export const isWordFile = (row) => /\.docx$/i.test(row?.storage_path ?? "");
 
 // The cache is shared by every module in the process, keyed by storage path.
@@ -83,12 +91,14 @@ export async function standardRows(supabase, documentTypeId) {
   if (typeError) throw new Error(`Could not read the document type: ${typeError.message}`);
   if (!type) throw new Error("There is no document type with that id. list_document_types gives them.");
   // Only what locates the file: content_html is the whole standard as HTML
-  // for a type that has a Word file too, megabytes nothing here reads.
-  const { data: template, error: templateError } = await supabase
+  // for a type that has a Word file too, megabytes nothing here reads. A
+  // firm pack's kinds and mode come too (read without them until the
+  // migration that adds them is applied).
+  const { data: template, error: templateError } = await withPackColumns((withPack) => supabase
     .from("document_type_templates")
-    .select("format_rules, storage_path, filename, updated_at")
+    .select(`format_rules, storage_path, filename, updated_at${withPack ? `, ${PACK_COLUMNS}` : ""}`)
     .eq("document_type_id", type.id)
-    .maybeSingle();
+    .maybeSingle());
   if (templateError) throw new Error(`Could not read the standard: ${templateError.message}`);
   if (!template || !isWordFile(template)) return { type, template: template ?? null, snapshot: null };
   // The immutable filing of this very file, when the Hub has one.
@@ -123,13 +133,15 @@ function partsOf(inspection) {
  * their ¶ numbers. No character cap: the pages carry the length. Returns
  * { listing, shown }.
  */
-export function fillListing(inspection) {
+export function fillListing(inspection, { all = false } = {}) {
   const blocks = [];
   let shown = 0;
   for (const [part, refs] of partsOf(inspection)) {
     const keep = new Set();
     refs.forEach((r, i) => {
-      if (r.headingLevel) keep.add(i);
+      // A shell pack is small and every paragraph of it is a fixed part or
+      // an example: all of it is listed.
+      if (all || r.headingLevel) keep.add(i);
       if (PLACEHOLDER.test(r.exactText)) for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < refs.length) keep.add(k);
     });
     const lines = [];
@@ -208,9 +220,10 @@ export function rangeListing(inspection, { from, to }, budget) {
 
 /**
  * The reader of a type's standard: `load(documentTypeId)` gives
- * { type, template, snapshot, bytes, hash, inspection, listing, shown,
+ * { type, template, snapshot, pack, bytes, hash, inspection, listing, shown,
  * blanks } — `template` null when the type has none, the rest null when it
- * is not a Word file; throws a plain sentence when the type does not exist
+ * is not a Word file, `pack` the firm pack's { kinds, mode } or null
+ * (a shell pack's listing is every paragraph); throws a plain sentence when the type does not exist
  * or the file cannot be read. `inspection` is inspectDocx(bytes, { budget:
  * Infinity }), every paragraph with the ¶ numbers 3.2 resolves against;
  * `listing` is fillListing's composition of it.
@@ -231,7 +244,8 @@ export function createStandardLoader({ supabase, now = () => Date.now() }) {
 
   async function load(documentTypeId) {
     const { type, template, snapshot } = await standardRows(supabase, documentTypeId);
-    if (!template || !isWordFile(template)) return { type, template, snapshot: null, bytes: null, hash: null, inspection: null, listing: null, shown: 0, blanks: null };
+    if (!template || !isWordFile(template)) return { type, template, snapshot: null, pack: null, bytes: null, hash: null, inspection: null, listing: null, shown: 0, blanks: null };
+    const pack = packOf(template);
     let hit = cached(template.storage_path);
     if (!hit) {
       const bytes = await download(template.storage_path);
@@ -239,12 +253,12 @@ export function createStandardLoader({ supabase, now = () => Date.now() }) {
       try { inspection = inspectDocx(bytes, { budget: Infinity }); } catch (err) {
         throw new Error(`The standard's file ${template.filename ?? template.storage_path} could not be read as a Word document: ${err?.message ?? err}.`);
       }
-      const { listing, shown } = fillListing(inspection);
+      const { listing, shown } = fillListing(inspection, { all: pack?.mode === "shell" });
       hit = { at: now(), bytes, hash: inspection.hash, inspection, listing, shown, blanks: blankCounts(inspection) };
       cache.set(template.storage_path, hit);
       while (cache.size > STANDARD_CACHE_MAX) cache.delete(cache.keys().next().value);
     }
-    return { type, template, snapshot, bytes: hit.bytes, hash: hit.hash, inspection: hit.inspection, listing: hit.listing, shown: hit.shown, blanks: hit.blanks };
+    return { type, template, snapshot, pack, bytes: hit.bytes, hash: hit.hash, inspection: hit.inspection, listing: hit.listing, shown: hit.shown, blanks: hit.blanks };
   }
 
   return { load };
@@ -272,7 +286,7 @@ export default ({ supabase, hubUrl, now }) => {
     {
       name: "open_standard_for_filling",
       title: "Open a firm standard for filling",
-      description: `The firm's Word standard for a document type, opened for a fill: every paragraph with a blank in it ([●], [•], [____], a [bracketed] value), numbered ¶n with its exact text, every heading and the paragraphs around each blank; the rest of the standard as gaps naming the ¶ numbers they hide, any of which paragraphs: "from-to" reads (at most ${MAX_RANGE} at a time) so a change inside a gap can quote the paragraph exactly. With the Hub's fill instructions, the operations protocol, and a templateHash that fill_standard_to_project must echo (a standard replaced in between is refused). The standard itself is never changed. Call list_document_types for the id; read_standard reads the whole text, get_drafting_decisions the type's questions. Long standards come in pages: start at from: 0 (the instructions are on that page) and continue where the reply says.`,
+      description: `The firm's Word standard for a document type, opened for a fill: every paragraph with a blank in it ([●], [•], [____], a [bracketed] value), numbered ¶n with its exact text, every heading and the paragraphs around each blank; the rest of the standard as gaps naming the ¶ numbers they hide, any of which paragraphs: "from-to" reads (at most ${MAX_RANGE} at a time) so a change inside a gap can quote the paragraph exactly. With the Hub's fill instructions, the operations protocol, and a templateHash that fill_standard_to_project must echo (a standard replaced in between is refused). When the standard is one of the firm's packs (list_document_types says so), the reply also gives the pack's paragraph kinds and how to write the body or a new clause with them. The standard itself is never changed. Call list_document_types for the id; read_standard reads the whole text, get_drafting_decisions the type's questions. Long standards come in pages: start at from: 0 (the instructions are on that page) and continue where the reply says.`,
       inputSchema: {
         documentTypeId: z.string().describe("The document type's id, from list_document_types."),
         from: z.number().int().min(0).optional().describe("Character offset into the listing to continue from, as the previous page gave it. Default 0, the first page, which carries the instructions."),
@@ -284,7 +298,7 @@ export default ({ supabase, hubUrl, now }) => {
         const s = await loader.load(id);
         if (!s.template) return `${s.type.name} has no standard yet, so there is nothing to fill: draft it from the firm's rules (get_firm_rules) and precedents (search_precedents) instead. list_document_types shows which types have a Word standard.\n${openStandard(s.type.id, hubUrl)}`;
         if (!s.bytes) return `${s.type.name}'s standard is text only (no Word file), so there is nothing to fill: read_standard gives its text to draft from. list_document_types shows which types have a Word standard.\n${openStandard(s.type.id, hubUrl)}`;
-        const { type, template, snapshot, hash, inspection, listing, shown, blanks } = s;
+        const { type, template, snapshot, pack, hash, inspection, listing, shown, blanks } = s;
         const total = inspection.paragraphCount;
         const fileName = template.filename ?? template.storage_path;
 
@@ -315,7 +329,7 @@ export default ({ supabase, hubUrl, now }) => {
           ? `all ${n(total)} paragraphs are listed`
           : `${n(shown)} of the ${n(total)} paragraphs are listed (the blanks, every heading and the paragraphs around each blank); the rest are gaps marked "not shown" with their ¶ numbers, which paragraphs: "from-to" reads`;
         const head = [
-          `${type.name}: the firm's Word standard ${fileName}, as stored ${when(template.updated_at)} — ${n(total)} paragraphs, ${n(blanks.body)} of them with a blank to fill, every one listed with its ¶ number${blanks.notes ? `; ${n(blanks.notes)} more bracketed paragraphs are the firm's drafting notes in the footnotes (listed under their PART line for context, not slots to fill: the lawyer removes them in Word before circulation)` : ""}. ${coverage[0].toUpperCase()}${coverage.slice(1)}.`,
+          `${type.name}: the firm's Word standard ${fileName}, as stored ${when(template.updated_at)} — ${n(total)} paragraphs, ${n(blanks.body)} of them with a blank to fill, every one listed with its ¶ number${blanks.notes ? `; ${n(blanks.notes)} more bracketed paragraphs are the firm's drafting notes in the footnotes (listed under their PART line for context, not slots to fill: the lawyer removes them in Word before circulation)` : ""}. ${coverage[0].toUpperCase()}${coverage.slice(1)}.${pack ? ` This standard is the firm's ${pack.mode} pack for ${type.name}: ${pack.mode === "shell" ? "its fixed parts are filled and its body is written in the pack's paragraph kinds" : "its blanks are filled and a new clause is written in the pack's clause kinds"}, as the instructions below say.` : ""}`,
           `templateHash: ${hash}`,
           snapshot ? `Standard snapshot: ${snapshot.id} (filed ${when(snapshot.created_at)}); the Hub keeps this filing of the standard whole even if it is later replaced.` : "Standard snapshot: none recorded for this file.",
           openStandard(type.id, hubUrl),
@@ -323,7 +337,15 @@ export default ({ supabase, hubUrl, now }) => {
         if (from === 0) {
           if (type.questionnaire) head.push(`This type has a drafting questionnaire: before any fill, call get_drafting_decisions and ask the lawyer each decision in prose, one at a time; the fill instructions' "do not stop to ask" applies to the fill call once the decisions are answered.`);
           const rules = str(template.format_rules, MAX_RULES_CHARS);
-          head.push("", `FILL INSTRUCTIONS (the Hub's own, for a draft from this standard):\n${FILL_INSTRUCTIONS}${rules ? `\n\nHow the standard is formatted: ${rules}` : ""}`, "", OPS_PROTOCOL, "", FILL_DIRECT_NOTE, "", CONNECTOR_FILL_NOTE);
+          head.push("", `FILL INSTRUCTIONS (the Hub's own, for a draft from this standard):\n${FILL_INSTRUCTIONS}${rules ? `\n\nHow the standard is formatted: ${rules}` : ""}`);
+          // A firm pack: its mode's instructions and its kinds, the words the
+          // Hub's own fill turn shows beside the protocol.
+          if (pack) {
+            const map = packMap(s.bytes, pack);
+            head.push("", `${packPromptBlock(pack)}${map ? `\n${map}` : ""}`);
+          }
+          head.push("", OPS_PROTOCOL, "", FILL_DIRECT_NOTE, "", CONNECTOR_FILL_NOTE);
+          if (pack) head.push("", CONNECTOR_PACK_NOTE);
         } else {
           head.push("The fill instructions and the operations protocol are on the first page (from: 0).");
         }
