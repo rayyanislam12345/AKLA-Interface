@@ -34,6 +34,27 @@ What it does, and all it does:
   just opened or changed page, otherwise as a one-line "Claude mentioned a
   document. Show it." notice, so nothing you are doing in the panel is lost
   under you.
+- **Ask Claude about a passage.** Highlight words in a Word document in the
+  drawer and a small **Ask Claude about this** button appears by them (Tab
+  reaches it too). Click it and the chat's message box gets the passage,
+  quoted, under a line naming the document, version, file, project and
+  version id:
+
+  ```
+  In "Share Purchase Agreement" v3 (SPA [AKLA].docx), project Karachi Port — versionId: 0c1f…
+  > 14.2 The Seller shall indemnify the Buyer
+  > against all Losses arising from a Breach.
+  ```
+
+  with the cursor on a fresh line below it, after anything you had already
+  typed, so you only add what you want ("tighten this", "make it mutual")
+  and send. Nothing is ever sent for you. Passages over 4,000 characters are
+  cut, and the message says so. The drawer's notice line says "Added to your
+  message"; if the chat's box would not take it, the text is copied instead
+  and a note by the box says "Copied: paste it into the chat". Works in
+  Chrome's side panel too (it goes to the active claude.ai tab in that
+  window). The button never shows in the ordinary Hub, only in the
+  companion.
 - **Chat colours.** Looks for the claude.ai chat itself: Claude (no change),
   AKLA navy, Sky blue, Rose pink, Warm paper, Slate, Forest and High
   contrast, each in light and dark. Pick one in the panel bar or the settings page; it
@@ -55,7 +76,8 @@ note when that has happened (`theme.js` checks a few tokens after load).
 
 Privacy: the extension sends nothing anywhere. It reads links on claude.ai
 pages, talks only to its own side panel, and loads the Hub in a frame exactly
-as a tab would. Settings (Hub address, Follow new links) live in your Chrome
+as a tab would. The only thing it writes on claude.ai is a passage you asked
+for, into your own message box, unsent. Settings (Hub address, Follow new links) live in your Chrome
 profile's extension storage. No analytics, no servers of its own.
 
 ## Install
@@ -132,6 +154,33 @@ Right-click the toolbar button > Options (or the Details page):
   means the Hub's `frame-ancestors` header does not name this extension's
   id (see Install); use Open in tab until it does.
 - Each Chrome window's panel follows only the claude.ai tab in that window.
+- "Ask Claude about this" works on Word files drawn in the page. A PDF is
+  shown by the browser's own viewer in a frame the Hub cannot read, so
+  there it does not appear; copy from the PDF instead.
+- The passage goes in as a paste, the way claude.ai expects text to arrive.
+  If claude.ai turns a long paste into an attachment, the extension does
+  not type it a second time; it copies it and says so, and you may find it
+  already attached.
+
+## How the message box is found and filled (composer.js)
+
+Without any claude.ai class names. The box is, first that fits: the
+editable element with focus; the one that last had focus; the last visible
+contenteditable (or, failing that, textarea) on the page that says what it
+is for (`role="textbox"`, or an `aria-label`, placeholder or
+`data-placeholder` naming a prompt, message, reply, chat or Claude); else
+the last visible contenteditable or textarea. The extension's own elements
+are never chosen.
+
+The text goes after what is already typed, which is kept: first as a
+synthetic paste (a `paste` event carrying `text/plain`, which ProseMirror,
+claude.ai's editor, handles as a paste), checked by reading the box back;
+if nothing handled the paste, by `execCommand("insertText")` line by line
+with `insertParagraph` between lines, all in one go (ProseMirror reads a
+lone new paragraph as the Enter key, and Enter sends, so a new line is
+never inserted on its own); failing both, the clipboard and a note by the
+box. A textarea is typed into directly. The caret ends after the text and
+the box keeps focus. No key is pressed and no button clicked.
 
 ## How the panel opens
 
@@ -152,6 +201,11 @@ in the toolbar"; the address is already stored, so the toolbar button
   claude.ai only, so the drawer can frame it.
 - `links.js`: pure link finding and address tidying, shared by the content
   script and the panel, tested under node.
+- `passage.js`: pure; turns the Hub's `hub:selection` message into the
+  quoted text for the chat (shared by the panel and the tests).
+- `composer.js`: runs on claude.ai before the drawer and link scripts;
+  finds the chat's message box and puts text at its end without sending
+  (`HubComposer.insert`, and `composer:insert` from the service worker).
 - `content.js` + `content.css`: runs on claude.ai; buttons, newest-link
   tracking. MutationObserver, one scan at most every 400 ms, no scan of the
   prompt box or other editable areas.
@@ -160,15 +214,22 @@ in the toolbar"; the address is already stored, so the toolbar button
   slide-over layout, and the per-conversation memory.
 - `background.js`: service worker; the toolbar button (toggles the drawer,
   or opens the side panel in the side view); opens the side panel, passes
-  addresses on.
+  addresses on; hands a passage from the side panel to the active claude.ai
+  tab in its window (only from the extension's own panel page).
   Only an address on the configured Hub origin is stored or passed (the
   panel checks again before it sets its frame).
 - `panel.html/js/css`: the panel, in the drawer (`?mode=pane`) and in
-  Chrome's side panel: one bar, a menu, the Hub's frame.
+  Chrome's side panel: one bar, a menu, the Hub's frame. Takes
+  `hub:selection` only from the Hub's frame on the Hub's origin, builds the
+  text with `passage.js`, and sends it to `pane.js` (drawer) or the service
+  worker (side panel); shows the outcome in its notice line.
 - `options.html/js`: settings.
 - `icons/`: navy square with an H, 16/32/48/128.
 - `scripts/package.sh`: zip for the store.
 - `tests/links.test.js`: `node --test hub-companion/tests/links.test.js`.
+- `tests/passage.test.js`: `node --test hub-companion/tests/passage.test.js`
+  checks the quoted message: its heading, the `> ` lines, tidying, the
+  4,000-character cut.
 - `tests/themes.test.js`: `node --test hub-companion/tests/themes.test.js`
   checks every theme has both modes, reads at 7:1 or better, and that the
   generated CSS sets the tokens claude.ai uses and leaves the rest alone.
@@ -178,6 +239,15 @@ in the toolbar"; the address is already stored, so the toolbar button
   service worker starts under the expected id (`tests/expected-id.txt`),
   opens the panel and options pages, and runs the content script on a
   fixture page.
+- `tests/composer-check.mjs`: `node hub-companion/tests/composer-check.mjs`
+  loads the extension the same way and answers `https://claude.ai/` with a
+  fixture holding a real ProseMirror editor (from the repository's
+  `node_modules`) where Enter sends. It checks the paste path, the
+  line-by-line path, a textarea and the clipboard fallback (each keeps the
+  draft and sends nothing), then the whole drawer route (a fake Hub in the
+  drawer posts `hub:selection`; the passage lands in the box with "Added to
+  your message" in the drawer) and the side panel's route through the
+  service worker.
 
 ## Key
 

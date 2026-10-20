@@ -8,6 +8,10 @@
 // no header of its own: it posts its address and name here instead, and the
 // bar shows them. The chat's colour theme tints the bar and is passed to the
 // Hub, so the chat and the document wear the same colours.
+// A passage highlighted in a Hub document ("Ask Claude about this", posted as
+// hub:selection) is quoted into the chat's message box, unsent: in the drawer
+// through pane.js, in the side panel through the service worker; composer.js
+// on claude.ai does the typing.
 (function () {
   "use strict";
 
@@ -65,7 +69,13 @@
   function updateBack() { backBtn.disabled = trail.length === 0; }
 
   // ---- notices ----
-  function clearNotice() { notice.textContent = ""; notice.hidden = true; }
+  var flashTimer = null;
+  function clearNotice() {
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = null;
+    notice.textContent = "";
+    notice.hidden = true;
+  }
   function say(text, url) {
     notice.textContent = "";
     if (!text) return clearNotice();
@@ -79,6 +89,43 @@
       notice.appendChild(a);
     }
     notice.hidden = false;
+  }
+  // A line that goes by itself after a few seconds, unless something else
+  // has taken its place.
+  function flash(text) {
+    say(text);
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () {
+      flashTimer = null;
+      if (notice.textContent === text) clearNotice();
+    }, 5000);
+  }
+
+  // ---- a passage for the chat's message box ----
+  // composer.js answers { ok, how }: ok when the text is in the box (how is
+  // "paste" or "typed"); otherwise how is "clipboard" (copied for the lawyer
+  // to paste) or "none".
+  function inserted(result) {
+    if (result && result.ok) return flash("Added to your message. Say what you want changed, then send.");
+    if (result && result.how === "clipboard") return flash("Copied: paste it into the chat.");
+    flash("Could not reach the chat's message box. Open the chat and try again.");
+  }
+  function askAbout(d) {
+    var text = HubPassage.selectionMessage(d);
+    if (!text) return;
+    if (PANE) {
+      window.parent.postMessage({ source: "hub-companion-pane", type: "insert", text: text }, PAGE_ORIGIN);
+      return;
+    }
+    // The side panel: the service worker finds this window's claude.ai tab.
+    try {
+      chrome.runtime.sendMessage({ type: "composer:request", text: text, windowId: windowId }, function (reply) {
+        void chrome.runtime.lastError;
+        inserted(reply || { ok: false, how: "none" });
+      });
+    } catch (e) {
+      inserted({ ok: false, how: "none" });
+    }
   }
 
   // ---- showing a page ----
@@ -299,6 +346,7 @@
       // A page outside the workspace (the sign-in page) names itself only.
       if (d.type === "hub:title" && typeof d.title === "string" && d.title) setPlace(currentUrl || HubLinks.homeUrl(settings.hubOrigin), d.title);
       if (d.type === "hub:busy") busy = d.busy === true;
+      if (d.type === "hub:selection") askAbout(d);
       return;
     }
     // From the claude.ai page around the drawer.
@@ -308,6 +356,8 @@
         else onShow(d);
       } else if (d.type === "idle") {
         idle();
+      } else if (d.type === "inserted") {
+        inserted(d);
       }
     }
   });

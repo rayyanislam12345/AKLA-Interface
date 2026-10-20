@@ -7,6 +7,8 @@
 // Each conversation remembers the last Hub page shown for it, in the tab's
 // own sessionStorage, so switching chats switches the document.
 // content.js drives it through the HubPane global (same content-script world).
+// A passage the panel asks to quote in the chat ("insert") goes to
+// composer.js (HubComposer, same world), and the outcome back to the panel.
 (function () {
   "use strict";
   if (typeof HubLinks === "undefined") return;
@@ -25,6 +27,7 @@
   var CONV_KEY = "hub-companion:conversations";
   var EXT_ORIGIN = "chrome-extension://" + api.runtime.id;
   var PAGE_ORIGIN = location.origin;
+  var MAX_INSERT = 8000; // characters: a quoted passage (4,000) with its heading and "> " marks
 
   var settings = { hubOrigin: HubLinks.DEFAULT_ORIGIN, width: DEFAULT_W, mode: "push" };
   var host = null;
@@ -188,6 +191,11 @@
     } else if (d.type === "location" && typeof d.url === "string") {
       var url = HubLinks.normaliseHubUrl(d.url, settings.hubOrigin);
       if (url) rememberFor(url);
+    } else if (d.type === "insert" && typeof d.text === "string" && d.text.length <= MAX_INSERT) {
+      if (typeof window.HubComposer === "undefined") return post({ type: "inserted", ok: false, how: "none" });
+      window.HubComposer.insert(d.text).then(function (result) {
+        post({ type: "inserted", ok: !!(result && result.ok), how: result && result.how });
+      });
     }
   });
 

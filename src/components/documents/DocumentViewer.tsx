@@ -10,6 +10,7 @@ import { sortVersions, versionOptionLabel, type PreviewVersion } from "./preview
 import { VersionChecksPanel } from "./VersionChecksPanel";
 import { VersionChangesPanel } from "./VersionChangesPanel";
 import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
+import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutSelection";
 
 // Look at a project document without downloading it: Word files are drawn
 // in the page, PDFs and images shown as they are, anything else offered as a
@@ -20,6 +21,11 @@ import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
 // words and figures disagree, terms, numbering) and What changed (this
 // version against the one before, clause by clause), both written by the
 // server when it reads the version.
+//
+// In the companion's drawer (the Hub beside a claude.ai chat) the caller
+// passes `companionSource`, the version's name and id, and highlighting a
+// passage of a Word file offers "Ask Claude about this", which puts the
+// passage in the chat's message box.
 
 type Tab = "document" | "checks" | "changes";
 const CHECKABLE_EXTENSIONS = ["docx", "pdf", "txt", "md"];
@@ -54,11 +60,14 @@ export interface DocumentViewerProps {
   /** The header's padding; the sheet leaves room for its close button. */
   headerClassName?: string;
   className?: string;
+  /** Only in the companion's drawer: the version on show, so a highlighted passage can be handed to the chat. */
+  companionSource?: CompanionSource;
 }
 
-export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className }: DocumentViewerProps) {
+export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className, companionSource }: DocumentViewerProps) {
   const [state, setState] = useState<{ loading: boolean; error: string | null; url: string | null }>({ loading: false, error: null, url: null });
   const docxRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("document");
 
   const versions = sortVersions(given);
@@ -185,7 +194,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
       )}
 
       {/* Kept mounted on the other tabs so the drawn Word file survives a tab switch. */}
-      <div className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${tab === "document" || !checkable ? "" : " hidden"}`}>
+      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${tab === "document" || !checkable ? "" : " hidden"}`}>
         {state.loading && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />Opening…
@@ -199,6 +208,10 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
         )}
         {/* docx-preview writes the Word page margins (an inch each side) as inline padding on each section; below the sm breakpoint (a phone, or the companion's side panel) that would leave about 150px for the text, so the margins are overridden there. */}
         {kind === "docx" && <div ref={docxRef} className="min-h-full [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-2 sm:[&_.docx-wrapper]:p-6 max-sm:[&_section.docx]:!px-3 max-sm:[&_section.docx]:!py-4" />}
+        {/* Straight after the drawn file, so Tab from a selection reaches it. */}
+        {kind === "docx" && companionSource && !state.loading && !state.error && (
+          <AskClaudeAboutSelection contentRef={docxRef} scrollRef={previewRef} source={companionSource} />
+        )}
         {kind === "pdf" && state.url && (
           <iframe src={state.url} title={doc.title} className="h-full w-full border-0 bg-background" />
         )}

@@ -159,6 +159,11 @@ function VersionWindow({ versionId, onClose, onVersionChange, onAsk, onEdit }: E
         versionId={shownId}
         onVersionChange={(id) => (onVersionChange ? onVersionChange(id) : setPicked(id))}
         onDownload={download}
+        companionSource={
+          companion
+            ? { title: detail.document.title, versionId: shown.id, versionNumber: shown.version_number, fileName: shown.file_name, projectName: detail.matter?.name }
+            : undefined
+        }
         headerClassName="px-3 py-2.5"
         heading={
           <div className="flex items-start gap-2">

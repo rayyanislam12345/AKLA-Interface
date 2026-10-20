@@ -102,6 +102,11 @@ export default function AiDocumentPage() {
           versionId={detail.version.id}
           onVersionChange={(id) => navigate(`/ai/d/${id}`, { replace: true })}
           onDownload={download}
+          companionSource={
+            companion
+              ? { title: detail.document.title, versionId: detail.version.id, versionNumber: detail.version.version_number, fileName: detail.version.file_name, projectName: detail.matter?.name }
+              : undefined
+          }
           headerClassName={embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
           heading={
             <p className="break-words text-xs text-muted-foreground" title={detail.version.file_name ?? undefined}>

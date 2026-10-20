@@ -1,8 +1,10 @@
-// Service worker. Three jobs: the toolbar button (the drawer or the side
+// Service worker. Four jobs: the toolbar button (the drawer or the side
 // panel, by the "view" setting); in the side view, open the side panel when
-// an "Open beside" button is clicked on claude.ai; and pass the newest Hub
-// link on to the side panel so it can follow the conversation. Nothing is
-// sent outside the browser.
+// an "Open beside" button is clicked on claude.ai; pass the newest Hub link
+// on to the side panel so it can follow the conversation; and hand a passage
+// the side panel wants quoted to the claude.ai tab in its window, whose
+// composer.js puts it in the message box. Nothing is sent outside the
+// browser.
 //
 // chrome.sidePanel.open() may only run in response to a user action. Chrome's
 // documentation counts "a user interaction on an extension page or content
@@ -13,6 +15,11 @@
 // a hint to use the toolbar button, which opens the panel on the remembered
 // address (openPanelOnActionClick below).
 importScripts("links.js");
+
+// theme.js (a content script) records in session storage whether claude.ai
+// still has the colour tokens the themes set; content scripts may only use
+// session storage once the worker opens it to them.
+chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" }).catch(() => {});
 
 // Where the Hub shows: "page" (the drawer inside the claude.ai tab, pane.js;
 // the default) or "side" (Chrome's side panel). In the side view the toolbar
@@ -67,7 +74,28 @@ function tellPanel(url, auto, windowId) {
   chrome.runtime.sendMessage({ type: "show", url, auto, windowId }).catch(() => {});
 }
 
+// The side panel asks for a passage to be put in the chat's message box
+// (never sent). Only our own panel page may ask, and only the active
+// claude.ai tab of that panel's window receives it.
+const MAX_INSERT = 8000;
+function insertIntoChat(message, sender, sendResponse) {
+  if (sender.id !== chrome.runtime.id || sender.tab || !sender.url || !sender.url.startsWith(chrome.runtime.getURL("panel.html"))) return false;
+  if (typeof message.text !== "string" || !message.text || message.text.length > MAX_INSERT) return false;
+  const query = typeof message.windowId === "number" ? { active: true, windowId: message.windowId } : { active: true, lastFocusedWindow: true };
+  chrome.tabs.query(query, (tabs) => {
+    void chrome.runtime.lastError;
+    const tab = (tabs || []).find((t) => t.id != null && t.url && t.url.startsWith("https://claude.ai/"));
+    if (!tab) return sendResponse({ ok: false, how: "none" });
+    chrome.tabs
+      .sendMessage(tab.id, { type: "composer:insert", text: message.text })
+      .then((reply) => sendResponse(reply && typeof reply === "object" ? { ok: !!reply.ok, how: reply.how } : { ok: false, how: "none" }))
+      .catch(() => sendResponse({ ok: false, how: "none" })); // the tab loaded before the extension: no composer.js there
+  });
+  return true; // the reply is sent later
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === "composer:request") return insertIntoChat(message, sender, sendResponse);
   if (!message || typeof message.url !== "string") return;
   if (!sender.tab || !sender.tab.url || !sender.tab.url.startsWith("https://claude.ai/")) return;
   // Only a Hub address is stored or shown; the panel checks again before
