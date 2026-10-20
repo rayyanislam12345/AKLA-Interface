@@ -13,6 +13,7 @@
   // Characters a sentence leaves after a bare address: "…/ai/d/abc." or
   // "(…/ai/p/xyz)". Hub addresses never end with these.
   var TRAILING = /[.,;:!?'"\)\]\}>*_]+$/;
+  var FRAME_PARAMS = ["embed", "host", "aiTheme"];
 
   function isLocalHost(hostname) {
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
@@ -70,7 +71,8 @@
       return null;
     }
     if (!sameOrigin(u, origin)) return null;
-    u.searchParams.delete("embed");
+    // The frame's own parameters are never part of a page's address.
+    FRAME_PARAMS.forEach(function (k) { u.searchParams.delete(k); });
     var path = u.pathname.replace(/\/+$/, "") || "/";
     var search = u.searchParams.toString();
     return origin + path + (search ? "?" + search : "") + u.hash;
@@ -112,17 +114,24 @@
     return out;
   }
 
-  /** The address with `embed=1` added, for the panel's frame. */
-  function embedUrl(url) {
+  /**
+   * The address as the companion's frame opens it: `embed=1` (no sidebar),
+   * `host=companion` (the companion draws the bar, so the Hub drops its own
+   * header) and, when given, `aiTheme` (the Hub's colours to match the chat).
+   */
+  function embedUrl(url, aiTheme) {
     var u = new URL(url);
     u.searchParams.set("embed", "1");
+    u.searchParams.set("host", "companion");
+    if (aiTheme) u.searchParams.set("aiTheme", aiTheme);
+    else u.searchParams.delete("aiTheme");
     return u.toString();
   }
 
-  /** The address without the `embed` flag, for opening in a tab. */
+  /** The address without the frame's parameters, for opening in a tab. */
   function plainUrl(url) {
     var u = new URL(url);
-    u.searchParams.delete("embed");
+    FRAME_PARAMS.forEach(function (k) { u.searchParams.delete(k); });
     return u.toString();
   }
 

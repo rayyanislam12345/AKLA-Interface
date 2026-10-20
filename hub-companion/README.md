@@ -1,27 +1,39 @@
 # AKLA Hub companion
 
-A small Chrome/Edge extension that shows the firm's Hub in a side panel next
-to your claude.ai chat. When Claude answers with a line like
+A small Chrome/Edge extension that shows the firm's Hub beside your
+claude.ai chat. When Claude answers with a line like
 `Open in Hub: https://akla-interface.vercel.app/ai/d/<version>`, an
 **Open beside** button appears after the link; click it and that document
-(or project, or chat) opens in the panel on the right, with its formatting,
-version compare, checks and the Changes list. You keep talking in the chat.
+(or project, or chat) opens on the right, with its formatting, version
+compare, checks and the Changes list. You keep talking in the chat.
 
 What it does, and all it does:
 
 - On claude.ai, finds Hub links by their address (not by claude.ai's layout),
   puts an "Open beside" button after each, and remembers the newest one.
-- The side panel shows the Hub inside a frame with `?embed=1` on the address,
-  which the Hub uses to hide its sidebar.
-- If the panel is open and **Follow new links** is on (the default), the
-  panel follows the newest Hub link Claude mentions: straight away when the
-  panel has only just opened or changed page, otherwise as a one-line
-  "Claude mentioned a document. Show it." notice, so nothing you are doing
-  in the panel (text in the composer, an accept/reject pass, a file still
-  uploading) is lost under you.
-- The toolbar button opens the panel on the last page shown.
-- The panel's bar has Home, Back, a paste-a-link box, Open in tab, and a
-  theme picker.
+- **Where the Hub shows** (Settings, or the panel's menu):
+  - **Inside the chat page** (the default): a drawer on the right of the
+    claude.ai tab (`pane.js`). Drag its left edge to resize; the width is
+    remembered. **Push** narrows the chat so nothing is covered; **Slide
+    over** lays the drawer on top (always so on a window under 1,000 px).
+    Each conversation remembers the last Hub page shown for it, so switching
+    chats switches the document. The toolbar button shows or hides it. The
+    drawer is one fixed element of the extension's own, never something
+    added into claude.ai's components, so a redesign of the chat cannot
+    break it; at worst Push looks wrong and Slide over still works.
+  - **In Chrome's side panel**: the same panel, outside the page. Kept as
+    the fallback.
+- Either way the Hub opens with `?embed=1&host=companion`: no sidebar and no
+  header of its own. The Hub tells the panel the page's name, and the
+  panel's one bar shows it, with Back, Home, Open in the Hub, a menu (paste
+  a link, colours, push or slide over, where the Hub shows, all settings)
+  and, in the drawer, Close. The chat's colour theme is passed to the Hub
+  (`aiTheme`), so the chat and the document wear the same colours.
+- If **Follow new links** is on (the default), an open panel follows the
+  newest Hub link Claude mentions: straight away when the panel has only
+  just opened or changed page, otherwise as a one-line "Claude mentioned a
+  document. Show it." notice, so nothing you are doing in the panel is lost
+  under you.
 - **Chat colours.** Looks for the claude.ai chat itself: Claude (no change),
   AKLA navy, Sky blue, Rose pink, Warm paper, Slate, Forest and High
   contrast, each in light and dark. Pick one in the panel bar or the settings page; it
@@ -136,16 +148,23 @@ in the toolbar"; the address is already stored, so the toolbar button
 ## Files
 
 - `manifest.json`: Manifest V3; permissions `sidePanel`, `storage`; host
-  permission `https://claude.ai/*` only.
+  permission `https://claude.ai/*` only; `panel.html` is web-accessible on
+  claude.ai only, so the drawer can frame it.
 - `links.js`: pure link finding and address tidying, shared by the content
   script and the panel, tested under node.
 - `content.js` + `content.css`: runs on claude.ai; buttons, newest-link
   tracking. MutationObserver, one scan at most every 400 ms, no scan of the
   prompt box or other editable areas.
-- `background.js`: service worker; opens the panel, passes addresses on.
+- `pane.js`: runs on claude.ai; the in-page drawer (a closed shadow root
+  holding a frame of `panel.html?mode=pane`), its resize edge, push or
+  slide-over layout, and the per-conversation memory.
+- `background.js`: service worker; the toolbar button (toggles the drawer,
+  or opens the side panel in the side view); opens the side panel, passes
+  addresses on.
   Only an address on the configured Hub origin is stored or passed (the
   panel checks again before it sets its frame).
-- `panel.html/js/css`: the side panel.
+- `panel.html/js/css`: the panel, in the drawer (`?mode=pane`) and in
+  Chrome's side panel: one bar, a menu, the Hub's frame.
 - `options.html/js`: settings.
 - `icons/`: navy square with an H, 16/32/48/128.
 - `scripts/package.sh`: zip for the store.

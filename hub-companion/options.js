@@ -48,7 +48,22 @@
     });
   }
 
-  chrome.storage.sync.get({ hubOrigin: "", followNewLinks: true, theme: HubThemes.DEFAULT_THEME }, function (items) {
+  // Where the Hub shows, and how the drawer sits: applied at once, like the theme.
+  function radios(name, value) {
+    var inputs = document.querySelectorAll('input[name="' + name + '"]');
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i].checked = inputs[i].value === value;
+      inputs[i].addEventListener("change", function (ev) {
+        var patch = {};
+        patch[name] = ev.target.value;
+        if (ev.target.checked) chrome.storage.sync.set(patch);
+      });
+    }
+  }
+
+  chrome.storage.sync.get({ hubOrigin: "", followNewLinks: true, theme: HubThemes.DEFAULT_THEME, view: "page", paneMode: "push" }, function (items) {
+    radios("view", items.view === "side" ? "side" : "page");
+    radios("paneMode", items.paneMode === "over" ? "over" : "push");
     origin.value = items.hubOrigin || "";
     follow.checked = items.followNewLinks !== false;
     renderThemes(HubThemes.isTheme(items.theme) ? items.theme : HubThemes.DEFAULT_THEME);

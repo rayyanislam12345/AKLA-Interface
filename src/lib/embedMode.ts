@@ -13,6 +13,16 @@ import { useLocation, type Location } from "react-router-dom";
 const KEY = "hub-embed";
 export const EMBED_PARAM = "embed";
 
+// ?host=companion: the companion frames this page and draws its own bar (the
+// page's name, Back, Open in the Hub), so the workspace drops its one-line
+// header and tells the companion where it is instead. Kept like the embed
+// flag, for the life of the tab. The companion's extension id is fixed by
+// the key in hub-companion/manifest.json, so its origin can be named here
+// and nothing is posted to any other framer.
+const HOST_KEY = "hub-embed-host";
+export const HOST_PARAM = "host";
+export const COMPANION_ORIGIN = "chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp";
+
 function readStored(): boolean {
   try {
     return sessionStorage.getItem(KEY) === "1";
@@ -80,3 +90,37 @@ export function openSitePage(navigate: (to: string) => void, to: string) {
   if (resolveEmbedMode() || isFramed()) window.open(withoutEmbed(to), "_blank", "noopener");
   else navigate(to);
 }
+
+/** Whether the companion frames this page and draws the bar itself (?host=companion), kept for the tab. */
+export function resolveCompanionHost(search: string = typeof window !== "undefined" ? window.location.search : ""): boolean {
+  const value = new URLSearchParams(search).get(HOST_PARAM);
+  try {
+    if (value === "companion") sessionStorage.setItem(HOST_KEY, "1");
+    else if (value !== null) sessionStorage.removeItem(HOST_KEY);
+    return sessionStorage.getItem(HOST_KEY) === "1" || value === "companion";
+  } catch {
+    return value === "companion";
+  }
+}
+
+/** The page's address for the companion: this origin and path, without the frame's own parameters. */
+export function companionHref(loc: Pick<Location, "pathname" | "search" | "hash">): string {
+  const params = new URLSearchParams(loc.search);
+  for (const k of [EMBED_PARAM, HOST_PARAM, "aiTheme"]) params.delete(k);
+  const search = params.toString();
+  return `${window.location.origin}${loc.pathname}${search ? `?${search}` : ""}${loc.hash}`;
+}
+
+/** Tells the companion (and only the companion) where the page is and what it is called. */
+export function postToCompanion(message: Record<string, unknown>) {
+  try {
+    if (window.parent && window.parent !== window) window.parent.postMessage(message, COMPANION_ORIGIN);
+  } catch {
+    /* no parent to tell */
+  }
+}
+
+// Note the companion flag as soon as the app loads: a page that sends the
+// person to sign in first (ProtectedRoute) never reaches the layout that
+// would otherwise read it, and the sign-in page still owes the bar its name.
+if (typeof window !== "undefined") resolveCompanionHost();

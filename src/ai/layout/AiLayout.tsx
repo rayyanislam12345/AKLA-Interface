@@ -8,8 +8,8 @@ import { useTheme } from "next-themes";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { AiWorkspaceProvider, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import AiSidebar from "@/ai/layout/AiSidebar";
-import { enterDarkOnlyMode, isDarkOnlyAiTheme } from "@/ai/theme";
-import { EMBED_PARAM, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
+import { enterDarkOnlyMode, isAiThemeId, isDarkOnlyAiTheme } from "@/ai/theme";
+import { COMPANION_ORIGIN, EMBED_PARAM, companionHref, postToCompanion, resolveCompanionHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,10 @@ import { cn } from "@/lib/utils";
 // own pages keep the viewport they were built for.
 // Opened with ?embed=1 (the companion's side panel beside a claude.ai chat,
 // see src/lib/embedMode.ts) there is no sidebar at all: a one-line header
-// names the place and links to the same page in the ordinary Hub.
+// names the place and links to the same page in the ordinary Hub. When the
+// companion frames it with ?host=companion, the companion's own bar does that
+// job, so there is no header at all: the page posts its address and name to
+// the companion instead, and takes the chat's colour theme from it.
 export default function AiLayout() {
   useEffect(() => {
     document.body.classList.add("ai-app");
@@ -48,7 +51,22 @@ function AiShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const embed = useEmbedMode();
-  const { mobileSidebarOpen, setMobileSidebarOpen, pageTitle, sidebarCollapsed, aiTheme } = useAiWorkspace();
+  const companion = embed && resolveCompanionHost(location.search);
+  const { mobileSidebarOpen, setMobileSidebarOpen, pageTitle, sidebarCollapsed, aiTheme, setAiTheme } = useAiWorkspace();
+  useEffect(() => {
+    if (!companion) return;
+    postToCompanion({ type: "hub:location", href: companionHref(location), title: pageTitle });
+  }, [companion, location, pageTitle]);
+  useEffect(() => {
+    if (!companion) return;
+    const onMessage = (ev: MessageEvent) => {
+      if (ev.origin !== COMPANION_ORIGIN || ev.source !== window.parent) return;
+      const d = ev.data as { type?: unknown; aiTheme?: unknown } | null;
+      if (d && d.type === "companion:theme" && isAiThemeId(d.aiTheme)) setAiTheme(d.aiTheme);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [companion, setAiTheme]);
   const { theme, setTheme } = useTheme();
   // ?embed=0 has done its work (the mode is off): take it out of the address.
   useEffect(() => {
@@ -77,7 +95,7 @@ function AiShell() {
   if (embed) {
     return (
       <div className="ai-app flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app" data-embed="1">
-        <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
+        {!companion && <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
           <div className="min-w-0 flex-1 truncate text-sm font-medium" title={pageTitle}>{pageTitle}</div>
           <a
             href={withoutEmbed(location)}
@@ -90,7 +108,7 @@ function AiShell() {
             <ExternalLink className="h-3.5 w-3.5" />
             Open in the Hub
           </a>
-        </header>
+        </header>}
         <main className="relative flex min-h-0 flex-1 flex-col">
           <Outlet />
         </main>

@@ -1,18 +1,24 @@
+/* The companion's panel, in the claude.ai drawer and in Chrome's side panel.
+   One bar, in the chat's colours (panel.js sets --bar, --text and --accent
+   from the chosen theme), so the chat and the document read as one window. */
 :root {
-  --navy: #12264a;
   --bar: #f4f5f8;
-  --line: #d9dce3;
   --text: #1f2430;
-  --muted: #5b6270;
+  --accent: #12264a;
+  --muted: color-mix(in srgb, var(--text) 62%, var(--bar));
+  --line: color-mix(in srgb, var(--text) 14%, var(--bar));
+  --hover: color-mix(in srgb, var(--text) 8%, var(--bar));
+  --raised: color-mix(in srgb, var(--bar) 92%, #fff);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bar: #1c1f26;
-    --line: #343946;
     --text: #e8eaef;
-    --muted: #a0a6b3;
+    --accent: #8fa8e6;
+    --raised: color-mix(in srgb, var(--bar) 90%, #fff);
   }
 }
+* { box-sizing: border-box; }
 html, body {
   height: 100%;
   margin: 0;
@@ -20,87 +26,134 @@ html, body {
   color: var(--text);
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-body {
-  display: flex;
-  flex-direction: column;
-  min-width: 320px;
-}
+body { display: flex; flex-direction: column; min-width: 300px; position: relative; }
+
 .bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
-  padding: 6px 8px;
+  gap: 2px;
+  height: 44px;
+  padding: 0 6px;
   border-bottom: 1px solid var(--line);
+  flex: none;
 }
-.bar button {
-  flex: 0 0 auto;
-  padding: 4px 9px;
-  font: inherit;
-  color: var(--text);
+.icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.bar button:hover { border-color: var(--navy); }
-.bar select {
-  flex: 0 0 auto;
-  max-width: 120px;
-  padding: 4px 6px;
-  font: inherit;
   color: var(--text);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 6px;
   cursor: pointer;
 }
-.go {
-  display: flex;
-  flex: 1 1 140px;
-  min-width: 0;
-  gap: 4px;
-  margin: 0;
+.icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.icon svg circle { fill: currentColor; stroke: none; }
+.icon:hover:not(:disabled), .icon[aria-expanded="true"] { background: var(--hover); }
+.icon:disabled { opacity: 0.35; cursor: default; }
+.icon:focus-visible, .item:focus-visible, .seg button:focus-visible, .go input:focus-visible, .go button:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
-.go input {
+.place { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; padding: 0 6px; line-height: 1.2; }
+.kind { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.menu {
+  position: absolute;
+  top: 46px;
+  right: 8px;
+  z-index: 5;
+  width: min(320px, calc(100% - 16px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+}
+.menu[hidden] { display: none; }
+.go { display: flex; gap: 6px; margin: 0; }
+.go input, select {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 4px 8px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bar);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.go button, .seg button, .notice button {
+  padding: 5px 10px;
   font: inherit;
   color: var(--text);
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
+  cursor: pointer;
 }
+.go button { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); }
+.row select { flex: 0 1 170px; }
+.seg { display: inline-flex; }
+.seg button:first-child { border-radius: 7px 0 0 7px; }
+.seg button:last-child { border-radius: 0 7px 7px 0; margin-left: -1px; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bar); font-weight: 600; }
+.item {
+  text-align: left;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  cursor: pointer;
+}
+.item:hover { background: var(--hover); }
+body:not(.pane) .pane-only { display: none; }
+
 .notice {
   margin: 0;
-  padding: 8px 10px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
-}
-.notice a { color: inherit; }
-.notice button {
-  margin-left: 6px;
-  padding: 2px 8px;
-  font: inherit;
+  padding: 8px 12px;
   color: var(--text);
-  background: transparent;
-  border: 1px solid var(--navy);
-  border-radius: 6px;
-  cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bar));
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
-.notice button.quiet { border-color: var(--line); color: var(--muted); }
-#frame {
-  flex: 1 1 auto;
-  width: 100%;
-  border: 0;
-  background: #fff;
-}
+.notice[hidden] { display: none; }
+.notice a { color: var(--accent); }
+.notice button.primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.notice button.quiet { color: var(--muted); }
+
+#frame { flex: 1 1 auto; width: 100%; border: 0; background: var(--bar); }
+#frame[hidden] { display: none; }
+
 .idle {
-  padding: 28px 20px;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 28px 64px;
   color: var(--muted);
   line-height: 1.5;
 }
-.idle p { margin: 0 0 10px; }
-.idle strong { color: var(--text); }
+.idle[hidden] { display: none; }
+.idle p { margin: 0 0 8px; max-width: 34ch; }
+.idle .lead { color: var(--text); font-weight: 600; font-size: 15px; }
+.idle .hint { font-size: 12px; }
+.idle .mark { width: 44px; height: 44px; margin-bottom: 12px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; opacity: .8; }
+@media (prefers-reduced-motion: no-preference) {
+  .menu { animation: drop .12s ease-out; }
+  @keyframes drop { from { opacity: 0; transform: translateY(-4px); } }
+}

@@ -101,10 +101,13 @@ test("findHubUrls: a custom origin", () => {
 });
 
 test("embedUrl and plainUrl", () => {
-  assert.equal(L.embedUrl(`${HUB}/ai/d/v1`), `${HUB}/ai/d/v1?embed=1`);
-  assert.equal(L.embedUrl(`${HUB}/ai/d/v1?tab=changes#x`), `${HUB}/ai/d/v1?tab=changes&embed=1#x`);
-  assert.equal(L.plainUrl(`${HUB}/ai/d/v1?embed=1`), `${HUB}/ai/d/v1`);
+  assert.equal(L.embedUrl(`${HUB}/ai/d/v1`), `${HUB}/ai/d/v1?embed=1&host=companion`);
+  assert.equal(L.embedUrl(`${HUB}/ai/d/v1`, "blue"), `${HUB}/ai/d/v1?embed=1&host=companion&aiTheme=blue`);
+  assert.equal(L.embedUrl(`${HUB}/ai/d/v1?tab=changes#x`), `${HUB}/ai/d/v1?tab=changes&embed=1&host=companion#x`);
+  assert.equal(L.plainUrl(`${HUB}/ai/d/v1?embed=1&host=companion&aiTheme=pink`), `${HUB}/ai/d/v1`);
   assert.equal(L.plainUrl(`${HUB}/ai/d/v1?tab=changes&embed=1`), `${HUB}/ai/d/v1?tab=changes`);
+  // A page's address never keeps the frame's parameters.
+  assert.equal(L.normaliseHubUrl(`${HUB}/ai/d/v1?embed=1&host=companion&aiTheme=green&tab=x`), `${HUB}/ai/d/v1?tab=x`);
 });
 
 test("linkKind and homeUrl", () => {

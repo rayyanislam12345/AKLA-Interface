@@ -1,7 +1,7 @@
 // Runs on claude.ai. Finds Hub links in the conversation by their address
 // (never by claude.ai's class names), puts a small "Open beside" button after
-// each, and tells the service worker about the newest link so an open panel
-// can follow it. Nothing leaves the page: the only messages go to this
+// each, and passes the newest link on so the open drawer (pane.js, in this
+// tab) or Chrome's side panel (through the service worker) can follow it. Nothing leaves the page: the only messages go to this
 // extension's own service worker.
 (function () {
   "use strict";
@@ -16,6 +16,7 @@
   var SWITCH_QUIET = 3000; // ms after claude.ai changes conversation during which links are the old chat loading, not a new reply
 
   var origin = HubLinks.DEFAULT_ORIGIN;
+  var view = "page"; // "page": the drawer inside this tab (pane.js); "side": Chrome's side panel
   var hostNeedle = originHost(origin);
   var newestUrl = null;
   var unconfirmed = null; // an address with nothing after it yet: maybe still streaming
@@ -71,11 +72,15 @@
     b.setAttribute(MARK, "1");
     b.dataset.url = url;
     b.textContent = "Open beside";
-    b.title = "Show this " + HubLinks.linkKind(url) + " in the Hub panel";
+    b.title = "Show this " + HubLinks.linkKind(url) + " beside the chat";
     b.addEventListener("click", function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
       delete b.dataset.hint;
+      if (inPage()) {
+        window.HubPane.show(url, false);
+        return;
+      }
       send({ type: "open", url: url }).then(function (reply) {
         if (reply && reply.ok) return;
         // The panel could not be opened from here (older Chrome, or the
@@ -164,7 +169,8 @@
     // Just after a change of conversation, the links on screen are the chat
     // that is loading, not something Claude has just said.
     if (Date.now() < quietUntil) return;
-    send({ type: "seen", url: url });
+    if (inPage()) window.HubPane.show(url, true);
+    else send({ type: "seen", url: url });
   }
 
   function scan() {
@@ -173,6 +179,8 @@
     if (location.href !== pageHref) {
       pageHref = location.href;
       quietUntil = Date.now() + SWITCH_QUIET;
+      newestUrl = null; // the next chat's newest link is news again
+      if (inPage()) window.HubPane.conversationChanged();
     }
     dropStale();
     var found = []; // Hub addresses in document order; the last is the newest
@@ -222,6 +230,11 @@
   function applySettings(items) {
     origin = HubLinks.normaliseOrigin(items && items.hubOrigin);
     hostNeedle = originHost(origin);
+    if (items && items.view) view = items.view === "side" ? "side" : "page";
+  }
+
+  function inPage() {
+    return view === "page" && typeof window.HubPane !== "undefined";
   }
 
   function start() {
@@ -248,13 +261,15 @@
   }
 
   if (api && api.storage && api.storage.sync) {
-    api.storage.sync.get({ hubOrigin: "" }, function (items) {
+    api.storage.sync.get({ hubOrigin: "", view: "page" }, function (items) {
       void api.runtime.lastError;
       applySettings(items);
       start();
     });
     api.storage.onChanged.addListener(function (changes, area) {
-      if (area === "sync" && changes.hubOrigin) {
+      if (area !== "sync") return;
+      if (changes.view) view = changes.view.newValue === "side" ? "side" : "page";
+      if (changes.hubOrigin) {
         applySettings({ hubOrigin: changes.hubOrigin.newValue });
         scheduleScan();
       }

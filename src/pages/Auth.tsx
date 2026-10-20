@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { postToCompanion, resolveCompanionHost, resolveEmbedMode } from '@/lib/embedMode';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -61,6 +62,10 @@ export default function Auth() {
   const [signupEmailConfirmRequired, setSignupEmailConfirmRequired] = useState(false);
 
   // Load org name from user metadata once Supabase processes the invite token
+  // In the companion's panel the bar names the page; this one is the sign-in.
+  useEffect(() => {
+    if (resolveEmbedMode() && resolveCompanionHost()) postToCompanion({ type: 'hub:title', title: 'Sign in to the Hub' });
+  }, []);
   useEffect(() => {
     if (authStep !== 'accept-invite') return;
     const load = async () => {

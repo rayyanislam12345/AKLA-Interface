@@ -1,6 +1,8 @@
-// Service worker. Two jobs: open the side panel when an "Open beside" button
-// is clicked on claude.ai, and pass the newest Hub link on to the panel so it
-// can follow the conversation. Nothing is sent outside the browser.
+// Service worker. Three jobs: the toolbar button (the drawer or the side
+// panel, by the "view" setting); in the side view, open the side panel when
+// an "Open beside" button is clicked on claude.ai; and pass the newest Hub
+// link on to the side panel so it can follow the conversation. Nothing is
+// sent outside the browser.
 //
 // chrome.sidePanel.open() may only run in response to a user action. Chrome's
 // documentation counts "a user interaction on an extension page or content
@@ -12,11 +14,38 @@
 // address (openPanelOnActionClick below).
 importScripts("links.js");
 
-function enableActionClick() {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// Where the Hub shows: "page" (the drawer inside the claude.ai tab, pane.js;
+// the default) or "side" (Chrome's side panel). In the side view the toolbar
+// button opens the side panel itself; in the page view it toggles the drawer
+// in the current claude.ai tab, and on any other tab opens the side panel.
+let view = "page";
+function applyView() {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: view === "side" }).catch(() => {});
 }
-enableActionClick();
-chrome.runtime.onInstalled.addListener(enableActionClick);
+chrome.storage.sync.get({ view: "page" }, (items) => {
+  void chrome.runtime.lastError;
+  view = items && items.view === "side" ? "side" : "page";
+  applyView();
+});
+chrome.runtime.onInstalled.addListener(applyView);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.view) {
+    view = changes.view.newValue === "side" ? "side" : "page";
+    applyView();
+  }
+});
+
+// Only fires while openPanelOnActionClick is off, i.e. in the page view.
+chrome.action.onClicked.addListener((tab) => {
+  if (tab && tab.id != null && tab.url && tab.url.startsWith("https://claude.ai/")) {
+    chrome.tabs.sendMessage(tab.id, { type: "pane:toggle" }).catch(() => {
+      // The page loaded before the extension did: no drawer script there yet.
+      chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    });
+    return;
+  }
+  if (tab && tab.id != null) chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
 
 // The Hub origin, kept in memory so the address check below stays
 // synchronous (sidePanel.open must be the first call while the gesture

@@ -63,7 +63,9 @@ try {
   const name = await worker.evaluate(() => chrome.runtime.getManifest().name);
   if (name !== manifest.name) problems.push(`manifest name mismatch: ${name}`);
   const behaviour = await worker.evaluate(() => chrome.sidePanel.getPanelBehavior());
-  if (!behaviour || behaviour.openPanelOnActionClick !== true) problems.push("openPanelOnActionClick is not set");
+  // The default view is the in-page drawer: the toolbar button toggles it, so
+  // Chrome's own open-on-click must be off (it is on only in the side view).
+  if (!behaviour || behaviour.openPanelOnActionClick !== false) problems.push("openPanelOnActionClick should be off in the default (in-page) view");
   note(`panel behaviour: ${JSON.stringify(behaviour)}`);
 
   for (const file of ["panel.html", "options.html"]) {

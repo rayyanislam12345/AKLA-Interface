@@ -37,6 +37,17 @@ export function isDarkOnlyAiTheme(id: AiThemeId): boolean {
 
 /** The saved theme, read synchronously so the first paint already has it. */
 export function readAiTheme(): AiThemeId {
+  // The companion opens the page with ?aiTheme= so the document beside the
+  // chat wears the chat's colours; that choice is saved like any other.
+  try {
+    const asked = new URLSearchParams(window.location.search).get("aiTheme");
+    if (isAiThemeId(asked)) {
+      saveAiTheme(asked);
+      return asked;
+    }
+  } catch {
+    /* no address to read */
+  }
   try {
     const saved = localStorage.getItem(AI_THEME_KEY);
     return isAiThemeId(saved) ? saved : DEFAULT_AI_THEME;

@@ -1,154 +1,177 @@
-// The side panel: a slim bar and a frame that shows the Hub. It shows the
-// last address it was given (chrome.storage.session), the Hub home otherwise,
-// and follows the newest link from the chat when that setting is on.
+// The companion's panel: one bar (Back, the page's name, Home, Open in the
+// Hub, a menu) over a frame that shows the Hub. The same page runs in two
+// places:
+//   - the drawer inside the claude.ai tab (pane.js frames it with ?mode=pane;
+//     links arrive from the chat by postMessage, and Close hands back);
+//   - Chrome's side panel (links arrive from the service worker).
+// The Hub is opened with embed=1&host=companion, so it shows no sidebar and
+// no header of its own: it posts its address and name here instead, and the
+// bar shows them. The chat's colour theme tints the bar and is passed to the
+// Hub, so the chat and the document wear the same colours.
 (function () {
   "use strict";
 
+  var PANE = new URLSearchParams(location.search).get("mode") === "pane";
+  var PAGE_ORIGIN = "https://claude.ai"; // the drawer's only parent
+
   var frame = document.getElementById("frame");
   var notice = document.getElementById("notice");
-  var idle = document.getElementById("idle");
+  var idleBox = document.getElementById("idle");
+  var titleEl = document.getElementById("title");
+  var kindEl = document.getElementById("kind");
+  var backBtn = document.getElementById("back");
+  var moreBtn = document.getElementById("more");
+  var menu = document.getElementById("menu");
   var address = document.getElementById("address");
-
   var themeSelect = document.getElementById("theme");
+  var viewSwitch = document.getElementById("viewSwitch");
 
-  // The chat colour theme. Chosen here or in the options page, stored once
-  // in chrome.storage.sync; theme.js applies it on claude.ai, and the
-  // panel's own bar takes the same page and text colours so the two halves
-  // of the screen match.
-  function tintPanel(id) {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    var sw = HubThemes.swatches(id, dark);
-    var rootStyle = document.documentElement.style;
-    if (!sw) {
-      rootStyle.removeProperty("--bar");
-      rootStyle.removeProperty("--text");
-      rootStyle.removeProperty("--navy");
-      return;
-    }
-    rootStyle.setProperty("--bar", sw.bg);
-    rootStyle.setProperty("--text", sw.text);
-    rootStyle.setProperty("--navy", sw.accent);
-  }
-  if (themeSelect && typeof HubThemes !== "undefined") {
-    HubThemes.THEMES.forEach(function (theme) {
-      var option = document.createElement("option");
-      option.value = theme.id;
-      option.textContent = theme.name;
-      themeSelect.appendChild(option);
-    });
-    chrome.storage.sync.get({ theme: HubThemes.DEFAULT_THEME }, function (items) {
-      var id = HubThemes.isTheme(items.theme) ? items.theme : HubThemes.DEFAULT_THEME;
-      themeSelect.value = id;
-      tintPanel(id);
-    });
-    themeSelect.addEventListener("change", function () {
-      chrome.storage.sync.set({ theme: themeSelect.value });
-    });
-    chrome.storage.onChanged.addListener(function (changes, area) {
-      if (area !== "sync" || !changes.theme) return;
-      var id = HubThemes.isTheme(changes.theme.newValue) ? changes.theme.newValue : HubThemes.DEFAULT_THEME;
-      themeSelect.value = id;
-      tintPanel(id);
-    });
-  }
+  document.body.classList.toggle("pane", PANE);
+  document.getElementById("close").hidden = !PANE;
+  viewSwitch.textContent = PANE ? "Use Chrome's side panel instead" : "Show inside the chat page instead";
+
+  // The chat's themes (themes.js) and the Hub's own (src/ai/theme.ts) are two
+  // lists; each chat theme is given the Hub theme closest to it.
+  var HUB_THEME = { default: "warm", akla: "warm", sky: "blue", rose: "pink", paper: "orange", slate: "blue", forest: "green", contrast: "warm" };
 
   var LOAD_WAIT = 12000; // ms before "did not load" is shown
   var FRESH = 4000; // ms after a page is shown during which a new link may replace it outright
-  var settings = { hubOrigin: HubLinks.DEFAULT_ORIGIN, followNewLinks: true };
+  var settings = { hubOrigin: HubLinks.DEFAULT_ORIGIN, followNewLinks: true, theme: "default", paneMode: "push" };
   var settingsReady = false;
-  var queued = []; // "show" messages that arrived before the settings were read
-  var currentUrl = null; // the address we showed, without embed=1
-  var shownAt = 0; // when the frame was last sent to a page
-  var pendingUrl = null; // a link Claude mentioned that is waiting for a click
-  var busy = false; // the Hub said the person is mid-task (text typed, a save in flight)
-  var windowId = null; // the Chrome window this panel belongs to
+  var queued = []; // links that arrived before the settings were read
+  var currentUrl = null; // the page on screen, without the frame's parameters
+  var trail = []; // pages shown before it, for Back (never the tab's own history)
+  var shownAt = 0;
+  var pendingUrl = null; // a link Claude mentioned, waiting for "Show it"
+  var busy = false; // the Hub said the person is mid-task
+  var windowId = null; // side panel: the Chrome window this panel belongs to
   var loadTimer = null;
+  var frameStarted = false;
 
-  function clearNotice() {
-    notice.textContent = "";
-    notice.hidden = true;
-  }
-
-  function say(text, url) {
-    notice.textContent = "";
-    if (!text) {
-      notice.hidden = true;
+  // ---- the bar ----
+  function capital(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function setPlace(url, title) {
+    if (!url) {
+      kindEl.textContent = "AKLA Hub";
+      titleEl.textContent = "No document open";
+      titleEl.title = "";
       return;
     }
-    notice.appendChild(document.createTextNode(text + " "));
+    var kind = HubLinks.linkKind(url);
+    kindEl.textContent = kind === "page" ? "AKLA Hub" : capital(kind);
+    titleEl.textContent = title || "Opening…";
+    titleEl.title = title || "";
+  }
+  function updateBack() { backBtn.disabled = trail.length === 0; }
+
+  // ---- notices ----
+  function clearNotice() { notice.textContent = ""; notice.hidden = true; }
+  function say(text, url) {
+    notice.textContent = "";
+    if (!text) return clearNotice();
+    notice.appendChild(document.createTextNode(text));
     if (url) {
       var a = document.createElement("a");
-      a.href = url;
+      a.href = HubLinks.plainUrl(url);
       a.target = "_blank";
       a.rel = "noopener";
-      a.textContent = "Open it in a tab.";
+      a.textContent = "Open it in a tab";
       notice.appendChild(a);
     }
     notice.hidden = false;
   }
 
-  function show(url) {
+  // ---- showing a page ----
+  function remember(url) {
+    if (PANE) window.parent.postMessage({ source: "hub-companion-pane", type: "location", url: url }, PAGE_ORIGIN);
+    else chrome.storage.session.set({ panelUrl: url });
+  }
+
+  function navigateFrame(url) {
+    var target = HubLinks.embedUrl(url, HUB_THEME[settings.theme] || null);
+    frame.hidden = false;
+    if (!frameStarted) {
+      frameStarted = true;
+      frame.src = target;
+    } else {
+      // replace(), not a new entry: the Hub's pages must not pile up in the
+      // claude.ai tab's own Back history.
+      try {
+        frame.contentWindow.location.replace(target);
+      } catch (e) {
+        frame.src = target;
+      }
+    }
+    if (loadTimer) clearTimeout(loadTimer);
+    loadTimer = setTimeout(function () { say("The Hub did not load. ", url); }, LOAD_WAIT);
+  }
+
+  function show(url, keepTrail) {
     var clean = HubLinks.normaliseHubUrl(url, settings.hubOrigin);
     if (!clean) {
       say("That is not a Hub link.");
-      return;
+      return false;
     }
     clearNotice();
-    idle.hidden = true;
+    idleBox.hidden = true;
     pendingUrl = null;
     busy = false;
+    if (!keepTrail && currentUrl && currentUrl !== clean) {
+      trail.push(currentUrl);
+      if (trail.length > 30) trail.shift();
+    }
+    updateBack();
     currentUrl = clean;
     shownAt = Date.now();
-    frame.src = HubLinks.embedUrl(clean);
-    address.value = "";
-    chrome.storage.session.set({ panelUrl: clean });
-    if (loadTimer) clearTimeout(loadTimer);
-    loadTimer = setTimeout(function () {
-      say("The Hub did not load.", currentUrl);
-    }, LOAD_WAIT);
+    setPlace(clean, null);
+    navigateFrame(clean);
+    remember(clean);
+    return true;
+  }
+
+  function idle() {
+    clearNotice();
+    currentUrl = null;
+    pendingUrl = null;
+    trail = [];
+    updateBack();
+    setPlace(null);
+    frame.hidden = true;
+    idleBox.hidden = false;
   }
 
   // A link from the chat while the person may be working in the frame: never
-  // navigate under them. Offer it in one line and move only when clicked.
+  // move under them. Offer it in one line and move only when asked.
   function offer(url) {
     pendingUrl = url;
     notice.textContent = "";
-    notice.appendChild(document.createTextNode("Claude mentioned a " + HubLinks.linkKind(url) + ". "));
+    notice.appendChild(document.createTextNode("Claude mentioned a " + HubLinks.linkKind(url) + "."));
     var go = document.createElement("button");
     go.type = "button";
+    go.className = "primary";
     go.textContent = "Show it";
-    go.addEventListener("click", function () {
-      if (pendingUrl) show(pendingUrl);
-    });
-    notice.appendChild(go);
+    go.addEventListener("click", function () { if (pendingUrl) show(pendingUrl); });
     var skip = document.createElement("button");
     skip.type = "button";
     skip.className = "quiet";
     skip.textContent = "Not now";
-    skip.addEventListener("click", function () {
-      pendingUrl = null;
-      clearNotice();
-    });
+    skip.addEventListener("click", function () { pendingUrl = null; clearNotice(); });
+    notice.appendChild(go);
     notice.appendChild(skip);
     notice.hidden = false;
   }
 
   function onShow(message) {
-    if (windowId !== null && typeof message.windowId === "number" && message.windowId !== windowId) return; // another Chrome window's chat
-    if (message.url === currentUrl) {
-      if (message.auto) return;
-      clearNotice();
-      pendingUrl = null;
-      return;
-    }
-    if (!message.auto) {
-      show(message.url);
-      return;
-    }
-    if (settings.followNewLinks === false) return;
+    if (!PANE && windowId !== null && typeof message.windowId === "number" && message.windowId !== windowId) return;
     var clean = HubLinks.normaliseHubUrl(message.url, settings.hubOrigin);
     if (!clean) return;
-    // A page that has just come up (or no page yet) can be replaced; one the
+    if (clean === currentUrl) {
+      if (!message.auto) { clearNotice(); pendingUrl = null; }
+      return;
+    }
+    if (!message.auto) return void show(clean);
+    if (settings.followNewLinks === false) return;
+    // A page that has only just come up (or none) can be replaced; one the
     // person has had time to start working in is not.
     if (!busy && (currentUrl === null || Date.now() - shownAt < FRESH)) show(clean);
     else offer(clean);
@@ -157,82 +180,183 @@
   frame.addEventListener("load", function () {
     if (loadTimer) clearTimeout(loadTimer);
     loadTimer = null;
+    // A page that never says its name still gets a plain one.
+    setTimeout(function () {
+      if (titleEl.textContent === "Opening…" && currentUrl) setPlace(currentUrl, "AKLA Hub");
+    }, 3000);
   });
 
-  // The Hub may post messages while embedded. Both are optional: without
-  // "hub:location" the last address the panel set is used for "Open in
-  // tab"; without "hub:busy" a mentioned link is offered, never forced, once
-  // the page has been up for a few seconds.
-  window.addEventListener("message", function (ev) {
-    if (ev.origin.toLowerCase() !== settings.hubOrigin.toLowerCase()) return;
-    var d = ev.data;
-    if (!d || typeof d !== "object") return;
-    if (d.type === "hub:location" && typeof d.href === "string") {
-      var clean = HubLinks.normaliseHubUrl(d.href, settings.hubOrigin);
-      if (clean) {
-        currentUrl = clean;
-        chrome.storage.session.set({ panelUrl: clean });
-      }
+  // ---- theme ----
+  function tint(id) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var sw = typeof HubThemes !== "undefined" ? HubThemes.swatches(id, dark) : null;
+    var st = document.documentElement.style;
+    if (!sw) {
+      ["--bar", "--text", "--accent"].forEach(function (k) { st.removeProperty(k); });
+      return;
     }
-    if (d.type === "hub:busy") busy = d.busy === true;
-  });
+    st.setProperty("--bar", sw.bg);
+    st.setProperty("--text", sw.text);
+    st.setProperty("--accent", sw.accent);
+  }
+  function applyTheme(id) {
+    settings.theme = HubThemes.isTheme(id) ? id : HubThemes.DEFAULT_THEME;
+    themeSelect.value = settings.theme;
+    tint(settings.theme);
+    if (frameStarted && frame.contentWindow) {
+      frame.contentWindow.postMessage({ type: "companion:theme", aiTheme: HUB_THEME[settings.theme] || "warm" }, settings.hubOrigin);
+    }
+  }
+  if (typeof HubThemes !== "undefined") {
+    HubThemes.THEMES.forEach(function (theme) {
+      var option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = theme.name;
+      themeSelect.appendChild(option);
+    });
+    themeSelect.addEventListener("change", function () { chrome.storage.sync.set({ theme: themeSelect.value }); });
+    if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { tint(settings.theme); });
+  }
 
-  document.getElementById("home").addEventListener("click", function () {
-    show(HubLinks.homeUrl(settings.hubOrigin));
+  // ---- menu ----
+  function setMenu(open) {
+    menu.hidden = !open;
+    moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) address.focus();
+  }
+  moreBtn.addEventListener("click", function () { setMenu(menu.hidden); });
+  document.addEventListener("click", function (ev) {
+    if (!menu.hidden && !menu.contains(ev.target) && !moreBtn.contains(ev.target)) setMenu(false);
   });
-  document.getElementById("back").addEventListener("click", function () {
-    history.back(); // the frame's navigations are in this window's history
-  });
-  document.getElementById("tab").addEventListener("click", function () {
-    chrome.tabs.create({ url: currentUrl || HubLinks.homeUrl(settings.hubOrigin) });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !menu.hidden) { setMenu(false); moreBtn.focus(); }
   });
   document.getElementById("go").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var typed = address.value.trim();
     if (!typed) return;
-    // A pasted address without a scheme ("akla-interface.vercel.app/ai/d/…")
-    // is tried as https, the same way the options page treats a bare host.
-    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(typed)) typed = "https://" + typed;
-    show(typed);
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(typed)) typed = "https://" + typed; // a pasted bare host
+    if (show(typed)) { address.value = ""; setMenu(false); }
   });
-
-  chrome.runtime.onMessage.addListener(function (message) {
-    if (!message || message.type !== "show" || typeof message.url !== "string") return;
-    if (!settingsReady) {
-      queued.push(message); // replayed once the settings are read, so a custom Hub address is honoured
+  function paintMode() {
+    var buttons = document.querySelectorAll(".seg button");
+    for (var i = 0; i < buttons.length; i++) buttons[i].setAttribute("aria-pressed", buttons[i].dataset.mode === settings.paneMode ? "true" : "false");
+  }
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () { chrome.storage.sync.set({ paneMode: b.dataset.mode }); });
+  });
+  viewSwitch.addEventListener("click", function () {
+    if (PANE) {
+      // The drawer closes itself when the setting changes; the toolbar
+      // button and "Open beside" then open Chrome's side panel.
+      chrome.storage.sync.set({ view: "side" });
       return;
     }
-    onShow(message);
+    chrome.storage.sync.set({ view: "page" }, function () {
+      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        var tab = tabs && tabs[0];
+        if (tab && tab.id != null) chrome.tabs.sendMessage(tab.id, { type: "pane:toggle" }).catch(function () {});
+        window.close();
+      });
+    });
   });
+  document.getElementById("settings").addEventListener("click", function () { chrome.runtime.openOptionsPage(); });
+
+  // ---- bar buttons ----
+  backBtn.addEventListener("click", function () {
+    var prev = trail.pop();
+    updateBack();
+    if (prev) show(prev, true);
+  });
+  document.getElementById("home").addEventListener("click", function () { show(HubLinks.homeUrl(settings.hubOrigin)); });
+  document.getElementById("tab").addEventListener("click", function () {
+    chrome.tabs.create({ url: HubLinks.plainUrl(currentUrl || HubLinks.homeUrl(settings.hubOrigin)) });
+  });
+  document.getElementById("close").addEventListener("click", function () {
+    window.parent.postMessage({ source: "hub-companion-pane", type: "close" }, PAGE_ORIGIN);
+  });
+
+  // ---- messages ----
+  window.addEventListener("message", function (ev) {
+    var d = ev.data;
+    if (!d || typeof d !== "object") return;
+    // From the Hub inside our frame: where it is, and what it is called.
+    if (ev.source === frame.contentWindow && ev.origin.toLowerCase() === settings.hubOrigin.toLowerCase()) {
+      if (d.type === "hub:location" && typeof d.href === "string") {
+        var clean = HubLinks.normaliseHubUrl(d.href, settings.hubOrigin);
+        if (!clean) return;
+        if (clean !== currentUrl) {
+          // A move inside the Hub (a link clicked there): Back returns to the
+          // page before. A change in the first moments is the Hub settling
+          // the address it was given (a redirect), not a move.
+          if (currentUrl && Date.now() - shownAt > 3000) trail.push(currentUrl);
+          updateBack();
+          currentUrl = clean;
+          remember(clean);
+        }
+        setPlace(clean, typeof d.title === "string" && d.title ? d.title : null);
+      }
+      // A page outside the workspace (the sign-in page) names itself only.
+      if (d.type === "hub:title" && typeof d.title === "string" && d.title) setPlace(currentUrl || HubLinks.homeUrl(settings.hubOrigin), d.title);
+      if (d.type === "hub:busy") busy = d.busy === true;
+      return;
+    }
+    // From the claude.ai page around the drawer.
+    if (PANE && ev.source === window.parent && ev.origin === PAGE_ORIGIN && d.source === "hub-companion") {
+      if (d.type === "show" && typeof d.url === "string") {
+        if (!settingsReady) queued.push(d);
+        else onShow(d);
+      } else if (d.type === "idle") {
+        idle();
+      }
+    }
+  });
+
+  if (!PANE) {
+    chrome.runtime.onMessage.addListener(function (message) {
+      if (!message || message.type !== "show" || typeof message.url !== "string") return;
+      if (!settingsReady) queued.push(message);
+      else onShow(message);
+    });
+    if (chrome.windows && chrome.windows.getCurrent) {
+      chrome.windows.getCurrent(function (w) {
+        void chrome.runtime.lastError;
+        if (w && typeof w.id === "number") windowId = w.id;
+      });
+    }
+  }
 
   chrome.storage.onChanged.addListener(function (changes, area) {
     if (area !== "sync") return;
     if (changes.hubOrigin) settings.hubOrigin = HubLinks.normaliseOrigin(changes.hubOrigin.newValue);
     if (changes.followNewLinks) settings.followNewLinks = changes.followNewLinks.newValue !== false;
+    if (changes.theme) applyTheme(changes.theme.newValue);
+    if (changes.paneMode) { settings.paneMode = changes.paneMode.newValue === "over" ? "over" : "push"; paintMode(); }
   });
 
-  if (chrome.windows && chrome.windows.getCurrent) {
-    chrome.windows.getCurrent(function (w) {
-      void chrome.runtime.lastError;
-      if (w && typeof w.id === "number") windowId = w.id;
-    });
-  }
-
-  chrome.storage.sync.get({ hubOrigin: "", followNewLinks: true }, function (items) {
+  // ---- start ----
+  chrome.storage.sync.get({ hubOrigin: "", followNewLinks: true, theme: "default", paneMode: "push" }, function (items) {
     settings.hubOrigin = HubLinks.normaliseOrigin(items.hubOrigin);
     settings.followNewLinks = items.followNewLinks !== false;
-    chrome.storage.session.get({ panelUrl: "" }, function (s) {
+    settings.paneMode = items.paneMode === "over" ? "over" : "push";
+    paintMode();
+    if (typeof HubThemes !== "undefined") applyTheme(items.theme);
+    function begin(first) {
       settingsReady = true;
       var replay = queued;
       queued = [];
       for (var i = 0; i < replay.length; i++) onShow(replay[i]);
-      // A "show" that arrived while we were starting has already set the
-      // frame; loading the remembered page as well would load it twice.
-      if (currentUrl) return;
-      // Nothing chosen yet: say so rather than load the whole workspace.
-      var last = HubLinks.normaliseHubUrl(s.panelUrl, settings.hubOrigin);
-      if (last) show(last);
-      else idle.hidden = false;
-    });
+      if (currentUrl) return; // a link that arrived while starting has already been shown
+      var start = first && HubLinks.normaliseHubUrl(first, settings.hubOrigin);
+      if (start) show(start);
+      else idle();
+    }
+    if (PANE) {
+      var m = /^#u=(.+)$/.exec(location.hash);
+      begin(m ? decodeURIComponent(m[1]) : null);
+      window.parent.postMessage({ source: "hub-companion-pane", type: "ready" }, PAGE_ORIGIN);
+    } else {
+      chrome.storage.session.get({ panelUrl: "" }, function (s) { begin(s.panelUrl); });
+    }
   });
 })();
