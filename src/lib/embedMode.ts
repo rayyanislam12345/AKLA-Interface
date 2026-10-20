@@ -85,6 +85,12 @@ export function useEmbedMode(): boolean {
   return resolveEmbedMode(search);
 }
 
+/** True when the companion frames the page (embed mode with host=companion): its chat is claude.ai's. */
+export function useCompanionHost(): boolean {
+  const { search } = useLocation();
+  return resolveEmbedMode(search) && resolveCompanionHost(search);
+}
+
 /** Opens one of the site's pages: in the ordinary Hub when embedded or framed (a new tab), else here. */
 export function openSitePage(navigate: (to: string) => void, to: string) {
   if (resolveEmbedMode() || isFramed()) window.open(withoutEmbed(to), "_blank", "noopener");

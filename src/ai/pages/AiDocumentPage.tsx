@@ -3,10 +3,11 @@ import { ArrowLeft, ExternalLink, MessageSquare, PencilLine } from "lucide-react
 import { useToast } from "@/hooks/use-toast";
 import { editTargetOf, useDocumentVersion } from "@/hooks/useDocumentVersion";
 import { attachParam } from "@/lib/projectSeeds";
-import { useEmbedMode } from "@/lib/embedMode";
+import { useCompanionHost, useEmbedMode } from "@/lib/embedMode";
 import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
 import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import SiteLink from "@/ai/components/SiteLink";
+import CopyForClaude from "@/ai/components/CopyForClaude";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { downloadStoredVersion } from "@/components/documents/downloadVersion";
 import { versionDownloadName } from "@/components/documents/zipDownload";
@@ -17,12 +18,14 @@ import { Button } from "@/components/ui/button";
 // project page with the file in the prompt box; "Edit with AI" opens it in
 // a chat of its own. In the companion's panel (embed mode) the layout's own
 // header already names the document, so the page's bar is left out and the
-// project's name goes on the line under it.
+// project's name goes on the line under it. Framed by the companion, the chat
+// is claude.ai's: "Copy for Claude" replaces the two Hub-chat buttons.
 export default function AiDocumentPage() {
   const { versionId } = useParams<{ versionId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
   const embed = useEmbedMode();
+  const companion = useCompanionHost();
   const openEdit = useOpenEditChat();
   const { data: detail, isLoading, error, refetch } = useDocumentVersion(versionId);
   useAiPageTitle(detail?.document.title ?? "Document");
@@ -113,6 +116,9 @@ export default function AiDocumentPage() {
             </p>
           }
           actions={
+            companion ? (
+              <CopyForClaude title={detail.document.title} versionId={detail.version.id} versionNumber={detail.version.version_number} fileName={detail.version.file_name} projectName={detail.matter?.name} />
+            ) : (
             <>
               <Button size="sm" onClick={() => navigate(`${projectPath}?attach=${attachParam(detail.version.id)}`)} data-testid="ask-about-version">
                 <MessageSquare className="mr-1.5 h-4 w-4" />Ask about this
@@ -121,6 +127,7 @@ export default function AiDocumentPage() {
                 <PencilLine className="mr-1.5 h-4 w-4" />Edit with AI
               </Button>
             </>
+            )
           }
         />
       </div>
