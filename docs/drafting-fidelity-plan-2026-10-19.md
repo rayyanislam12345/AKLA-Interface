@@ -189,6 +189,12 @@ Answered by Rayyan on the decisions page (https://claude.ai/artifact/3AgGhwZGEM1
 
 **People.** Rayyan checks every pack and signs off the style sheet.
 
+**No government or province is built in (20 Oct, standing rule for every pack).** A project may sit with the federal government or any province, so no pack names a government, province, provincial department or body, or a province-specific (or federal-only PPP) law. The government party is the defined term **Government**, filled per deal; departments and authorities are [●] or a bracketed neutral description ("[relevant sales tax authority]", "[applicable PPP law]"). Laws and bodies that apply nationwide whatever the project (Companies Act, 2017; SECP; Arbitration Act, 1940; Contract Act, 1872; FBR) stay.
+
+**Numbering (20 Oct).** Every numbered paragraph in a pack is Word's automatic numbering; hand-typed numbers ("4.1.1" plus a tab, "(a)") are converted when the pack is built.
+
+**Amendment pack (20 Oct).** General, not an SPA amendment: the agreement amended is "‘[●]’ (the Principal Agreement)", its clause numbers [●] with headings kept, parties [First Party] and [Second Party].
+
 **Precedent library.** Yes: the chosen precedents are copied into the Hub's precedent library under their type (blanked before they become standards).
 
 ## What needs you
