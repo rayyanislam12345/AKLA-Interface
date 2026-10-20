@@ -46,6 +46,13 @@ export function useLatestDocumentVersion(matterDocumentId: string | undefined, d
   });
 }
 
+const REVIEW_TYPES: readonly RedlineReviewType[] = ["legal_clauses", "formatting", "content_conflicts", "chat"];
+const isReviewType = (t: string): t is RedlineReviewType => (REVIEW_TYPES as readonly string[]).includes(t);
+
+// The review panel's suggestions on a version: only the four review types.
+// A version marked up from claude.ai also has rows of type 'edit' (its
+// tracked changes, decided in the viewer's Changes tab); they are not a
+// review's and are left out rather than breaking the panel.
 export function useRedlineSuggestions(documentVersionId: string | undefined, reviewRunId?: string | null) {
   return useQuery({
     queryKey: ["redline-suggestions", documentVersionId, reviewRunId],
@@ -54,15 +61,13 @@ export function useRedlineSuggestions(documentVersionId: string | undefined, rev
       let query = supabase
         .from("redline_suggestions")
         .select("*")
-        .eq("document_version_id", documentVersionId!);
+        .eq("document_version_id", documentVersionId!)
+        .in("review_type", [...REVIEW_TYPES]);
       if (reviewRunId) query = query.eq("review_run_id", reviewRunId);
       else query = query.is("review_run_id", null);
       const { data, error } = await query.order("created_at");
       if (error) throw error;
-      return data.map(row => {
-        if (!["legal_clauses", "formatting", "content_conflicts", "chat"].includes(row.review_type)) throw new Error("Unknown review type");
-        return { ...row, review_type: row.review_type as RedlineReviewType };
-      });
+      return data.flatMap((row) => (isReviewType(row.review_type) ? [{ ...row, review_type: row.review_type }] : []));
     },
   });
 }

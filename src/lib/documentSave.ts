@@ -128,33 +128,89 @@ export interface Decision {
   decision: "accepted" | "rejected";
 }
 
+/** A change the service left alone, with the sentence saying why. */
+export interface NotDone {
+  changeId: string;
+  reason: string;
+  note: string;
+}
+
 export interface DecideResult {
   workingDocumentId: string;
   head: ArtifactRow;
   changes: ChangeCard[];
   counts: ChangeCounts;
-  notDone: Array<{ changeId: string; reason: string; note: string }>;
+  notDone: NotDone[];
 }
+
+// A stored project version marked up from claude.ai (the connector's
+// apply_tracked_changes) has a Changes list of its own, named by the
+// version's id: its decisions land in a decided copy kept beside the
+// version's own file (public.version_change_heads), never in the file
+// itself. Same cards, counts and sentences as a chat's list.
+
+/** The file a version's changes are decided in: the decided copy, or the version's own file before any decision. */
+export interface VersionHeadSummary {
+  id: string;
+  versionId: string;
+  versionNumber: number;
+  bucket: string;
+  storagePath: string;
+  fileName: string | null;
+  title: string | null;
+  updatedAt: string | null;
+  decided: boolean;
+}
+
+export interface VersionChangesList {
+  workingDocumentId: null;
+  versionId: string;
+  head: VersionHeadSummary;
+  changes: ChangeCard[];
+  counts: ChangeCounts;
+}
+
+export interface VersionDecideResult extends VersionChangesList {
+  notDone: NotDone[];
+}
+
+/** What a call names: a chat's working document (by any of its copies) or a stored project version. */
+type DocumentTarget = { artifactId: string } | { versionId: string };
 
 export async function listChanges(artifactId: string): Promise<ChangesList> {
   const resp = await postChatApi("/changes/list", { artifactId });
   return (await resp.json()) as ChangesList;
 }
 
+/** The Changes list of a stored version. A version with no changes (or not a Word file) comes back with none. */
+export async function listVersionChanges(versionId: string): Promise<VersionChangesList> {
+  const resp = await postChatApi("/changes/list", { versionId });
+  return (await resp.json()) as VersionChangesList;
+}
+
 const MAX_DECISIONS = 200;
 
 /** Decides changes in batches the service accepts; the last batch's head and counts are the result. */
-export async function decideChanges(artifactId: string, decisions: Decision[]): Promise<DecideResult> {
-  let result: DecideResult | null = null;
+async function decideIn<R extends { changes: ChangeCard[]; notDone: NotDone[] }>(target: DocumentTarget, decisions: Decision[]): Promise<R> {
+  let result: R | null = null;
   for (let i = 0; i < decisions.length; i += MAX_DECISIONS) {
-    const resp = await postChatApi("/changes/decide", { artifactId, decisions: decisions.slice(i, i + MAX_DECISIONS) });
-    const part = (await resp.json()) as DecideResult;
+    const resp = await postChatApi("/changes/decide", { ...target, decisions: decisions.slice(i, i + MAX_DECISIONS) });
+    const part = (await resp.json()) as R;
     result = result
       ? { ...part, changes: [...result.changes, ...part.changes], notDone: [...result.notDone, ...part.notDone] }
       : part;
   }
   if (!result) throw new Error("Choose at least one change to decide.");
   return result;
+}
+
+export function decideChanges(artifactId: string, decisions: Decision[]): Promise<DecideResult> {
+  return decideIn<DecideResult>({ artifactId }, decisions);
+}
+
+/** Decides changes in a stored version's working copy; the version's own file is never touched. */
+export function decideVersionChanges(versionId: string, decisions: Decision[]): Promise<VersionDecideResult> {
+  return decideIn<VersionDecideResult>({ versionId }, decisions);
 }
 
 // ------------------------------------------------------------------ the file
@@ -196,10 +252,19 @@ function fileNameFrom(disposition: string | null, fallback: string): string {
 }
 
 /** The head file of a working document: "tracked" is the file as it is, "clean" has the AI's changes accepted. */
-export async function fetchDocumentFile(artifactId: string, form: "tracked" | "clean", { acceptOthers = false }: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
+export function fetchDocumentFile(artifactId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
+  return fetchFileFor({ artifactId }, form, opts);
+}
+
+/** A stored version's working file (its decided copy once a change has been decided), tracked or clean. */
+export function fetchVersionFile(versionId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
+  return fetchFileFor({ versionId }, form, opts);
+}
+
+async function fetchFileFor(target: DocumentTarget, form: "tracked" | "clean", { acceptOthers = false }: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
   let resp: Response;
   try {
-    resp = await postChatApi("/documents/file", { artifactId, form, ...(acceptOthers ? { acceptOthers: true } : {}) });
+    resp = await postChatApi("/documents/file", { ...target, form, ...(acceptOthers ? { acceptOthers: true } : {}) });
   } catch (err) {
     if (err instanceof ChatApiError && err.status === 409 && form === "clean") {
       throw new CleanCopyRefused(err.message, (err.body.counts as Partial<ChangeCounts> | undefined) ?? null);
@@ -231,6 +296,13 @@ export function downloadBlob(blob: Blob, name: string) {
 /** Downloads the working document in either form. A refused clean copy throws CleanCopyRefused with the service's sentence. */
 export async function downloadWorkingDocument(artifactId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
   const file = await fetchDocumentFile(artifactId, form, opts);
+  downloadBlob(file.blob, file.fileName);
+  return file;
+}
+
+/** Downloads a stored version's working file in either form. A refused clean copy throws CleanCopyRefused with the service's sentence. */
+export async function downloadVersionFile(versionId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
+  const file = await fetchVersionFile(versionId, form, opts);
   downloadBlob(file.blob, file.fileName);
   return file;
 }

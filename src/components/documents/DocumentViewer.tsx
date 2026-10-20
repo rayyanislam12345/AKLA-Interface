@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, FileQuestion, Loader2 } from "lucide-react";
+import { ChevronDown, Download, FileQuestion, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToastAction } from "@/components/ui/toast";
+import ChangesPanel from "@/components/ai/chat/ChangesPanel";
+import { useToast } from "@/hooks/use-toast";
+import { useVersionChangeState, useVersionChanges } from "@/hooks/useVersionChanges";
+import { CleanCopyRefused, chatApiBase, downloadVersionFile, type ChangeCard } from "@/lib/documentSave";
+import { clearOutline, outlineSuggestion } from "@/lib/locateInPreview";
+import { changesTabLabel, opensOnChanges, showsChangesTab, viewerFileOf } from "@/lib/versionChangesRules";
 import { cn } from "@/lib/utils";
 import { extensionFor } from "./zipDownload";
 import { sortVersions, versionOptionLabel, type PreviewVersion } from "./previewVersions";
@@ -26,8 +34,17 @@ import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutS
 // passes `companionSource`, the version's name and id, and highlighting a
 // passage of a Word file offers "Ask Claude about this", which puts the
 // passage in the chat's message box.
+//
+// A Word version marked up from claude.ai (the connector files the client's
+// draft with the AI's tracked changes as the next version) also has
+// Changes: the AI's changes as cards, each accepted or rejected here. The
+// decisions are kept in a decided copy beside the version's own file, which
+// is never rewritten; once there is one, the viewer draws it and Download
+// offers it tracked or clean (chat-service/versionChanges.js). The tab is
+// shown only for a version with change rows, and first while any wait.
 
-type Tab = "document" | "checks" | "changes";
+// "changes" is What changed (the comparison); "tracked" is the Changes list.
+type Tab = "document" | "tracked" | "checks" | "changes";
 const CHECKABLE_EXTENSIONS = ["docx", "pdf", "txt", "md"];
 
 export type { PreviewVersion } from "./previewVersions";
@@ -79,17 +96,94 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
   const earlier = version ? versions.filter((v) => v.version_number < version.version_number) : [];
   const checkTotal = insights.data?.proofCheck?.total;
   const comparedWith = insights.data?.changes?.previous?.version_number ?? earlier[0]?.version_number ?? null;
+  const { toast } = useToast();
+
+  // A Word version's change rows and decided copy, then (only when it has
+  // rows) its Changes list from the chat service.
+  const changeState = useVersionChangeState(kind === "docx" ? version?.id : undefined);
+  const rowCount = changeState.data?.rowCount ?? 0;
+  const changes = useVersionChanges(version?.id, { enabled: kind === "docx" && rowCount > 0 });
+  const hasChanges = kind === "docx" && showsChangesTab({ rowCount, listed: changes.cards?.length });
+  const showing: Tab = tab === "tracked" && !hasChanges ? "document" : tab;
+  // The file drawn: the decided copy once a change has been decided here,
+  // else the version's own. A Word file waits for the database to say which.
+  const decidedPath = (changes.head?.decided ? changes.head.storagePath : null) ?? changeState.data?.head?.storage_path ?? null;
+  const filePath = version ? viewerFileOf(version, decidedPath ? { storage_path: decidedPath } : null) : null;
+  const fileReady = kind !== "docx" || !changeState.isLoading;
+  const marked = kind === "docx" && (rowCount > 0 || !!decidedPath);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // The tab a version opens on: Changes while any of its changes wait,
+  // unless the lawyer has already picked a tab for this version.
+  const settledFor = useRef<string | null>(null);
+  const chooseTab = (next: Tab) => {
+    if (version) settledFor.current = version.id;
+    setTab(next);
+  };
+  const listed = changes.list.data;
+  useEffect(() => {
+    if (!version || !listed || listed.versionId !== version.id || settledFor.current === version.id) return;
+    settledFor.current = version.id;
+    if (opensOnChanges(listed.counts)) setTab("tracked");
+  }, [version?.id, listed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The server may have finished reading since the viewer opened.
   const { reload } = insights;
   useEffect(() => {
-    if (tab !== "document") reload();
-  }, [tab, reload]);
+    if (showing === "checks" || showing === "changes") reload();
+  }, [showing, reload]);
 
   // Show a finding in the Word preview: switch to it, then find the words.
   const findInDocument = (text: string) => {
-    setTab("document");
+    chooseTab("document");
     return scrollPreviewTo(docxRef.current, text);
+  };
+
+  // Show a change's card in the Word preview: switch to it, then outline the words.
+  const showCard = (card: ChangeCard) => {
+    setSelectedId(card.id);
+    chooseTab("document");
+    // The page is shown on the next paint; find the passage once it is.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const frame = previewRef.current;
+        if (!frame) return;
+        if (outlineSuggestion(frame, card.before || null, card.after || null, { accepted: card.state === "accepted" })) return;
+        const placed = card.state === "waiting" || card.state === "accepted" || card.state === "rejected";
+        toast({
+          title: "Couldn't find this passage in the document",
+          description: placed ? "Its wording is on the card. The page may lay it out differently." : card.stateNote ?? "Nothing in the file was changed for this one.",
+        });
+      }),
+    );
+  };
+
+  // A marked-up version's file comes from the chat service, tracked or
+  // clean; without the service only the file as it stands can be offered.
+  const downloadMarked = async (form: "tracked" | "clean", acceptOthers = false) => {
+    if (!version) return;
+    try {
+      if (!chatApiBase()) {
+        if (form === "clean") throw new Error("A clean copy needs the firm's chat service, which isn't set up on this site.");
+        onDownload({ ...version, storage_path: filePath ?? version.storage_path });
+        return;
+      }
+      await downloadVersionFile(version.id, form, { acceptOthers });
+    } catch (err) {
+      if (err instanceof CleanCopyRefused) {
+        toast({
+          title: "The clean copy isn't ready",
+          description: err.message,
+          action: err.onlyOthers ? (
+            <ToastAction altText="Download a clean copy with their changes accepted too" onClick={() => void downloadMarked("clean", true)}>
+              Accept theirs too
+            </ToastAction>
+          ) : undefined,
+        });
+        return;
+      }
+      toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    }
   };
 
   useEffect(() => {
@@ -97,11 +191,13 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
     let cancelled = false;
     const container = docxRef.current;
     if (container) container.innerHTML = "";
+    if (previewRef.current) clearOutline(previewRef.current);
     setState({ loading: kind !== "none", error: null, url: null });
+    if (!fileReady || !filePath) return;
     (async () => {
       try {
         if (kind === "docx") {
-          const { data, error } = await supabase.storage.from("matter-documents").download(version.storage_path);
+          const { data, error } = await supabase.storage.from("matter-documents").download(filePath);
           if (error || !data) throw error ?? new Error("The file couldn't be fetched.");
           const { renderAsync } = await import("docx-preview");
           if (cancelled || !docxRef.current) return;
@@ -124,7 +220,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
     return () => {
       cancelled = true;
     };
-  }, [version?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [version?.id, kind, filePath, fileReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!version) return null;
 
@@ -145,28 +241,78 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" onClick={() => onDownload(version)}>
-            <Download className="h-4 w-4 mr-1.5" />Download
-          </Button>
+          {marked ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" data-testid="version-download">
+                  <Download className="h-4 w-4 mr-1.5" />Download
+                  <ChevronDown className="ml-1 h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onSelect={() => void downloadMarked("tracked")}>With tracked changes</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void downloadMarked("clean")}>Clean copy</DropdownMenuItem>
+                {decidedPath && <DropdownMenuItem onSelect={() => onDownload(version)}>v{version.version_number} as filed, before any decision</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => onDownload(version)}>
+              <Download className="h-4 w-4 mr-1.5" />Download
+            </Button>
+          )}
           {actions}
         </div>
         {note}
+        {decidedPath && (
+          <p className="text-xs text-muted-foreground" data-testid="decided-copy-note">
+            Shown with the decisions made so far. v{version.version_number} as filed is kept unchanged.
+          </p>
+        )}
         {checkable && (
-          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+          <Tabs value={showing} onValueChange={(v) => chooseTab(v as Tab)}>
             <TabsList className="h-9 w-full sm:w-auto justify-start overflow-x-auto">
               <TabsTrigger value="document" className="text-xs">Document</TabsTrigger>
+              {hasChanges && (
+                <TabsTrigger value="tracked" className="text-xs" data-testid="version-changes-tab">
+                  {changesTabLabel(changes.counts?.waiting)}
+                </TabsTrigger>
+              )}
               <TabsTrigger value="checks" className="text-xs">
                 Checks{typeof checkTotal === "number" ? ` (${checkTotal})` : ""}
               </TabsTrigger>
               <TabsTrigger value="changes" className="text-xs">
-                What changed{comparedWith !== null ? ` (vs v${comparedWith})` : ""}
+                What changed
+                {/* Four tabs do not fit a narrow drawer with the comparison named. */}
+                {comparedWith !== null && <span className={cn(hasChanges && "hidden sm:inline")}>&nbsp;(vs v{comparedWith})</span>}
               </TabsTrigger>
             </TabsList>
           </Tabs>
         )}
       </div>
 
-      {checkable && tab === "checks" && (
+      {hasChanges && showing === "tracked" && (
+        <div className="flex-1 min-h-0 flex flex-col" data-testid="version-changes">
+          <ChangesPanel
+            cards={changes.cards}
+            counts={changes.counts}
+            loading={changes.loading}
+            error={changes.error}
+            available={changes.available}
+            deciding={changes.deciding}
+            selectedId={selectedId}
+            onSelect={showCard}
+            onDecide={changes.decide}
+            onReload={() => {
+              void changes.reload();
+              void changeState.refetch();
+            }}
+            emptyText="Nothing in this version is waiting to be decided here."
+            unavailableText="Deciding these changes needs the firm's chat service, which isn't set up on this site. They are in the Word file as tracked changes: download it to decide them in Word."
+          />
+        </div>
+      )}
+
+      {checkable && showing === "checks" && (
         <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
           <VersionChecksPanel
             versionId={version.id}
@@ -179,7 +325,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
           />
         </div>
       )}
-      {checkable && tab === "changes" && (
+      {checkable && showing === "changes" && (
         <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
           <VersionChangesPanel
             documentTitle={doc.title}
@@ -194,7 +340,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
       )}
 
       {/* Kept mounted on the other tabs so the drawn Word file survives a tab switch. */}
-      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${tab === "document" || !checkable ? "" : " hidden"}`}>
+      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${showing === "document" || !checkable ? "" : " hidden"}`}>
         {state.loading && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />Opening…

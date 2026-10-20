@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import type { ChangeCard, ChangeCounts, Decision, DecideResult } from "@/lib/documentSave";
+import type { ChangeCard, ChangeCounts, Decision, NotDone } from "@/lib/documentSave";
 import { cn } from "@/lib/utils";
 
 // The one Changes list for a Word document in the chat: every change the AI
@@ -20,6 +20,14 @@ import { cn } from "@/lib/utils";
 // says (its source, state, note and who decided it) is the server's, shown
 // as it comes. Waiting cards can be accepted or rejected here; the rest say
 // why they cannot.
+//
+// The same list shows a stored project version marked up from claude.ai
+// (DocumentViewer's Changes tab, useVersionChanges): the caller passes the
+// cards and decide() for the version, and its own words for an empty list
+// and for a site without the chat service.
+
+const CHAT_EMPTY = "The AI hasn't changed this document yet. Ask for an edit or a review in the chat and its changes will be listed here.";
+const CHAT_UNAVAILABLE = "The Changes list needs the firm's chat service, which isn't set up on this site. The document's changes are still in the Word file as tracked changes.";
 
 export type ChangesFilter = "waiting" | "decided" | "not-placed" | "all";
 
@@ -153,6 +161,8 @@ export default function ChangesPanel({
   onSelect,
   onDecide,
   onReload,
+  emptyText = CHAT_EMPTY,
+  unavailableText = CHAT_UNAVAILABLE,
 }: {
   cards: ChangeCard[] | undefined;
   counts: Partial<ChangeCounts> | null;
@@ -162,8 +172,12 @@ export default function ChangesPanel({
   deciding: boolean;
   selectedId: string | null;
   onSelect: (card: ChangeCard) => void;
-  onDecide: (decisions: Decision[]) => Promise<DecideResult>;
+  onDecide: (decisions: Decision[]) => Promise<{ notDone: NotDone[] }>;
   onReload: () => void;
+  /** Said when the list has no changes at all. */
+  emptyText?: string;
+  /** Said when the site has no chat service to list or decide with. */
+  unavailableText?: string;
 }) {
   const { toast } = useToast();
   const waitingCount = counts?.waiting ?? 0;
@@ -221,7 +235,7 @@ export default function ChangesPanel({
   };
 
   if (!available) {
-    return <p className="p-4 text-sm text-muted-foreground">The Changes list needs the firm's chat service, which isn't set up on this site. The document's changes are still in the Word file as tracked changes.</p>;
+    return <p className="p-4 text-sm text-muted-foreground">{unavailableText}</p>;
   }
 
   const countFor = (key: ChangesFilter) => all.filter(FILTERS.find((f) => f.key === key)!.match).length;
@@ -283,7 +297,7 @@ export default function ChangesPanel({
             </button>
           </p>
         )}
-        {cards && all.length === 0 && <p className="text-sm text-muted-foreground">The AI hasn't changed this document yet. Ask for an edit or a review in the chat and its changes will be listed here.</p>}
+        {cards && all.length === 0 && <p className="text-sm text-muted-foreground">{emptyText}</p>}
         {cards && all.length > 0 && shown.length === 0 && <p className="text-sm text-muted-foreground">Nothing here. Choose All to see every change.</p>}
         {shown.map((card) => (
           <ChangeCardView
