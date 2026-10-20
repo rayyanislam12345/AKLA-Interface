@@ -165,6 +165,32 @@ All results stay under the connector's 30,000-character page size.
 
 About 45 working days in all. Slices 1 to 5 (30 days) cover the ten wave-1 kinds everywhere. Slice 6 (15 days) is about a day for each long agreement (security, CTA, EPC, EF&U, DD, direct agreement, consortium, offtake, O&M, price escalation, site licence) and half a day for each short form (term sheets, undertakings, deeds, MOUs/LOIs, powers of attorney, affidavits, checklists, status reports, schedules of changes). It can be done one kind at a time. Slice 1 builds on connector slice 3, which is live. Slice 5 needs connector slices 2 and 3 live. Slices 3 and 4 can swap order. Wave-2 packs for a kind wait for your decisions on that kind (next section).
 
+## Decisions taken (20 October 2026)
+
+Answered by Rayyan on the decisions page (https://claude.ai/artifact/3AgGhwZGEM14bBKaWifTRK); this section overrides anything below that disagrees.
+
+**Template bases (wave 1).** Confirmed as proposed: letters (EWPL20), research memos (PTQ15.4), framework agreements (MM68), IE/IA agreements (MEW Qayyumabad IE Agreement, June 2026), legal opinions (SKM142.2), client proposals (PQE4.3), amendment agreements (ISPC SPA Amendment), consents and NOCs (SC12), meeting minutes (AM31). Changed:
+- **Escrow:** MEW's original escrow agreement, not SKM58: `Resigned Employees/Tayyaba - Backup/Tayyaba Hyder/MEW/2. Agreement (searchable)/1. Original Execution Versions/1. Project Documents/MEW - Escrow Agreement [Execution Draft November 19 2021].docx` (SKM57 is the same agreement as AKLA's execution version, 18 Nov 2021).
+- **Board resolutions:** `CTC of Board Resolution - Novation Agreement [AKLA][Second Draft][April 06, 2026].docx`, with the Helios resolutions (SC75 Extract of Resolutions, SOFR transition) as a second base.
+
+**Notes that change a pack.**
+- **Letters:** when the firm writes on someone's behalf there is no EWPL (or any client's) header or footer: the header is empty apart from "[To be printed on <client>'s letterhead]". The letter shell keeps the body layout of EWPL20 and that bracketed line, not EWPL's letterhead.
+- **Memos:** annexure headings follow the subject matter; there is usually no Annexure B or C, and when there is, Annexure B is the contract or document provision and Annexure C is the law. The memo shell keeps one annexure kind, titled by the drafter.
+
+**Layouts.** Security documents: Arial. Direct agreements: Arial (SKIM). Site licence: Arial. EF&U: Arial 11 (moved from PTQ5.2's Times New Roman). MOUs: A4 Arial 11. DD volumes: portrait. **Paper: every draft is A4**; execution versions are converted to US Legal at execution (a later "make execution version" step, not a pack choice).
+
+**Bases from other counsel.** All six (CTA, EPC, direct agreement, site licence, undertaking, price escalation) are **re-cut** before use: "we never use another firm's drafted document as a standard". Wave 2 builds these from AKLA-drafted files only, or as fresh firm standards in the firm's agreement layout.
+
+**Thin families.** NDA: a fresh firm standard in the look and formatting of the NSCL offtake agreement (NSCL41), with NDA content. Pleadings: left out for now.
+
+**New kinds of document.** Wave 1: all five as proposed (letter / notice, framework / agency agreement, amendment agreement, board resolution, certificate / consent / NOC); the page's preset was left as it stood. Wave 2: all twelve approved (term sheet, security document, undertaking, deed, MOU / LOI, JV / consortium, supply / offtake, O&M, power of attorney, affidavit / declaration, checklist / matrix, schedule of changes / file contents).
+
+**House rules.** Spelling: British -ise everywhere. Arbitration: no default; always asked as a drafting question.
+
+**People.** Rayyan checks every pack and signs off the style sheet.
+
+**Precedent library.** Yes: the chosen precedents are copied into the Hub's precedent library under their type (blanked before they become standards).
+
 ## What needs you
 
 1. **Confirm the template base for each wave-1 kind of document** (the table above; full paths in Appendix A). About ten minutes each: open the file and say "yes, this is how we send it out".
