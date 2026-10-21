@@ -19,7 +19,7 @@ Everything for the first upload is in `~/Desktop/AKLA Companion for the Web Stor
 ## 2. First upload (Rayyan, about 20 minutes)
 
 1. In the developer console: **New item** → upload
-   `akla-hub-companion-0.5.0.zip`.
+   `FOR THE WEB STORE ONLY - do not send to staff - 0.6.0.zip`.
 2. **Store listing** tab:
    - Description: paste the text in section 5 below.
    - Category: *Productivity* (Workflow & Planning). Language: English.
@@ -103,12 +103,11 @@ nothing anywhere.
 For lawyers at Ali Khan Law Associates who use Claude with the firm's AKLA
 Hub connector.
 
-When Claude names a Hub document or project, an "Open beside" button appears
-after the link. Click it and the document opens in a drawer on the right of
-the chat (or in Chrome's side panel): the firm's own Word document with its
+When Claude names a Hub document or project, click the link and the
+document opens in a drawer on the right of the chat (or in Chrome's side panel): the firm's own Word document with its
 formatting, versions, checks and the Changes list, where tracked changes are
-accepted or rejected. Highlight a passage in the drawer and "Ask Claude about
-this" puts it in your message box, quoted with its version, ready for your
+accepted or rejected. Highlight a passage in the drawer and "Add to message"
+puts it in your message box, quoted with its version, ready for your
 instruction. It never sends anything for you.
 
 You can also recolour the chat with the firm's themes.
@@ -124,8 +123,8 @@ links that conversation contains.
 **Permission justifications:**
 
 - *Host permission claude.ai:* to find links to the firm's Hub in a
-  claude.ai conversation, add an "Open beside" button next to them, show the
-  Hub in a drawer beside the chat, and, when the lawyer asks, place a
+  claude.ai conversation, open the one the lawyer clicks in a drawer beside
+  the chat, and, when the lawyer asks, place a
   highlighted passage in their own message box (never sending it).
 - *sidePanel:* to offer the Hub in Chrome's side panel as an alternative to
   the drawer.
