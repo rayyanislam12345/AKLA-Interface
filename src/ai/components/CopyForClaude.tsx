@@ -38,10 +38,12 @@ interface CopyTextForClaudeProps {
   compact?: boolean;
   className?: string;
   disabled?: boolean;
+  /** The words only from 480px wide, the icon alone below (the bar of a narrow drawer, where the page's name needs the room). */
+  iconWhenNarrow?: boolean;
 }
 
 /** Copies any text for the claude.ai chat: the full button, or an icon alone (compact). */
-export function CopyTextForClaude({ text, title, label, compact, className, disabled }: CopyTextForClaudeProps) {
+export function CopyTextForClaude({ text, title, label, compact, className, disabled, iconWhenNarrow }: CopyTextForClaudeProps) {
   const { toast } = useToast();
   const [done, setDone] = useState(false);
   const onClick = async () => {
@@ -72,9 +74,9 @@ export function CopyTextForClaude({ text, title, label, compact, className, disa
     );
   }
   return (
-    <Button size="sm" className={className} onClick={() => void onClick()} disabled={disabled} data-testid="copy-for-claude" title={title} aria-label={label}>
-      <Icon className="mr-1.5 h-4 w-4" />
-      {done ? "Copied" : "Copy for Claude"}
+    <Button size="sm" className={className} onClick={() => void onClick()} disabled={disabled} data-testid="copy-for-claude" title={title} aria-label={label ?? (iconWhenNarrow ? "Copy for Claude" : undefined)}>
+      <Icon className={cn("h-4 w-4", iconWhenNarrow ? "min-[480px]:mr-1.5" : "mr-1.5")} />
+      <span className={cn(iconWhenNarrow && "hidden min-[480px]:inline")}>{done ? "Copied" : "Copy for Claude"}</span>
     </Button>
   );
 }

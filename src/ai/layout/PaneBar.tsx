@@ -47,6 +47,7 @@ export default function PaneBar({ companion }: Props = {}) {
           text={() => info.copy ?? ""}
           title={info.copyTitle ?? "Copies this page's name, id and Hub link, to paste into your Claude message"}
           className="h-8 shrink-0 px-2.5 text-xs"
+          iconWhenNarrow
         />
       )}
       <a

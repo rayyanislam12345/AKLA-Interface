@@ -27,6 +27,10 @@ import { Button } from "@/components/ui/button";
 // Download, and draws a Word file at its page width, scaled to fit. The
 // companion shows the same bar (src/ai/layout/PaneBar.tsx), so there too the
 // bar carries "Copy for Claude" and the page does not repeat it.
+// Both beside a chat, the page is the same too: no line of detail (the bar
+// names the document and version, Back names the project, the file's name is
+// on the version's tooltip), one compact row of controls and tabs, and the
+// page fitted to the width, Word and PDF alike.
 export default function AiDocumentPage() {
   const { versionId } = useParams<{ versionId: string }>();
   const navigate = useNavigate();
@@ -34,7 +38,6 @@ export default function AiDocumentPage() {
   const embed = useEmbedMode();
   const host = useEmbedHost();
   const companion = host === "companion";
-  const pane = host === "pane";
   // Claude is the chat here (the companion's drawer or the pane): no Hub chat buttons.
   const claudeChat = host !== null;
   const openEdit = useOpenEditChat();
@@ -122,22 +125,23 @@ export default function AiDocumentPage() {
           </SiteLink>
         </div>
       )}
-      <div className={pane ? "flex w-full min-h-0 flex-1 flex-col" : "mx-auto flex w-full max-w-[72rem] min-h-0 flex-1 flex-col"}>
+      <div className={claudeChat ? "flex w-full min-h-0 flex-1 flex-col" : "mx-auto flex w-full max-w-[72rem] min-h-0 flex-1 flex-col"}>
         <DocumentViewer
           document={detail.document}
           versions={detail.versions}
           versionId={detail.version.id}
           onVersionChange={(id) => navigate(`/ai/d/${id}`, { replace: true })}
           onDownload={download}
-          fitToWidth={pane}
+          fitToWidth={claudeChat}
+          compact={claudeChat}
           companionSource={
             claudeChat
               ? { title: detail.document.title, versionId: detail.version.id, versionNumber: detail.version.version_number, fileName: detail.version.file_name, projectName: detail.matter?.name }
               : undefined
           }
-          headerClassName={pane ? "space-y-2 px-3 py-2" : embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
+          headerClassName={claudeChat ? "px-2 py-1.5" : embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
           heading={
-            <p className={pane ? "truncate text-xs text-muted-foreground" : "break-words text-xs text-muted-foreground"} title={detail.version.file_name ?? undefined}>
+            claudeChat ? undefined : <p className="break-words text-xs text-muted-foreground" title={detail.version.file_name ?? undefined}>
               {embed && detail.matter?.name && (
                 <>
                   <Link to={projectPath} className="hover:text-foreground hover:underline" title="The project's page: its files, chats and instructions">{detail.matter.name}</Link>

@@ -38,6 +38,11 @@ import { fitScale, useFitSize } from "./fitWidth";
 // app's browser pane) the same button is "Copy for Claude", and the caller
 // asks for `fitToWidth`: a Word file is drawn at its real page width and
 // scaled to fit the pane, with a Fit / 100% switch beside Download.
+// Beside a Claude chat (the drawer and the pane alike) the caller also asks
+// for `compact`: the version, Download, Fit / 100% and the tabs share one
+// row, so the document starts high in a short panel (a Windows laptop at
+// 150% scaling has little height to spare), and a PDF opens fitted to the
+// width without the browser's PDF toolbar (Download is on the row).
 //
 // A Word version marked up from claude.ai (the connector files the client's
 // draft with the AI's tracked changes as the next version) also has
@@ -85,9 +90,11 @@ export interface DocumentViewerProps {
   companionSource?: CompanionSource;
   /** The pane page: draw a Word file at its page width, scaled to fit, with a Fit / 100% switch. */
   fitToWidth?: boolean;
+  /** Beside a Claude chat: one row of controls, Download as an icon, a PDF fitted to the width without its toolbar. */
+  compact?: boolean;
 }
 
-export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className, companionSource, fitToWidth = false }: DocumentViewerProps) {
+export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className, companionSource, fitToWidth = false, compact = false }: DocumentViewerProps) {
   const [state, setState] = useState<{ loading: boolean; error: string | null; url: string | null }>({ loading: false, error: null, url: null });
   const docxRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -236,14 +243,39 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
 
   if (!version) return null;
 
+  const tabs = (
+    <Tabs value={showing} onValueChange={(v) => chooseTab(v as Tab)}>
+      <TabsList className={cn("justify-start overflow-x-auto", compact ? "h-8" : "h-9 w-full sm:w-auto")}>
+        <TabsTrigger value="document" className="text-xs">Document</TabsTrigger>
+        {hasChanges && (
+          <TabsTrigger value="tracked" className="text-xs" data-testid="version-changes-tab">
+            {changesTabLabel(changes.counts?.waiting)}
+          </TabsTrigger>
+        )}
+        <TabsTrigger value="checks" className="text-xs">
+          Checks{typeof checkTotal === "number" ? ` (${checkTotal})` : ""}
+        </TabsTrigger>
+        <TabsTrigger value="changes" className="text-xs">
+          What changed
+          {/* Four tabs do not fit a narrow drawer with the comparison named. */}
+          {comparedWith !== null && <span className={cn(compact ? "hidden" : hasChanges && "hidden sm:inline")}>&nbsp;(vs v{comparedWith})</span>}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+  );
+
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", className)} data-testid="document-viewer">
-      <div className={cn("border-b space-y-3", headerClassName)}>
+      <div className={cn("border-b", compact ? "space-y-1.5" : "space-y-3", headerClassName)}>
         {heading}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={cn("flex flex-wrap items-center", compact ? "gap-1.5" : "gap-2")}>
           {/* On the pane page the version shares its line with Download and Fit / 100%. */}
           <Select value={version.id} onValueChange={onVersionChange}>
-            <SelectTrigger className={cn("h-8 text-xs", fitToWidth ? "min-w-[8rem] flex-1 sm:max-w-[20rem]" : "w-full sm:w-auto sm:min-w-[12rem] sm:max-w-[20rem]")} aria-label="Version">
+            <SelectTrigger
+              className={cn("h-8 text-xs", compact ? "w-auto min-w-[6.5rem] max-w-[12rem]" : fitToWidth ? "min-w-[8rem] flex-1 sm:max-w-[20rem]" : "w-full sm:w-auto sm:min-w-[12rem] sm:max-w-[20rem]")}
+              aria-label="Version"
+              title={compact ? version.file_name ?? undefined : undefined}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -257,8 +289,8 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
           {marked ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" data-testid="version-download">
-                  <Download className="h-4 w-4 mr-1.5" />Download
+                <Button size="sm" variant="outline" className={cn(compact && "h-8 px-2")} data-testid="version-download" title="Download" aria-label="Download">
+                  <Download className={cn("h-4 w-4", !compact && "mr-1.5")} />{!compact && "Download"}
                   <ChevronDown className="ml-1 h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
@@ -269,8 +301,8 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button size="sm" variant="outline" onClick={() => onDownload(version)}>
-              <Download className="h-4 w-4 mr-1.5" />Download
+            <Button size="sm" variant="outline" className={cn(compact && "h-8 w-8 p-0")} onClick={() => onDownload(version)} title="Download" aria-label="Download">
+              <Download className={cn("h-4 w-4", !compact && "mr-1.5")} />{!compact && "Download"}
             </Button>
           )}
           {fitting && !state.loading && !state.error && (
@@ -296,6 +328,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
             </div>
           )}
           {actions}
+          {checkable && compact && tabs}
         </div>
         {note}
         {decidedPath && (
@@ -303,26 +336,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
             Shown with the decisions made so far. v{version.version_number} as filed is kept unchanged.
           </p>
         )}
-        {checkable && (
-          <Tabs value={showing} onValueChange={(v) => chooseTab(v as Tab)}>
-            <TabsList className="h-9 w-full sm:w-auto justify-start overflow-x-auto">
-              <TabsTrigger value="document" className="text-xs">Document</TabsTrigger>
-              {hasChanges && (
-                <TabsTrigger value="tracked" className="text-xs" data-testid="version-changes-tab">
-                  {changesTabLabel(changes.counts?.waiting)}
-                </TabsTrigger>
-              )}
-              <TabsTrigger value="checks" className="text-xs">
-                Checks{typeof checkTotal === "number" ? ` (${checkTotal})` : ""}
-              </TabsTrigger>
-              <TabsTrigger value="changes" className="text-xs">
-                What changed
-                {/* Four tabs do not fit a narrow drawer with the comparison named. */}
-                {comparedWith !== null && <span className={cn(hasChanges && "hidden sm:inline")}>&nbsp;(vs v{comparedWith})</span>}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        )}
+        {checkable && !compact && tabs}
       </div>
 
       {hasChanges && showing === "tracked" && (
@@ -410,7 +424,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
           <AskClaudeAboutSelection contentRef={docxRef} scrollRef={previewRef} source={companionSource} />
         )}
         {kind === "pdf" && state.url && (
-          <iframe src={state.url} title={doc.title} className="h-full w-full border-0 bg-background" />
+          <iframe src={compact ? `${state.url}#toolbar=0&view=FitH` : state.url} title={doc.title} className="h-full w-full border-0 bg-background" />
         )}
         {kind === "image" && state.url && (
           <div className="flex justify-center p-4">
