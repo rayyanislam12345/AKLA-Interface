@@ -134,7 +134,17 @@
     else chrome.storage.session.set({ panelUrl: url });
   }
 
+  // The Hub lets only this extension's own id frame it (vercel.json). A copy
+  // installed from another file gets another id, and the browser would only
+  // show a grey "refused to connect"; say what to do instead.
+  var KNOWN_IDS = ["djjhabnppnfpboomokbikdjdoimgogdp"];
+  var wrongCopy = KNOWN_IDS.indexOf(chrome.runtime.id) === -1;
+
   function navigateFrame(url) {
+    if (wrongCopy) {
+      say("This copy of the companion was installed from the wrong file, so the Hub will not open inside it. Remove it in chrome://extensions (edge://extensions in Edge) and load the folder from the \"sideload\" zip instead.", url);
+      return;
+    }
     var target = HubLinks.embedUrl(url, HUB_THEME[settings.theme] || null);
     frame.hidden = false;
     if (!frameStarted) {

@@ -25,7 +25,9 @@
   var NARROW = 1000; // below this window width the drawer always slides over
   var OPEN_KEY = "hub-companion:pane-open";
   var CONV_KEY = "hub-companion:conversations";
-  var EXT_ORIGIN = "chrome-extension://" + api.runtime.id;
+  // The extension's own origin as this browser spells it (Chrome:
+  // chrome-extension://<id>; Edge may use extension://<id>).
+  var EXT_ORIGIN = new URL(api.runtime.getURL("")).origin;
   var PAGE_ORIGIN = location.origin;
   var MAX_INSERT = 8000; // characters: a quoted passage (4,000) with its heading and "> " marks
 

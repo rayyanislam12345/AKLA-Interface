@@ -34,8 +34,10 @@ export type EmbedHost = "companion" | "pane";
 // The unpacked install's id (fixed by hub-companion/manifest.json's key) and,
 // once it is listed, the Chrome Web Store's id for the same extension. Add the
 // store's id here AND to frame-ancestors in vercel.json (docs/companion-web-store.md).
+// Edge runs the same extension under extension:// instead of chrome-extension://.
 export const COMPANION_ORIGINS: readonly string[] = [
   "chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp",
+  "extension://djjhabnppnfpboomokbikdjdoimgogdp",
 ];
 /** True when a message or a framer is the companion (any of its ids). */
 export function isCompanionOrigin(origin: string): boolean {
