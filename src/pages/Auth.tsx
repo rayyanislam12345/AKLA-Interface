@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { postToCompanion, resolveCompanionHost, resolveEmbedMode } from '@/lib/embedMode';
+import { EMBED_PARAM, HOST_PARAM, postToCompanion, resolveCompanionHost, resolveEmbedMode, resolvePaneHost } from '@/lib/embedMode';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,40 @@ function afterSignIn(): string {
   return '/dashboard';
 }
 
+// On the pane page (the Claude desktop app's browser pane, ?embed=1&host=pane)
+// the sign-in is shown compactly: no tall margins, a smaller logo, the card
+// near the top. The pane's flags ride along in ?next= (ProtectedRoute), and
+// the tab keeps them too.
+function isPaneSignIn(): boolean {
+  if (resolveEmbedMode() && resolvePaneHost()) return true;
+  const next = new URLSearchParams(window.location.search).get('next');
+  if (!next) return false;
+  try {
+    const params = new URL(next, 'http://x').searchParams;
+    return params.get(EMBED_PARAM) === '1' && params.get(HOST_PARAM) === 'pane';
+  } catch {
+    return false;
+  }
+}
+
+const LOOKS = {
+  full: {
+    shell: 'min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4',
+    logoRow: 'flex items-center justify-center mb-8',
+    logo: 'h-10 w-auto max-w-[220px] object-contain',
+    welcome: 'text-2xl text-center',
+  },
+  compact: {
+    shell: 'min-h-dvh flex items-start justify-center bg-background px-4 py-6 sm:items-center',
+    logoRow: 'flex items-center justify-center mb-4',
+    logo: 'h-7 w-auto max-w-[160px] object-contain',
+    welcome: 'text-xl text-center',
+  },
+};
+
 export default function Auth() {
+  const [compact] = useState(isPaneSignIn);
+  const look = compact ? LOOKS.compact : LOOKS.full;
   const { user, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const [destination] = useState(afterSignIn);
@@ -267,11 +300,11 @@ export default function Auth() {
   // Accept invite screen
   if (authStep === 'accept-invite') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -341,11 +374,11 @@ export default function Auth() {
   // Post-invite optional 2FA setup screen
   if (authStep === 'invite-mfa') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -392,11 +425,11 @@ export default function Auth() {
   // Sign up screen
   if (authStep === 'signup') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -487,11 +520,11 @@ export default function Auth() {
   // Post-signup screen — account exists but is pending admin approval
   if (authStep === 'signup-pending') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -528,11 +561,11 @@ export default function Auth() {
   // MFA Verification screen
   if (authStep === 'mfa-verify' && mfaFactorId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <MFAVerification 
@@ -548,11 +581,11 @@ export default function Auth() {
   // MFA Required screen (org requires MFA but user doesn't have it)
   if (authStep === 'mfa-required') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -592,11 +625,11 @@ export default function Auth() {
   // Forgot password screen
   if (authStep === 'forgot-password') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+      <div className={look.shell}>
         <div className="w-full max-w-md">
-          <div className="flex items-center justify-center mb-8">
+          <div className={look.logoRow}>
             <div className="flex items-center space-x-3">
-              <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+              <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
             </div>
           </div>
           <Card className="border-border/50 shadow-elegant">
@@ -670,19 +703,19 @@ export default function Auth() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-muted/50 p-4">
+    <div className={look.shell}>
       <div className="w-full max-w-md">
-        <div className="flex items-center justify-center mb-8">
+        <div className={look.logoRow}>
           <div className="flex items-center space-x-3">
-            <img src={aklaLogo} alt="Ali Khan Law Associates" className="h-10 w-auto max-w-[220px] object-contain" />
+            <img src={aklaLogo} alt="Ali Khan Law Associates" className={look.logo} />
           </div>
         </div>
 
         <Card className="w-full border-border/50 shadow-elegant">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-center">Welcome</CardTitle>
+            <CardTitle className={look.welcome}>Welcome</CardTitle>
             <CardDescription className="text-center">
-              Sign in to your account
+              {compact ? "Sign in to open this page in the Hub" : "Sign in to your account"}
             </CardDescription>
           </CardHeader>
           <CardContent>

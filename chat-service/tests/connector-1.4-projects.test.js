@@ -115,16 +115,16 @@ test('the module adds its two tools after the built-in eight, described and sche
 test('get_project_overview gathers the project, its instructions, its laws and every document\'s latest card', async () => {
   const { run, supabase } = tools();
   const out = await run('get_project_overview', { projectId: P1 });
-  assert.match(out, /^M6 Motorway — NHA; Infrastructure; PPP\nprojectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\n/);
+  assert.match(out, /^M6 Motorway — NHA; Infrastructure; PPP\nprojectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane\n/);
   assert.doesNotMatch(out, /starred by you/);
   assert.match(out, /\nSTANDING INSTRUCTIONS\n\(the project's context on the Hub, updated 5 Oct 2026; follow it in anything you draft or answer for this project\)\nThe client wants a 30-year term\. Use the 2024 NHA model agreement\.\n/);
   assert.match(out, /\nRELEVANT LAWS \(2\)\n- National Highway Authority Act, 1991 \(in the law library: search_law_library and read_act_section read it\)\n- Sindh Public Private Partnership Act, 2010 \(not in the law library yet\)\n/);
   assert.match(out, /\nDOCUMENTS \(3\)\n/);
   // The newest version, its card, and the Hub link; the older version's card is not shown.
-  assert.match(out, /- Concession Agreement \(Concession Agreement\) — in progress; 2 versions, latest v2 CA v2\.docx, saved 5 Oct 2026 \[AI draft, read by the Hub\]\n {2}versionId: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {2}Summary: The draft concession agreement with the tolling clause added\.\n {2}Parties: NHA\n {2}Key dates: 2027-01-01\n/);
+  assert.match(out, /- Concession Agreement \(Concession Agreement\) — in progress; 2 versions, latest v2 CA v2\.docx, saved 5 Oct 2026 \[AI draft, read by the Hub\]\n {2}versionId: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\?embed=1&host=pane\n {2}Summary: The draft concession agreement with the tolling clause added\.\n {2}Parties: NHA\n {2}Key dates: 2027-01-01\n/);
   assert.doesNotMatch(out, /Financial Close/);
   assert.doesNotMatch(out, /Defined terms|Clause outline/);
-  assert.match(out, /- Notes 100% final_v2; 1 version, latest v1 notes\.txt, saved 6 Oct 2026 \[being read\]\n {2}versionId: ffffffff-ffff-4fff-8fff-ffffffffffff\n {2}Open in Hub: [^\n]+\/ai\/d\/ffffffff-ffff-4fff-8fff-ffffffffffff\n {2}Index card: not written yet \(the Hub has not read this file\)\.\n/);
+  assert.match(out, /- Notes 100% final_v2; 1 version, latest v1 notes\.txt, saved 6 Oct 2026 \[being read\]\n {2}versionId: ffffffff-ffff-4fff-8fff-ffffffffffff\n {2}Open in Hub: [^\n]+\/ai\/d\/ffffffff-ffff-4fff-8fff-ffffffffffff\?embed=1&host=pane\n {2}Index card: not written yet \(the Hub has not read this file\)\.\n/);
   assert.match(out, /- Term Sheet — draft; no versions saved$/);
   assert.doesNotMatch(out, /Showing documents|more document/);
   assert.deepEqual(supabase.calls, ['matters', 'matter_stars', 'matter_context', 'matter_relevant_laws', 'matter_documents', 'document_versions']);
@@ -149,7 +149,7 @@ test('get_project_overview says when a project is starred, has no instructions, 
   assert.match(out, /^Karachi Port Corridor — KPT; Ports; PPP; starred by you\n/);
   assert.match(out, /\nSTANDING INSTRUCTIONS\nNone written on the Hub yet\.\n/);
   assert.match(out, /\nRELEVANT LAWS \(0\)\nNone marked on the Hub\. search_law_library searches every Act the firm holds\.\n/);
-  assert.match(out, /- Port Term Sheet \(Term Sheet\) — draft; 1 version, latest v1 TS\.docx, saved 7 Oct 2026 \[read by the Hub\]\n {2}versionId: v4\n {2}Open in Hub: [^\n]+\/ai\/d\/v4\n {2}Index card: not written\.$/);
+  assert.match(out, /- Port Term Sheet \(Term Sheet\) — draft; 1 version, latest v1 TS\.docx, saved 7 Oct 2026 \[read by the Hub\]\n {2}versionId: v4\n {2}Open in Hub: [^\n]+\/ai\/d\/v4\?embed=1&host=pane\n {2}Index card: not written\.$/);
   const empty = await run('get_project_overview', { projectId: P2 });
   assert.match(empty, /^Old Port Deal — NHA; Infrastructure; PPP; closed\n/);
   assert.match(empty, /\nDOCUMENTS \(0\)\nOld Port Deal has no documents yet\.$/);
@@ -212,15 +212,15 @@ test('find_document_by_title matches titles and project names across the Hub, or
   const { run, supabase } = tools();
   const all = await run('find_document_by_title', { query: 'term sheet' });
   assert.match(all, /^2 documents whose title contains “term sheet” on the Hub:\n\n/);
-  assert.match(all, /- Port Term Sheet \(Term Sheet\) — draft; project Karachi Port Corridor\n {2}projectId: 99999999-9999-4999-8999-999999999999\n {2}documentId: d4\n {2}latest v1 TS\.docx of 1 \[read by the Hub\]\n {2}versionId: v4\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/v4\n/);
-  assert.match(all, /- Term Sheet — draft; project M6 Motorway\n {2}projectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\n {2}documentId: dddddddd-dddd-4ddd-8ddd-dddddddddd02\n {2}no versions saved\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/);
+  assert.match(all, /- Port Term Sheet \(Term Sheet\) — draft; project Karachi Port Corridor\n {2}projectId: 99999999-9999-4999-8999-999999999999\n {2}documentId: d4\n {2}latest v1 TS\.docx of 1 \[read by the Hub\]\n {2}versionId: v4\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/v4\?embed=1&host=pane\n/);
+  assert.match(all, /- Term Sheet — draft; project M6 Motorway\n {2}projectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\n {2}documentId: dddddddd-dddd-4ddd-8ddd-dddddddddd02\n {2}no versions saved\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane/);
   assert.doesNotMatch(all, /Projects? whose name contains/);
   assert.deepEqual(supabase.calls, ['matter_documents', 'matters']);
 
   // A project name matches too, under its own heading; a document's latest version wins.
   const port = await run('find_document_by_title', { query: 'PORT' });
   assert.match(port, /^1 document whose title contains “PORT” on the Hub:\n\n- Port Term Sheet/);
-  assert.match(port, /\n\nProjects whose name contains “PORT”:\n\n- Karachi Port Corridor — KPT; Ports; PPP\n {2}projectId: 99999999-9999-4999-8999-999999999999\n {2}Open in Hub: [^\n]+\/ai\/p\/99999999-9999-4999-8999-999999999999\n- Old Port Deal — NHA; Infrastructure; PPP; closed\n {2}projectId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/);
+  assert.match(port, /\n\nProjects whose name contains “PORT”:\n\n- Karachi Port Corridor — KPT; Ports; PPP\n {2}projectId: 99999999-9999-4999-8999-999999999999\n {2}Open in Hub: [^\n]+\/ai\/p\/99999999-9999-4999-8999-999999999999\?embed=1&host=pane\n- Old Port Deal — NHA; Infrastructure; PPP; closed\n {2}projectId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/);
   const ca = await run('find_document_by_title', { query: 'concession' });
   assert.match(ca, /- Concession Agreement \(Concession Agreement\) — in progress; project M6 Motorway\n {2}projectId: [^\n]+\n {2}documentId: cccccccc-cccc-4ccc-8ccc-cccccccccccc\n {2}latest v2 CA v2\.docx of 2 \[AI draft, read by the Hub\]\n {2}versionId: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/);
 

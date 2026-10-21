@@ -6,12 +6,25 @@
 // use (scripts/ask.mjs SITE). A plain address in a tool's text is the only
 // way a link reaches the lawyer: claude.ai shows no link affordance for
 // connector results, so each one is written out on its own line.
+//
+// A project or version link carries ?embed=1&host=pane: the Claude desktop
+// app opens a link Claude prints in its own browser pane beside the chat,
+// and those two flags make the Hub there a page made for the pane (no
+// sidebar, a slim bar with Copy for Claude and Full Hub, the document scaled
+// to fit; src/lib/embedMode.ts). Clicked anywhere else (a browser tab, a
+// phone) the page reads the same way. The companion extension strips both
+// flags when it opens a Hub link in its drawer (hub-companion/links.js
+// FRAME_PARAMS), so it is unaffected. The precedent library is a page of the
+// site, not of the workspace, so its link stays plain.
 
 export const DEFAULT_HUB_URL = "https://akla-interface.vercel.app";
 
+/** The pane page's flags, on every project and version link. */
+export const PANE_QUERY = "?embed=1&host=pane";
+
 const PATHS = {
-  project: (id) => `/ai/p/${id}`,
-  version: (id) => `/ai/d/${id}`,
+  project: (id) => `/ai/p/${id}${PANE_QUERY}`,
+  version: (id) => `/ai/d/${id}${PANE_QUERY}`,
   precedents: () => "/precedent-library",
 };
 

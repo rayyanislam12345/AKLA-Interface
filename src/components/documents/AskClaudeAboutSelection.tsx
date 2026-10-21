@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { MessageSquareQuote } from "lucide-react";
-import { postToCompanion, useCompanionHost } from "@/lib/embedMode";
-import { tidyPassage } from "@/lib/selectionPassage";
+import { ClipboardCopy, MessageSquareQuote } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { copyText } from "@/lib/copyText";
+import { postToCompanion, useEmbedHost } from "@/lib/embedMode";
+import { selectionMessage, tidyPassage, type SelectionPayload } from "@/lib/selectionPassage";
 
 // In the companion's drawer (the Hub beside a claude.ai chat), highlighting
 // a passage of the drawn Word file brings up one small button by the
 // selection: "Ask Claude about this". It hands the passage, with the
 // version's name and id, to the companion, which puts it in the chat's
 // message box quoted, ready for the lawyer to say what to change. Nothing is
-// sent to Claude until the lawyer sends the message. Never shown in the
-// ordinary Hub.
+// sent to Claude until the lawyer sends the message.
+// On the pane page (?host=pane, the Claude desktop app's browser pane) there
+// is no companion to hand it to: the button is "Copy for Claude" and puts the
+// same quoted message on the clipboard, for the lawyer to paste into the
+// chat. Never shown in the ordinary Hub.
 
 /** The version on show, as the companion names it in the chat. */
 export interface CompanionSource {
@@ -40,7 +45,9 @@ const BUTTON_W = 190;
 const GAP = 6;
 
 export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props) {
-  const companion = useCompanionHost();
+  const host = useEmbedHost();
+  const active = host !== null;
+  const { toast } = useToast();
   const [spot, setSpot] = useState<Spot | null>(null);
   const dragging = useRef(false);
   const dismissed = useRef<string | null>(null); // the selection already sent, or put away with Escape
@@ -78,7 +85,7 @@ export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props
   }, [measure]);
 
   useEffect(() => {
-    if (!companion) return;
+    if (!active) return;
     const box = scrollRef.current;
     // Hidden while the mouse is still choosing the words, so the button does not chase the pointer.
     const down = (ev: PointerEvent) => {
@@ -116,13 +123,13 @@ export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props
       if (frame.current) cancelAnimationFrame(frame.current);
       frame.current = 0;
     };
-  }, [companion, contentRef, scrollRef, schedule]);
+  }, [active, contentRef, scrollRef, schedule]);
 
-  if (!companion || !spot) return null;
+  if (!active || !spot) return null;
+  const pane = host === "pane";
 
   const ask = () => {
-    postToCompanion({
-      type: "hub:selection",
+    const payload: SelectionPayload = {
       text: spot.text,
       truncated: spot.truncated,
       title: source.title,
@@ -130,7 +137,20 @@ export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props
       versionNumber: source.versionNumber,
       fileName: source.fileName ?? null,
       projectName: source.projectName ?? null,
-    });
+    };
+    if (pane) {
+      // The very message the companion would have built from the same post.
+      const text = selectionMessage(payload);
+      if (text) {
+        void copyText(text).then((ok) =>
+          ok
+            ? toast({ title: "Copied — paste it into your Claude message." })
+            : toast({ title: "Copy it by hand", description: text }),
+        );
+      }
+    } else {
+      postToCompanion({ type: "hub:selection", ...payload });
+    }
     dismissed.current = window.getSelection()?.toString() ?? null;
     setSpot(null);
   };
@@ -143,11 +163,15 @@ export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props
       onClick={ask}
       className="fixed z-50 inline-flex items-center whitespace-nowrap gap-1.5 rounded-md border bg-popover px-2.5 text-xs font-medium text-popover-foreground shadow-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       style={{ top: spot.top, left: spot.left, height: BUTTON_H, maxWidth: BUTTON_W }}
-      title="Adds this passage, quoted, to your message in the chat. Nothing is sent until you send it."
+      title={
+        pane
+          ? "Copies this passage, quoted, with the document's name and version, to paste into your Claude message."
+          : "Adds this passage, quoted, to your message in the chat. Nothing is sent until you send it."
+      }
       data-testid="ask-claude-about-selection"
     >
-      <MessageSquareQuote className="h-3.5 w-3.5 shrink-0" />
-      Ask Claude about this
+      {pane ? <ClipboardCopy className="h-3.5 w-3.5 shrink-0" /> : <MessageSquareQuote className="h-3.5 w-3.5 shrink-0" />}
+      {pane ? "Copy for Claude" : "Ask Claude about this"}
     </button>
   );
 }

@@ -205,7 +205,7 @@ test('a sign-in with hub:write sees the write tool with its own annotations, rea
 
     const saved = await client.callTool({ name: 'save_test_note', arguments: { projectId: P1, text: 'Notes on the term sheet.' } });
     assert.equal(saved.isError, undefined, saved.content?.[0]?.text);
-    assert.match(saved.content[0].text, new RegExp(`^saved v1 as ${USER}\\|hub:read hub:write\\|true\\|function\\nOpen in Hub: https://hub\\.test/ai/d/${NEW_V}$`));
+    assert.match(saved.content[0].text, new RegExp(`^saved v1 as ${USER}\\|hub:read hub:write\\|true\\|function\\nOpen in Hub: https://hub\\.test/ai/d/${NEW_V}\\?embed=1&host=pane$`));
     // One upload under the site's path shape, one RPC as the lawyer, one record.
     assert.equal(t.supabase.calls.upload.length, 1);
     assert.match(t.supabase.calls.upload[0].path, new RegExp(`^${P1}/[0-9a-f-]{36}/[0-9a-f-]{36}-Test-note\\.md$`));
@@ -423,7 +423,7 @@ test('saveVersion of a new document: upload under the site\'s path, the RPC as t
   assert.deepEqual(saved, {
     matterDocumentId: docId, versionId: NEW_V, versionNumber: 1, fileName: 'Notes-on-the-term-sheet-v1.md', storagePath: up.path,
     label: 'Saved from claude.ai — 20 October 2026', created: true,
-    links: { project: `https://hub.test/ai/p/${P1}`, version: `https://hub.test/ai/d/${NEW_V}` },
+    links: { project: `https://hub.test/ai/p/${P1}?embed=1&host=pane`, version: `https://hub.test/ai/d/${NEW_V}?embed=1&host=pane` },
     note: 'On file; the Hub is reading it now. Call get_document_summary on the version in about a minute.',
   });
   assert.equal(w.supabase.calls.remove.length, 0);

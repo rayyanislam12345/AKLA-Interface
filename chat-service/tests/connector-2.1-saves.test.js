@@ -214,7 +214,7 @@ test('a note becomes v1 of a new document: caps checked first, the Markdown uplo
   assert.ok(!JSON.stringify(row).includes('term sheet'), 'never the document\'s text');
   // The reply.
   assert.equal(out.split('\n')[0], `Saved "Notes on the term sheet" as v1 (Notes-on-the-term-sheet-v1.md), a new document on M6 Motorway, labelled "Saved from claude.ai — 20 October 2026".`);
-  assert.match(out, new RegExp(`\ndocumentId: ${args.p_document_id}\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\nProject M6 Motorway — Open in Hub: ${HUB}/ai/p/${P1}\n`));
+  assert.match(out, new RegExp(`\ndocumentId: ${args.p_document_id}\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\\?embed=1&host=pane\nProject M6 Motorway — Open in Hub: ${HUB}/ai/p/${P1}\\?embed=1&host=pane\n`));
   assert.match(out, /\nOn file; the Hub is reading it now\. Call get_document_summary on the version in about a minute\.\n/);
   assert.match(out, /Filed as the lawyer's own version \(not marked AI-generated\).*filing is not legal approval\.$/);
   assert.ok(!/House format check/.test(out), 'a note is not rendered, so there is no format check');
@@ -341,7 +341,7 @@ test('a draft is rendered to the house-format Word file and saved as v1 of a new
   assert.deepEqual([actions(s)[0].tool, actions(s)[0].outcome, actions(s)[0].version_id], [DRAFT_TOOL, 'saved', NEW_V]);
   assert.ok(!JSON.stringify(actions(s)[0]).includes('Concession'), 'the record carries ids and the label, not the draft');
   assert.match(out, /^Saved "Notes on the Concession Agreement" as v1 \(Notes-on-the-Concession-Agreement-v1\.docx\), a new document on M6 Motorway, labelled "First draft — saved from claude\.ai"\.\n/);
-  assert.match(out, new RegExp(`\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\n`));
+  assert.match(out, new RegExp(`\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\\?embed=1&host=pane\n`));
   assert.match(out, /\nHouse format check: passed \(3 numbered sections, 2 AKLA comments\)\.\nRenderer notes: python-docx: one note\n/);
   assert.match(out, /\nOn file; the Hub is reading it now\./);
   // A check that found something says so, and the file is still saved.

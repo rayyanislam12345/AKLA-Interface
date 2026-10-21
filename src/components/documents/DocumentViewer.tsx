@@ -19,6 +19,7 @@ import { VersionChecksPanel } from "./VersionChecksPanel";
 import { VersionChangesPanel } from "./VersionChangesPanel";
 import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
 import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutSelection";
+import { fitScale, useFitSize } from "./fitWidth";
 
 // Look at a project document without downloading it: Word files are drawn
 // in the page, PDFs and images shown as they are, anything else offered as a
@@ -33,7 +34,10 @@ import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutS
 // In the companion's drawer (the Hub beside a claude.ai chat) the caller
 // passes `companionSource`, the version's name and id, and highlighting a
 // passage of a Word file offers "Ask Claude about this", which puts the
-// passage in the chat's message box.
+// passage in the chat's message box. On the pane page (the Claude desktop
+// app's browser pane) the same button is "Copy for Claude", and the caller
+// asks for `fitToWidth`: a Word file is drawn at its real page width and
+// scaled to fit the pane, with a Fit / 100% switch beside Download.
 //
 // A Word version marked up from claude.ai (the connector files the client's
 // draft with the AI's tracked changes as the next version) also has
@@ -77,15 +81,19 @@ export interface DocumentViewerProps {
   /** The header's padding; the sheet leaves room for its close button. */
   headerClassName?: string;
   className?: string;
-  /** Only in the companion's drawer: the version on show, so a highlighted passage can be handed to the chat. */
+  /** Only where Claude is the chat (the companion's drawer, the pane page): the version on show, so a highlighted passage can be handed to the chat. */
   companionSource?: CompanionSource;
+  /** The pane page: draw a Word file at its page width, scaled to fit, with a Fit / 100% switch. */
+  fitToWidth?: boolean;
 }
 
-export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className, companionSource }: DocumentViewerProps) {
+export function DocumentViewer({ document: doc, versions: given, versionId, onVersionChange, onDownload, heading, actions, note, headerClassName = "p-4", className, companionSource, fitToWidth = false }: DocumentViewerProps) {
   const [state, setState] = useState<{ loading: boolean; error: string | null; url: string | null }>({ loading: false, error: null, url: null });
   const docxRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("document");
+  // Fit the page to the pane, or show it at 100% (scrolling sideways).
+  const [fit, setFit] = useState(true);
 
   const versions = sortVersions(given);
   const version = versions.find((v) => v.id === versionId) ?? versions[0] ?? null;
@@ -112,6 +120,9 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
   const fileReady = kind !== "docx" || !changeState.isLoading;
   const marked = kind === "docx" && (rowCount > 0 || !!decidedPath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const fitting = fitToWidth && kind === "docx";
+  const fitSize = useFitSize(previewRef, docxRef, fitting);
+  const scale = fitting && fit && fitSize ? fitScale(fitSize.available, fitSize.width) : 1;
 
   // The tab a version opens on: Changes while any of its changes wait,
   // unless the lawyer has already picked a tab for this version.
@@ -203,7 +214,8 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
           if (cancelled || !docxRef.current) return;
           await renderAsync(data, docxRef.current, docxRef.current, {
             inWrapper: true,
-            ignoreWidth: window.innerWidth < 640,
+            // At its page width when it is to be fitted; reflowed to the width otherwise on a narrow screen.
+            ignoreWidth: !fitToWidth && window.innerWidth < 640,
             renderChanges: true,
             renderComments: false,
           });
@@ -229,8 +241,9 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
       <div className={cn("border-b space-y-3", headerClassName)}>
         {heading}
         <div className="flex flex-wrap items-center gap-2">
+          {/* On the pane page the version shares its line with Download and Fit / 100%. */}
           <Select value={version.id} onValueChange={onVersionChange}>
-            <SelectTrigger className="h-8 w-full sm:w-auto sm:min-w-[12rem] sm:max-w-[20rem] text-xs" aria-label="Version">
+            <SelectTrigger className={cn("h-8 text-xs", fitToWidth ? "min-w-[8rem] flex-1 sm:max-w-[20rem]" : "w-full sm:w-auto sm:min-w-[12rem] sm:max-w-[20rem]")} aria-label="Version">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -259,6 +272,28 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
             <Button size="sm" variant="outline" onClick={() => onDownload(version)}>
               <Download className="h-4 w-4 mr-1.5" />Download
             </Button>
+          )}
+          {fitting && !state.loading && !state.error && (
+            <div className="inline-flex h-8 items-center rounded-md border p-0.5" role="group" aria-label="Page size" data-testid="fit-toggle">
+              {([
+                [true, "Fit", "Fit the page to the width"],
+                [false, "100%", "The page at full size"],
+              ] as const).map(([value, label, title]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setFit(value)}
+                  aria-pressed={fit === value}
+                  title={title}
+                  className={cn(
+                    "h-full rounded px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    fit === value ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
           {actions}
         </div>
@@ -340,7 +375,8 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
       )}
 
       {/* Kept mounted on the other tabs so the drawn Word file survives a tab switch. */}
-      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${showing === "document" || !checkable ? "" : " hidden"}`}>
+      {/* A fitted page keeps the scrollbar's room reserved, so its showing up does not change the width and the scale with it. */}
+      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${fitToWidth ? " [scrollbar-gutter:stable]" : ""}${showing === "document" || !checkable ? "" : " hidden"}`}>
         {state.loading && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />Opening…
@@ -353,7 +389,22 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
           </div>
         )}
         {/* docx-preview writes the Word page margins (an inch each side) as inline padding on each section; below the sm breakpoint (a phone, or the companion's side panel) that would leave about 150px for the text, so the margins are overridden there. */}
-        {kind === "docx" && <div ref={docxRef} className="min-h-full [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-2 sm:[&_.docx-wrapper]:p-6 max-sm:[&_section.docx]:!px-3 max-sm:[&_section.docx]:!py-4" />}
+        {kind === "docx" && !fitToWidth && <div ref={docxRef} className="min-h-full [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-2 sm:[&_.docx-wrapper]:p-6 max-sm:[&_section.docx]:!px-3 max-sm:[&_section.docx]:!py-4" />}
+        {/* Fitted (the pane page): the pages keep their own width and margins and are scaled down as one; the outer box takes the scaled size so the scrolling matches what is seen. overflow: clip, not hidden, so scrolling to a finding scrolls the pane and not this box. */}
+        {kind === "docx" && fitToWidth && (
+          <div
+            className="mx-auto overflow-clip"
+            style={fitSize ? { width: Math.floor(fitSize.width * scale), height: Math.ceil(fitSize.height * scale) } : undefined}
+            data-testid="fit-box"
+            data-scale={scale.toFixed(3)}
+          >
+            <div
+              ref={docxRef}
+              className="w-max origin-top-left [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-3"
+              style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
+            />
+          </div>
+        )}
         {/* Straight after the drawn file, so Tab from a selection reaches it. */}
         {kind === "docx" && companionSource && !state.loading && !state.error && (
           <AskClaudeAboutSelection contentRef={docxRef} scrollRef={previewRef} source={companionSource} />

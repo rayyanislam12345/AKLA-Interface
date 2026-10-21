@@ -119,7 +119,7 @@ test('the two tools register from connector/tools/documentInsight.js after the b
 test('get_document_checks prints a stored check whole: counts, notes, what was not kept, every finding numbered, and the Hub link', async () => {
   const { run } = tools();
   const text = await run('get_document_checks', { versionId: V1 });
-  assert.match(text, /^Proof check of Concession Agreement v1 \(CA v1\.docx\), project M6 Motorway: the check the Hub stored when it read the file\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\n/);
+  assert.match(text, /^Proof check of Concession Agreement v1 \(CA v1\.docx\), project M6 Motorway: the check the Hub stored when it read the file\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane\n/);
   assert.match(text, /3 findings \(checked 1 Oct 2026\): blanks and placeholders 2; terms used but not defined 1; definitions never used 0; cross-references to nothing 0; numbers whose words and figures disagree 0; gaps in numbering 0\./);
   assert.match(text, /This document amends or supplements another/);
   assert.match(text, /Not listed \(the Hub keeps at most 100 findings in a category\): 5 more under blanks and placeholders\./);
@@ -161,13 +161,13 @@ test('a long stored check is paged: every page fits under the cap uncut, numberi
 test('get_document_checks reads the file now when the Hub stored no check, and refuses with a sentence when it cannot', async () => {
   const { run, supabase } = tools();
   const text = await run('get_document_checks', { versionId: V3 });
-  assert.match(text, /^Proof check of Notes v1 \(notes-v1\.txt\), project M6 Motorway: checked now from the file; the Hub had not stored a check for this version\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/ffffffff-ffff-4fff-8fff-ffffffffffff\n/);
+  assert.match(text, /^Proof check of Notes v1 \(notes-v1\.txt\), project M6 Motorway: checked now from the file; the Hub had not stored a check for this version\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/ffffffff-ffff-4fff-8fff-ffffffffffff\?embed=1&host=pane\n/);
   assert.match(text, /\d+ findings? \(checked \d+ \w+ 20\d\d\): blanks and placeholders [1-9]/);
   assert.match(text, /\[placeholders, \w+\] [^\n]*\[●\]/);
   assert.match(text, /\[End of the findings\.\]$/);
   assert.deepEqual(supabase.downloads, [`${P1}/notes-v1.txt`]);
   // A check the worker gave up on ({ error }, or { skipped } for a scan) is reported as the summary reports it, without reading the file; recheck: true reads it.
-  assert.equal(await run('get_document_checks', { versionId: V2 }), `Proof check of Concession Agreement v2 (CA v2.docx), project M6 Motorway (an AI draft): Could not be checked: The file could not be read.\nOpen in Hub: https://hub.test/ai/d/${V2}\nrecheck: true reads the file now (up to two minutes).`);
+  assert.equal(await run('get_document_checks', { versionId: V2 }), `Proof check of Concession Agreement v2 (CA v2.docx), project M6 Motorway (an AI draft): Could not be checked: The file could not be read.\nOpen in Hub: https://hub.test/ai/d/${V2}?embed=1&host=pane\nrecheck: true reads the file now (up to two minutes).`);
   assert.equal(supabase.downloads.length, 1, 'no download for a stored refusal');
   await assert.rejects(run('get_document_checks', { versionId: V2, recheck: true }), /The file for v2 is missing from storage\./);
   assert.equal(supabase.downloads.length, 2);
@@ -190,7 +190,7 @@ test('an on-demand read past the two-minute deadline answers the preview\'s "tak
 test('compare_document_versions prints the stored comparison when it is of that pair, hiding formatting-only changes unless asked', async () => {
   const { run } = tools();
   const text = await run('compare_document_versions', { fromVersionId: V1, toVersionId: V2 });
-  assert.match(text, /^Changes from Concession Agreement v1 \(CA v1\.docx\) to Concession Agreement v2 \(CA v2\.docx\), project M6 Motorway: the comparison the Hub stored when it read the later version\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee \(v2\)\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd \(v1\)\n/);
+  assert.match(text, /^Changes from Concession Agreement v1 \(CA v1\.docx\) to Concession Agreement v2 \(CA v2\.docx\), project M6 Motorway: the comparison the Hub stored when it read the later version\.\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\?embed=1&host=pane \(v2\)\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane \(v1\)\n/);
   assert.match(text, /2 changed, 1 added, 0 removed, 0 moved \(compared 5 Oct 2026\); 3 shown, 1 formatting-only hidden \(includeFormatting: true lists them\)\./);
   assert.match(text, /By nature: wording 1; numbers dates names 1; clause added 1; formatting only 1\./);
   assert.match(text, /Changes 1–3 of 3:\n  1\. cl\. 2\.1: changed \(numbers dates names\)\n     before: twenty-five \(25\) years\n     after:  thirty \(30\) years\n  2\. cl\. 5: added \(clause added\)\n     after:  New clause on tolling\.\n  3\. cl\. 9: changed \(wording\)\n/);
@@ -217,7 +217,7 @@ test('compare_document_versions reads both files now for any other pair, and gua
   assert.match(text, /forty \(40\) years/);
   assert.match(text, /\[End of the changes\.\]$/);
   // Stored as skipped for that pair: the sentence, no read; recheck: true reads now (the earlier file is missing here).
-  assert.equal(await run('compare_document_versions', { fromVersionId: V6, toVersionId: V7 }), `Changes from Notes v4 (notes-v4.txt) to Notes v5 (notes-v5.txt), project M6 Motorway: Not compared: not comparable\nOpen in Hub: https://hub.test/ai/d/${V7} (v5)\nOpen in Hub: https://hub.test/ai/d/${V6} (v4)\nrecheck: true reads the two files now (up to two minutes).`);
+  assert.equal(await run('compare_document_versions', { fromVersionId: V6, toVersionId: V7 }), `Changes from Notes v4 (notes-v4.txt) to Notes v5 (notes-v5.txt), project M6 Motorway: Not compared: not comparable\nOpen in Hub: https://hub.test/ai/d/${V7}?embed=1&host=pane (v5)\nOpen in Hub: https://hub.test/ai/d/${V6}?embed=1&host=pane (v4)\nrecheck: true reads the two files now (up to two minutes).`);
   await assert.rejects(run('compare_document_versions', { fromVersionId: V6, toVersionId: V7, recheck: true }), /The file for v4 is missing from storage\./);
   // The skip was about v4 -> v5; another pair ending in v5 is read now.
   assert.match(await run('compare_document_versions', { fromVersionId: V3, toVersionId: V7 }), /^Changes from Notes v1 \(notes-v1\.txt\) to Notes v5 \(notes-v5\.txt\), project M6 Motorway: compared now from the two files\.\n/);

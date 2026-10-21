@@ -192,7 +192,7 @@ test('a read-only or ended sign-in, and the 31st write in an hour, are refused b
 test('when the change landed but its record could not be written, the reply still reports the change, with one line saying so, and nothing invites a retry', async () => {
   const t = setup({ errors: { connector_actions: { message: 'remaining connection slots are reserved' } } });
   const out = await t.run('label_version', { versionId: V2, label: 'Signed copy' });
-  assert.equal(out, `Draft CA v2 (CA-v2.docx) on M6 Motorway is labelled "Signed copy" (it was "Client mark-up").\nOpen in Hub: ${HUB}/ai/d/${V2}\nThe change was made but could not be recorded; tell the Hub's owner.`);
+  assert.equal(out, `Draft CA v2 (CA-v2.docx) on M6 Motorway is labelled "Signed copy" (it was "Client mark-up").\nOpen in Hub: ${HUB}/ai/d/${V2}?embed=1&host=pane\nThe change was made but could not be recorded; tell the Hub's owner.`);
   assert.deepEqual(t.supabase.calls.update, [{ table: 'document_versions', patch: { label: 'Signed copy' }, ids: [V2] }], 'the change landed');
   assert.equal(t.actions().length, 0, 'no row could be written');
   assert.ok(t.lines.some((l) => /^label_version: the change was made but the record could not be written: The write could not be recorded: remaining connection slots are reserved$/.test(l)), t.lines.join('\n'));
@@ -212,7 +212,7 @@ test('set_project_instructions upserts the project\'s context as the lawyer and 
   const t = setup();
   const content = 'The client is the Sindh PPP Unit.\r\nNotices go to the Director (Legal).\n';
   const out = await t.run('set_project_instructions', { projectId: P1, content });
-  assert.equal(out, `The standing instructions for M6 Motorway are set (69 characters; the project had none before). Every Hub chat and claude.ai overview of the project now sees them.\nOpen in Hub: ${HUB}/ai/p/${P1}`);
+  assert.equal(out, `The standing instructions for M6 Motorway are set (69 characters; the project had none before). Every Hub chat and claude.ai overview of the project now sees them.\nOpen in Hub: ${HUB}/ai/p/${P1}?embed=1&host=pane`);
   assert.equal(t.supabase.calls.upsert.length, 1);
   const { row, opts } = t.supabase.calls.upsert[0];
   assert.deepEqual(opts, { onConflict: 'matter_id' }, 'the site\'s own upsert (useMatterContext.ts)');
@@ -247,12 +247,12 @@ test('set_project_instructions refuses empty or too-long text and an unknown pro
 test('label_version updates the one version\'s label and says what it was', async () => {
   const t = setup();
   const out = await t.run('label_version', { versionId: V2, label: '  Signed  copy ' });
-  assert.equal(out, `Draft CA v2 (CA-v2.docx) on M6 Motorway is labelled "Signed copy" (it was "Client mark-up").\nOpen in Hub: ${HUB}/ai/d/${V2}`);
+  assert.equal(out, `Draft CA v2 (CA-v2.docx) on M6 Motorway is labelled "Signed copy" (it was "Client mark-up").\nOpen in Hub: ${HUB}/ai/d/${V2}?embed=1&host=pane`);
   assert.deepEqual(t.supabase.calls.update, [{ table: 'document_versions', patch: { label: 'Signed copy' }, ids: [V2] }]);
   assert.equal(t.supabase.tables.document_versions.find((v) => v.id === V1).label, null, 'the other version is untouched');
   expectRecord(t.actions()[0], { tool: 'label_version', projectId: P1, documentId: D1, versionId: V2, label: 'Signed copy', outcome: 'done' });
   const first = await t.run('label_version', { versionId: V1, label: 'Sent to SECP' });
-  assert.equal(first, `Draft CA v1 (CA-v1.docx) on M6 Motorway is labelled "Sent to SECP".\nOpen in Hub: ${HUB}/ai/d/${V1}`);
+  assert.equal(first, `Draft CA v1 (CA-v1.docx) on M6 Motorway is labelled "Sent to SECP".\nOpen in Hub: ${HUB}/ai/d/${V1}?embed=1&host=pane`);
 });
 
 test('label_version refuses a blank or long label and an unknown version', async () => {
@@ -272,7 +272,7 @@ test('label_version refuses a blank or long label and an unknown version', async
 test('rename_document changes the title only, by the document\'s id or by one of its versions', async () => {
   const t = setup();
   const out = await t.run('rename_document', { documentId: D1, title: ' Concession Agreement —  Hyderabad bypass ' });
-  assert.equal(out, `"Draft CA" on M6 Motorway is now called "Concession Agreement — Hyderabad bypass"; its type (Concession Agreement), status and versions are unchanged.\nOpen in Hub: ${HUB}/ai/d/${V2}`);
+  assert.equal(out, `"Draft CA" on M6 Motorway is now called "Concession Agreement — Hyderabad bypass"; its type (Concession Agreement), status and versions are unchanged.\nOpen in Hub: ${HUB}/ai/d/${V2}?embed=1&host=pane`);
   assert.deepEqual(t.supabase.calls.update, [{ table: 'matter_documents', patch: { title: 'Concession Agreement — Hyderabad bypass' }, ids: [D1] }], 'title only, never document_type_id');
   expectRecord(t.actions()[0], { tool: 'rename_document', projectId: P1, documentId: D1, versionId: V2, outcome: 'done' });
   assert.ok(!JSON.stringify(t.actions()[0]).includes('Hyderabad'), 'the record carries ids, not the title');
@@ -280,7 +280,7 @@ test('rename_document changes the title only, by the document\'s id or by one of
   const byVersion = await t.run('rename_document', { versionId: V1, title: 'CA' });
   assert.match(byVersion, /^"Concession Agreement — Hyderabad bypass" on M6 Motorway is now called "CA"/);
   const noVersions = await t.run('rename_document', { documentId: D2, title: 'Term Sheet (signed)' });
-  assert.equal(noVersions, `"Term Sheet" on M6 Motorway is now called "Term Sheet (signed)"; its type, status and versions are unchanged.\nOpen in Hub: ${HUB}/ai/p/${P1}`);
+  assert.equal(noVersions, `"Term Sheet" on M6 Motorway is now called "Term Sheet (signed)"; its type, status and versions are unchanged.\nOpen in Hub: ${HUB}/ai/p/${P1}?embed=1&host=pane`);
 });
 
 test('rename_document refuses no id, an unknown document, the same title, a blank or long title', async () => {
@@ -302,13 +302,13 @@ test('rename_document refuses no id, an unknown document, the same title, a blan
 test('set_document_status moves the whole document along the status line and says where it was', async () => {
   const t = setup();
   const out = await t.run('set_document_status', { documentId: D1, status: 'with_counterparty' });
-  assert.equal(out, `Draft CA (Concession Agreement) on M6 Motorway is now "with counterparty" (it was "drafting").\nOpen in Hub: ${HUB}/ai/d/${V2}`);
+  assert.equal(out, `Draft CA (Concession Agreement) on M6 Motorway is now "with counterparty" (it was "drafting").\nOpen in Hub: ${HUB}/ai/d/${V2}?embed=1&host=pane`);
   assert.deepEqual(t.supabase.calls.update, [{ table: 'matter_documents', patch: { status: 'with_counterparty' }, ids: [D1] }]);
   expectRecord(t.actions()[0], { tool: 'set_document_status', projectId: P1, documentId: D1, versionId: V2, outcome: 'done' });
   const byVersion = await t.run('set_document_status', { versionId: V1, status: 'executed' });
   assert.match(byVersion, /^Draft CA \(Concession Agreement\) on M6 Motorway is now "executed" \(it was "with counterparty"\)\./);
   const fresh = await t.run('set_document_status', { documentId: D2, status: 'drafting' });
-  assert.equal(fresh, `Term Sheet on M6 Motorway is now "drafting" (it was "not started").\nOpen in Hub: ${HUB}/ai/p/${P1}`);
+  assert.equal(fresh, `Term Sheet on M6 Motorway is now "drafting" (it was "not started").\nOpen in Hub: ${HUB}/ai/p/${P1}?embed=1&host=pane`);
   // The status in the description's own words (spaces, any case) is read as the enum value.
   const spaced = await t.run('set_document_status', { documentId: D2, status: 'Internal review' });
   assert.match(spaced, /^Term Sheet on M6 Motorway is now "internal review" \(it was "drafting"\)\./);
@@ -336,7 +336,7 @@ test('create_document_record inserts an empty record with the lawyer as creator,
   assert.match(row.id, UUID_RE);
   assert.deepEqual(row, { id: row.id, matter_id: P1, title: 'Shareholders Agreement', document_type_id: null, status: NEW_RECORD_STATUS, created_by: USER });
   assert.equal(NEW_RECORD_STATUS, 'drafting');
-  assert.equal(out, `Created "Shareholders Agreement" on M6 Motorway: status drafting, no versions yet. documentId: ${row.id}. Save its first version with a saving tool (save_note_to_project or save_draft_to_project, with matterDocumentId ${row.id}) or upload one on the Hub.\nOpen in Hub: ${HUB}/ai/p/${P1}`);
+  assert.equal(out, `Created "Shareholders Agreement" on M6 Motorway: status drafting, no versions yet. documentId: ${row.id}. Save its first version with a saving tool (save_note_to_project or save_draft_to_project, with matterDocumentId ${row.id}) or upload one on the Hub.\nOpen in Hub: ${HUB}/ai/p/${P1}?embed=1&host=pane`);
   expectRecord(t.actions()[0], { tool: 'create_document_record', projectId: P1, outcome: 'done' });
   assert.ok(!JSON.stringify(t.actions()[0]).includes('Shareholders'));
   const typed = await t.run('create_document_record', { projectId: P2, title: 'CA', documentTypeId: T1 });
@@ -363,15 +363,15 @@ test('reindex_document calls enqueue_index_job for the version and reports queue
   const states = { [V1]: { jobId: 'j1', state: 'queued' }, [V2]: { jobId: 'j2', state: 'queued' } };
   const t = setup({ rpc: async (name, args) => { assert.equal(name, 'enqueue_index_job'); return { data: states[args.p_version_id], error: null }; } });
   const failed = await t.run('reindex_document', { versionId: V2 });
-  assert.equal(failed, `The Hub will read Draft CA v2 (CA-v2.docx) on M6 Motorway again now. It could not be read last time (No text layer). Call get_document_summary on it in about a minute (longer for a scanned PDF); the project page shows its progress.\nOpen in Hub: ${HUB}/ai/d/${V2}`);
+  assert.equal(failed, `The Hub will read Draft CA v2 (CA-v2.docx) on M6 Motorway again now. It could not be read last time (No text layer). Call get_document_summary on it in about a minute (longer for a scanned PDF); the project page shows its progress.\nOpen in Hub: ${HUB}/ai/d/${V2}?embed=1&host=pane`);
   assert.deepEqual(t.supabase.calls.rpc, [{ name: 'enqueue_index_job', args: { p_version_id: V2 } }]);
   expectRecord(t.actions()[0], { tool: 'reindex_document', projectId: P1, documentId: D1, versionId: V2, outcome: 'done' });
   const fine = await t.run('reindex_document', { versionId: V1 });
-  assert.equal(fine, `The Hub will read Draft CA v1 (CA-v1.docx) on M6 Motorway again now. Call get_document_summary on it in about a minute (longer for a scanned PDF); the project page shows its progress.\nOpen in Hub: ${HUB}/ai/d/${V1}`);
+  assert.equal(fine, `The Hub will read Draft CA v1 (CA-v1.docx) on M6 Motorway again now. Call get_document_summary on it in about a minute (longer for a scanned PDF); the project page shows its progress.\nOpen in Hub: ${HUB}/ai/d/${V1}?embed=1&host=pane`);
   // A second ask while it runs: the function leaves the job alone, and so does the reply.
   states[V1] = { jobId: 'j1', state: 'running' };
   const running = await t.run('reindex_document', { versionId: V1 });
-  assert.equal(running, `Draft CA v1 (CA-v1.docx) on M6 Motorway is being read by the Hub right now; nothing more was queued. Call get_document_summary in a minute or two.\nOpen in Hub: ${HUB}/ai/d/${V1}`);
+  assert.equal(running, `Draft CA v1 (CA-v1.docx) on M6 Motorway is being read by the Hub right now; nothing more was queued. Call get_document_summary in a minute or two.\nOpen in Hub: ${HUB}/ai/d/${V1}?embed=1&host=pane`);
   assert.equal(t.actions().at(-1).outcome, 'done');
   // A kind of file the worker does not read: refused, recorded as such.
   states[V1] = { state: 'unsupported' };

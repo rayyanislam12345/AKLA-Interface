@@ -92,9 +92,9 @@ test('documents, notes and tasks are printed with their snippets, ids and Hub li
   assert.match(text, /^3 results for “"step-in rights"” in every project's documents, notes and tasks\./);
   assert.match(text, /Only the current version of each document was searched; allVersions: true/);
   assert.match(text, /marked ⟦like this⟧/);
-  assert.match(text, /1\. \[document\] Concession Agreement v3 \(CA v3\.docx\) — project M6 Motorway; saved 2 Mar 2026; matched in the text\n   the Authority may exercise ⟦step-in⟧ ⟦rights⟧ under clause 31\n   versionId: dddddddd-dddd-4ddd-8ddd-dddddddddddd\n   Open in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd/);
-  assert.match(text, /2\. \[note\] Project note on Old Port Deal, 10 Feb 2026\n   Client asked about ⟦step-in⟧ ⟦rights⟧ for lenders\n   Open in Hub: https:\/\/hub\.test\/ai\/p\/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/);
-  assert.match(text, /3\. \[task\] Draft step-in rights clause — project M6 Motorway; Status: in progress · Due 2026-04-01; created 20 Feb 2026\n   Open in Hub: https:\/\/hub\.test\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/);
+  assert.match(text, /1\. \[document\] Concession Agreement v3 \(CA v3\.docx\) — project M6 Motorway; saved 2 Mar 2026; matched in the text\n   the Authority may exercise ⟦step-in⟧ ⟦rights⟧ under clause 31\n   versionId: dddddddd-dddd-4ddd-8ddd-dddddddddddd\n   Open in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane/);
+  assert.match(text, /2\. \[note\] Project note on Old Port Deal, 10 Feb 2026\n   Client asked about ⟦step-in⟧ ⟦rights⟧ for lenders\n   Open in Hub: https:\/\/hub\.test\/ai\/p\/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\?embed=1&host=pane/);
+  assert.match(text, /3\. \[task\] Draft step-in rights clause — project M6 Motorway; Status: in progress · Due 2026-04-01; created 20 Feb 2026\n   Open in Hub: https:\/\/hub\.test\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane/);
   assert.match(text, /\[End of results\.\]$/);
   assert.ok(!text.includes('page 1 of'), 'one page needs no page line');
   // The default site, a title match (no text snippet to show), and a scoped search.
@@ -103,7 +103,7 @@ test('documents, notes and tasks are printed with their snippets, ids and Hub li
   assert.match(t2, /^1 result for “CA” in M6 Motorway's documents\./);
   assert.match(t2, /matched in the title or file name\n   versionId: /);
   assert.ok(!t2.includes('⟦CA⟧ v3.docx'), 'the file name is already in the line');
-  assert.ok(t2.includes(`Open in Hub: ${DEFAULT_HUB_URL}/ai/d/${V1}`));
+  assert.ok(t2.includes(`Open in Hub: ${DEFAULT_HUB_URL}/ai/d/${V1}?embed=1&host=pane`));
   // Notes and tasks have no versions, so no sentence about them.
   const t3 = await tool(fakeSupabase({ matters, rpc: { data: [NOTE], error: null } })).run({ query: 'step-in', kind: 'note' }, { userId: U1 });
   assert.match(t3, /in every project's notes\. The matched words/);

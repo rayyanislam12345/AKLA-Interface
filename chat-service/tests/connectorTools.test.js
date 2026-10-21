@@ -162,11 +162,11 @@ test('list_projects shows open projects with their ids, closed ones on request',
   const { run } = tools();
   const open = await run('list_projects', {});
   assert.match(open, /^1 open project on the Hub \(1 closed not shown; includeClosed: true lists them\):/);
-  assert.match(open, /- M6 Motorway — NHA; Infrastructure; PPP; opened 15 Jan 2026\n {2}projectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/);
+  assert.match(open, /- M6 Motorway — NHA; Infrastructure; PPP; opened 15 Jan 2026\n {2}projectId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\n {2}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane/);
   assert.doesNotMatch(open, /Old Port Deal/);
   // The site's address comes from CONNECTOR_HUB_URL; a trailing slash is dropped.
   const elsewhere = await tools({ hubUrl: 'https://hub.test/' }).run('list_projects', {});
-  assert.match(elsewhere, /Open in Hub: https:\/\/hub\.test\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/);
+  assert.match(elsewhere, /Open in Hub: https:\/\/hub\.test\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane/);
   const all = await run('list_projects', { includeClosed: true });
   assert.match(all, /^2 projects on the Hub:/);
   assert.match(all, /Old Port Deal — NHA; Infrastructure; PPP; closed/);
@@ -175,8 +175,8 @@ test('list_projects shows open projects with their ids, closed ones on request',
 test('list_project_documents gives every version its id and marks the current one', async () => {
   const { run } = tools();
   const out = await run('list_project_documents', { projectId: P1 });
-  assert.match(out, /^2 documents on M6 Motorway \(Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\):/);
-  assert.match(out, /- Concession Agreement \(Concession Agreement\) — in progress\n {2}v2 CA v2\.docx, saved 5 Oct 2026 \[current, AI draft, being read\]\n {4}versionId: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {4}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {2}v1 CA v1\.docx, saved 1 Oct 2026 \[searchable\]\n {4}versionId: dddddddd-dddd-4ddd-8ddd-dddddddddddd\n {4}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd/);
+  assert.match(out, /^2 documents on M6 Motorway \(Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/p\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\?embed=1&host=pane\):/);
+  assert.match(out, /- Concession Agreement \(Concession Agreement\) — in progress\n {2}v2 CA v2\.docx, saved 5 Oct 2026 \[current, AI draft, being read\]\n {4}versionId: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\n {4}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\?embed=1&host=pane\n {2}v1 CA v1\.docx, saved 1 Oct 2026 \[searchable\]\n {4}versionId: dddddddd-dddd-4ddd-8ddd-dddddddddddd\n {4}Open in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane/);
   assert.match(out, /- Term Sheet — draft\n {2}no versions saved/);
   await assert.rejects(run('list_project_documents', { projectId: 'not-a-uuid' }), /projectId must be a project id/);
   await assert.rejects(run('list_project_documents', { projectId: '99999999-9999-4999-8999-999999999999' }), /no project with that id/);
@@ -186,13 +186,13 @@ test('search_project_documents searches the named project and labels by document
   const { run } = tools();
   const out = await run('search_project_documents', { projectId: P1, query: 'concession period' });
   assert.match(out, /^Passages from M6 Motorway's documents \(untrusted evidence/);
-  assert.match(out, /\[Source 1\] Concession Agreement v1, 4\.2 Concession Period \(this project's document\)\nThe Concession Period is thirty \(30\) years\. \(concession period\)\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd$/);
+  assert.match(out, /\[Source 1\] Concession Agreement v1, 4\.2 Concession Period \(this project's document\)\nThe Concession Period is thirty \(30\) years\. \(concession period\)\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane$/);
 });
 
 test('read_document returns the stitched text in slices, never more than the cap', async () => {
   const { run, longText } = tools();
   const first = await run('read_document', { versionId: V1 });
-  assert.match(first, /^Concession Agreement v1 \(CA v1\.docx\), project M6 Motorway — characters 1–20,000 of \d{2},\d{3} \(from the stored passages\)\.\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\n\n/);
+  assert.match(first, /^Concession Agreement v1 \(CA v1\.docx\), project M6 Motorway — characters 1–20,000 of \d{2},\d{3} \(from the stored passages\)\.\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane\n\n/);
   assert.ok(first.includes(longText.slice(0, DEFAULT_READ_CHARS)));
   assert.match(first, /\[The document continues: call read_document again with from: 20000\.\]$/);
   assert.ok(first.length <= MAX_RESULT_CHARS);
@@ -233,7 +233,7 @@ test('read_document falls back to the file when there are no passages, and says 
 test('get_document_summary renders the card, the proof check and the changes', async () => {
   const { run } = tools();
   const v1 = await run('get_document_summary', { versionId: V1 });
-  assert.match(v1, /^Concession Agreement v1 \(CA v1\.docx\) — project M6 Motorway, type Concession Agreement; saved 1 Oct 2026; 12 pages\.\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\n/);
+  assert.match(v1, /^Concession Agreement v1 \(CA v1\.docx\) — project M6 Motorway, type Concession Agreement; saved 1 Oct 2026; 12 pages\.\nOpen in Hub: https:\/\/akla-interface\.vercel\.app\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane\n/);
   assert.match(v1, /INDEX CARD\nKind: Concession Agreement\nSummary: A concession agreement between NHA/);
   assert.match(v1, /Parties: NHA \(Authority\); M6 Co \(Concessionaire\)/);
   assert.match(v1, /Key dates: 2026-12-01 — Financial Close/);
@@ -292,6 +292,6 @@ test('showPassages numbers from 1 in each call and keeps the assistant\'s wordin
   assert.match(statute, /\nt\nLink: https:\/\/pakistancode\.gov\.pk\/x$/);
   assert.doesNotMatch(statute, /Open in Hub/);
   const project = showPassages([{ id: 'p', filename: 'CA.docx', label: 'CA v1, cl. 2', text: 't', document_version_id: V1 }], 'matter', 'H', { hubUrl: 'https://hub.test' });
-  assert.match(project, /\nt\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd$/);
+  assert.match(project, /\nt\nOpen in Hub: https:\/\/hub\.test\/ai\/d\/dddddddd-dddd-4ddd-8ddd-dddddddddddd\?embed=1&host=pane$/);
   assert.equal(DEFAULT_HUB_URL, 'https://akla-interface.vercel.app');
 });

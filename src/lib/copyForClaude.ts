@@ -17,6 +17,11 @@ export function versionForClaudeText({ title, versionId, versionNumber, fileName
   return [`Hub document: ${title}, ${what}`, `versionId: ${versionId}`, `Open in Hub: ${origin}/ai/d/${versionId}`].join("\n");
 }
 
+/** A project: its name, its id (the connector's projectId) and its Hub address. */
+export function projectForClaudeText({ name, matterId }: { name: string; matterId: string }, origin: string): string {
+  return [`Hub project: ${name}`, `projectId: ${matterId}`, `Open in Hub: ${origin}/ai/p/${matterId}`].join("\n");
+}
+
 /** A project's standing instructions, ready to paste; null when there are none. */
 export function instructionsForClaudeText(projectName: string, content: string | null | undefined): string | null {
   const body = (content ?? "").trim();

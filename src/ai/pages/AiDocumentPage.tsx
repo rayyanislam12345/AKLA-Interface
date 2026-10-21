@@ -3,8 +3,10 @@ import { ArrowLeft, ExternalLink, MessageSquare, PencilLine } from "lucide-react
 import { useToast } from "@/hooks/use-toast";
 import { editTargetOf, useDocumentVersion } from "@/hooks/useDocumentVersion";
 import { attachParam } from "@/lib/projectSeeds";
-import { useCompanionHost, useEmbedMode } from "@/lib/embedMode";
+import { useEmbedHost, useEmbedMode } from "@/lib/embedMode";
+import { versionForClaudeText } from "@/lib/copyForClaude";
 import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
+import { usePaneBar } from "@/ai/layout/paneBarContext";
 import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import SiteLink from "@/ai/components/SiteLink";
 import CopyForClaude from "@/ai/components/CopyForClaude";
@@ -20,17 +22,39 @@ import { Button } from "@/components/ui/button";
 // header already names the document, so the page's bar is left out and the
 // project's name goes on the line under it. Framed by the companion, the chat
 // is claude.ai's: "Copy for Claude" replaces the two Hub-chat buttons.
+// On the pane page (?host=pane, the Claude desktop app's browser pane) Claude
+// is the chat too, and the pane's bar carries the name, Back to the project
+// and "Copy for Claude": the page keeps one line of detail, the version and
+// Download, and draws a Word file at its page width, scaled to fit.
 export default function AiDocumentPage() {
   const { versionId } = useParams<{ versionId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
   const embed = useEmbedMode();
-  const companion = useCompanionHost();
+  const host = useEmbedHost();
+  const companion = host === "companion";
+  const pane = host === "pane";
+  // Claude is the chat here (the companion's drawer or the pane): no Hub chat buttons.
+  const claudeChat = host !== null;
   const openEdit = useOpenEditChat();
   const { data: detail, isLoading, error, refetch } = useDocumentVersion(versionId);
   useAiPageTitle(detail?.document.title ?? "Document");
 
   const projectPath = detail ? `/ai/p/${detail.document.matter_id}` : "/ai";
+  usePaneBar(
+    pane && detail
+      ? {
+          title: `${detail.document.title} · v${detail.version.version_number}`,
+          backTo: projectPath,
+          backLabel: detail.matter?.name ? `Back to ${detail.matter.name}` : "Back to the project",
+          copy: versionForClaudeText(
+            { title: detail.document.title, versionId: detail.version.id, versionNumber: detail.version.version_number, fileName: detail.version.file_name, projectName: detail.matter?.name },
+            window.location.origin,
+          ),
+          copyTitle: "Copies this version's name, id and Hub link, to paste into your Claude message",
+        }
+      : null,
+  );
   const back = () => {
     // Back where the lawyer came from when there is somewhere to go back to
     // (the router numbers its entries); the project page for a pasted link.
@@ -97,21 +121,22 @@ export default function AiDocumentPage() {
           </SiteLink>
         </div>
       )}
-      <div className="mx-auto flex w-full max-w-[72rem] min-h-0 flex-1 flex-col">
+      <div className={pane ? "flex w-full min-h-0 flex-1 flex-col" : "mx-auto flex w-full max-w-[72rem] min-h-0 flex-1 flex-col"}>
         <DocumentViewer
           document={detail.document}
           versions={detail.versions}
           versionId={detail.version.id}
           onVersionChange={(id) => navigate(`/ai/d/${id}`, { replace: true })}
           onDownload={download}
+          fitToWidth={pane}
           companionSource={
-            companion
+            claudeChat
               ? { title: detail.document.title, versionId: detail.version.id, versionNumber: detail.version.version_number, fileName: detail.version.file_name, projectName: detail.matter?.name }
               : undefined
           }
-          headerClassName={embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
+          headerClassName={pane ? "space-y-2 px-3 py-2" : embed ? "px-3 py-2.5" : "px-4 py-3 md:px-6"}
           heading={
-            <p className="break-words text-xs text-muted-foreground" title={detail.version.file_name ?? undefined}>
+            <p className={pane ? "truncate text-xs text-muted-foreground" : "break-words text-xs text-muted-foreground"} title={detail.version.file_name ?? undefined}>
               {embed && detail.matter?.name && (
                 <>
                   <Link to={projectPath} className="hover:text-foreground hover:underline" title="The project's page: its files, chats and instructions">{detail.matter.name}</Link>
@@ -123,7 +148,7 @@ export default function AiDocumentPage() {
             </p>
           }
           actions={
-            companion ? (
+            pane ? null : claudeChat ? (
               <CopyForClaude title={detail.document.title} versionId={detail.version.id} versionNumber={detail.version.version_number} fileName={detail.version.file_name} projectName={detail.matter?.name} />
             ) : (
             <>

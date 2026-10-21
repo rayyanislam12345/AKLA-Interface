@@ -16,14 +16,15 @@ import { versionDownloadName } from "@/components/documents/zipDownload";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useCompanionHost } from "@/lib/embedMode";
+import { useClaudeIsTheChat } from "@/lib/embedMode";
 import CopyForClaude from "@/ai/components/CopyForClaude";
 
 // The document window on the right of the AI workspace. Two things open in
 // it: a document the chat produced (a draft, a Word file with its changes, a
 // review), shown as the chat's own panel; and a stored project version,
 // shown by the same viewer the project page's preview uses, with "Ask about
-// this" and "Edit with AI" (or, in the companion's drawer, "Copy for Claude").
+// this" and "Edit with AI" (or, in the companion's drawer or on the pane
+// page, "Copy for Claude").
 
 export type AiDocumentWindowProps =
   | {
@@ -124,7 +125,8 @@ function SavedVersionInsights({ versionId, tab, onClose }: { versionId: string; 
 // ------------------------------------------------------------- version
 
 function VersionWindow({ versionId, onClose, onVersionChange, onAsk, onEdit }: Extract<AiDocumentWindowProps, { kind: "version" }>) {
-  const companion = useCompanionHost();
+  // The companion's drawer or the pane page: Claude is the chat, so "Copy for Claude" stands in for the Hub's chat buttons.
+  const companion = useClaudeIsTheChat();
   const { toast } = useToast();
   const { data: detail, isLoading, error, refetch } = useDocumentVersion(versionId);
   // Another version picked in the viewer, when the page does not take over.

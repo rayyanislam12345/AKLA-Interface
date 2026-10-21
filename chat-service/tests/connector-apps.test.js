@@ -308,7 +308,7 @@ test('a mark-up shows the panel: apply_tracked_changes answers its full text and
   assert.equal(sc.versionNumber, 2);
   assert.equal(sc.title, 'Supply Agreement');
   assert.equal(sc.projectName, 'Karachi Port Supply');
-  assert.equal(sc.hubUrl, `${HUB}/ai/d/${NEW}`);
+  assert.equal(sc.hubUrl, `${HUB}/ai/d/${NEW}?embed=1&host=pane`);
   assert.equal(sc.canDecide, true);
   assert.equal(sc.counts.waiting, 1);
   assert.equal(sc.changes.length, 1);
@@ -337,7 +337,7 @@ test('list_changes and decide_changes over MCP: text and structuredContent; a de
     assert.match(text, /^Changes in "Supply Agreement" v2 on Karachi Port Supply: 1 waiting, 0 accepted, 0 rejected\./);
     assert.ok(text.includes(`changeId: ${row.id}`), 'the text fallback names each change for decide_changes');
     assert.ok(text.includes(`  Before: ${P_CAP}`) && text.includes(`  After: ${CAPPED}`));
-    assert.ok(text.includes(`Open in Hub: ${HUB}/ai/d/${NEW}`));
+    assert.ok(text.includes(`Open in Hub: ${HUB}/ai/d/${NEW}?embed=1&host=pane`));
     assert.equal(listed.structuredContent.kind, PANEL_KIND);
     assert.equal(listed.structuredContent.changes[0].id, row.id);
     assert.equal(listed.structuredContent.canDecide, true);
@@ -416,7 +416,7 @@ test('open_document_panel: a short text and the version\'s paragraphs as structu
     assert.equal(sc.kind, DOCUMENT_KIND);
     assert.equal(sc.versionId, V1);
     assert.equal(sc.fileName, 'Supply-Agreement-v1.docx');
-    assert.equal(sc.hubUrl, `${HUB}/ai/d/${V1}`);
+    assert.equal(sc.hubUrl, `${HUB}/ai/d/${V1}?embed=1&host=pane`);
     assert.deepEqual(sc.paragraphs.map((p) => p.text), [P_HEAD, P_CAP, P_INDIRECT, P_LAW]);
     assert.equal(sc.next, null);
     const second = await client.callTool({ name: OPEN_TOOL, arguments: { versionId: V1, from: 3 } });

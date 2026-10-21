@@ -2,7 +2,7 @@ import { ReactNode, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { useAuth } from '@/hooks/useAuth';
-import { resolveEmbedMode, withEmbed } from '@/lib/embedMode';
+import { resolveEmbedMode, resolvePaneHost, withEmbed } from '@/lib/embedMode';
 import { MFAVerification } from '@/components/MFAVerification';
 import { useOwnProfileStatus } from '@/hooks/useProfiles';
 import { Button } from '@/components/ui/button';
@@ -64,10 +64,12 @@ function pendingSecondFactor(session: Session | null): string | null {
 
 /** The sign-in page, told where to come back to: the page asked for, with
  * embed mode kept on it (the companion's panel opens a page with ?embed=1;
- * the sign-in must land back inside the panel's layout, not the full Hub). */
+ * the sign-in must land back inside the panel's layout, not the full Hub).
+ * The pane page's host=pane is kept the same way, so a link Claude printed
+ * comes back to the pane's bar after signing in. */
 function signInPath(location: { pathname: string; search: string; hash: string }): string {
   let next = `${location.pathname}${location.search}${location.hash}`;
-  if (resolveEmbedMode(location.search)) next = withEmbed(next);
+  if (resolveEmbedMode(location.search)) next = withEmbed(next, resolvePaneHost(location.search) ? 'pane' : undefined);
   if (next === '/' || next === '/dashboard') return '/auth';
   return `/auth?next=${encodeURIComponent(next)}`;
 }

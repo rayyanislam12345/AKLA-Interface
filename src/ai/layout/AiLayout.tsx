@@ -9,7 +9,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { AiWorkspaceProvider, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import AiSidebar from "@/ai/layout/AiSidebar";
 import { enterDarkOnlyMode, isAiThemeId, isDarkOnlyAiTheme } from "@/ai/theme";
-import { EMBED_PARAM, isCompanionOrigin, companionHref, postToCompanion, resolveCompanionHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
+import { EMBED_PARAM, isCompanionOrigin, companionHref, postToCompanion, resolveEmbedHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
+import PaneBar from "@/ai/layout/PaneBar";
+import { PaneBarProvider } from "@/ai/layout/paneBarContext";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { startCompanionBusy } from "@/lib/companionBusy";
@@ -29,7 +31,9 @@ import { cn } from "@/lib/utils";
 // companion frames it with ?host=companion, the companion's own bar does that
 // job, so there is no header at all: the page posts its address and name to
 // the companion instead, says when the lawyer is busy, and takes the chat's
-// colour theme from it.
+// colour theme from it. Opened with ?host=pane (the Claude desktop app's
+// browser pane, from a connector link) nothing draws a bar for it, so the
+// pane's own slim bar does (src/ai/layout/PaneBar.tsx); nothing is posted.
 export default function AiLayout() {
   useEffect(() => {
     document.body.classList.add("ai-app");
@@ -43,7 +47,9 @@ export default function AiLayout() {
   }, []);
   return (
     <AiWorkspaceProvider>
-      <AiShell />
+      <PaneBarProvider>
+        <AiShell />
+      </PaneBarProvider>
     </AiWorkspaceProvider>
   );
 }
@@ -53,7 +59,9 @@ function AiShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const embed = useEmbedMode();
-  const companion = embed && resolveCompanionHost(location.search);
+  const host = embed ? resolveEmbedHost(location.search) : null;
+  const companion = host === "companion";
+  const pane = host === "pane";
   const { mobileSidebarOpen, setMobileSidebarOpen, pageTitle, sidebarCollapsed, aiTheme, setAiTheme } = useAiWorkspace();
   useEffect(() => {
     if (!companion) return;
@@ -103,8 +111,9 @@ function AiShell() {
   }, [aiTheme, theme, setTheme]);
   if (embed) {
     return (
-      <div className="ai-app flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app" data-embed="1">
-        {!companion && <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
+      <div className="ai-app flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app" data-embed="1" data-host={host ?? undefined}>
+        {pane && <PaneBar />}
+        {!companion && !pane && <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
           <div className="min-w-0 flex-1 truncate text-sm font-medium" title={pageTitle}>{pageTitle}</div>
           <a
             href={withoutEmbed(location)}

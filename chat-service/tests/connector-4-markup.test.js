@@ -247,7 +247,7 @@ test('the highlighted passage is found across two paragraphs whatever its quotes
   assert.equal(lines[0], 'Supply Agreement v1 (Supply-Agreement-v1.docx) on Karachi Port Supply — a Word file of 5 paragraphs (¶1–¶5).');
   assert.equal(lines[1], `versionId: ${V1}`);
   assert.equal(lines[2], `fileHash: ${HASH}`);
-  assert.ok(out.includes(`Open in Hub: ${HUB}/ai/d/${V1}`));
+  assert.ok(out.includes(`Open in Hub: ${HUB}/ai/d/${V1}?embed=1&host=pane`));
   assert.ok(out.includes('HOW TO CHANGE THE DOCUMENT'), 'the operations protocol');
   assert.ok(out.includes(CONNECTOR_MARKUP_NOTE), 'its connector form');
   assert.ok(out.includes(`The highlighted passage is ¶${at(P_CAP)}–¶${at(P_INDIRECT)}, found word for word.`));
@@ -326,7 +326,7 @@ test('a replace and a comment land as tracked changes by AKLA AI and an AKLA Com
   assert.equal(lines[1], 'Changes: 2 of 2 made — 1 as tracked change by AKLA AI, 1 margin comment by AKLA Comments; 0 could not be made.');
   assert.ok(out.includes('Format matches the version it was made from'), 'the format line');
   assert.ok(out.includes("1 change is waiting in v2's Changes list in the Hub"));
-  assert.ok(out.includes(`Open in Hub: ${HUB}/ai/d/${NEW}`));
+  assert.ok(out.includes(`Open in Hub: ${HUB}/ai/d/${NEW}?embed=1&host=pane`));
   assert.ok(out.includes('Nothing was accepted'));
 
   // The version's Changes list (POST /changes/list with { versionId }).

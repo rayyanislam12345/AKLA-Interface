@@ -45,3 +45,11 @@ test('versions added at the same moment put the higher number first', () => {
   const rows = recentVersions([{ versions: [{ id: 'v1', version_number: 1, created_at: at }, { id: 'v2', version_number: 2, created_at: at }] }]);
   assert.deepEqual(rows.map((r) => r.version.id), ['v2', 'v1']);
 });
+
+test('a project is copied with its name, id and Hub address (the pane bar on a project page)', async () => {
+  const { projectForClaudeText } = await import('../src/lib/copyForClaude.ts');
+  assert.equal(
+    projectForClaudeText({ name: 'M6 Motorway', matterId: 'p1' }, 'https://hub.example'),
+    'Hub project: M6 Motorway\nprojectId: p1\nOpen in Hub: https://hub.example/ai/p/p1',
+  );
+});

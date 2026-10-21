@@ -303,7 +303,7 @@ test('the facts go into the standard and land accepted, the comment stays in the
   assert.equal(lines[4], '- Changed ¶99: Nothing there — Paragraph was not supplied to this turn; request that section first.');
   assert.equal(lines[5], "Format matches the firm's standard (Standard Concession Agreement [AKLA]).", 'the format gate passed and says so');
   assert.equal(lines[6], 'Blanks left in the filed draft: 3 ([●] ×3). They stay [●] until the lawyer fills them.');
-  assert.match(out, new RegExp(`\ndocumentId: ${args.p_document_id}\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\nProject Hyderabad Bypass — Open in Hub: ${HUB}/ai/p/${P1}\n`));
+  assert.match(out, new RegExp(`\ndocumentId: ${args.p_document_id}\nversionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}\\?embed=1&host=pane\nProject Hyderabad Bypass — Open in Hub: ${HUB}/ai/p/${P1}\\?embed=1&host=pane\n`));
   assert.match(out, /\nOn file; the Hub is reading it now\./);
   assert.ok(!out.includes(UNRECORDED_LINE));
   assert.match(out, /The fills are accepted in the file; the AKLA Comments are margin comments for the lawyer\. The standard in the library is unchanged\. Filed as the lawyer's own version \(not marked AI-generated\).*not legal approval\.$/);

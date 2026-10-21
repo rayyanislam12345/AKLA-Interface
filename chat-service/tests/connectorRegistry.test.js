@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHubTools, loadToolModules, BUILT_IN_TOOL_NAMES, MAX_RESULT_CHARS } from '../connector/tools.js';
-import { DEFAULT_HUB_URL, hubBase, hubLink, openInHub } from '../connector/hubLinks.js';
+import { DEFAULT_HUB_URL, PANE_QUERY, hubBase, hubLink, openInHub } from '../connector/hubLinks.js';
 import firmRules, { firmRulesText, CONNECTOR_CITING, CONNECTOR_SOURCING, CONNECTOR_GROUNDING, TASKS } from '../connector/tools/firmRules.js';
 import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, ARTIFACT_RULES, lookingUpRules, citingRules } from '../firmRules.js';
 
@@ -47,7 +47,7 @@ test('a module\'s tools follow the built-in eight, get the deps, and answer thro
     assert.deepEqual(list.map((t) => t.name), [...BUILT_IN_TOOL_NAMES, 'say_hello', 'show_deps', 'too_long']);
     const byName = Object.fromEntries(list.map((t) => [t.name, t]));
     assert.equal(await byName.say_hello.run({}, { userId: 'u1' }), 'hello u1');
-    assert.equal(await byName.show_deps.run({}, { userId: 'u1' }), 'object|v|https://hub.test|link,matterById,needProject,needVersion,open,passagesOf,showPassages,textOf,versionById,versionName|Open in Hub: https://hub.test/ai/p/p1|function');
+    assert.equal(await byName.show_deps.run({}, { userId: 'u1' }), 'object|v|https://hub.test|link,matterById,needProject,needVersion,open,passagesOf,showPassages,textOf,versionById,versionName|Open in Hub: https://hub.test/ai/p/p1?embed=1&host=pane|function');
     const clipped = await byName.too_long.run({}, { userId: 'u1' });
     assert.equal(clipped.length, MAX_RESULT_CHARS);
     assert.match(clipped, /\[Cut here:/);
@@ -71,12 +71,14 @@ test('a module of the wrong shape, or one that repeats a name, is refused at sta
 
 test('hubLink builds the site\'s pages and refuses what it cannot link', () => {
   assert.equal(DEFAULT_HUB_URL, 'https://akla-interface.vercel.app');
+  // A project or version link opens the pane page (the Claude desktop app's browser pane); the precedent library stays plain.
+  assert.equal(PANE_QUERY, '?embed=1&host=pane');
   assert.equal(hubBase(undefined), DEFAULT_HUB_URL);
   assert.equal(hubBase('  https://hub.test///  '), 'https://hub.test');
-  assert.equal(hubLink('project', 'p1'), `${DEFAULT_HUB_URL}/ai/p/p1`);
-  assert.equal(hubLink('version', V1, 'https://hub.test/'), `https://hub.test/ai/d/${V1}`);
+  assert.equal(hubLink('project', 'p1'), `${DEFAULT_HUB_URL}/ai/p/p1?embed=1&host=pane`);
+  assert.equal(hubLink('version', V1, 'https://hub.test/'), `https://hub.test/ai/d/${V1}?embed=1&host=pane`);
   assert.equal(hubLink('precedents', null, 'https://hub.test'), 'https://hub.test/precedent-library');
-  assert.equal(openInHub('project', 'p1', 'https://hub.test'), 'Open in Hub: https://hub.test/ai/p/p1');
+  assert.equal(openInHub('project', 'p1', 'https://hub.test'), 'Open in Hub: https://hub.test/ai/p/p1?embed=1&host=pane');
   assert.throws(() => hubLink('chat', 'c1'), /Unknown Hub link kind: chat/);
   assert.throws(() => hubLink('version', ''), /A version link needs an id/);
 });

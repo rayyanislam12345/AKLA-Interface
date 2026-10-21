@@ -7,8 +7,10 @@ import { useMatterContext } from "@/hooks/useMatterContext";
 import { useProfiles } from "@/hooks/useProfiles";
 import { relativeDay } from "@/lib/chatStatus";
 import { parseOpenParam } from "@/lib/aiLinks";
-import { instructionsForClaudeText, recentVersions } from "@/lib/copyForClaude";
+import { instructionsForClaudeText, projectForClaudeText, recentVersions } from "@/lib/copyForClaude";
+import { usePaneHost } from "@/lib/embedMode";
 import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
+import { usePaneBar } from "@/ai/layout/paneBarContext";
 import { CopyTextForClaude } from "@/ai/components/CopyForClaude";
 import ProjectFilesPanel from "@/ai/components/ProjectFilesPanel";
 import { LoadState } from "@/components/LoadState";
@@ -22,11 +24,23 @@ const RECENT = 5;
 // alone. What is here: the project's files, each opening its own page in the
 // drawer and each with a "Copy for Claude"; its standing instructions, to
 // copy into the chat; and what arrived lately. Files can still be added.
+// The pane page (the Claude desktop app's browser pane) shows the same view,
+// and its bar's "Copy for Claude" copies the project's name, id and link.
 export default function CompanionProjectView({ matterId }: { matterId: string }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: matter, isLoading, error: matterError, refetch: refetchMatter } = useMatter(matterId);
   useAiPageTitle(matter?.name ?? "Project");
+  const pane = usePaneHost();
+  usePaneBar(
+    pane && matter
+      ? {
+          title: matter.name,
+          copy: projectForClaudeText({ name: matter.name, matterId }, window.location.origin),
+          copyTitle: "Copies this project's name, id and Hub link, to paste into your Claude message",
+        }
+      : null,
+  );
   const documents = useMatterDocuments(matterId);
 
   // A link to one of the project's files (?open=v:<id>, from search or a
