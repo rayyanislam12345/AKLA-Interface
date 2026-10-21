@@ -9,7 +9,6 @@ import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
 import { usePaneBar } from "@/ai/layout/paneBarContext";
 import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import SiteLink from "@/ai/components/SiteLink";
-import CopyForClaude from "@/ai/components/CopyForClaude";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { downloadStoredVersion } from "@/components/documents/downloadVersion";
 import { versionDownloadName } from "@/components/documents/zipDownload";
@@ -25,7 +24,9 @@ import { Button } from "@/components/ui/button";
 // On the pane page (?host=pane, the Claude desktop app's browser pane) Claude
 // is the chat too, and the pane's bar carries the name, Back to the project
 // and "Copy for Claude": the page keeps one line of detail, the version and
-// Download, and draws a Word file at its page width, scaled to fit.
+// Download, and draws a Word file at its page width, scaled to fit. The
+// companion shows the same bar (src/ai/layout/PaneBar.tsx), so there too the
+// bar carries "Copy for Claude" and the page does not repeat it.
 export default function AiDocumentPage() {
   const { versionId } = useParams<{ versionId: string }>();
   const navigate = useNavigate();
@@ -42,7 +43,7 @@ export default function AiDocumentPage() {
 
   const projectPath = detail ? `/ai/p/${detail.document.matter_id}` : "/ai";
   usePaneBar(
-    pane && detail
+    claudeChat && detail
       ? {
           title: `${detail.document.title} · v${detail.version.version_number}`,
           backTo: projectPath,
@@ -148,9 +149,7 @@ export default function AiDocumentPage() {
             </p>
           }
           actions={
-            pane ? null : claudeChat ? (
-              <CopyForClaude title={detail.document.title} versionId={detail.version.id} versionNumber={detail.version.version_number} fileName={detail.version.file_name} projectName={detail.matter?.name} />
-            ) : (
+            claudeChat ? null : (
             <>
               <Button size="sm" onClick={() => navigate(`${projectPath}?attach=${attachParam(detail.version.id)}`)} data-testid="ask-about-version">
                 <MessageSquare className="mr-1.5 h-4 w-4" />Ask about this

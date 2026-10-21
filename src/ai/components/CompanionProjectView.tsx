@@ -8,7 +8,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { relativeDay } from "@/lib/chatStatus";
 import { parseOpenParam } from "@/lib/aiLinks";
 import { instructionsForClaudeText, projectForClaudeText, recentVersions } from "@/lib/copyForClaude";
-import { usePaneHost } from "@/lib/embedMode";
+import { useClaudeIsTheChat } from "@/lib/embedMode";
 import { useAiPageTitle } from "@/ai/AiWorkspaceContext";
 import { usePaneBar } from "@/ai/layout/paneBarContext";
 import { CopyTextForClaude } from "@/ai/components/CopyForClaude";
@@ -25,15 +25,16 @@ const RECENT = 5;
 // drawer and each with a "Copy for Claude"; its standing instructions, to
 // copy into the chat; and what arrived lately. Files can still be added.
 // The pane page (the Claude desktop app's browser pane) shows the same view,
-// and its bar's "Copy for Claude" copies the project's name, id and link.
+// and the bar (the pane's, which the companion shows too) has "Copy for
+// Claude" for the project's name, id and link.
 export default function CompanionProjectView({ matterId }: { matterId: string }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: matter, isLoading, error: matterError, refetch: refetchMatter } = useMatter(matterId);
   useAiPageTitle(matter?.name ?? "Project");
-  const pane = usePaneHost();
+  const claudeChat = useClaudeIsTheChat();
   usePaneBar(
-    pane && matter
+    claudeChat && matter
       ? {
           title: matter.name,
           copy: projectForClaudeText({ name: matter.name, matterId }, window.location.origin),

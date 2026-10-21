@@ -1,6 +1,6 @@
 // Service worker. Four jobs: the toolbar button (the drawer or the side
 // panel, by the "view" setting); in the side view, open the side panel when
-// an "Open beside" button is clicked on claude.ai; pass the newest Hub link
+// a Hub link (or the button after a bare address) is clicked on claude.ai; pass the newest Hub link
 // on to the side panel so it can follow the conversation; and hand a passage
 // the side panel wants quoted to the claude.ai tab in its window, whose
 // composer.js puts it in the message box. Nothing is sent outside the

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ExternalLink, Menu, SquarePen } from "lucide-react";
 import "@fontsource/source-serif-4/400.css";
@@ -27,13 +27,16 @@ import { cn } from "@/lib/utils";
 // own pages keep the viewport they were built for.
 // Opened with ?embed=1 (the companion's side panel beside a claude.ai chat,
 // see src/lib/embedMode.ts) there is no sidebar at all: a one-line header
-// names the place and links to the same page in the ordinary Hub. When the
-// companion frames it with ?host=companion, the companion's own bar does that
-// job, so there is no header at all: the page posts its address and name to
-// the companion instead, says when the lawyer is busy, and takes the chat's
-// colour theme from it. Opened with ?host=pane (the Claude desktop app's
-// browser pane, from a connector link) nothing draws a bar for it, so the
-// pane's own slim bar does (src/ai/layout/PaneBar.tsx); nothing is posted.
+// names the place and links to the same page in the ordinary Hub. Opened with
+// ?host=pane (the Claude desktop app's browser pane, from a connector link)
+// or framed by the companion with ?host=companion (the Chrome extension's
+// drawer or side panel), the page draws the same slim bar either way
+// (src/ai/layout/PaneBar.tsx), so Chrome and the desktop app look and work
+// alike. In the companion the bar adds the extension's menu and, in the
+// drawer, Close; the page also posts its address and name to the companion
+// (with bar: true, so the extension hides its own bar), says when the lawyer
+// is busy, and takes the chat's colour theme from it. Nothing is posted in
+// the pane.
 export default function AiLayout() {
   useEffect(() => {
     document.body.classList.add("ai-app");
@@ -63,16 +66,22 @@ function AiShell() {
   const companion = host === "companion";
   const pane = host === "pane";
   const { mobileSidebarOpen, setMobileSidebarOpen, pageTitle, sidebarCollapsed, aiTheme, setAiTheme } = useAiWorkspace();
+  // Where the companion shows the page: "pane" (the drawer inside the
+  // claude.ai tab, which the bar's Close can shut) or "side" (Chrome's side
+  // panel, which a page cannot close). The companion says so in answer to
+  // hub:location; until it does, no Close.
+  const [companionView, setCompanionView] = useState<"pane" | "side" | null>(null);
   useEffect(() => {
     if (!companion) return;
-    postToCompanion({ type: "hub:location", href: companionHref(location), title: pageTitle });
+    postToCompanion({ type: "hub:location", href: companionHref(location), title: pageTitle, bar: true });
   }, [companion, location, pageTitle]);
   useEffect(() => {
     if (!companion) return;
     const onMessage = (ev: MessageEvent) => {
       if (!isCompanionOrigin(ev.origin) || ev.source !== window.parent) return;
-      const d = ev.data as { type?: unknown; aiTheme?: unknown } | null;
+      const d = ev.data as { type?: unknown; aiTheme?: unknown; view?: unknown } | null;
       if (d && d.type === "companion:theme" && isAiThemeId(d.aiTheme)) setAiTheme(d.aiTheme);
+      if (d && d.type === "companion:context" && (d.view === "pane" || d.view === "side")) setCompanionView(d.view);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -112,7 +121,7 @@ function AiShell() {
   if (embed) {
     return (
       <div className="ai-app flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground" data-ai-theme={aiTheme} data-testid="ai-app" data-embed="1" data-host={host ?? undefined}>
-        {pane && <PaneBar />}
+        {(pane || companion) && <PaneBar companion={companion ? { closable: companionView === "pane" } : undefined} />}
         {!companion && !pane && <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3" data-testid="ai-embed-bar">
           <div className="min-w-0 flex-1 truncate text-sm font-medium" title={pageTitle}>{pageTitle}</div>
           <a

@@ -220,7 +220,7 @@
     if (host) host.hidden = true;
     layout();
   }
-  // "Open beside" was clicked, or a link came from the chat (auto).
+  // A Hub link was clicked in the chat, or a link came from the chat (auto).
   function show(url, auto) {
     var clean = HubLinks.normaliseHubUrl(url, settings.hubOrigin);
     if (!clean) return;

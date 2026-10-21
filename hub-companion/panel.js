@@ -1,14 +1,21 @@
-// The companion's panel: one bar (Back, the page's name, Home, Open in the
-// Hub, a menu) over a frame that shows the Hub. The same page runs in two
-// places:
+// The companion's panel: a frame that shows the Hub, and a menu. The same
+// page runs in two places:
 //   - the drawer inside the claude.ai tab (pane.js frames it with ?mode=pane;
 //     links arrive from the chat by postMessage, and Close hands back);
 //   - Chrome's side panel (links arrive from the service worker).
-// The Hub is opened with embed=1&host=companion, so it shows no sidebar and
-// no header of its own: it posts its address and name here instead, and the
-// bar shows them. The chat's colour theme tints the bar and is passed to the
-// Hub, so the chat and the document wear the same colours.
-// A passage highlighted in a Hub document ("Ask Claude about this", posted as
+// The Hub is opened with embed=1&host=companion and draws the same slim bar
+// it draws in the Claude desktop app's pane (Back to the project, the page's
+// name, Copy for Claude, Full Hub), with two buttons of ours at its end: "⋯"
+// (hub:menu, which opens this panel's menu) and, in the drawer, Close
+// (hub:close). While the Hub's bar is up (it says so with bar: true on
+// hub:location) the panel's own bar is hidden and its notices float as a
+// slim strip over the top of the frame; the panel's bar is kept for its own
+// states (no document open, the Hub not loading, the sign-in page, a copy
+// installed from the wrong file). The Hub is told which view it is in
+// (companion:context), so it offers Close only in the drawer.
+// The chat's colour theme tints the panel and is passed to the Hub, so the
+// chat and the document wear the same colours.
+// A passage highlighted in a Hub document ("Add to message", posted as
 // hub:selection) is quoted into the chat's message box, unsent: in the drawer
 // through pane.js, in the side panel through the service worker; composer.js
 // on claude.ai does the typing.
@@ -67,6 +74,11 @@
     titleEl.title = title || "";
   }
   function updateBack() { backBtn.disabled = trail.length === 0; }
+  // The Hub draws the bar (true), or the panel does (false).
+  function hubBar(on) {
+    document.body.classList.toggle("hub-bar", !!on);
+    if (on && !menu.hidden && document.activeElement === moreBtn) frame.focus();
+  }
 
   // ---- notices ----
   var flashTimer = null;
@@ -160,7 +172,10 @@
       }
     }
     if (loadTimer) clearTimeout(loadTimer);
-    loadTimer = setTimeout(function () { say("The Hub did not load. ", url); }, LOAD_WAIT);
+    loadTimer = setTimeout(function () {
+      hubBar(false);
+      say("The Hub did not load. ", url);
+    }, LOAD_WAIT);
   }
 
   function show(url, keepTrail) {
@@ -188,6 +203,7 @@
 
   function idle() {
     clearNotice();
+    hubBar(false);
     currentUrl = null;
     pendingUrl = null;
     trail = [];
@@ -276,17 +292,39 @@
   }
 
   // ---- menu ----
+  // Opened from the panel's own bar, or from the Hub's bar ("⋯", hub:menu);
+  // either way it sits at the top right, over the frame.
+  var menuClosedByFrame = 0;
   function setMenu(open) {
     menu.hidden = !open;
     moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) address.focus();
   }
+  function menuFromHub() {
+    // A click on the Hub's "⋯" while the menu is open first moves focus into
+    // the frame, which closes it; that same click must not open it again.
+    if (Date.now() - menuClosedByFrame < 400) return;
+    setMenu(menu.hidden);
+  }
   moreBtn.addEventListener("click", function () { setMenu(menu.hidden); });
   document.addEventListener("click", function (ev) {
     if (!menu.hidden && !menu.contains(ev.target) && !moreBtn.contains(ev.target)) setMenu(false);
   });
+  // A click inside the Hub's frame never reaches this document; it takes the
+  // focus into the frame instead, and the menu goes.
+  window.addEventListener("blur", function () {
+    setTimeout(function () {
+      if (!menu.hidden && document.activeElement === frame) {
+        setMenu(false);
+        menuClosedByFrame = Date.now();
+      }
+    }, 0);
+  });
   document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape" && !menu.hidden) { setMenu(false); moreBtn.focus(); }
+    if (ev.key !== "Escape" || menu.hidden) return;
+    setMenu(false);
+    if (document.body.classList.contains("hub-bar")) frame.focus();
+    else moreBtn.focus();
   });
   document.getElementById("go").addEventListener("submit", function (ev) {
     ev.preventDefault();
@@ -305,7 +343,7 @@
   viewSwitch.addEventListener("click", function () {
     if (PANE) {
       // The drawer closes itself when the setting changes; the toolbar
-      // button and "Open beside" then open Chrome's side panel.
+      // button and a click on a Hub link then open Chrome's side panel.
       chrome.storage.sync.set({ view: "side" });
       return;
     }
@@ -325,13 +363,18 @@
     updateBack();
     if (prev) show(prev, true);
   });
-  document.getElementById("home").addEventListener("click", function () { show(HubLinks.homeUrl(settings.hubOrigin)); });
-  document.getElementById("tab").addEventListener("click", function () {
+  function goHome() { show(HubLinks.homeUrl(settings.hubOrigin)); }
+  function openInTab() {
     chrome.tabs.create({ url: HubLinks.plainUrl(currentUrl || HubLinks.homeUrl(settings.hubOrigin)) });
-  });
-  document.getElementById("close").addEventListener("click", function () {
-    window.parent.postMessage({ source: "hub-companion-pane", type: "close" }, PAGE_ORIGIN);
-  });
+  }
+  function closeDrawer() {
+    if (PANE) window.parent.postMessage({ source: "hub-companion-pane", type: "close" }, PAGE_ORIGIN);
+  }
+  document.getElementById("home").addEventListener("click", goHome);
+  document.getElementById("tab").addEventListener("click", openInTab);
+  document.getElementById("menuHome").addEventListener("click", function () { setMenu(false); goHome(); });
+  document.getElementById("menuTab").addEventListener("click", function () { setMenu(false); openInTab(); });
+  document.getElementById("close").addEventListener("click", closeDrawer);
 
   // ---- messages ----
   window.addEventListener("message", function (ev) {
@@ -340,6 +383,11 @@
     // From the Hub inside our frame: where it is, and what it is called.
     if (ev.source === frame.contentWindow && ev.origin.toLowerCase() === settings.hubOrigin.toLowerCase()) {
       if (d.type === "hub:location" && typeof d.href === "string") {
+        // The Hub draws its own bar (a Hub from before 0.6.0 does not say so,
+        // and keeps the panel's), and is told where it is shown, so it
+        // offers Close only in the drawer.
+        hubBar(d.bar === true);
+        frame.contentWindow.postMessage({ type: "companion:context", view: PANE ? "pane" : "side" }, settings.hubOrigin);
         var clean = HubLinks.normaliseHubUrl(d.href, settings.hubOrigin);
         if (!clean) return;
         if (clean !== currentUrl) {
@@ -354,7 +402,12 @@
         setPlace(clean, typeof d.title === "string" && d.title ? d.title : null);
       }
       // A page outside the workspace (the sign-in page) names itself only.
-      if (d.type === "hub:title" && typeof d.title === "string" && d.title) setPlace(currentUrl || HubLinks.homeUrl(settings.hubOrigin), d.title);
+      if (d.type === "hub:title" && typeof d.title === "string" && d.title) {
+        hubBar(false);
+        setPlace(currentUrl || HubLinks.homeUrl(settings.hubOrigin), d.title);
+      }
+      if (d.type === "hub:menu") menuFromHub();
+      if (d.type === "hub:close") closeDrawer(); // Chrome's side panel cannot be closed from a page; the Hub offers Close only in the drawer
       if (d.type === "hub:busy") busy = d.busy === true;
       if (d.type === "hub:selection") askAbout(d);
       return;

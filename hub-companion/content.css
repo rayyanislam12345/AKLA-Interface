@@ -1,11 +1,12 @@
-/* The "Open beside" button placed after each Hub link on claude.ai. Kept
+/* The small icon button placed after a Hub address Claude wrote as bare
+   text (a link needs none: clicking it opens it beside the chat). Kept
    small and quiet so it reads as part of the line, not a banner. */
 .hub-companion-open {
   all: unset;
   display: inline-block;
   box-sizing: border-box;
   margin: 0 0 0 0.4em;
-  padding: 0 0.5em;
+  padding: 0 0.35em;
   font: 600 11px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: inherit;
   border: 1px solid currentColor;
@@ -15,6 +16,16 @@
   vertical-align: baseline;
   white-space: nowrap;
   user-select: none;
+}
+.hub-companion-open svg {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }
 .hub-companion-open:hover,
 .hub-companion-open:focus-visible {

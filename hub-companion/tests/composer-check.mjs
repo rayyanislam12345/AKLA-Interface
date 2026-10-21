@@ -8,10 +8,15 @@
 //      for content.js): the paste path, the line-by-line typing path (paste
 //      blocked), a plain textarea, and a box that swallows pastes (clipboard
 //      and a notice). Each keeps the draft and sends nothing.
-//   2. The real thing in the extension's own content-script world: "Open
-//      beside" opens the drawer, the fake Hub inside it posts hub:selection,
-//      and the quoted passage lands in the ProseMirror box after the draft,
-//      unsent, with "Added to your message" in the drawer's notice line.
+//   2. The real thing in the extension's own content-script world: a
+//      Cmd/Ctrl click on a Hub link is left to the browser and a plain click
+//      opens the drawer on it; the small button after a bare address opens
+//      it too; the fake Hub inside says it draws the bar (the panel's own
+//      bar goes, and the Hub is told it is in the drawer), posts
+//      hub:selection, and the quoted passage lands in the ProseMirror box
+//      after the draft, unsent, with "Added to your message" floating over
+//      the top of the frame; the Hub's "⋯" (hub:menu) opens the panel's menu
+//      and its Close (hub:close) closes the drawer.
 //   3. The side panel's route: the service worker hands the text to the
 //      tab's composer.js (chrome.tabs.sendMessage), which adds it.
 //
@@ -88,6 +93,7 @@ const CHAT_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Fixtu
 <body>
 <main>
   <p>Claude said: Open in Hub: https://akla-interface.vercel.app/ai/d/ver-123</p>
+  <p>And the project: <a id="hub-link" href="https://akla-interface.vercel.app/ai/p/proj-9" target="_blank" rel="noopener">Karachi Port</a></p>
   <div id="decoy" contenteditable="true">notes, not the composer</div>
   <textarea id="edit-old" rows="2">an earlier message being edited</textarea>
 </main>
@@ -138,10 +144,14 @@ const CHAT_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Fixtu
 </body></html>`;
 
 // The Hub in the drawer: says its name, and posts a selection when asked.
+// It draws its own bar, as the real Hub does (bar: true), and keeps what the
+// companion tells it.
 const FAKE_HUB = `<!doctype html><html><head><meta charset="utf-8"><title>Fake Hub</title></head><body><p>Fake Hub document</p>
 <script>
   window.ask = (ext, msg) => parent.postMessage(msg, ext);
-  parent.postMessage({ type: "hub:location", href: location.href, title: "Share Purchase Agreement" }, "*");
+  window.told = [];
+  window.addEventListener("message", (e) => { if (e.source === parent) window.told.push(e.data); });
+  parent.postMessage({ type: "hub:location", href: location.href, title: "Share Purchase Agreement", bar: true }, "*");
 </script></body></html>`;
 
 const executablePath = findBrowser();
@@ -259,7 +269,37 @@ try {
     await page.close();
   }
 
+  const findFrame = async (page, prefix, tries = 80) => {
+    for (let i = 0; i < tries; i++) {
+      const f = page.frames().find((fr) => fr.url().startsWith(prefix));
+      if (f) return f;
+      await page.waitForTimeout(100);
+    }
+    return null;
+  };
+
   // ---- 2. the drawer, end to end, in the extension's own world ----
+  note("A Hub link in the chat:");
+  {
+    const { page, errors } = await chatPage("", { inject: false });
+    await page.waitForTimeout(1200); // the content script's first scan
+    check((await page.$$("a#hub-link + button.hub-companion-open")).length === 0, "no button after a link");
+    const before = context.pages().length;
+    await page.click("#hub-link", { modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+    await page.waitForTimeout(800);
+    check(!(await findFrame(page, `chrome-extension://${id}/panel.html`, 5)), "a Cmd/Ctrl click does not open the drawer");
+    check(context.pages().length > before, "a Cmd/Ctrl click opens the link in a new tab, as the browser does");
+    for (const p of context.pages().slice(before)) await p.close().catch(() => {});
+    await page.click("#hub-link");
+    const panel = await findFrame(page, `chrome-extension://${id}/panel.html`, 50);
+    check(!!panel, "a plain click opens the drawer");
+    check(!!(await findFrame(page, "https://akla-interface.vercel.app/ai/p/proj-9")), "on the link's page");
+    check(context.pages().length === before, "and no new tab");
+    const others = errors.filter((e) => !/Access to storage is not allowed from this context/.test(e));
+    check(others.length === 0, `no page errors (${others.join(" | ")})`);
+    await page.close();
+  }
+
   note("Drawer, end to end:");
   {
     const { page, errors } = await chatPage("", { inject: false });
@@ -285,6 +325,11 @@ try {
     })();
     check(!!hub, "the fake Hub loaded in the drawer");
     if (panel && hub) {
+      await panel.waitForFunction(() => document.body.classList.contains("hub-bar"), null, { timeout: 3000 }).catch(() => {});
+      check(await panel.$eval(".bar", (b) => getComputedStyle(b).display === "none"), "the panel's own bar is hidden while the Hub draws its bar");
+      await hub.waitForFunction(() => window.told.some((m) => m && m.type === "companion:context"), null, { timeout: 3000 }).catch(() => {});
+      const ctx = await hub.evaluate(() => window.told.find((m) => m && m.type === "companion:context") || null);
+      check(ctx && ctx.view === "pane", `the Hub is told it is in the drawer (${JSON.stringify(ctx)})`);
       await hub.waitForFunction(() => typeof window.ask === "function");
       await hub.evaluate(
         ([extOrigin]) =>
@@ -308,10 +353,25 @@ try {
       await panel.waitForFunction(() => !document.getElementById("notice").hidden, null, { timeout: 3000 }).catch(() => {});
       const said = await panel.$eval("#notice", (n) => (n.hidden ? "" : n.textContent));
       check(/^Added to your message/.test(said), `the drawer says so ("${said}")`);
+      check((await panel.$eval("#notice", (n) => getComputedStyle(n).position)) === "absolute", "the notice floats over the frame, not in a bar row");
       // A message from anywhere but the Hub frame is ignored.
       await page.evaluate(() => window.postMessage({ type: "hub:selection", text: "spoof", versionId: "x" }, "*"));
       await page.waitForTimeout(400);
       check(!(await page.evaluate(() => window.pmText().join("\n").includes("spoof"))), "a selection message from the page itself is ignored");
+      // The Hub's "⋯": the panel's menu opens, with Home and Open in tab.
+      await hub.evaluate(([extOrigin]) => window.ask(extOrigin, { type: "hub:menu" }), [`chrome-extension://${id}`]);
+      await panel.waitForFunction(() => !document.getElementById("menu").hidden, null, { timeout: 3000 }).catch(() => {});
+      check(await panel.$eval("#menu", (m) => !m.hidden), "hub:menu opens the panel's menu");
+      check((await panel.$$("#menuHome, #menuTab")).length === 2, "the menu has Hub home and Open in a new tab");
+      await panel.press("#address", "Escape");
+      check(await panel.$eval("#menu", (m) => m.hidden), "Escape puts the menu away");
+      // A close message from anywhere but the Hub frame is ignored; the Hub's Close closes the drawer.
+      await panel.evaluate(() => window.postMessage({ type: "hub:close" }, "*"));
+      await page.waitForTimeout(300);
+      check(await page.$eval("#hub-companion-pane", (h) => !h.hidden), "a close message from the panel page itself is ignored");
+      await hub.evaluate(([extOrigin]) => window.ask(extOrigin, { type: "hub:close" }), [`chrome-extension://${id}`]);
+      await page.waitForFunction(() => document.getElementById("hub-companion-pane").hidden, null, { timeout: 3000 }).catch(() => {});
+      check(await page.$eval("#hub-companion-pane", (h) => h.hidden), "hub:close closes the drawer");
     }
     check(nothingSent(await counters(page)), "nothing was sent");
     // Known, and not this feature's: theme.js writes chrome.storage.session

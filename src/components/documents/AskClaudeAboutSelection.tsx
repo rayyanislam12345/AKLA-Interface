@@ -7,14 +7,14 @@ import { selectionMessage, tidyPassage, type SelectionPayload } from "@/lib/sele
 
 // In the companion's drawer (the Hub beside a claude.ai chat), highlighting
 // a passage of the drawn Word file brings up one small button by the
-// selection: "Ask Claude about this". It hands the passage, with the
-// version's name and id, to the companion, which puts it in the chat's
-// message box quoted, ready for the lawyer to say what to change. Nothing is
-// sent to Claude until the lawyer sends the message.
+// selection: "Add to message". It hands the passage, with the version's name
+// and id, to the companion, which puts it in the chat's message box quoted,
+// ready for the lawyer to say what to change. Nothing is sent to Claude until
+// the lawyer sends the message.
 // On the pane page (?host=pane, the Claude desktop app's browser pane) there
 // is no companion to hand it to: the button is "Copy for Claude" and puts the
 // same quoted message on the clipboard, for the lawyer to paste into the
-// chat. Never shown in the ordinary Hub.
+// chat. Same place and look either way. Never shown in the ordinary Hub.
 
 /** The version on show, as the companion names it in the chat. */
 export interface CompanionSource {
@@ -171,7 +171,7 @@ export function AskClaudeAboutSelection({ contentRef, scrollRef, source }: Props
       data-testid="ask-claude-about-selection"
     >
       {pane ? <ClipboardCopy className="h-3.5 w-3.5 shrink-0" /> : <MessageSquareQuote className="h-3.5 w-3.5 shrink-0" />}
-      {pane ? "Copy for Claude" : "Ask Claude about this"}
+      {pane ? "Copy for Claude" : "Add to message"}
     </button>
   );
 }

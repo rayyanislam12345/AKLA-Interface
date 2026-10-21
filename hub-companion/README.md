@@ -1,16 +1,21 @@
 # AKLA Hub companion
 
 A small Chrome/Edge extension that shows the firm's Hub beside your
-claude.ai chat. When Claude answers with a line like
-`Open in Hub: https://akla-interface.vercel.app/ai/d/<version>`, an
-**Open beside** button appears after the link; click it and that document
-(or project, or chat) opens on the right, with its formatting, version
-compare, checks and the Changes list. You keep talking in the chat.
+claude.ai chat, the way the Claude desktop app shows it in its own browser
+pane. When Claude answers with a line like
+`Open in Hub: https://akla-interface.vercel.app/ai/d/<version>`, click the
+link: that document (or project, or chat) opens on the right, with its
+formatting, version compare, checks and the Changes list, under the same
+slim bar as in the desktop app. You keep talking in the chat. Cmd/Ctrl-click
+(or a middle click) still opens the link in a new tab.
 
 What it does, and all it does:
 
-- On claude.ai, finds Hub links by their address (not by claude.ai's layout),
-  puts an "Open beside" button after each, and remembers the newest one.
+- On claude.ai, finds Hub links by their address (not by claude.ai's layout)
+  and remembers the newest one. A plain click on a Hub link (no Cmd, Ctrl,
+  Shift or Alt, left button) opens it beside the chat instead of in a new
+  tab. An address Claude wrote as bare text, not as a link, gets a small
+  icon button after it ("Open beside the chat") that does the same.
 - **Where the Hub shows** (Settings, or the panel's menu):
   - **Inside the chat page** (the default): a drawer on the right of the
     claude.ai tab (`pane.js`). Drag its left edge to resize; the width is
@@ -23,12 +28,21 @@ What it does, and all it does:
     break it; at worst Push looks wrong and Slide over still works.
   - **In Chrome's side panel**: the same panel, outside the page. Kept as
     the fallback.
-- Either way the Hub opens with `?embed=1&host=companion`: no sidebar and no
-  header of its own. The Hub tells the panel the page's name, and the
-  panel's one bar shows it, with Back, Home, Open in the Hub, a menu (paste
-  a link, colours, push or slide over, where the Hub shows, all settings)
-  and, in the drawer, Close. The chat's colour theme is passed to the Hub
-  (`aiTheme`), so the chat and the document wear the same colours.
+- Either way the Hub opens with `?embed=1&host=companion`: no sidebar, and
+  the same one slim bar the Hub draws in the Claude desktop app's pane:
+  back to the project, the page's name, **Copy for Claude** and **Full Hub**
+  (the same page in the ordinary Hub, in a new tab). At its right end are
+  two buttons of the extension's: **⋯**, the extension's menu (paste a link,
+  colours, push or slide over, where the Hub shows, Hub home, open this page
+  in a new tab, all settings), and, in the drawer, **×** Close (Chrome's own
+  side panel has its own close, so the Hub shows no × there). The
+  extension's own bar shows only when there is no Hub page to draw one: no
+  document open, the Hub not loading, the Hub's sign-in page, or a copy
+  installed from the wrong file. Its one-line notices ("Claude mentioned a
+  document. Show it.", "Added to your message") float as a slim strip at
+  the top of the frame, under the Hub's bar. The chat's colour theme is
+  passed to the Hub (`aiTheme`), so the chat and the document wear the same
+  colours.
 - **Alt+H** shows or hides the drawer (or opens Chrome's side panel in the side view). Change it at `chrome://extensions/shortcuts`.
 - If **Follow new links** is on (the default), an open panel follows the
   newest Hub link Claude mentions: straight away when the panel has only
@@ -36,8 +50,10 @@ What it does, and all it does:
   document. Show it." notice, so nothing you are doing in the panel is lost
   under you.
 - **Ask Claude about a passage.** Highlight words in a Word document in the
-  drawer and a small **Ask Claude about this** button appears by them (Tab
-  reaches it too). Click it and the chat's message box gets the passage,
+  drawer and a small **Add to message** button appears by them (Tab
+  reaches it too; in the desktop app's pane the same button, in the same
+  place, is "Copy for Claude", since nothing there can reach the message
+  box). Click it and the chat's message box gets the passage,
   quoted, under a line naming the document, version, file, project and
   version id:
 
@@ -130,19 +146,19 @@ Right-click the toolbar button > Options (or the Details page):
   must start with `https://`; a plain `http://` address is refused (except
   `localhost`, for a development build of the Hub).
 - **Follow new links**: on by default. Off means the panel changes page only
-  when you click Open beside, paste a link, or press Home.
+  when you click a Hub link, paste a link, or choose Hub home.
 
 ## Limits
 
 - Chrome and Edge on a computer only. Nothing on mobile or Safari.
 - Link detection depends on claude.ai showing the connector's "Open in Hub"
-  addresses as text or links. If claude.ai stops showing them, the buttons
-  stop appearing; the panel still works from the toolbar button and the
-  paste-a-link box.
+  addresses as text or links. If claude.ai stops showing them, links open
+  in a new tab as ordinary links do; the panel still works from the toolbar
+  button and the paste-a-link box.
 - It is a viewer beside the chat, not part of Claude's messages. Claude does
   not know what you accepted or rejected in the panel unless you tell it, or
   ask it to check the Changes list through the connector.
-- "Open in tab" opens the last page the panel was sent to. If you navigate
+- "Open this page in a new tab" (the menu) opens the last page the panel was sent to. If you navigate
   inside the panel, the Hub tells the panel its new address only if the Hub
   posts `{ type: "hub:location", href }` to its parent window in embed mode;
   until it does, Open in tab may be one step behind. Likewise the Hub may
@@ -155,7 +171,7 @@ Right-click the toolbar button > Options (or the Details page):
   means the Hub's `frame-ancestors` header does not name this extension's
   id (see Install); use Open in tab until it does.
 - Each Chrome window's panel follows only the claude.ai tab in that window.
-- "Ask Claude about this" works on Word files drawn in the page. A PDF is
+- "Add to message" works on Word files drawn in the page. A PDF is
   shown by the browser's own viewer in a frame the Hub cannot read, so
   there it does not appear; copy from the PDF instead.
 - The passage goes in as a paste, the way claude.ai expects text to arrive.
@@ -185,15 +201,33 @@ the box keeps focus. No key is pressed and no button clicked.
 
 ## How the panel opens
 
+In the page view (the default) a click on a Hub link, caught by
+`content.js` on its way down (a capture-phase listener, so claude.ai's own
+link handling never sees it), opens the drawer on that page.
+
+In Chrome's side-panel view the click goes to the service worker instead.
 `chrome.sidePanel.open()` may only run in response to a user action. Chrome's
 documentation counts a click in a content script, and the click's user
 gesture carries through `runtime.sendMessage` to the service worker as long
 as `open()` is the first call in the listener (nothing awaited before it).
 That is what `background.js` does. If `open()` still fails (Chrome before
-116, or a gesture that did not carry), the button shows "Click the Hub button
-in the toolbar"; the address is already stored, so the toolbar button
-(`openPanelOnActionClick`) opens the panel on it. Needs Chrome 116 or later
-(`minimum_chrome_version`).
+116, or a gesture that did not carry), a clicked link opens in a new tab as
+it would have anyway, and the small button after a bare address shows
+"Click the Hub button in the toolbar"; the address is already stored, so the
+toolbar button (`openPanelOnActionClick`) opens the panel on it. Needs
+Chrome 116 or later (`minimum_chrome_version`).
+
+## What the Hub and the panel say to each other
+
+From the Hub's frame (checked: the frame's window, on the Hub's origin):
+`hub:location` (address, name, and `bar: true` when the Hub draws its bar;
+a Hub without it keeps the panel's bar), `hub:title` (the sign-in page, no
+bar), `hub:busy`, `hub:selection` (a passage for the message box),
+`hub:menu` (open the panel's menu) and `hub:close` (close the drawer; the
+side panel ignores it). From the panel to the Hub (only to the Hub's
+origin): `companion:theme` and, in answer to each `hub:location`,
+`companion:context` with `view: "pane"` (the drawer) or `"side"`, so the
+Hub shows × only in the drawer.
 
 ## Files
 
@@ -207,8 +241,9 @@ in the toolbar"; the address is already stored, so the toolbar button
 - `composer.js`: runs on claude.ai before the drawer and link scripts;
   finds the chat's message box and puts text at its end without sending
   (`HubComposer.insert`, and `composer:insert` from the service worker).
-- `content.js` + `content.css`: runs on claude.ai; buttons, newest-link
-  tracking. MutationObserver, one scan at most every 400 ms, no scan of the
+- `content.js` + `content.css`: runs on claude.ai; a plain click on a Hub
+  link opens it beside the chat; the icon button after a bare address;
+  newest-link tracking. MutationObserver, one scan at most every 400 ms, no scan of the
   prompt box or other editable areas.
 - `pane.js`: runs on claude.ai; the in-page drawer (a closed shadow root
   holding a frame of `panel.html?mode=pane`), its resize edge, push or
@@ -220,7 +255,8 @@ in the toolbar"; the address is already stored, so the toolbar button
   Only an address on the configured Hub origin is stored or passed (the
   panel checks again before it sets its frame).
 - `panel.html/js/css`: the panel, in the drawer (`?mode=pane`) and in
-  Chrome's side panel: one bar, a menu, the Hub's frame. Takes
+  Chrome's side panel: the Hub's frame, a menu, and a bar of its own shown
+  only while the Hub is not drawing one. Takes
   `hub:selection` only from the Hub's frame on the Hub's origin, builds the
   text with `passage.js`, and sends it to `pane.js` (drawer) or the service
   worker (side panel); shows the outcome in its notice line.
@@ -239,16 +275,20 @@ in the toolbar"; the address is already stored, so the toolbar button
   Chrome 137+ ignores `--load-extension`) with a visible window, checks the
   service worker starts under the expected id (`tests/expected-id.txt`),
   opens the panel and options pages, and runs the content script on a
-  fixture page.
+  fixture page: an icon button after a bare address and none after a link;
+  a plain click on a Hub link taken, a Cmd/Ctrl click left to the browser.
 - `tests/composer-check.mjs`: `node hub-companion/tests/composer-check.mjs`
   loads the extension the same way and answers `https://claude.ai/` with a
   fixture holding a real ProseMirror editor (from the repository's
   `node_modules`) where Enter sends. It checks the paste path, the
   line-by-line path, a textarea and the clipboard fallback (each keeps the
-  draft and sends nothing), then the whole drawer route (a fake Hub in the
-  drawer posts `hub:selection`; the passage lands in the box with "Added to
-  your message" in the drawer) and the side panel's route through the
-  service worker.
+  draft and sends nothing); a Hub link in the chat (a plain click opens the
+  drawer on it, a Cmd/Ctrl click opens a new tab instead); the whole drawer
+  route (a fake Hub that draws its own bar: the panel's bar hides, the Hub
+  is told it is in the drawer, `hub:selection` puts the passage in the box
+  with "Added to your message" floating over the frame, `hub:menu` opens
+  the panel's menu, `hub:close` closes the drawer); and the side panel's
+  route through the service worker.
 
 ## Key
 

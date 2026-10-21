@@ -4,7 +4,7 @@
 //
 // The Hub posts { type: "hub:selection", text, title, versionId,
 // versionNumber, fileName, projectName, truncated } when the lawyer picks
-// "Ask Claude about this" on a passage; the message reads:
+// "Add to message" on a passage; the message reads:
 //
 //   In "<title>" v<n> (<file name>), project <name> — versionId: <id>
 //   > first line of the passage

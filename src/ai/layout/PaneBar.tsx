@@ -1,10 +1,10 @@
 import { useContext } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, MoreHorizontal, X } from "lucide-react";
 import { useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import { CopyTextForClaude } from "@/ai/components/CopyForClaude";
 import { Button } from "@/components/ui/button";
-import { withoutEmbed } from "@/lib/embedMode";
+import { postToCompanion, withoutEmbed } from "@/lib/embedMode";
 import { PaneBarContext } from "@/ai/layout/paneBarContext";
 
 // The pane page's bar (?embed=1&host=pane: the Hub in the Claude desktop
@@ -14,8 +14,18 @@ import { PaneBarContext } from "@/ai/layout/paneBarContext";
 // for Claude" for the page, and "Full Hub", the same page in the ordinary
 // Hub in a new tab. The page on show tells the bar what it is with
 // usePaneBar; until it does the bar shows the workspace's page title.
+// The companion (the Chrome extension, ?host=companion) shows this same bar,
+// so the two read and work alike; it adds two buttons of the extension's at
+// the right end: "⋯", the extension's menu (paste a link, colours, where the
+// Hub shows, settings), and, in the drawer inside the chat page, Close. Both
+// are messages to the extension, which does the work.
 
-export default function PaneBar() {
+interface Props {
+  /** In the companion: its menu, and Close when the extension can close (the drawer, not Chrome's side panel). */
+  companion?: { closable: boolean };
+}
+
+export default function PaneBar({ companion }: Props = {}) {
   const location = useLocation();
   const { pageTitle } = useAiWorkspace();
   const info = useContext(PaneBarContext)?.info ?? null;
@@ -51,6 +61,33 @@ export default function PaneBar() {
         <ExternalLink className="h-3.5 w-3.5" />
         <span className="hidden min-[380px]:inline">Full Hub</span>
       </a>
+      {companion && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => postToCompanion({ type: "hub:menu" })}
+          title="More: paste a link, colours, where the Hub shows, settings"
+          aria-label="More"
+          aria-haspopup="menu"
+          data-testid="companion-menu"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      )}
+      {companion?.closable && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => postToCompanion({ type: "hub:close" })}
+          title="Close the Hub beside the chat"
+          aria-label="Close"
+          data-testid="companion-close"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
     </header>
   );
 }

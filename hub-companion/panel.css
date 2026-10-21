@@ -134,6 +134,22 @@ body:not(.pane) .pane-only { display: none; }
 .notice button.primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .notice button.quiet { color: var(--muted); }
 
+/* The Hub draws the bar (its own, the same as in the Claude desktop app's
+   pane): the panel's goes, and a notice floats as a slim strip over the top
+   of the frame, just under the Hub's bar (44px, the same height as ours). */
+body.hub-bar .bar { display: none; }
+body.hub-bar .notice {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  padding: 5px 12px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .10);
+}
+body.hub-bar .notice button { padding: 2px 8px; }
+
 #frame { flex: 1 1 auto; width: 100%; border: 0; background: var(--bar); }
 #frame[hidden] { display: none; }
 

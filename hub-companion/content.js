@@ -1,8 +1,12 @@
 // Runs on claude.ai. Finds Hub links in the conversation by their address
-// (never by claude.ai's class names), puts a small "Open beside" button after
-// each, and passes the newest link on so the open drawer (pane.js, in this
-// tab) or Chrome's side panel (through the service worker) can follow it. Nothing leaves the page: the only messages go to this
-// extension's own service worker.
+// (never by claude.ai's class names) and passes the newest on so the open
+// drawer (pane.js, in this tab) or Chrome's side panel (through the service
+// worker) can follow it. A plain click on a Hub link opens it beside the
+// chat, as the Claude desktop app opens it in its pane (Cmd/Ctrl/Shift or a
+// middle click keep the browser's own behaviour). An address Claude wrote as
+// bare text, not a link, gets a small icon button after it that does the
+// same. Nothing leaves the page: the only messages go to this extension's own
+// service worker.
 (function () {
   "use strict";
   if (typeof HubLinks === "undefined") return;
@@ -65,24 +69,52 @@
     return n && n.nodeType === 1 && n.hasAttribute(MARK);
   }
 
+  // Opens a Hub address beside the chat: the drawer in this tab, or Chrome's
+  // side panel through the service worker (which must be asked while the
+  // click's gesture lasts). `failed` runs when the side panel would not open.
+  function openBeside(url, failed) {
+    if (inPage()) {
+      window.HubPane.show(url, false);
+      return;
+    }
+    send({ type: "open", url: url }).then(function (reply) {
+      if (!(reply && reply.ok) && failed) failed();
+    });
+  }
+
+  // A panel-beside icon, built node by node (claude.ai may refuse innerHTML).
+  function icon() {
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("aria-hidden", "true");
+    var rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", "1.75");
+    rect.setAttribute("y", "2.75");
+    rect.setAttribute("width", "12.5");
+    rect.setAttribute("height", "10.5");
+    rect.setAttribute("rx", "1.5");
+    var line = document.createElementNS(NS, "path");
+    line.setAttribute("d", "M9.5 2.75v10.5");
+    svg.appendChild(rect);
+    svg.appendChild(line);
+    return svg;
+  }
+
   function makeButton(url) {
     var b = document.createElement("button");
     b.type = "button";
     b.className = BUTTON_CLASS;
     b.setAttribute(MARK, "1");
     b.dataset.url = url;
-    b.textContent = "Open beside";
-    b.title = "Show this " + HubLinks.linkKind(url) + " beside the chat";
+    b.appendChild(icon());
+    b.title = "Open beside the chat";
+    b.setAttribute("aria-label", "Open this " + HubLinks.linkKind(url) + " beside the chat");
     b.addEventListener("click", function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
       delete b.dataset.hint;
-      if (inPage()) {
-        window.HubPane.show(url, false);
-        return;
-      }
-      send({ type: "open", url: url }).then(function (reply) {
-        if (reply && reply.ok) return;
+      openBeside(url, function () {
         // The panel could not be opened from here (older Chrome, or the
         // gesture did not carry). The address is remembered, so the toolbar
         // button shows it.
@@ -93,6 +125,28 @@
       });
     });
     return b;
+  }
+
+  // A plain click on a Hub link in the conversation opens it beside the chat
+  // instead of in a new tab. Caught on the way down (capture), before
+  // claude.ai's own handlers, which never see it. A click with Cmd, Ctrl,
+  // Shift or Alt, a middle click, and links in the message box are left to
+  // the browser.
+  function onLinkClick(ev) {
+    if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.defaultPrevented) return;
+    var t = ev.target;
+    var el = t && t.nodeType === 1 ? t : t && t.parentElement;
+    var a = el && el.closest ? el.closest("a[href]") : null;
+    if (!a || insideSkipped(a)) return;
+    var url = HubLinks.normaliseHubUrl(a.getAttribute("href"), origin);
+    if (!url) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openBeside(url, function () {
+      // The side panel would not open (older Chrome, or the gesture did not
+      // carry): the link does what it would have done.
+      window.open(HubLinks.plainUrl(url), "_blank", "noopener");
+    });
   }
 
   // One button per link in a given parent. A button whose address is a strict
@@ -139,12 +193,12 @@
     }
   }
 
+  // A link needs no button: a click on it opens it beside the chat
+  // (onLinkClick). It still counts as the newest link Claude mentioned.
   function handleAnchor(a, found) {
     var url = HubLinks.normaliseHubUrl(a.getAttribute("href"), origin);
     if (!url) return;
     found.push({ url: url, terminated: true }); // an href is never half-typed
-    if (!a.parentNode) return;
-    placeButton(a.parentNode, a.nextSibling, url);
   }
 
   function handleText(node, found) {
@@ -257,6 +311,7 @@
     // claude.ai is a single-page app: a change of conversation is a pushState,
     // not a page load, and popstate covers the back button.
     window.addEventListener("popstate", scheduleScan);
+    window.addEventListener("click", onLinkClick, true);
     scheduleScan();
   }
 

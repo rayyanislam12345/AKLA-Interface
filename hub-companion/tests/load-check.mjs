@@ -1,8 +1,10 @@
 // Loads the unpacked extension into a real Chrome and checks that the
 // manifest is accepted, the service worker starts, the panel and options
-// pages open without errors, and the content script puts "Open beside"
-// buttons after Hub links on a fixture page (the script is run there by
-// hand, since it only auto-runs on claude.ai).
+// pages open without errors, and the content script on a fixture page (the
+// script is run there by hand, since it only auto-runs on claude.ai) puts
+// its small "Open beside the chat" button after a bare Hub address and none
+// after a Hub link, takes a plain click on a Hub link for itself (the link
+// opens beside the chat) and leaves a Cmd/Ctrl click to the browser.
 //
 //   node hub-companion/tests/load-check.mjs
 //
@@ -106,15 +108,40 @@ try {
   await fixture.addScriptTag({ path: path.join(ext, "links.js") });
   await fixture.addScriptTag({ path: path.join(ext, "content.js") });
   await fixture.waitForTimeout(900);
-  const buttons = await fixture.$$eval("button.hub-companion-open", (b) => b.map((x) => x.dataset.url));
+  const buttons = await fixture.$$eval("button.hub-companion-open", (b) => b.map((x) => ({ url: x.dataset.url, title: x.title, text: x.textContent, icon: !!x.querySelector("svg") })));
   note(`fixture buttons: ${JSON.stringify(buttons)}`);
-  const want = ["https://akla-interface.vercel.app/ai/d/v-first", "https://akla-interface.vercel.app/ai/p/m-two"];
-  if (JSON.stringify(buttons) !== JSON.stringify(want)) problems.push(`fixture buttons were ${JSON.stringify(buttons)}`);
+  // Only the bare address gets a button; the link opens beside the chat itself.
+  const want = ["https://akla-interface.vercel.app/ai/d/v-first"];
+  if (JSON.stringify(buttons.map((b) => b.url)) !== JSON.stringify(want)) problems.push(`fixture buttons were ${JSON.stringify(buttons)}`);
+  if (buttons[0] && (buttons[0].title !== "Open beside the chat" || buttons[0].text !== "" || !buttons[0].icon)) problems.push(`the button should be an icon titled "Open beside the chat": ${JSON.stringify(buttons[0])}`);
   // A second scan must not add duplicates.
   await fixture.evaluate(() => document.querySelector("main").appendChild(document.createElement("p")));
   await fixture.waitForTimeout(900);
   const again = await fixture.$$eval("button.hub-companion-open", (b) => b.length);
-  if (again !== 2) problems.push(`buttons after a rescan: ${again}`);
+  if (again !== 1) problems.push(`buttons after a rescan: ${again}`);
+  // A click on the Hub link: a plain one is the content script's (default
+  // prevented), a Cmd/Ctrl one the browser's. Recorded by a capture listener
+  // added after content.js's, which then stops the navigation either way.
+  // (With no extension runtime on a fixture page, a plain click falls back
+  // to a new tab, as when Chrome's side panel will not open; that window is
+  // closed again.)
+  await fixture.evaluate(() => {
+    window.__clicks = [];
+    window.addEventListener("click", (e) => {
+      if (!e.target.closest || !e.target.closest("a")) return;
+      window.__clicks.push(e.defaultPrevented);
+      e.preventDefault();
+    }, true);
+  });
+  const popups = [];
+  context.on("page", (p) => popups.push(p));
+  await fixture.click("a[href*='/ai/p/m-two']");
+  await fixture.click("a[href*='/ai/p/m-two']", { modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+  await fixture.waitForTimeout(300);
+  const clicks = await fixture.evaluate(() => window.__clicks);
+  note(`fixture link clicks (default prevented): ${JSON.stringify(clicks)}`);
+  if (JSON.stringify(clicks) !== JSON.stringify([true, false])) problems.push(`a plain click should be taken and a Cmd/Ctrl click left alone: ${JSON.stringify(clicks)}`);
+  for (const p of popups) await p.close().catch(() => {});
   if (errors.length) problems.push(`fixture: ${errors.join(" | ")}`);
   await fixture.close();
 } catch (e) {
