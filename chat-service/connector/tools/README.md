@@ -8,6 +8,7 @@ Every `*.js` file here is loaded by `connector/tools.js` (`loadToolModules`, nam
 - A tool without `annotations` is read-only (app.js marks it so). Keep per-call database work small (the micro instance has about ten connections) and make at most one Voyage call per tool call.
 - Put "Open in Hub: <url>" on every project, version or passage a result mentions (`helpers.open`), and label passages `[Source n]` through `helpers.showPassages`.
 - Tests: `import mod from "../connector/tools/<file>.js"` and pass `modules: [mod]` to `createHubTools(...)`; `loadToolModules()` with no argument loads the whole directory. Run `npm run test:ai` from the repo root.
+- A panel (the MCP Apps trial, `connector/apps.js`, on only with `CONNECTOR_APPS=on`): a tool with `ui: "ui://akla/…"` is linked to that page while the trial is on, and its `run` may return `{ text, structuredContent }` instead of a string (the text is clipped and shown as ever; `structuredContent` is what the page draws, passed on only while the trial is on). `ctx.apps` says whether it is on; a module whose tools exist only for the trial returns `[]` unless `deps.apps` (changesPanel.js, documentPanel.js), and pins its names in apps.js `APP_TOOL_NAMES`, not `MODULE_TOOL_NAMES`.
 - Deploy: deploy.sh ships `connector/tools/*.js` with the connector; a new module at the chat-service root (not here) must be added to both of deploy.sh's lists.
 
 ## A write tool (slice 2)

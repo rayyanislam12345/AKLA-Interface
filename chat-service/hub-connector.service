@@ -19,6 +19,11 @@ Environment=CONNECTOR_HUB_URL=https://akla-interface.vercel.app
 # (default claude.ai,claude.com and their subdomains). Never set
 # CONNECTOR_ALLOW_LOOPBACK here: it is for a dev box only.
 #Environment=CONNECTOR_REDIRECT_HOSTS=claude.ai,claude.com
+# The MCP Apps trial (connector/apps.js): panels inside Claude's replies
+# (list_changes, decide_changes, open_document_panel). Off unless set; after
+# switching it either way, restart and remove and re-add the connector in
+# claude.ai (docs/claude-ai-connector.md, "Trial: changes panel").
+Environment=CONNECTOR_APPS=on
 # Saving into projects (scope hub:write, granted at sign-in alongside
 # hub:read) needs migration 20261020120000_connector_writes.sql applied:
 # save_document_version_as and the connector_actions record, both service

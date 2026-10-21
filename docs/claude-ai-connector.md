@@ -304,6 +304,79 @@ sits under claude.ai, `vercel.json` names `https://claude.ai` in
 sign-in (the browser partitions it under claude.ai), so a lawyer signs in
 once in the drawer and once in Chrome's side panel if they use both.
 
+## Trial: changes panel inside Claude's replies
+
+A one-day trial of **MCP Apps** (interactive panels Claude draws under a
+tool's reply), to find out whether the Claude desktop app, claude.ai and
+the mobile apps show a custom connector's panel. The desktop app runs no
+browser extension, so this is the only way the companion's experience
+could reach it. Off unless `CONNECTOR_APPS=on`; with it off the connector
+is exactly as before (same tools, nothing new declared).
+
+What the trial adds (`chat-service/connector/apps.js`,
+`connector/tools/changesPanel.js`, `connector/tools/documentPanel.js`, the
+pages in `connector/changesPanelHtml.js` and `connector/documentPanelHtml.js`):
+
+| Tool | Panel |
+|---|---|
+| `list_changes` (versionId) | The version's tracked changes (clause, before → after as a word diff, reason, state) with **Accept** / **Reject** on each, **Accept all** / **Reject all** (asks for a second click), **Open in Hub**, **Full screen** |
+| `decide_changes` (versionId, decisions [{ id, decision: accept or reject }]) — saves | What the panel's buttons call through Claude; also callable by Claude on the lawyer's word. The Hub's own Changes-list decision (the version's file is never rewritten), recorded and capped like every save; a document that changed meanwhile is refused in one sentence |
+| `apply_tracked_changes` (unchanged) | The same changes panel for the version it just filed |
+| `open_document_panel` (versionId) | The document's text to read (full screen if wanted); select a passage, or tap a paragraph's number, and **Ask Claude about the selected text** puts the same quoted passage the Chrome companion builds into the chat |
+
+Every reply keeps its full text, so where no panel shows nothing is lost.
+The document panel draws the text itself rather than framing the Hub's
+page: Claude does not allow a frame inside a panel (see the findings in
+the trial's report). A sign-in without saving sees the changes panel
+without buttons.
+
+**Switching it on** (on the VM, after deploying the code):
+
+1. Add `CONNECTOR_APPS=on` to `/opt/chat-service/.env` (or uncomment
+   `Environment=CONNECTOR_APPS=on` in `hub-connector.service`, then
+   `sudo systemctl daemon-reload`).
+2. `sudo systemctl restart hub-connector`, then
+   `sudo journalctl -u hub-connector -n 3 --no-pager -o cat` should end
+   with `MCP Apps trial ON (changes panel)`.
+3. In claude.ai, **remove and re-add** the AKLA Hub connector (Settings →
+   Connectors). Claude keeps a connector's tool list, so without this the
+   new tools and their panel links are not seen. The connector's page should
+   then count some tools as interactive.
+
+**Switching it off:** remove the line (or set `CONNECTOR_APPS=off`),
+restart, and remove and re-add the connector. Nothing in the database
+depends on it; decisions already made stay made.
+
+**What to try**, in a new chat with the connector on, on each surface
+(Claude desktop app first, then claude.ai in a browser, then the iOS or
+Android app; mobile shows a connector only after it was added on web or
+desktop):
+
+- "List the changes on versionId `<a marked-up version>`" (any version
+  `apply_tracked_changes` filed; the Hub's Changes tab shows which have
+  them). Success: under the reply, a bordered AKLA card with the change
+  cards and buttons, in the chat's light or dark theme. Press **Accept** on
+  one: Claude may ask "Allow once / Always allow" first (it is a saving
+  tool); then the card turns Accepted and the counts move. Check the Hub's
+  Changes tab shows the same decision. Try **Open in Hub** and **Full
+  screen**.
+- "Mark up clause 3 of `<a Word version>` to cap liability at fees paid"
+  (the usual mark-up): the panel should appear under the filing reply.
+- "Open `<a document>` in a panel": select two lines, press **Ask Claude
+  about the selected text**. Note whether the quoted passage lands in the
+  message box for you to finish (expected) or is sent at once.
+
+**Record for each surface:** whether the panel appeared at all (or only the
+text), whether the buttons worked, whether Claude asked permission before
+each decision, whether Full screen and Open in Hub worked, and whether the
+passage reached the message box. If a panel is blank, the desktop app's
+Help → Troubleshooting → Enable Developer Mode, then Cmd+Option+I, shows
+the panel's frame and its console. A panel that never appears on any
+surface while the text does is the known open problem with custom
+connectors' panels (anthropics/claude-ai-mcp issue 61), not a fault here;
+an organisation setting (`disableNonessentialServices` on Claude Desktop)
+or a network block on `*.claudemcpcontent.com` also hides every panel.
+
 ## What it cannot do (this version)
 
 - It never **deletes** or replaces anything: a save is always a new
@@ -487,7 +560,8 @@ discovery documents and the resource claude.ai asks for),
 `CONNECTOR_REDIRECT_HOSTS` (comma-separated; default `claude.ai,claude.com`),
 `CONNECTOR_HUB_URL` (the site's address for the "Open in Hub" lines on
 results; default `https://akla-interface.vercel.app`) and
-`CONNECTOR_ALLOW_LOOPBACK` (never on the VM). The rest comes from
+`CONNECTOR_ALLOW_LOOPBACK` (never on the VM), and `CONNECTOR_APPS` (`on`
+turns on the panels trial above; off when unset). The rest comes from
 `/opt/chat-service/.env`, including `FORMAT_GATE` (shared with
 chat-service): `enforce`, the default, refuses a fill whose format differs
 from the standard's; `report` saves it anyway and puts what differs in the

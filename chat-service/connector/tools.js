@@ -79,6 +79,9 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "list_skills", "read_skill", // skills.js
   "list_document_types", "read_standard", "get_drafting_decisions", // standards.js
   "check_text", "compare_text_with_version", // textChecks.js
+  // changesPanel.js adds list_changes and decide_changes only when the MCP
+  // Apps trial is on (CONNECTOR_APPS=on); they are pinned in apps.js
+  // APP_TOOL_NAMES, not here, so the list with the switch off is unchanged.
 ]);
 /**
  * The tools that save or change something (slices 2 to 4), in registration
@@ -215,9 +218,10 @@ export function stitchPassages(rows) {
  * @param {string} [deps.hubUrl]   the site's address for "Open in Hub" lines (CONNECTOR_HUB_URL)
  * @param {Array} [deps.modules]   from loadToolModules(): [{ file, tools }], or bare default exports
  * @param {object} [deps.writes]   { saveVersion, recordAction, checkCaps } (projectWrites.js; tests pass stubs)
+ * @param {boolean} [deps.apps]    the MCP Apps trial (CONNECTOR_APPS=on, connector/apps.js): the changes panel's tools are added
  * @returns {Array<{ name, title, description, inputSchema, run: (input, ctx) => Promise<string>, write?: boolean, annotations?: object }>}
  */
-export function createHubTools({ supabase, voyageKey, anthropicJson = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null }) {
+export function createHubTools({ supabase, voyageKey, anthropicJson = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null, apps = false }) {
   const lib = { ...defaultLibrary, ...library };
   const textCache = new Map();
   const site = hubBase(hubUrl);
@@ -539,6 +543,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
     supabase, voyageKey, anthropicJson, library: lib, readFile, log, now, hubUrl: site,
     helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, link, open, showPassages: passagesText },
     writes: projectWrites,
+    apps: apps === true,
   };
   const seen = new Set(tools.map((t) => t.name));
   for (const m of modules) {
@@ -560,9 +565,13 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
       const args = input && typeof input === "object" ? input : {};
       try {
         if (t.write === true && !hasScope(ctx.scope, WRITE_SCOPE)) throw new Error(READ_ONLY_REFUSAL);
-        const text = clipText(await t.run.call(t, args, ctx));
-        log(`${t.name} for ${ctx.userId ?? "?"}: ${text.length} chars in ${now() - started} ms`);
-        return text;
+        // A tool with a panel (the MCP Apps trial) answers { text,
+        // structuredContent }; the text is clipped as every other result is.
+        const out = await t.run.call(t, args, ctx);
+        const structured = out && typeof out === "object" && typeof out.text === "string";
+        const text = clipText(structured ? out.text : out);
+        log(`${t.name} for ${ctx.userId ?? "?"}: ${text.length} chars${structured && out.structuredContent ? " and a panel" : ""} in ${now() - started} ms`);
+        return structured ? { text, structuredContent: out.structuredContent ?? null } : text;
       } catch (err) {
         log(`${t.name} for ${ctx.userId ?? "?"} failed: ${err?.message ?? err}`);
         throw err;

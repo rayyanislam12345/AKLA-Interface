@@ -54,6 +54,8 @@ import {
 import { readOps, readConfirmed, sha256, MAX_OPS, MAX_OP_TEXT_CHARS, APPLY_TIMEOUT_MS, DOCX_MIME, OP_KINDS } from "./fillStandardWrite.js";
 import { draftingTypeOf, draftingOf, autoCommentOps, skeletonGate, connectorConfirmSentence } from "../../draftChecks.js";
 import { rangeListing, MAX_RANGE } from "./fillStandard.js";
+import { CHANGES_UI } from "../apps.js";
+import { panelForVersion } from "./changesPanel.js";
 
 export const SHOW_TOOL = "show_document_paragraphs";
 export const MARKUP_TOOL = "apply_tracked_changes";
@@ -408,6 +410,9 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
       },
       write: true,
       annotations: WRITE,
+      // The MCP Apps trial (CONNECTOR_APPS=on): the changes panel under the
+      // reply, drawn from the new version's Changes list.
+      ui: CHANGES_UI,
       async run(input, ctx) {
         const caps = await writes.checkCaps(ctx);
         let locked = false;
@@ -543,7 +548,15 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
             ...(recorded ? [] : [UNRECORDED_LINE]),
             `Nothing was accepted: v${saved.versionNumber} carries the changes as tracked changes, and v${version.version_number} is unchanged. Filed as the lawyer's own version (not marked AI-generated), with the label saying it came from claude.ai; filing is not legal approval. When the changes are decided, ${CLEAN_TOOL} files a clean copy.`,
           );
-          return lines.join("\n");
+          const text = lines.join("\n");
+          // With the trial on, the panel's data too; a panel that cannot be
+          // built never costs the lawyer the filing's reply.
+          if (!ctx?.apps) return text;
+          const structuredContent = await panelForVersion(supabase, {
+            versionId: saved.versionId, versionNumber: saved.versionNumber, title: doc.title, projectName: matter.name,
+            hubUrl: link("version", saved.versionId), bytes: out.bytes, canDecide: true,
+          }).catch((err) => { log(`${MARKUP_TOOL}: the changes panel for ${saved.versionId} could not be built: ${err?.message ?? err}`); return null; });
+          return structuredContent ? { text, structuredContent } : text;
         } finally {
           if (locked) busy = false;
           caps.release();

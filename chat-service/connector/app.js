@@ -22,6 +22,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { DEFAULT_REDIRECT_HOSTS, DEFAULT_SCOPE, OAuthError, READ_ONLY_REFUSAL, WRITE_SCOPE, authenticateBearer, checkAuthorizeRequest, exchangeToken, hasScope, issueCode, metadata, parseAuthorization, redirectWith, registerClient, revokeToken, sha256 } from "./oauth.js";
 import { aboutPage, errorPage, signInPage } from "./pages.js";
+import { appsCapability, registerAppResources, toolUiMeta } from "./apps.js";
 
 export const MAX_BODY_BYTES = 1_000_000;
 // POST /mcp alone takes more: a fill_standard_to_project call may carry 300
@@ -133,8 +134,11 @@ const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, typeof obj?.[
  * @param {object} [deps.version]    { commit, deployedAt } for /health
  * @param {Function} [deps.now]      () -> Date
  * @param {Function} [deps.log]
+ * @param {boolean} [deps.apps]      the MCP Apps trial (CONNECTOR_APPS=on, apps.js): the extension declared, the
+ *                                   panel served as a resource, tools with a `ui` linked to it and their
+ *                                   structuredContent passed on. Off: nothing of it is listed or declared.
  */
-export function createApp({ store, signIn, tools, isMember, issuer, redirectHosts = DEFAULT_REDIRECT_HOSTS, allowLoopback = false, version = {}, now = () => new Date(), log = console.log, serverVersion = "1.0.0" }) {
+export function createApp({ store, signIn, tools, isMember, issuer, redirectHosts = DEFAULT_REDIRECT_HOSTS, allowLoopback = false, version = {}, now = () => new Date(), log = console.log, serverVersion = "1.0.0", apps = false }) {
   const base = String(issuer).replace(/\/+$/, "");
   const docs = metadata(base);
   const nowMs = () => now().getTime();
@@ -214,23 +218,31 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
       instructions: `Access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an "Open in Hub:" address; pass it on. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards, and open_standard_for_filling opens a type's Word standard with its blanks numbered for a fill. ${canWrite
         ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version), fill the firm's Word standard with the facts gathered and file the result (fill_standard_to_project, after open_standard_for_filling and the drafting questions), or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval."
         : "This sign-in is read-only: nothing here can change, fill or save a document. If the lawyer asks you to draft, fill, file or save anything, say first, in one sentence, that this sign-in predates saving and that removing and re-adding the AKLA Hub connector in claude.ai turns saving on; only then draft in the chat if they still want that."}`,
+      // The MCP Apps trial: the extension named in the initialize result.
+      ...(apps ? { capabilities: appsCapability() } : {}),
     });
+    if (apps) registerAppResources(server);
     // Write tools are listed only for a sign-in that carries hub:write. A
     // read-only sign-in that calls one anyway (an old conversation, a
     // guess) gets the one sentence below as a tool result, not the SDK's
     // "not found"; the tool is registered for that one request so the
     // listing stays clean (one server per request, so nothing persists).
     const called = body && !Array.isArray(body) && body.method === "tools/call" ? body.params?.name : null;
-    const ctx = { userId: auth.userId, clientId: auth.clientId, scope: auth.scope, tokenId: auth.tokenId, canWrite, recheck: () => recheckBearer(bearer) };
+    const ctx = { userId: auth.userId, clientId: auth.clientId, scope: auth.scope, tokenId: auth.tokenId, canWrite, apps, recheck: () => recheckBearer(bearer) };
     for (const t of tools) {
       const write = t.write === true;
       if (write && !canWrite && t.name !== called) continue;
       const refused = write && !canWrite;
-      server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: refused ? WRITE : (t.annotations ?? READ_ONLY) }, async (args) => {
+      // A tool with a panel (t.ui, a ui:// resource) points at it only
+      // while the trial is on; its result's structuredContent is what the
+      // panel draws, beside the same full text as ever.
+      const ui = apps && typeof t.ui === "string" ? { _meta: toolUiMeta(t.ui) } : {};
+      server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: refused ? WRITE : (t.annotations ?? READ_ONLY), ...ui }, async (args) => {
         if (refused) return { content: [{ type: "text", text: READ_ONLY_REFUSAL }], isError: true };
         try {
-          const text = await t.run(args ?? {}, ctx);
-          return { content: [{ type: "text", text }] };
+          const out = await t.run(args ?? {}, ctx);
+          if (out && typeof out === "object") return { content: [{ type: "text", text: out.text }], ...(apps && out.structuredContent ? { structuredContent: out.structuredContent } : {}) };
+          return { content: [{ type: "text", text: out }] };
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           return { content: [{ type: "text", text: `The ${write ? "save" : "lookup"} failed: ${reason}` }], isError: true };

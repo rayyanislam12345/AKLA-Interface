@@ -30,6 +30,7 @@ import { createApp } from "./app.js";
 import { createSupabaseStore } from "./store.js";
 import { createSignIn } from "./signIn.js";
 import { createHubTools, loadToolModules } from "./tools.js";
+import { appsOn } from "./apps.js";
 import { DEFAULT_HUB_URL } from "./hubLinks.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -42,6 +43,9 @@ const ISSUER = (process.env.CONNECTOR_ISSUER ?? "https://aklachat.duckdns.org").
 const REDIRECT_HOSTS = String(process.env.CONNECTOR_REDIRECT_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
 const HUB_URL = (process.env.CONNECTOR_HUB_URL ?? DEFAULT_HUB_URL).replace(/\/+$/, "");
 const ALLOW_LOOPBACK = /^(1|true|yes)$/i.test(String(process.env.CONNECTOR_ALLOW_LOOPBACK ?? ""));
+// The MCP Apps trial (apps.js): CONNECTOR_APPS=on adds the changes panel
+// (list_changes, decide_changes, the ui://akla/changes page). Off by default.
+const APPS = appsOn(process.env);
 
 for (const [name, value] of Object.entries({ SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY, VOYAGE_API_KEY: VOYAGE_KEY })) {
   if (!value) { console.error(`${name} is not set`); process.exit(1); }
@@ -79,7 +83,7 @@ const modules = await loadToolModules();
 const app = createApp({
   store: createSupabaseStore(db),
   signIn: createSignIn({ supabaseUrl: SUPABASE_URL, publishableKey: PUBLISHABLE_KEY, serviceClient: db, log }),
-  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, log, hubUrl: HUB_URL, modules }),
+  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, log, hubUrl: HUB_URL, modules, apps: APPS }),
   isMember: async (userId) => {
     const { data, error } = await db.rpc("is_firm_member", { _user_id: userId });
     if (error) throw new Error(`is_firm_member: ${error.message}`);
@@ -88,6 +92,7 @@ const app = createApp({
   issuer: ISSUER,
   ...(REDIRECT_HOSTS.length ? { redirectHosts: REDIRECT_HOSTS } : {}),
   allowLoopback: ALLOW_LOOPBACK,
+  apps: APPS,
   version,
   log,
 });
@@ -100,7 +105,7 @@ const server = createServer((req, res) => { app(req, res); });
 server.requestTimeout = 0;
 server.headersTimeout = 60_000;
 server.listen(PORT, "127.0.0.1", () => {
-  log(`hub-connector listening on 127.0.0.1:${PORT} as ${ISSUER} (commit ${version.commit ?? "unknown"}); redirects allowed to ${(REDIRECT_HOSTS.length ? REDIRECT_HOSTS : ["claude.ai", "claude.com"]).join(", ")}; Hub links to ${HUB_URL}; ${modules.length} tool module${modules.length === 1 ? "" : "s"} loaded`);
+  log(`hub-connector listening on 127.0.0.1:${PORT} as ${ISSUER} (commit ${version.commit ?? "unknown"}); redirects allowed to ${(REDIRECT_HOSTS.length ? REDIRECT_HOSTS : ["claude.ai", "claude.com"]).join(", ")}; Hub links to ${HUB_URL}; ${modules.length} tool module${modules.length === 1 ? "" : "s"} loaded; MCP Apps trial ${APPS ? "ON (changes panel)" : "off"}`);
 });
 
 for (const sig of ["SIGTERM", "SIGINT"]) {
