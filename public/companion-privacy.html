@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKLA Hub companion — privacy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 32px 16px 48px; font: 16px/1.6 -apple-system, "Segoe UI", Arial, sans-serif; background: #fbfbf9; color: #1d2433; }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 28px 0 6px; }
+  p, li { margin: 0 0 10px; }
+  .muted { color: #5b6476; }
+  @media (prefers-color-scheme: dark) { body { background: #12161f; color: #e6e9f0; } .muted { color: #a3abbb; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>AKLA Hub companion: privacy</h1>
+  <p class="muted">Ali Khan Law Associates. Last updated 21 October 2026.</p>
+
+  <p>The AKLA Hub companion is a browser extension for the firm's lawyers. It shows the firm's Project Hub beside a claude.ai chat. This page says exactly what it does with information.</p>
+
+  <h2>What it reads</h2>
+  <ul>
+    <li>On claude.ai pages only, the addresses of links to the firm's Hub (https://akla-interface.vercel.app), so it can put an "Open beside" button next to them and show that page beside the chat.</li>
+    <li>When the lawyer asks it to, the passage they highlighted in a Hub document, which it places in their own claude.ai message box. It never sends the message.</li>
+  </ul>
+  <p>It does not read the rest of the conversation, the lawyer's messages, or any other website.</p>
+
+  <h2>What it stores</h2>
+  <p>Only settings, in the browser's own extension storage: the Hub's address, the chosen colour theme, where the Hub is shown (in the page or in the browser's side panel), the drawer's width, and the last Hub page shown for each conversation. These stay on the lawyer's computer, synced only through their own browser profile.</p>
+
+  <h2>What it sends</h2>
+  <p>Nothing. The extension has no server of its own, no analytics and no tracking. It sends no data to Ali Khan Law Associates, to Anthropic, or to anyone else. The Hub page it shows is loaded from the Hub exactly as a browser tab would load it, under the lawyer's own Hub sign-in.</p>
+
+  <h2>Permissions</h2>
+  <ul>
+    <li><strong>Access to claude.ai:</strong> to find Hub links in the chat, show the drawer, and place a highlighted passage in the message box.</li>
+    <li><strong>Side panel:</strong> to offer the Hub in the browser's side panel instead of the drawer.</li>
+    <li><strong>Storage:</strong> to keep the settings listed above.</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Questions about this extension: the firm's Hub administrators, through the Hub's Help page.</p>
+</main>
+</body>
+</html>

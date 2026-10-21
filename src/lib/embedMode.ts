@@ -21,7 +21,16 @@ export const EMBED_PARAM = "embed";
 // and nothing is posted to any other framer.
 const HOST_KEY = "hub-embed-host";
 export const HOST_PARAM = "host";
-export const COMPANION_ORIGIN = "chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp";
+// The unpacked install's id (fixed by hub-companion/manifest.json's key) and,
+// once it is listed, the Chrome Web Store's id for the same extension. Add the
+// store's id here AND to frame-ancestors in vercel.json (docs/companion-web-store.md).
+export const COMPANION_ORIGINS: readonly string[] = [
+  "chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp",
+];
+/** True when a message or a framer is the companion (any of its ids). */
+export function isCompanionOrigin(origin: string): boolean {
+  return COMPANION_ORIGINS.includes(origin);
+}
 
 function readStored(): boolean {
   try {
@@ -120,7 +129,9 @@ export function companionHref(loc: Pick<Location, "pathname" | "search" | "hash"
 /** Tells the companion (and only the companion) where the page is and what it is called. */
 export function postToCompanion(message: Record<string, unknown>) {
   try {
-    if (window.parent && window.parent !== window) window.parent.postMessage(message, COMPANION_ORIGIN);
+    // The browser drops a message whose target origin is not the parent's,
+    // so posting to each of the companion's ids reaches only the real one.
+    if (window.parent && window.parent !== window) for (const origin of COMPANION_ORIGINS) window.parent.postMessage(message, origin);
   } catch {
     /* no parent to tell */
   }

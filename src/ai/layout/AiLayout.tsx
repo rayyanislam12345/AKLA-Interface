@@ -9,7 +9,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { AiWorkspaceProvider, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import AiSidebar from "@/ai/layout/AiSidebar";
 import { enterDarkOnlyMode, isAiThemeId, isDarkOnlyAiTheme } from "@/ai/theme";
-import { COMPANION_ORIGIN, EMBED_PARAM, companionHref, postToCompanion, resolveCompanionHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
+import { EMBED_PARAM, isCompanionOrigin, companionHref, postToCompanion, resolveCompanionHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -60,7 +60,7 @@ function AiShell() {
   useEffect(() => {
     if (!companion) return;
     const onMessage = (ev: MessageEvent) => {
-      if (ev.origin !== COMPANION_ORIGIN || ev.source !== window.parent) return;
+      if (!isCompanionOrigin(ev.origin) || ev.source !== window.parent) return;
       const d = ev.data as { type?: unknown; aiTheme?: unknown } | null;
       if (d && d.type === "companion:theme" && isAiThemeId(d.aiTheme)) setAiTheme(d.aiTheme);
     };
