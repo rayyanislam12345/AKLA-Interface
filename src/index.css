@@ -960,3 +960,40 @@ All colors MUST be HSL.
 .ai-analysis-prose hr {
   @apply my-4 border-border;
 }
+
+/* Tracked changes in a Word file drawn by docx-preview (DocumentViewer,
+   the chat's DocxArtifact, the review session). The renderer marks them as
+   <ins> and <del> but leaves them in the text colour, so a mark-up looked
+   almost untouched. Shown the way Word shows them: insertions coloured and
+   underlined on a light tint, deletions red and struck through, and a bar in
+   the left margin of every paragraph that changed. The page is always white
+   paper, so these colours are fixed, not theme tokens. ::after is used for the
+   bar because docx-preview draws list numbers with ::before. */
+.docx-wrapper ins {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-decoration-color: #1d4ed8;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  background: rgba(29, 78, 216, 0.08);
+}
+.docx-wrapper del {
+  color: #b91c1c;
+  text-decoration: line-through;
+  text-decoration-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.06);
+}
+.docx-wrapper p:has(ins, del),
+.docx-wrapper li:has(ins, del) {
+  position: relative;
+}
+.docx-wrapper p:has(ins, del)::after,
+.docx-wrapper li:has(ins, del)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  width: 2px;
+  background: #b45309;
+}
