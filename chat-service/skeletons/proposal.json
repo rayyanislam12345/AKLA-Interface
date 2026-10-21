@@ -1,0 +1,182 @@
+{
+  "key": "proposal",
+  "typeName": "Client Proposal Letter",
+  "source": "Derived 20 October 2026 from the approved client proposal pack (5 Packs to check/06 client proposal, a shell cut from the firm's August 2026 proposal, the owner's chosen base) and the firm's five other proposals: the cover (Dated, Prepared For, Prepared By), the boxed sections Introduction, Scope Of Work, Professional Fees, Expenses, And Taxes, General And Specific Assumptions, Limitation Of Liability, Acknowledgement And Acceptance (headings in tables), the signature block, then Annexures A (scope), B (fees) and C (assumptions), and D (the team) in one of six; supplementary and fee-only proposals drop the scope and assumptions (decision proposal_form).",
+  "completeLevels": [],
+  "headingKinds": {
+    "annexure_heading": 1,
+    "annex_h1": 2
+  },
+  "items": [
+    {
+      "id": "dated",
+      "heading": "Cover: Dated",
+      "label": "cover's Dated line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "cover_label",
+      "pattern": "^dated\\s*:?$"
+    },
+    {
+      "id": "prepared_for",
+      "heading": "Cover: Prepared For",
+      "label": "cover's Prepared For line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "pattern": "^prepared\\s+for\\s*:?$"
+    },
+    {
+      "id": "prepared_by",
+      "heading": "Cover: Prepared By",
+      "label": "cover's Prepared By line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "pattern": "^prepared\\s+by\\s*:?$"
+    },
+    {
+      "id": "introduction",
+      "heading": "Introduction",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "inTable": true
+    },
+    {
+      "id": "scope",
+      "heading": "Scope Of Work",
+      "level": 1,
+      "presence": "decision",
+      "decision": "proposal_form",
+      "when": [
+        "full"
+      ],
+      "match": "heading",
+      "inTable": true
+    },
+    {
+      "id": "fees",
+      "heading": "Professional Fees, Expenses, And Taxes",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "inTable": true,
+      "synonyms": [
+        "Professional Fee, Expenses, And Taxes",
+        "Professional Fees, Expenses And Taxes",
+        "Professional Fees"
+      ]
+    },
+    {
+      "id": "assumptions",
+      "heading": "General And Specific Assumptions",
+      "level": 1,
+      "presence": "decision",
+      "decision": "proposal_form",
+      "when": [
+        "full"
+      ],
+      "match": "heading",
+      "inTable": true,
+      "synonyms": [
+        "Assumptions"
+      ]
+    },
+    {
+      "id": "limitation",
+      "heading": "Limitation Of Liability",
+      "level": 1,
+      "presence": "decision",
+      "decision": "proposal_form",
+      "when": [
+        "full"
+      ],
+      "match": "heading",
+      "inTable": true
+    },
+    {
+      "id": "acceptance",
+      "heading": "Acknowledgement And Acceptance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "inTable": true,
+      "synonyms": [
+        "Acceptance"
+      ]
+    },
+    {
+      "id": "signature",
+      "heading": "Signature block",
+      "label": "signature block (For & On Behalf of)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "pattern": "^for\\s*(?:and|&)\\s*on\\s+behalf\\s+of\\b",
+      "inTable": true
+    },
+    {
+      "id": "annexure_scope",
+      "heading": "Annexure A – Scope Of Work",
+      "level": 1,
+      "presence": "decision",
+      "decision": "proposal_form",
+      "when": [
+        "full"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Annexure [●] – Scope Of Work [●]",
+        "Annexure [●] – Scope Of Work"
+      ]
+    },
+    {
+      "id": "annexure_fees",
+      "heading": "Annexure B – Professional Fees, Expenses, And Taxes",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Annexure [●] – Professional Fees, Expenses, And Taxes [●]",
+        "Annexure [●] – Professional Fee, Expenses, And Taxes [●]",
+        "Annexure [●] – Fees, Expenses And Taxes [●]"
+      ]
+    },
+    {
+      "id": "annexure_assumptions",
+      "heading": "Annexure C – General And Specific Assumptions",
+      "level": 1,
+      "presence": "decision",
+      "decision": "proposal_form",
+      "when": [
+        "full"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Annexure [●] – General And Specific Assumptions [●]",
+        "Annexure [●] – Transaction Specific Assumptions [●]",
+        "Annexure [●] – Assumptions [●]"
+      ]
+    },
+    {
+      "id": "annexure_team",
+      "heading": "Annexure D – Team Members Of The Firm",
+      "level": 1,
+      "presence": "decision",
+      "decision": "team_annexure",
+      "when": [
+        "include"
+      ],
+      "absentWhen": [
+        "omit"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Annexure [●] – Team Members Of The Firm",
+        "Annexure [●] – Team Members"
+      ]
+    }
+  ]
+}

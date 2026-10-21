@@ -1,0 +1,69 @@
+{
+  "key": "rfp",
+  "title": "RFP Volume I (Instructions to Bidders)",
+  "types": [
+    "RFP Volume I"
+  ],
+  "packs": [],
+  "kind": "rfp",
+  "voice": {
+    "we_allowed": false,
+    "rule": "The Agency's voice in the third person (the Agency shall …); the firm does not speak in the RFP.",
+    "source": [
+      "RFP master"
+    ]
+  },
+  "defined_terms": {
+    "rule": "The glossary is a two-column table (Term | Meaning) with the term in bold and no quotation marks; in the body (the X) bold.",
+    "pointer_formula": "Capitalised terms used but not otherwise defined herein shall have the meaning ascribed thereto in Volume I (Tender Procedure) of the RFP.",
+    "source": [
+      "RFP master",
+      "Decisions 20 Oct 2026"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case (the master's ALL CAPS headings are kept where the master has them; new headings are Title Case).",
+    "source": [
+      "RFP master",
+      "Decisions 20 Oct 2026"
+    ]
+  },
+  "money": {
+    "rule": "PKR [●]/- (Pakistani Rupees [●] Only).",
+    "source": [
+      "RFP master"
+    ]
+  },
+  "formulae": {
+    "reference": {
+      "text": "Reference: [●] / Dated: [●]",
+      "source": [
+        "RFP master"
+      ]
+    },
+    "law": {
+      "text": "The procurement law is [applicable procurement law]; the PPP law is [applicable PPP law]; the procuring department is [●].",
+      "source": [
+        "Decisions 20 Oct 2026"
+      ]
+    }
+  },
+  "notes": [
+    "The master's [CONFIRM - …] and [DRAFT - …] markers are the skill's flags for the lawyer, not placeholders to fill.",
+    "The master names a province's PPP Act, procurement rules and regulator; drafts write [applicable PPP law], [applicable procurement rules] and [●] instead."
+  ],
+  "banned": [
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ]
+}

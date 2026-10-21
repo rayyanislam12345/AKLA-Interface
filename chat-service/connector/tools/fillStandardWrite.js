@@ -57,6 +57,7 @@ import { alignCommentExpectations } from "../../libraryTools.js";
 import { standardRows, isWordFile } from "./fillStandard.js";
 import { checkFormat, variableLinesFor } from "../../formatFingerprint.js";
 import { packOf } from "../../draftingPacks.js";
+import { draftingOf, autoCommentOps, skeletonGate, connectorConfirmSentence } from "../../draftChecks.js";
 
 export const FILL_TOOL = "fill_standard_to_project";
 /** The bucket the firm's standards live in (server.js guideStart, the same download). */
@@ -89,6 +90,21 @@ export const STANDARD_CHANGED_SENTENCE = "The firm's standard has changed since 
 export const TOO_LONG_SENTENCE = `The fill took too long (over ${Math.round(APPLY_TIMEOUT_MS / 1000)} seconds) and nothing was written; send fewer changes in one call, then the rest as the next version.`;
 export const BUSY_SENTENCE = "Another fill is running on the Hub; nothing was saved. Try again in a minute with the same changes.";
 export const UNRECORDED_LINE = "The save landed but could not be recorded in the Hub's log; tell the Hub's owner.";
+/** The most clause-list ids one call may confirm as left out. */
+export const MAX_CONFIRMED = 100;
+
+/**
+ * confirmedOmissions as given: the clause-list ids the lawyer confirmed may
+ * be left out (the refusal names them), at most MAX_CONFIRMED, each a short
+ * id. Shared with apply_tracked_changes.
+ */
+export function readConfirmed(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) throw new Error("confirmedOmissions must be a list of the clause-list ids the refusal named, e.g. [\"governing_law\"].");
+  const ids = [...new Set(value.map((v) => v.trim()).filter(Boolean))];
+  if (ids.length > MAX_CONFIRMED || ids.some((v) => v.length > 80)) throw new Error(`confirmedOmissions takes at most ${MAX_CONFIRMED} ids, each as the refusal named it.`);
+  return ids;
+}
 // The parts whose bracketed text is a slot to fill; the rest (footnotes,
 // endnotes) carry the firm's drafting notes.
 const SLOT_PART = /^word\/(document|header\d+|footer\d+)\.xml$/;
@@ -266,7 +282,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
     if (error || !blob) throw new Error(`The standard for ${type.name} could not be downloaded${error?.message ? ` (${error.message})` : ""}; try again.`);
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (!bytes.length) throw new Error(`The standard for ${type.name} is empty on the Hub; upload it again under Firm Library → Standards.`);
-    return { type, bytes, pack: packOf(template), storagePath: template.storage_path, fileName: pinned?.filename ?? template.filename ?? template.storage_path.split("/").pop(), snapshotAt: pinned?.created_at ?? template.updated_at ?? null };
+    return { type, drafting: draftingOf(type), bytes, pack: packOf(template), storagePath: template.storage_path, fileName: pinned?.filename ?? template.filename ?? template.storage_path.split("/").pop(), snapshotAt: pinned?.created_at ?? template.updated_at ?? null };
   }
 
   /** The existing document a next version goes on, checked to be on this project so the refusal is plain. */
@@ -304,7 +320,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
     {
       name: FILL_TOOL,
       title: "Fill the firm's Word standard and file it in a project",
-      description: `Draft a document by filling the firm's real Word standard for a document type and filing the result as a NEW version in a project: the facts you gathered go into the standard's placeholder paragraphs as changes against the ¶n numbers from open_standard_for_filling, the fills are accepted so the draft reads clean, every value you were not given stays [●], and open questions go in as "AKLA Comments" margin comments. Numbering, styles, headers and the contents page stay as the firm set them. Use it after open_standard_for_filling and after asking the firm's drafting questions (get_drafting_decisions) one at a time; say which project and title you will file under and wait for the lawyer's yes. It always saves a NEW version, never over one that exists, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. templateHash is the fingerprint open_standard_for_filling printed: if the standard was replaced since, the fill is refused and nothing is saved. At most ${MAX_OPS} changes a call (file the rest as the next version); each must quote the paragraph's exact current text in expected, as open_standard_for_filling listed it or read it with paragraphs: "from-to", so a stale or unseen paragraph changes nothing. When the standard is one of the firm's packs, write, repeat_block, add_row and remove_block are taken too, as open_standard_for_filling describes: the body of a letter, memo or opinion, or a new clause, is written in the pack's own paragraph kinds. One fill runs on the Hub at a time; a second is refused in one sentence and can be sent again a minute later. The standard in the library is never changed. Returns every change that could not be made and why, the blanks still in the file, the new version's id and its Hub page. Filing is not legal approval.`,
+      description: `Draft a document by filling the firm's real Word standard for a document type and filing the result as a NEW version in a project: the facts you gathered go into the standard's placeholder paragraphs as changes against the ¶n numbers from open_standard_for_filling, the fills are accepted so the draft reads clean, every value you were not given stays [●], and open questions go in as "AKLA Comments" margin comments. Numbering, styles, headers and the contents page stay as the firm set them. Use it after open_standard_for_filling and after asking the firm's drafting questions (get_drafting_decisions) one at a time; say which project and title you will file under and wait for the lawyer's yes. It always saves a NEW version, never over one that exists, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. templateHash is the fingerprint open_standard_for_filling printed: if the standard was replaced since, the fill is refused and nothing is saved. At most ${MAX_OPS} changes a call (file the rest as the next version); each must quote the paragraph's exact current text in expected, as open_standard_for_filling listed it or read it with paragraphs: "from-to", so a stale or unseen paragraph changes nothing. When the standard is one of the firm's packs, write, repeat_block, add_row and remove_block are taken too, as open_standard_for_filling describes: the body of a letter, memo or opinion, or a new clause, is written in the pack's own paragraph kinds. One fill runs on the Hub at a time; a second is refused in one sentence and can be sent again a minute later. The standard in the library is never changed. Before filing, the draft is checked against the firm's clause list for the type: a part the firm always has that the draft lacks refuses the filing and names its id; send the same changes again with confirmedOmissions only once the lawyer confirms it may be left out. A heading not on the list gets the AKLA comment "New clause — not in the firm's precedents", and each wording point in what you wrote (not the standard's own words) an AKLA comment; neither stops the filing. Returns every change that could not be made and why, the format, clause-list and wording lines, the blanks still in the file, the new version's id and its Hub page. Filing is not legal approval.`,
       inputSchema: {
         documentTypeId: z.string().describe("The document type's id, from list_document_types or open_standard_for_filling."),
         projectId: z.string().describe("The project's id, from list_projects or find_document_by_title."),
@@ -328,6 +344,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           why: z.string().max(MAX_WHY_CHARS).optional().describe("Optional: one short line on why."),
         })).min(1).max(MAX_OPS).describe(`The changes, at most ${MAX_OPS}.`),
         templateHash: z.string().describe("The standard's fingerprint (sha256) as open_standard_for_filling printed it."),
+        confirmedOmissions: z.array(z.string()).optional().describe("Only after a refusal for a missing part, and only once the lawyer confirms it may be left out: the clause-list ids the refusal named, e.g. [\"governing_law\"]."),
         matterDocumentId: z.string().optional().describe("Optional: an existing document's id (documentId from list_project_documents) to file this as its next version. Leave out for a new document."),
         label: z.string().optional().describe("Optional: a short label for the version, e.g. \"First draft for the client\". \"Drafted from the firm's standard in claude.ai\" and the date are added."),
       },
@@ -346,6 +363,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           const matterDocumentId = input.matterDocumentId == null || String(input.matterDocumentId).trim() === "" ? null : uuid(input.matterDocumentId);
           if (input.matterDocumentId != null && String(input.matterDocumentId).trim() !== "" && !matterDocumentId) throw new Error("matterDocumentId must be a document id (a UUID). list_project_documents gives them.");
           const label = str(input.label, MAX_LABEL_CHARS);
+          const confirmedOmissions = readConfirmed(input.confirmedOmissions);
           const matter = await needProject(input);
           const existing = matterDocumentId ? await existingDocument(matterDocumentId, matter) : null;
           if (!title && !existing) throw new Error("A title for the new document is needed, e.g. \"Concession Agreement — Hyderabad Bypass\".");
@@ -377,9 +395,14 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           let fileBytes;
           let inspection;
           let aligned;
+          let auto = null;
           try {
             inspection = inspectDocx(standard.bytes, { budget: Infinity });
-            aligned = alignCommentExpectations(ops, inspection.byRef);
+            // The firm's rules add their comments to the same pass
+            // (draftChecks.js): "New clause" on a heading written without
+            // it, and one per wording point in what this call wrote.
+            auto = autoCommentOps({ ops, skeleton: standard.drafting.skeleton, styleSheet: standard.drafting.styleSheet, more: `check_text on the drafted text with documentTypeId ${standard.type.id} lists them all` });
+            aligned = alignCommentExpectations([...ops, ...auto.ops], inspection.byRef);
             // A firm pack's kinds: what write takes its look from.
             out = await applyWithDeadline(standard.bytes, aligned, inspection.byRef, standard.pack?.kinds);
             fileBytes = out.applied > 0 ? acceptChangesBy(out.bytes, DOCX_AUTHOR) : out.bytes;
@@ -391,8 +414,11 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
             // next lawyer's fill need not wait for it.
             filling = false; locked = false;
           }
-          const account = changesLines(out.results);
-          if (out.applied === 0) {
+          // The account is of the changes sent; the comments the rules added
+          // are counted in their own lines below.
+          const own = out.results.filter((r) => (r.i ?? 0) < ops.length);
+          const account = changesLines(own);
+          if (!own.some((r) => r.status === "applied")) {
             await record({ documentId: matterDocumentId, outcome: "refused" });
             throw new Error(`None of the ${ops.length} change${ops.length === 1 ? "" : "s"} could be made, so nothing was saved; the standard is unchanged. ${account.slice(2).join(" ")} Open the standard again and quote each paragraph's exact current text in expected.`);
           }
@@ -408,6 +434,21 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           if (format.refused) {
             await record({ documentId: matterDocumentId, outcome: "refused" });
             throw new Error(`${format.text} The standard is unchanged.`);
+          }
+
+          // The clause list (draftChecks.js skeletonGate): a part the firm
+          // always has that the draft lacks stops the filing until the lawyer
+          // confirms it may be left out (confirmedOmissions) — any such part
+          // for a shell pack, whose body is written here; for a form, one
+          // the fill took out (one the standard itself lacks is reported).
+          const clauses = skeletonGate({
+            bytes: fileBytes, baseBytes: standard.bytes, skeleton: standard.drafting.skeleton, kinds: standard.pack?.kinds ?? null,
+            confirmedOmissions, full: standard.pack?.mode === "shell", report: true, typeName: standard.type.name, ops, confirmHow: connectorConfirmSentence(FILL_TOOL),
+          });
+          if (clauses) log(`${FILL_TOOL}: clause list ${clauses.record.status}${clauses.refused ? ` (refused: ${clauses.record.blocking.join(", ")})` : ""}`);
+          if (clauses?.refused) {
+            await record({ documentId: matterDocumentId, outcome: "refused" });
+            throw new Error(`${clauses.text} The standard is unchanged.`);
           }
 
           // The save, through the foundation: the upload under the site's
@@ -432,6 +473,8 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
             ...account,
             format.text,
             blanksLine(out.validation?.placeholders),
+            ...(clauses?.line ? [clauses.line] : []),
+            ...(auto?.wording.line ? [auto.wording.line] : []),
             `documentId: ${saved.matterDocumentId}`,
             `versionId: ${saved.versionId}`,
             open("version", saved.versionId),

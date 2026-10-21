@@ -1501,6 +1501,8 @@ function planBlocks({ blockOps, parsed, entries, pristineXml, paragraphs, byInde
     const st = stampFor(stamp, op);
     if (r.paras.some((p) => p.headingLevel)) ctx.heading = true;
     op.copied = r.paras.filter((p) => p.text.trim()).length;
+    // What the copy reads, for its record in the Changes list.
+    op.text = r.paras.map((p) => p.text).filter((t) => t.trim()).join("\n");
     const again = new Set();
     const seen = new Set();
     for (const p of r.paras) {

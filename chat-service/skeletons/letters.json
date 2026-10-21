@@ -1,0 +1,155 @@
+{
+  "key": "letters",
+  "typeName": "Letter / Notice",
+  "source": "Derived 20 October 2026 from the approved letter pack (5 Packs to check/01 letters, a shell cut from the firm's March 2026 letter to a project director) and the firm's five other letters read for the study: every one has Dated, To, the addressee, Subject, a body and a signature block; three have a Ref line, three a salutation, two a reservation of rights. A letter has no headings, so each part is found by its kind in the pack (kinds.json) and its words (pattern), after the part before it. Nothing is checked for new clauses: the body is written fresh.",
+  "completeLevels": [],
+  "items": [
+    {
+      "id": "ref",
+      "heading": "Ref line",
+      "label": "Ref line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "reference",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "slot",
+      "slot": "ref_line",
+      "pattern": "^(?:our\\s+)?ref(?:erence)?(?:\\s*no\\.?)?\\s*[:.]"
+    },
+    {
+      "id": "dated",
+      "heading": "Dated line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "dated_line",
+      "pattern": "^dated?\\s*[:.]?(?:\\s|$)"
+    },
+    {
+      "id": "to",
+      "heading": "To line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "to_line",
+      "pattern": "^to\\s*,?\\s*$"
+    },
+    {
+      "id": "addressee",
+      "heading": "Addressee",
+      "label": "addressee's designation",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "addressee"
+    },
+    {
+      "id": "subject",
+      "heading": "Subject line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "subject_line",
+      "pattern": "^(?:subject|re)\\s*:"
+    },
+    {
+      "id": "salutation",
+      "heading": "Salutation",
+      "label": "salutation",
+      "level": 0,
+      "presence": "decision",
+      "decision": "salutation",
+      "when": [
+        "dear"
+      ],
+      "absentWhen": [
+        "none"
+      ],
+      "match": "slot",
+      "pattern": "^dear\\b"
+    },
+    {
+      "id": "body",
+      "heading": "Body",
+      "label": "body of the letter",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": [
+        "opening",
+        "body",
+        "limb_a"
+      ],
+      "pattern": "^(?!_{3,}\\s*$)\\S"
+    },
+    {
+      "id": "definitions_note",
+      "heading": "Definitions note",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "definitions_note",
+      "pattern": "^\\(?\\s*unless otherwise defined"
+    },
+    {
+      "id": "reservation",
+      "heading": "Reservation of rights",
+      "level": 0,
+      "presence": "decision",
+      "decision": "reservation_of_rights",
+      "when": [
+        "reserve"
+      ],
+      "absentWhen": [
+        "none"
+      ],
+      "match": "slot",
+      "slot": "reservation",
+      "pattern": "without prejudice"
+    },
+    {
+      "id": "signature",
+      "heading": "Signature block",
+      "label": "signature block (For And On Behalf Of)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "signature_for",
+      "pattern": "^for\\s*(?:and|&)\\s*on\\s+behalf\\s+of\\b"
+    },
+    {
+      "id": "signatory",
+      "heading": "Signatory",
+      "label": "signatory's name",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "signatory_name"
+    },
+    {
+      "id": "attachments",
+      "heading": "Attachments",
+      "label": "Attachments list",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "attachments_heading",
+      "pattern": "^(?:attachments?|enclosures?)\\s*:?$"
+    },
+    {
+      "id": "copy_to",
+      "heading": "Copy To",
+      "label": "Copy To list",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "copy_to_heading",
+      "pattern": "^(?:copy|copies)\\s+to\\s*:?$|^cc\\s*:?$"
+    }
+  ]
+}

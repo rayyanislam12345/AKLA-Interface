@@ -1,0 +1,85 @@
+{
+  "key": "letters",
+  "typeName": "Letter / Notice",
+  "source": "Derived 20 October 2026 from the letter clause list (skeletons/letters.json) and the owner's note of 20 October on letterheads.",
+  "name": "Letter drafting decisions",
+  "documentLabel": "LETTER",
+  "applyWhere": "the fixed part named above and the letter's body",
+  "closing": "That completes the drafting decisions. What remains are the letter's facts — the reference, the date, the addressee and address, the subject, the documents referred to, what the letter says and asks, and the signatory. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "letterhead",
+      "section": "Letterhead",
+      "title": "Whose letterhead",
+      "question": "On whose letterhead does the letter go?",
+      "location": "The header: \"[To be printed on [●]'s letterhead]\"",
+      "basis": "Owner's decision of 20 October 2026: when the firm writes on a client's behalf the header is empty apart from \"[To be printed on <client>'s letterhead]\".",
+      "options": [
+        {
+          "id": "client",
+          "label": "The client's — the Firm drafts it for the client to send",
+          "hint": "The header keeps \"[To be printed on <client>'s letterhead]\"; the client signs"
+        },
+        {
+          "id": "firm",
+          "label": "The Firm's own letter",
+          "hint": "Ali Khan Law Associates signs; the bracketed line goes"
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "section": "Fixed parts",
+      "title": "Reference number",
+      "question": "Does the letter carry a reference number?",
+      "location": "The Ref line above the date",
+      "basis": "Three of the firm's six letters read for the study carry one.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — keep the Ref line"
+        },
+        {
+          "id": "no",
+          "label": "No — remove it"
+        }
+      ]
+    },
+    {
+      "id": "salutation",
+      "section": "Fixed parts",
+      "title": "Salutation",
+      "question": "How does the letter open?",
+      "location": "After the Subject line",
+      "basis": "Half the firm's letters open \"Dear Sir,\"; the others go straight to \"We, [party] (the [role]), refer you to …\".",
+      "options": [
+        {
+          "id": "dear",
+          "label": "With a salutation (\"Dear Sir,\" or the addressee's name)"
+        },
+        {
+          "id": "none",
+          "label": "Directly with the opening paragraph"
+        }
+      ]
+    },
+    {
+      "id": "reservation_of_rights",
+      "section": "Fixed parts",
+      "title": "Reservation of rights",
+      "question": "Should the letter close by reserving the sender's rights (without prejudice)?",
+      "location": "The closing reservation paragraph before the signature block",
+      "basis": "In the firm's letters on disputed matters; not in requests or consents.",
+      "options": [
+        {
+          "id": "reserve",
+          "label": "Yes — keep the reservation of rights"
+        },
+        {
+          "id": "none",
+          "label": "No — remove it"
+        }
+      ]
+    }
+  ]
+}

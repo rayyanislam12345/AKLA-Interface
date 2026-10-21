@@ -1,0 +1,70 @@
+{
+  "key": "minutes",
+  "title": "Meeting minutes and notes",
+  "types": [
+    "Meeting Minutes"
+  ],
+  "packs": [
+    "minutes"
+  ],
+  "kind": "minutes",
+  "voice": {
+    "rule": "Reported speech in the third person and the past tense; the firm is \"Ali Khan Law Associates (AKLA)\", then \"AKLA\" (or \"the Firm\"), never \"we\".",
+    "source": [
+      "AM31"
+    ]
+  },
+  "numbers": {
+    "rule": "Words and figures for periods and counts in the firm's own sentences; figures quoted from the discussion (US$100 million, 15 to 20 items) may stay as said.",
+    "source": [
+      "AM31"
+    ]
+  },
+  "cross_refs": {
+    "heading_required": false,
+    "source": [
+      "AM31"
+    ]
+  },
+  "formulae": {
+    "title": {
+      "text": "[●] Meeting Notes Dated [Month DD, YYYY]",
+      "source": [
+        "AM31"
+      ]
+    },
+    "attendance": {
+      "text": "Attendance And Purpose — Attendance: The meeting was held by [●] and was attended by representatives of [●], [●] and Ali Khan Law Associates (AKLA).",
+      "source": [
+        "AM31"
+      ]
+    },
+    "sections": {
+      "text": "Purpose Of The Call / Summary Of The Position / The Substantive Outcome / The Process Outcome / Points Held Open / Next Steps",
+      "source": [
+        "AM31"
+      ]
+    },
+    "open_point": {
+      "text": "… is not established. Clarity on it was sought and it is recorded as open.",
+      "source": [
+        "AM31"
+      ]
+    },
+    "action": {
+      "text": "[●] is to provide … to [●] by [●]. / A separate session is to be held on [●] …",
+      "source": [
+        "AM31"
+      ]
+    },
+    "page_end": {
+      "text": "[*** The Rest Of This Page Has Been Intentionally Left Blank ***]",
+      "source": [
+        "AM31"
+      ]
+    }
+  },
+  "notes": [
+    "There is no Date / Venue / Attendees header table: attendance is a paragraph."
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "key": "proposal",
+  "title": "Client proposals",
+  "types": [
+    "Client Proposal Letter"
+  ],
+  "packs": [
+    "proposal"
+  ],
+  "kind": "proposal",
+  "voice": {
+    "rule": "\"the Firm\" (PQE4.3: 56, we 0); the addressee is \"the Client\". \"the Firm will provide\" describes the services; \"shall\" binds (fees payable, acceptance).",
+    "source": [
+      "PQE4.3"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Annexure",
+      "Section"
+    ],
+    "rule": "Annexure A (Scope Of Work), Annexure C (General And Specific Assumptions).",
+    "source": [
+      "PQE4.3"
+    ]
+  },
+  "money": {
+    "rule": "Fees: USD [●]/- then (United States Dollars [words] Only), or PKR [●]/- (Pakistani Rupees [words] Only); net of tax stated.",
+    "source": [
+      "PQE4.3",
+      "AM7"
+    ]
+  },
+  "dates": {
+    "cover": "DATED: [●]",
+    "source": [
+      "PQE4.3"
+    ]
+  },
+  "formulae": {
+    "cover": {
+      "text": "Proposal For The Provision Of Legal Advisory Services To [●] Relating To [●] / DATED: / Prepared For: / Prepared By:",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "opening": {
+      "text": "ALI KHAN LAW ASSOCIATES (the Firm) is pleased to submit this proposal dated [●] (this Proposal) to [●] (the Client) for an assignment (the Assignment) that entails the provision of legal advisory services … in connection with the Proposed Transaction (defined below).",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "scope": {
+      "text": "Subject to the Assumptions (defined below), the Firm will provide legal services as detailed in Annexure A (Scope Of Work) (the Services).",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "fees": {
+      "text": "Subject to the terms of this Proposal, including the assumptions set out in Annexure C (General And Specific Assumptions), … the Firm will charge its lump sum professional fees (the Professional Fees) … in the following amount, net of tax (the [●] Professional Fees Amount):",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "assumptions": {
+      "text": "This Proposal is subject to the specific and general assumptions detailed in Annexure C (General And Specific Assumptions) (the Assumptions).",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "limitation": {
+      "text": "The Firm’s total liability in a calendar year for all claims pursuant to and/or related to this Proposal is capped at the aggregate Professional Fees actually received by the Firm during such calendar year …",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "acceptance": {
+      "text": "The Firm welcomes any questions and is prepared to adjust this Proposal as needed. The Client may accept this Proposal by countersigning below and returning a copy to the Firm, whereupon this Proposal shall take effect on [●].",
+      "source": [
+        "PQE4.3"
+      ]
+    },
+    "signature": {
+      "text": "Acknowledged and accepted by / For & On Behalf of / [Client] / Name: / Designation: / Date:; then Sincerely yours, / For & On Behalf of / Ali Khan Law Associates / [signing partner]",
+      "source": [
+        "PQE4.3"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ]
+}

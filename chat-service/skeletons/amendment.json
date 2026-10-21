@@ -1,0 +1,134 @@
+{
+  "key": "amendment",
+  "typeName": "Amendment Agreement",
+  "source": "Derived 20 October 2026 from the approved amendment agreement pack (5 Packs to check/07 amendment agreement, the general form cut from the firm's February 2026 SPA amendment: the agreement amended is \"[●]\" (the Principal Agreement)) and the firm's three other amendment agreements: every one has Definitions, the amendments, Effectiveness, Other Provisions Unchanged, Governing Law and Counterparts in that order; Miscellaneous is in three of four, Transaction Covenants and Representations in one each. Presence: an article (level 1) is \"always\" when every firm precedent of the family read for the study has it, \"optional\" when it belongs to one deal or one form, and \"decision\" when a drafting decision (decisions/amendment.json) turns it on or off. Sections (level 2) are the pack's own, all optional except the ones every precedent has; they are listed so that a section the firm already uses is never reported as a new clause.",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "headingKinds": {
+    "h1": 1,
+    "signature_page_heading": 1
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "[●] Amendment Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Amendment Agreement"
+      ]
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions",
+      "heading": "Definitions",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "amendments_to_principal_agreement",
+      "heading": "Amendments To Principal Agreement",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Amendments To The Principal Agreement",
+        "Amendments To [●]",
+        "Amendments To The Original Agreement"
+      ]
+    },
+    {
+      "id": "transaction_covenants",
+      "heading": "Transaction Covenants",
+      "level": 1,
+      "presence": "decision",
+      "decision": "extra_terms",
+      "when": [
+        "covenants"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "representations_and_warranties",
+      "heading": "Representations And Warranties",
+      "level": 1,
+      "presence": "decision",
+      "decision": "extra_terms",
+      "when": [
+        "representations"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Representation And Warranties",
+        "Representation And Warranties Of [●]"
+      ]
+    },
+    {
+      "id": "effectiveness",
+      "heading": "Effectiveness",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "other_provisions_unchanged",
+      "heading": "Other Provisions Unchanged",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law",
+      "heading": "Governing Law",
+      "label": "Governing Law (and dispute resolution)",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Governing Law And Dispute Resolution",
+        "Governing Law & Dispute Resolution"
+      ]
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "counterparts",
+      "heading": "Counterparts",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "signature_page",
+      "heading": "Signature Page",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "schedules",
+      "heading": "Schedule [●] – [●]",
+      "label": "a schedule (parties, details, notices)",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    }
+  ]
+}

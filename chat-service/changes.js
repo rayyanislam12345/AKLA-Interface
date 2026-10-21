@@ -152,56 +152,163 @@ function decideInline(xml, item) {
   return xml;
 }
 
+// The notes parts: a footnote a "write" or "repeat_block" added has its
+// revisions there, under ids minted in the same count as the body's (one
+// counter for the whole package), so a change recorded on the body may own
+// ids in the notes too.
+const NOTE_PARTS = ["word/footnotes.xml", "word/endnotes.xml"];
+
+// Table rows: a row we added carries <w:ins/> in its own properties, a row
+// we removed <w:del/>. Deciding the row's id keeps or drops the row whole
+// (with its cells), the way acceptChangesBy does for a fill; a table left
+// with no rows goes too.
+function rowsOf(xml) {
+  const out = [];
+  const stack = [];
+  for (const m of xml.matchAll(/<w:tr(?:\s[^>]*)?>|<\/w:tr>/g)) {
+    if (m[0] === "</w:tr>") {
+      const start = stack.pop();
+      if (start !== undefined && !stack.length) out.push({ start, end: m.index + m[0].length });
+    } else if (!m[0].endsWith("/>")) stack.push(m.index);
+  }
+  return out;
+}
+// A row's own properties (not a nested table's): the first <w:trPr> before its first cell.
+function ownRowProps(tr) {
+  const firstCell = tr.search(/<w:tc[\s>]/);
+  const head = firstCell >= 0 ? tr.slice(0, firstCell) : tr;
+  return /<w:trPr\b[^>]*?(?:\/>|>[\s\S]*?<\/w:trPr>)/.exec(head)?.[0] ?? null;
+}
+const rowMarkOf = (trPr, ids) => {
+  for (const id of ids) {
+    const m = markOf(id).exec(trPr ?? "");
+    if (m) return { tag: m[1], xml: m[0] };
+  }
+  return null;
+};
+function decideRows(xml, items) {
+  if (!/<w:trPr\b[^>]*>(?:(?!<\/w:trPr>)[\s\S])*?<w:(?:ins|del)\b/.test(xml)) return xml;
+  const all = items.flatMap((item) => item.revisionIds.map((id) => ({ id, item })));
+  if (!all.length) return xml;
+  const edits = [];
+  // Nested tables are rows of their own, inside a cell of an outer row; the
+  // outermost rows first, then each nested level, so a dropped row takes
+  // whatever it held.
+  const visit = (from, to) => {
+    for (const r of rowsOf(xml.slice(from, to)).map((r) => ({ start: r.start + from, end: r.end + from }))) {
+      const tr = xml.slice(r.start, r.end);
+      const trPr = ownRowProps(tr);
+      const hit = trPr && all.map(({ id, item }) => ({ item, mark: rowMarkOf(trPr, [id]) })).find((x) => x.mark);
+      if (hit) {
+        const drop = (hit.mark.tag === "del") === (hit.item.decision === "accepted");
+        if (drop) { edits.push({ start: r.start, end: r.end, xml: "" }); continue; }
+        const at = r.start + tr.indexOf(trPr);
+        const tidy = trPr.replace(hit.mark.xml, "");
+        edits.push({ start: at, end: at + trPr.length, xml: /^<w:trPr><\/w:trPr>$/.test(tidy) ? "" : tidy });
+      }
+      // Rows of tables inside this row's cells.
+      const inner = tr.search(/<w:tc[\s>]/);
+      if (inner >= 0) {
+        for (const t of tablesIn(xml, r.start + inner, r.end)) visit(t.start, t.end);
+      }
+    }
+  };
+  for (const t of tablesIn(xml, 0, xml.length)) visit(t.start, t.end);
+  edits.sort((a, b) => b.start - a.start);
+  let out = xml;
+  for (const e of edits) out = out.slice(0, e.start) + e.xml + out.slice(e.end);
+  // A table every row of which went.
+  return out.replace(/<w:tbl>(?:(?!<w:tbl>|<\/w:tbl>)[\s\S])*?<\/w:tbl>/g, (t) => (/<w:tr[\s>]/.test(t) ? t : ""));
+}
+// The outermost tables between from and to.
+function tablesIn(xml, from, to) {
+  const out = [];
+  let depth = 0;
+  let start = -1;
+  const re = /<w:tbl>|<w:tbl\s[^>]*>|<\/w:tbl>/g;
+  re.lastIndex = from;
+  for (let m = re.exec(xml); m && m.index < to; m = re.exec(xml)) {
+    if (m[0] === "</w:tbl>") {
+      depth--;
+      if (depth === 0 && start >= 0) { out.push({ start, end: m.index + m[0].length }); start = -1; }
+    } else {
+      if (depth === 0) start = m.index;
+      depth++;
+    }
+  }
+  return out;
+}
+
 /**
  * Accepts or rejects changes by their revision ids.
  *
  * items: [{ id, part, revisionIds: number[], decision: 'accepted' | 'rejected' }]
  * Returns { bytes, results: [{ id, status: 'applied' | 'missing' | 'blocked', reason? }] }.
  *
- * All or nothing per item: unless every one of its ids is in its part, the
- * file is not touched for it ('missing'). A change Word has to decide is
- * left whole too ('blocked'). No id or date is minted, so the same input
- * always gives the same file.
+ * All or nothing per item: unless every one of its ids is in its part (or,
+ * for a change to the body, in the footnotes or endnotes, where a footnote
+ * it added keeps its own revisions), the file is not touched for it
+ * ('missing'). A change Word has to decide is left whole too ('blocked').
+ * A table row the change added or removed is kept or dropped whole. No id
+ * or date is minted, so the same input always gives the same file.
  */
 export function applyDecisions(bytes, items) {
   const entries = readZip(bytes);
   const results = [];
-  const byPart = new Map();
+  const xmlOf = new Map();
+  const read = (part) => {
+    if (!xmlOf.has(part)) xmlOf.set(part, entries[part] ? dec.decode(entries[part]) : null);
+    return xmlOf.get(part);
+  };
+  const idsOf = new Map();
+  const present = (part) => {
+    if (!idsOf.has(part)) idsOf.set(part, read(part) ? revisionIdsIn(read(part)) : new Set());
+    return idsOf.get(part);
+  };
+  // Each item's ids, by the part they are in.
+  const pieces = new Map(); // part → [{ item, revisionIds }]
+  const plans = [];
   items.forEach((raw, n) => {
     const decision = raw.decision;
     if (decision !== "accepted" && decision !== "rejected") throw new Error(`Unknown decision "${decision}"`);
-    const item = { n, id: raw.id, part: raw.part || "word/document.xml", decision, revisionIds: (Array.isArray(raw.revisionIds) ? raw.revisionIds : []).map(Number) };
-    byPart.set(item.part, [...(byPart.get(item.part) ?? []), item]);
+    const part = raw.part || "word/document.xml";
+    const item = { n, id: raw.id, part, decision, revisionIds: (Array.isArray(raw.revisionIds) ? raw.revisionIds : []).map(Number) };
+    const byPart = new Map();
+    let missing = !item.revisionIds.length;
+    for (const id of item.revisionIds) {
+      if (!Number.isFinite(id)) { missing = true; break; }
+      const home = present(part).has(id) ? part : part === "word/document.xml" ? NOTE_PARTS.find((p) => present(p).has(id)) : null;
+      if (!home) { missing = true; break; }
+      byPart.set(home, [...(byPart.get(home) ?? []), id]);
+    }
+    if (missing) { results[n] = { id: item.id, status: "missing", reason: "changed_since" }; return; }
+    plans.push({ item, byPart });
   });
 
-  let changed = false;
-  for (const [part, list] of byPart) {
-    const xml = entries[part] ? dec.decode(entries[part]) : null;
-    const present = xml ? revisionIdsIn(xml) : new Set();
-    const found = [];
-    for (const item of list) {
-      if (!item.revisionIds.length || !item.revisionIds.every((id) => Number.isFinite(id) && present.has(id))) {
-        results[item.n] = { id: item.id, status: "missing", reason: "changed_since" };
-        continue;
-      }
-      found.push(item);
+  // Blocked: judged per part, against everything decided in that part.
+  const deciding = new Map();
+  for (const { byPart } of plans) for (const [part, ids] of byPart) deciding.set(part, new Set([...(deciding.get(part) ?? []), ...ids]));
+  for (const { item, byPart } of plans) {
+    let reason = null;
+    for (const [part, ids] of byPart) {
+      reason = blockedReason(read(part), { ...item, revisionIds: ids }, deciding.get(part));
+      if (reason) break;
     }
-    const deciding = new Set(found.flatMap((item) => item.revisionIds));
-    const todo = [];
-    for (const item of found) {
-      const reason = blockedReason(xml, item, deciding);
-      if (reason) results[item.n] = { id: item.id, status: "blocked", reason };
-      else todo.push(item);
-    }
-    if (!todo.length) continue;
-    let out = decideParagraphMarks(xml, todo);
-    for (const item of todo) out = decideInline(out, item);
-    entries[part] = enc.encode(patchEmptyCells(out));
-    for (const item of todo) results[item.n] = { id: item.id, status: "applied" };
-    changed = true;
+    if (reason) { results[item.n] = { id: item.id, status: "blocked", reason }; continue; }
+    for (const [part, ids] of byPart) pieces.set(part, [...(pieces.get(part) ?? []), { ...item, revisionIds: ids }]);
+    results[item.n] = { id: item.id, status: "applied" };
   }
+  if (!pieces.size) return { bytes, results };
 
-  if (!changed) return { bytes, results };
+  for (const [part, todo] of pieces) {
+    let out = decideRows(read(part), todo);
+    out = decideParagraphMarks(out, todo);
+    for (const item of todo) out = decideInline(out, item);
+    // A footnote a rejected "write" added has lost its only paragraph (and
+    // its mark in the body went with the write): the empty note goes too.
+    if (NOTE_PARTS.includes(part)) out = out.replace(/<w:(footnote|endnote)\b[^>]*>\s*<\/w:\1>/g, "");
+    entries[part] = enc.encode(patchEmptyCells(out));
+  }
   validateXml(entries);
   const quality = inspectPackage(xmlParts(entries));
   if (quality.errors.length) throw new Error(`Decided file failed structural checks: ${quality.errors.join("; ")}`);
@@ -252,7 +359,8 @@ export function reconcile(bytes, rows, results = []) {
     const takenBy = results.find((r) => inPart(r, part) && has(r.takesOver));
     if (takenBy) { patches.push({ id: row.id, patch: { placement: "superseded", placement_reason: "replaced", superseded_by: takenBy.rowId ?? null } }); continue; }
     if (results.some((r) => inPart(r, part) && has(r.removedIds))) { patches.push({ id: row.id, patch: { placement: "superseded", placement_reason: "withdrawn" } }); continue; }
-    if (ids.some((id) => !present.has(`${part}#${id}`))) { patches.push({ id: row.id, patch: { placement: "unplaced", placement_reason: "changed_since" } }); continue; }
+    const here = (id) => present.has(`${part}#${id}`) || (part === "word/document.xml" && NOTE_PARTS.some((p) => present.has(`${p}#${id}`)));
+    if (ids.some((id) => !here(id))) { patches.push({ id: row.id, patch: { placement: "unplaced", placement_reason: "changed_since" } }); continue; }
     // Our earlier insertion was split around a later change: the second
     // half's fresh id still belongs to the earlier change.
     const grown = results.flatMap((r) => (inPart(r, part) ? r.splits ?? [] : [])).filter((s) => ids.includes(Number(s.fromId))).map((s) => Number(s.toId));
@@ -264,6 +372,22 @@ export function reconcile(bytes, rows, results = []) {
 // ---------------------------------------------------------------- records
 
 const OPS = new Set(["replace", "insert_after", "delete"]);
+// The block operations a firm pack takes, recorded as the change they make
+// to the text: paragraphs (or a row) added, or a stretch removed. The card
+// is an addition or a deletion like any other, decided by its revision ids.
+const BLOCK_WHY = { write: "Written in the firm's own paragraph kinds.", repeat_block: "A copy of the firm's own block.", add_row: "A new table row, formatted like the one above it.", remove_block: "A block removed whole." };
+const BLOCK_AS = { write: "insert_after", repeat_block: "insert_after", add_row: "insert_after", remove_block: "delete" };
+
+/**
+ * The results editRecords makes a row for, in its order: so a caller can
+ * give each result its row's id.
+ */
+export function recordedResults(results) {
+  return results.filter((r) => {
+    const kind = String(r.kind ?? "").toLowerCase();
+    return OPS.has(BLOCK_AS[kind] ?? kind) && !(r.status === "applied" && r.removedIds?.length && !r.revisionIds?.length);
+  });
+}
 
 /**
  * Rows for an Edit turn's results, one per operation that is a change to
@@ -279,7 +403,8 @@ export function editRecords(results, { threadId, rootId, userId, fillIn = false 
   const rows = [];
   const withdrawals = [];
   for (const r of results) {
-    const op = String(r.kind ?? "").toLowerCase();
+    const kind = String(r.kind ?? "").toLowerCase();
+    const op = BLOCK_AS[kind] ?? kind;
     if (!OPS.has(op)) continue;
     if (r.status === "applied" && r.removedIds?.length && !r.revisionIds?.length) { withdrawals.push(r); continue; }
     const placed = r.status === "applied";
@@ -296,7 +421,7 @@ export function editRecords(results, { threadId, rootId, userId, fillIn = false 
       clause_reference: r.clause ?? null,
       original_text: r.original ?? "",
       suggested_text: op === "delete" ? "" : r.modified ?? r.text ?? "",
-      rationale: r.why ?? null,
+      rationale: r.why ?? BLOCK_WHY[kind] ?? null,
       status: fillIn ? "accepted" : "pending",
       decided_by: null,
       decided_at: fillIn ? now : null,
@@ -447,7 +572,9 @@ export function unlistedIn(rows, ours) {
   const listed = new Set();
   for (const row of rows) {
     if (row.placement !== "placed" && row.placement !== "blocked") continue;
-    for (const id of row.revision_ids ?? []) listed.add(`${row.part ?? "word/document.xml"}#${id}`);
+    const part = row.part ?? "word/document.xml";
+    // A body change's footnote keeps its revisions in the notes part.
+    for (const id of row.revision_ids ?? []) for (const p of part === "word/document.xml" ? [part, ...NOTE_PARTS] : [part]) listed.add(`${p}#${id}`);
   }
   let n = 0;
   for (const key of ours) if (!listed.has(key)) n++;

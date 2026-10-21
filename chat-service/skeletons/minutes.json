@@ -1,0 +1,81 @@
+{
+  "key": "minutes",
+  "typeName": "Meeting Minutes",
+  "source": "Derived 20 October 2026 from the approved minutes pack (5 Packs to check/11 meeting minutes, a shell cut from the firm's August 2026 meeting notes) and the firm's five other meeting notes: the title box always; attendance, points held open and next steps in a record of a meeting; discussion pointers and outcome notes go straight to their subjects (decision minutes_form). Section headings are the meeting's own, so nothing is checked for new clauses.",
+  "completeLevels": [],
+  "headingKinds": {
+    "h1": 1,
+    "h2": 2
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "Title",
+      "label": "title box ([●] Meeting Notes Dated [●])",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "title",
+      "pattern": "\\b(?:meeting|notes|minutes|discussion|outcome)\\b",
+      "inTable": true
+    },
+    {
+      "id": "attendance",
+      "heading": "Attendance And Purpose",
+      "level": 1,
+      "presence": "decision",
+      "decision": "minutes_form",
+      "when": [
+        "record"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Attendance",
+        "Attendees",
+        "Attendance And Agenda",
+        "Purpose And Attendance"
+      ]
+    },
+    {
+      "id": "summary",
+      "heading": "Summary Of The Position",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Summary",
+        "Key Outcomes",
+        "Outcome"
+      ]
+    },
+    {
+      "id": "points_open",
+      "heading": "Points Held Open",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Open Points",
+        "Outstanding Points",
+        "Matters Held Open"
+      ]
+    },
+    {
+      "id": "next_steps",
+      "heading": "Next Steps",
+      "level": 1,
+      "presence": "decision",
+      "decision": "minutes_form",
+      "when": [
+        "record"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "General Matters And Next Steps",
+        "Action Items",
+        "Action Points",
+        "Way Forward"
+      ]
+    }
+  ]
+}

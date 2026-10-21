@@ -475,7 +475,7 @@ test('server.js reads the pack with the standard, passes its kinds on every fill
   assert.ok(server.includes('const out = await applyDocxOps(docxBase.bytes, aligned, docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id), ...(docxBase.pack ? { kinds: docxBase.pack.kinds } : {}) });'));
   assert.equal((server.match(/applyDocxOps\(docxBase\.bytes/g) ?? []).length, 1, 'there is one such call');
   // The fill prompt: instructions, format, the pack's block, then the protocol.
-  assert.ok(server.includes('${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\\n\\nHow the standard is formatted: ${templateRules.trim()}` : ""}${packBlock}${earlierText}\\n\\n${OPS_PROTOCOL}\\n\\n${FILL_DIRECT_NOTE}`'));
+  assert.ok(server.includes('${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\\n\\nHow the standard is formatted: ${templateRules.trim()}` : ""}${packBlock}${draftingBlock}${earlierText}\\n\\n${OPS_PROTOCOL}\\n\\n${FILL_DIRECT_NOTE}`'));
   assert.ok(server.includes('const packBlock = docxBase.pack ? `\\n\\n${packPromptBlock(docxBase.pack, { editing: docxBase.bucket !== "precedent-library" })}${docxBase.packMap ? `\\n${docxBase.packMap}` : ""}` : "";'));
   // The edit prompt: the edit note and kinds before the protocol.
   assert.ok(server.includes('${docxBase.pack ? `\\n\\n${packPromptBlock(docxBase.pack, { editing: true })}${docxBase.packMap ? `\\n${docxBase.packMap}` : ""}` : ""}\\n\\n${OPS_PROTOCOL}`;'));
@@ -529,8 +529,17 @@ test('fill_standard_to_project passes the pack\'s kinds, takes the block operati
   const seen = [];
   const stub = async (bytes, ops, byRef, opts) => { seen.push(opts); return applyDocxOps(bytes, ops, byRef, opts); };
   const c = connector({ modules: [{ file: 'fillStandardWrite.js', tools: (deps) => createFillStandardTools(deps, { apply: stub }) }] });
-  const out = await c.run(FILL_TOOL, { documentTypeId: T_LETTER, projectId: P1, title: 'Letter to the PD on the delivery point', templateHash: sha256(LETTER), ops: shellOps() });
-  assert.equal(seen.length, 1);
+  // This small shell has no "For And On Behalf Of" block and writes its Dated line in the Ref line's kind, so the
+  // letter's clause list (skeletons/letters.json) refuses it, naming the ids to confirm; filed once they are confirmed.
+  const input = { documentTypeId: T_LETTER, projectId: P1, title: 'Letter to the PD on the delivery point', templateHash: sha256(LETTER), ops: shellOps() };
+  await assert.rejects(c.run(FILL_TOOL, input), (err) => {
+    assert.match(err.message, /^Not filed: the firm's Letter \/ Notice always has these parts, and this draft does not:\n- The Dated line is missing\.\n- The signature block[^\n]* is missing\.\nNothing was saved\. Add them and send the changes again, or, only once the lawyer confirms the omission, call fill_standard_to_project again with the same changes and confirmedOmissions: \["dated","signature"\]\. The standard is unchanged\.$/);
+    return true;
+  });
+  assert.equal(c.supabase.calls.upload.filter((u) => u.bucket === 'matter-documents').length, 0, 'nothing filed');
+  const out = await c.run(FILL_TOOL, { ...input, confirmedOmissions: ['dated', 'signature'] });
+  assert.match(out, /\nClause list: [^\n]*Left out as confirmed: Dated line and Signature/);
+  assert.equal(seen.length, 2);
   assert.equal(seen[0].kinds, LETTER_PACK.kinds, 'the pack\'s own kinds list');
   assert.ok(seen[0].signal instanceof AbortSignal);
   assert.match(out, /^Drafted "Letter to the PD on the delivery point" from the firm's Letter \/ Notice standard/);
@@ -545,7 +554,7 @@ test('fill_standard_to_project passes the pack\'s kinds, takes the block operati
   plain.document_type_templates[0] = { ...letterRow, kinds: null, pack_mode: null };
   const seenPlain = [];
   const d = connector({ tables: plain, modules: [{ file: 'fillStandardWrite.js', tools: (deps) => createFillStandardTools(deps, { apply: async (b, o, r, opts) => { seenPlain.push(opts); return applyDocxOps(b, o, r, opts); } }) }] });
-  const refused = await d.run(FILL_TOOL, { documentTypeId: T_LETTER, projectId: P1, title: 'Letter', templateHash: sha256(LETTER), ops: shellOps() });
+  const refused = await d.run(FILL_TOOL, { documentTypeId: T_LETTER, projectId: P1, title: 'Letter', templateHash: sha256(LETTER), ops: shellOps(), confirmedOmissions: ['dated', 'signature', 'body'] });
   assert.equal(seenPlain[0].kinds, undefined);
   assert.match(refused, /Could not be made[\s\S]*no kinds of paragraph are listed/);
 });

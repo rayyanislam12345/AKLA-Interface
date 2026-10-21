@@ -327,5 +327,87 @@ class AutoNumberTests(unittest.TestCase):
         self.assertIn("1.1\tThe first clause:", [bp.para_text(p) for p in bp.etree.fromstring(read(pack)["word/document.xml"]).iter(bp.w("p"))])
 
 
+def R(text, rpr=""):
+    return f'<w:r>{rpr}<w:t xml:space="preserve">{text}</w:t></w:r>'
+
+
+SPELL_BODY = "".join([
+    # 0: words split across runs, each run with its own look
+    '<w:p>' + R("The ORGANI", "<w:rPr><w:b/></w:rPr>") + R("ZATION is autho") + R("rized; Recognize the colo", "<w:rPr><w:i/></w:rPr>") + R("r and the Program.") + '</w:p>',
+    # 1: exceptions the style sheet keeps
+    P("The size of the prize; a citizen may seize it; the World Health Organization; a computer program.", rpr=""),
+    # 2: a term quoted from another instrument stays; the firm's own quoted term changes
+    P("the “Authorized Representative” and the “Utilization Plan”; analyze it.", rpr=""),
+    # 3: a quoted defined term put in the firm's form
+    '<w:p>' + R("located at [●] (the ") + R("“") + R("Concessionaire") + R("”, which expression shall ...)") + '</w:p>',
+])
+SPELL_DOCUMENT = DECL + f'<w:document {W}><w:body>{SPELL_BODY}{SECT}</w:body></w:document>'
+SPELL_HEADER = DECL + f'<w:hdr {W}><w:p><w:r><w:t>Finalized draft</w:t></w:r></w:p></w:hdr>'
+
+
+class SpellingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.join(self.tmp.name, "spell.docx")
+        parts = dict(PARTS, **{"word/document.xml": SPELL_DOCUMENT, "word/header1.xml": SPELL_HEADER})
+        with zipfile.ZipFile(self.base, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, xml in parts.items():
+                z.writestr(name, xml.encode("utf-8"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def build(self, **extra):
+        cfg = dict({"mode": "form", "detectors": False, "base": self.base, "name": "t", "kind": "spell"}, **extra)
+        pack, report, kj = bp.build(cfg, os.path.join(self.tmp.name, "out-%d" % len(extra)))
+        parts = read(pack)
+        root = bp.etree.fromstring(parts["word/document.xml"])
+        return report, parts, root, [bp.para_text(p) for p in root.iter(bp.w("p"))]
+
+    def test_british_case_kept_across_runs(self):
+        report, parts, root, texts = self.build()
+        self.assertEqual(texts[0], "The ORGANISATION is authorised; Recognise the colour and the Programme.")
+        # each letter keeps its run: the bold run still ends ORGANI, the next run carries the S
+        runs = [r for r in root.iter(bp.w("r"))][:4]
+        self.assertEqual([r.find(bp.w("t")).text for r in runs], ["The ORGANI", "SATION is autho", "rised; Recognise the colou", "r and the Programme."])
+        self.assertIsNotNone(runs[0].find("w:rPr/w:b", bp.NS))
+        self.assertIsNotNone(runs[2].find("w:rPr/w:i", bp.NS))
+        # headers too
+        self.assertIn("Finalised draft", parts["word/header1.xml"].decode("utf-8"))
+        ch = {(c["from"], c["to"]): c["count"] for c in report["spelling"]["changes"]}
+        for pair in (("ORGANIZATION", "ORGANISATION"), ("authorized", "authorised"), ("Recognize", "Recognise"), ("color", "colour"),
+                     ("Program", "Programme"), ("Finalized", "Finalised"), ("analyze", "analyse")):
+            self.assertEqual(ch.get(pair), 1, pair)
+        self.assertEqual(report["spelling"]["changed"], sum(ch.values()))
+
+    def test_exceptions_kept(self):
+        report, parts, root, texts = self.build()
+        self.assertEqual(texts[1], "The size of the prize; a citizen may seize it; the World Health Organization; a computer program.")
+        self.assertIn("“Authorized Representative” and the “Utilization Plan”; analyse it.", texts[2])
+        kept = {k["word"]: k["why"] for k in report["spelling"]["kept"]}
+        self.assertIn("proper name", kept["Organization"])
+        self.assertIn("computer", kept["program"])
+        self.assertIn("quotation marks", kept["Authorized"])
+        # the firm's own quoted term is converted when the config says so; a listed phrase is kept
+        report, parts, root, texts = self.build(spelling_quotes_own=["Utilization Plan"], spelling_keep=["Program."])
+        self.assertIn("“Authorized Representative” and the “Utilisation Plan”", texts[2])
+        self.assertTrue(texts[0].endswith("the Program."))
+
+    def test_spelling_off(self):
+        report, parts, root, texts = self.build(spelling=False)
+        self.assertIsNone(report["spelling"])
+        self.assertIn("autho", texts[0])
+        self.assertIn("ORGANIZATION", texts[0])
+        self.assertEqual(parts["word/header1.xml"], SPELL_HEADER.encode("utf-8"))
+
+    def test_unquote_term(self):
+        report, parts, root, texts = self.build(unquote_terms=[{"term": "Concessionaire", "reason": "quoted defined term"}])
+        self.assertEqual(texts[3], "located at [●] (the Concessionaire, which expression shall ...)")
+        bold = [r.find(bp.w("t")).text for r in root.iter(bp.w("r")) if r.find("w:rPr/w:b", bp.NS) is not None and r.find(bp.w("t")) is not None]
+        self.assertIn("Concessionaire", bold)
+        self.assertEqual(report["terms_unquoted"], 1)
+        self.assertTrue(any("Concessionaire" in b["reason"] for b in report["blankings"]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

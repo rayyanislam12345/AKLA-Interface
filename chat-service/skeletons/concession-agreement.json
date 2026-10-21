@@ -1,0 +1,601 @@
+{
+  "key": "concession-agreement",
+  "typeName": "Concession Agreement",
+  "source": "Derived 20 October 2026 from the firm's master, firm-skills/concession-agreement/assets/Standard Concession Agreement [AKLA].docx (its Heading 1 articles and its schedules A to Y), with firm-skills/concession-agreement/references/fill-map.md, schedules.md and known-issues.md. Decisions (decisions/concession-agreement.json): Article 12 is Financing Matters, Drawings or \"Not Used\"; Article 17 is Revenue Matters or Tolling Matters (both accepted as its heading); the equity option in Schedule P; Change in Law is a known gap of the master (no article, though defined and referred to), asked as a decision and reported until answered. Only articles are checked for new clauses (completeLevels [1]): the master's sections share their style with body text.",
+  "completeLevels": [
+    1
+  ],
+  "items": [
+    {
+      "id": "title",
+      "heading": "Concession Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Whereas"
+      ]
+    },
+    {
+      "id": "definitions_and_interpretation",
+      "heading": "Definitions & Interpretation",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "concession",
+      "heading": "Concession",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "conditions",
+      "heading": "Conditions",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Conditions Precedent"
+      ]
+    },
+    {
+      "id": "project_site",
+      "heading": "Project Site",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "independent_engineer",
+      "heading": "Independent Engineer",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "independent_auditor",
+      "heading": "Independent Auditor",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "concessionaire_representations",
+      "heading": "Concessionaire’s Representations, Warranties and Certain Obligations & Undertakings",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "agency_representations",
+      "heading": "Agency Representations, Warranties And Certain Obligations & Undertakings",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Agency Representations, Warranties And Certain Obligations &Undertakings"
+      ]
+    },
+    {
+      "id": "indemnities_and_limitation_of_liability",
+      "heading": "Indemnities & Limitation of Liability",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "equity_and_funding_matters",
+      "heading": "Equity And Funding Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "performance_securities",
+      "heading": "Development Performance Security & O&M Performance Security",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "article_12",
+      "heading": "Financing Matters",
+      "label": "Article 12 (Financing Matters or Drawings)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "article_12",
+      "when": [
+        "financing",
+        "drawings"
+      ],
+      "absentWhen": [
+        "not_used"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Drawings",
+        "Drawing Matters",
+        "Financing"
+      ],
+      "not_used_form": "Not Used"
+    },
+    {
+      "id": "development_works",
+      "heading": "Development Works",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "completion",
+      "heading": "Completion",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "relief_events",
+      "heading": "Relief Extensions & Relief Compensations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "change_of_scope",
+      "heading": "Change of Scope",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "article_17",
+      "heading": "Revenue Matters",
+      "label": "Article 17 (Revenue Matters or Tolling Matters)",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Tolling Matters",
+        "Tolling",
+        "Revenue And Tolling Matters"
+      ]
+    },
+    {
+      "id": "defects_and_deficiencies",
+      "heading": "Defects & Deficiencies, Notice of Remedy, Suspension",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "operation_and_maintenance",
+      "heading": "Operation and Maintenance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "insurances",
+      "heading": "Insurances",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "force_majeure",
+      "heading": "Force Majeure",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "events_of_default",
+      "heading": "Events of Default",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "termination",
+      "heading": "Termination",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "divestment_of_rights_and_interest",
+      "heading": "Divestment of Rights and Interest",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "exit_defects_liability",
+      "heading": "Defects Liability During Exit Implementation Period",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "disclaimer",
+      "heading": "Disclaimer",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "assignment_and_charges",
+      "heading": "Assignment and Charges",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "change_in_law",
+      "heading": "Change in Law",
+      "level": 1,
+      "presence": "decision",
+      "decision": "change_in_law",
+      "when": [
+        "include"
+      ],
+      "absentWhen": [
+        "omit"
+      ],
+      "match": "heading",
+      "gap": "the firm's master has no Change in Law article although it defines Change in Law and refers to the article; both executed agreements have one before Dispute Resolution"
+    },
+    {
+      "id": "dispute_resolution",
+      "heading": "Dispute Resolution",
+      "label": "Dispute Resolution (the forum is a drafting decision: arbitration_forum)",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "list_of_schedules",
+      "heading": "List of Schedules",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "signature_page",
+      "heading": "Signature Page",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Signature Pages"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_a",
+      "heading": "Schedule A – Scope Of The Project",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Scope Of The Project"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_b",
+      "heading": "Schedule B – Specific Definitions",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Specific Definitions"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_c",
+      "heading": "Schedule C – Development Works: Engineering, Design & Construction Drawings",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Development Works: Engineering, Design & Construction Drawings"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_d",
+      "heading": "Schedule D – Project Facilities",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Project Facilities"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_e",
+      "heading": "Schedule E – Project Development Completion Schedule",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Project Development Completion Schedule"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_f",
+      "heading": "Schedule F – Project Site",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Project Site"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_g",
+      "heading": "Schedule G – Completion Tests Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Completion Tests Matters"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_h",
+      "heading": "Schedule H – O&M Requirements",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – O&M Requirements"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_i",
+      "heading": "Schedule I – Insurance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Insurance"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_j",
+      "heading": "Schedule J – Specific Matters Relating To Relief Events",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Specific Matters Relating To Relief Events"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_k",
+      "heading": "Schedule K – Corporate Documents",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Corporate Documents"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_l",
+      "heading": "Schedule L – Financing Matters",
+      "label": "Schedule L (Financing Matters)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "article_12",
+      "when": [
+        "financing"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Financing Matters"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_m",
+      "heading": "Schedule M – Form Of O&M Performance Security",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Form Of O&M Performance Security"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_n_part_i",
+      "heading": "Schedule N – Part I (Indicative Independent Auditor Terms of Reference)",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Part I (Indicative Independent Auditor Terms of Reference)"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_n_part_ii",
+      "heading": "Schedule N – Part II (Indicative Independent Engineer Terms Of Reference)",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Part II (Indicative Independent Engineer Terms Of Reference)"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_o",
+      "heading": "Schedule O – Form Of Vesting Certificate",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Form Of Vesting Certificate"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_p",
+      "heading": "Schedule P – Equity Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Equity Matters"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_q",
+      "heading": "Schedule Q – Price Escalations",
+      "label": "Schedule Q (Price Escalations)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "price_escalation",
+      "when": [
+        "applies"
+      ],
+      "absentWhen": [
+        "none"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Price Escalations"
+      ],
+      "not_used_form": "Not Used",
+      "scan": false
+    },
+    {
+      "id": "schedule_r",
+      "heading": "Schedule R – Revenue Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Revenue Matters"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_s",
+      "heading": "Schedule S – Notices",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Notices"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_t",
+      "heading": "Schedule T – Termination Payments",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Termination Payments"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_u",
+      "heading": "Schedule U – Financial Model",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Financial Model"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_v",
+      "heading": "Schedule V – Illustrations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Illustrations"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_w",
+      "heading": "Schedule W – Agency Financial Instrument And Related Matters",
+      "label": "Schedule W (Agency Financial Instrument)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "agency_instrument",
+      "when": [
+        "provided"
+      ],
+      "absentWhen": [
+        "none"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Agency Financial Instrument And Related Matters"
+      ],
+      "not_used_form": "Not Used",
+      "scan": false
+    },
+    {
+      "id": "schedule_x",
+      "heading": "Schedule X – Change In Control, Change In Complete Control And Change In Shareholding",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Change In Control, Change In Complete Control And Change In Shareholding"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_y",
+      "heading": "Schedule Y – Agency Specific Permits",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Agency Specific Permits"
+      ],
+      "scan": false
+    }
+  ]
+}

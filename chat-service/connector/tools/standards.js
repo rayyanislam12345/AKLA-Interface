@@ -15,7 +15,10 @@
 // library. Nothing is written.
 
 import { z } from "zod";
-import { QUESTIONNAIRES, startQuestionnaire } from "../../questionnaire.js";
+import { questionnaireFor, startQuestionnaire } from "../../questionnaire.js";
+import { withDraftingColumns, DRAFTING_COLUMNS } from "../../draftChecks.js";
+import { skeletonFor, itemsOf } from "../../skeletonCheck.js";
+import { styleSheetKeyFor } from "../../styleSheets/index.js";
 import { MAX_READ_CHARS, DEFAULT_READ_CHARS, str, uuid, when } from "../tools.js";
 import { hubBase } from "../hubLinks.js";
 import { withPackColumns } from "../../draftingPacks.js";
@@ -34,6 +37,20 @@ export function standardLink(documentTypeId, hubUrl) {
 }
 
 export const openStandard = (documentTypeId, hubUrl) => `Open in Hub: ${standardLink(documentTypeId, hubUrl)}`;
+
+/**
+ * The line a list or a read gives a type's style sheet and clause list
+ * (draftChecks.js: the same the Hub's draft prompt carries), or null when
+ * it has neither its own style sheet nor a clause list.
+ */
+export function firmRulesLine(type) {
+  const key = styleSheetKeyFor(type?.name);
+  const skeleton = type ? skeletonFor(type) : null;
+  const parts = [];
+  if (key) parts.push(`its own style sheet ("${key}", on top of the firm-wide one: get_firm_rules with this documentTypeId)`);
+  if (skeleton) parts.push(`a clause list of ${itemsOf(skeleton).length} parts in the firm's order, each always, optional or turned on by a decision (open_standard_for_filling lists it; a filing missing an "always" part is refused)`);
+  return parts.length ? `the firm's rules for it: ${parts.join("; ")}; get_clause_examples gives the firm's own versions of a clause` : null;
+}
 
 /**
  * The standard's text as plain text. A row the site wrote holds extracted
@@ -181,16 +198,18 @@ export default ({ supabase, hubUrl }) => {
     {
       name: "list_document_types",
       title: "List the firm's document types",
-      description: `The document types the Hub knows (Concession Agreement, Share Purchase Agreement, RFP Volume I, …) by category, with their ids, and for each whether the firm holds a Word standard for it (the file, when it was last replaced) and whether it has a drafting questionnaire. Call it before read_standard or get_drafting_decisions, and before drafting a document of a type the firm may have a standard for: the standard, not general knowledge, is what a draft starts from. ${TYPES_PER_PAGE} types a page; the reply says when there is a next page.`,
+      description: `The document types the Hub knows (Concession Agreement, Share Purchase Agreement, RFP Volume I, …) by category, with their ids, and for each whether the firm holds a Word standard for it (the file, when it was last replaced), whether it has a drafting questionnaire, and whether it has its own style sheet and clause list (the parts the firm always has, in order). Call it before read_standard or get_drafting_decisions, and before drafting a document of a type the firm may have a standard for: the standard, not general knowledge, is what a draft starts from. ${TYPES_PER_PAGE} types a page; the reply says when there is a next page.`,
       inputSchema: {
         page: z.number().int().min(1).optional().describe("Which page of the list, from 1. Default 1."),
       },
       async run(input) {
-        const { data, error } = await withPackColumns((withPack) => supabase
+        // With the pack's mode, and each type's clause list and decisions
+        // (each read without its columns until its migration is applied).
+        const { data, error } = await withDraftingColumns((withDrafting) => withPackColumns((withPack) => supabase
           .from("document_types")
-          .select(`id, name, category, questionnaire, standard:document_type_templates(filename, updated_at, storage_path${withPack ? ", pack_mode" : ""})`)
+          .select(`id, name, category, questionnaire${withDrafting ? `, ${DRAFTING_COLUMNS}` : ""}, standard:document_type_templates(filename, updated_at, storage_path${withPack ? ", pack_mode" : ""})`)
           .order("name", { ascending: true })
-          .limit(MAX_TYPES));
+          .limit(MAX_TYPES)));
         if (error) throw new Error(`Could not list the document types: ${error.message}`);
         const types = (data ?? []).map((t) => ({ ...t, standard: oneOf(t.standard) }));
         if (!types.length) return "The Hub has no document types yet.";
@@ -218,12 +237,14 @@ export default ({ supabase, hubUrl }) => {
             if (isPack(s)) out.push(`  ${packLine(s.pack_mode)}`);
             out.push(`  ${openStandard(t.id, hubUrl)}`);
           }
-          const qn = t.questionnaire ? QUESTIONNAIRES[t.questionnaire] : null;
+          const qn = questionnaireFor(t);
           if (qn) out.push(`  drafting questionnaire: ${qn.questions.length} decisions (get_drafting_decisions)`);
+          const rules = firmRulesLine(t);
+          if (rules) out.push(`  ${rules}`);
           blocks.push(out.join("\n"));
         }
         const withStandard = types.filter((t) => t.standard).length;
-        const withQuestions = types.filter((t) => t.questionnaire && QUESTIONNAIRES[t.questionnaire]).length;
+        const withQuestions = types.filter((t) => questionnaireFor(t)).length;
         const withPack = types.filter((t) => isPack(t.standard)).length;
         const head = `${types.length} document type${types.length === 1 ? "" : "s"} on the Hub: ${withStandard} with a standard${withPack ? ` (${withPack} of them a firm pack: a draft of that type is written into the firm's own Word file with open_standard_for_filling and fill_standard_to_project)` : ""}, ${withQuestions} with a drafting questionnaire${pages > 1 ? ` (page ${page} of ${pages})` : ""}. read_standard reads a standard's text; get_drafting_decisions lists a type's drafting decisions.`;
         const tail = page < pages ? `[The list continues: call list_document_types again with page: ${page + 1}.]` : "[End of the list.]";
@@ -233,7 +254,7 @@ export default ({ supabase, hubUrl }) => {
     {
       name: "read_standard",
       title: "Read a firm standard",
-      description: `The text of the firm's standard for one document type (the Word file the Hub fills when it drafts that type), in slices of up to ${MAX_READ_CHARS.toLocaleString("en")} characters, with the format rules the Hub gives its own model (numbering scheme, headings, body font). Use it to draft a document of that type in the firm's own words and order, or to check a clause against the standard. Start at from: 0; the reply says where to continue. list_document_types gives the id and says which types have a standard.`,
+      description: `The text of the firm's standard for one document type (the Word file the Hub fills when it drafts that type), in slices of up to ${MAX_READ_CHARS.toLocaleString("en")} characters, with the format rules the Hub gives its own model (numbering scheme, headings, body font), and whether the type has its own style sheet and clause list (open_standard_for_filling gives both; get_firm_rules the style sheet). Use it to draft a document of that type in the firm's own words and order, or to check a clause against the standard. Start at from: 0; the reply says where to continue. list_document_types gives the id and says which types have a standard.`,
       inputSchema: {
         documentTypeId: z.string().describe("The document type's id, from list_document_types."),
         from: z.number().int().min(0).optional().describe("Character offset to start at. Default 0."),
@@ -261,8 +282,10 @@ export default ({ supabase, hubUrl }) => {
         if (from >= text.length) return `${label} is ${text.length.toLocaleString("en")} characters long; there is nothing at ${from.toLocaleString("en")}.`;
         const end = Math.min(text.length, from + chars);
         const head = [`${label[0].toUpperCase()}${label.slice(1)}, updated ${when(row.updated_at)} — characters ${(from + 1).toLocaleString("en")}–${end.toLocaleString("en")} of ${text.length.toLocaleString("en")}.`];
-        if (type.questionnaire && QUESTIONNAIRES[type.questionnaire]) head.push(`This type has a drafting questionnaire: get_drafting_decisions lists its decisions.`);
+        if (questionnaireFor(type)) head.push(`This type has a drafting questionnaire: get_drafting_decisions lists its decisions.`);
         if (isPack(row)) head.push(`This standard is ${packLine(row.pack_mode)}.`);
+        const firm = firmRulesLine(type);
+        if (firm) head.push(`${firm[0].toUpperCase()}${firm.slice(1)}.`);
         head.push(openStandard(type.id, hubUrl));
         const rules = str(row.format_rules, MAX_RULES_CHARS);
         if (rules) head.push("", `FORMAT RULES (how the Word file is laid out; a draft of this type follows them):\n${rules}`);
@@ -280,9 +303,18 @@ export default ({ supabase, hubUrl }) => {
       },
       async run(input) {
         const id = needTypeId(input);
-        const type = await typeById(id, "id, name, questionnaire, standard:document_type_templates(filename, storage_path)");
+        // The type's own decisions when it has them (read without the column
+        // until 20261021100000 is applied), else its questionnaire key, else
+        // the data file of its name (questionnaire.js questionnaireFor).
+        const type = await withDraftingColumns(async (withDrafting) => {
+          const { data, error } = await supabase.from("document_types").select(`id, name, questionnaire${withDrafting ? ", decisions" : ""}, standard:document_type_templates(filename, storage_path)`).eq("id", id).maybeSingle();
+          return { data, error };
+        }).then(({ data, error }) => {
+          if (error) throw new Error(`Could not read the document type: ${error.message}`);
+          return data ?? null;
+        });
         if (!type) throw new Error("There is no document type with that id. list_document_types gives them.");
-        const questionnaire = type.questionnaire ? QUESTIONNAIRES[type.questionnaire] : null;
+        const questionnaire = questionnaireFor(type);
         if (!questionnaire) return `${type.name} has no drafting questionnaire. list_document_types shows which types have one; a draft of this type starts from read_standard and the facts the lawyer gives.`;
         const from = Number.isInteger(input.from) && input.from > 0 ? input.from : 1;
         return decisionsText(questionnaire, { type, standard: oneOf(type.standard), hubUrl, from });

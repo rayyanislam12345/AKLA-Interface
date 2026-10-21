@@ -61,3 +61,75 @@ export function lookingUpRules({ toolNames, matterId = null, editTools = false }
 export function citingRules({ withTools = false } = {}) {
   return `CITING: every passage you are shown — retrieved for this message${withTools ? ", returned by a tool," : ""} or listed under EARLIER SOURCES IN THIS CHAT — carries a number that stays the same for the whole chat. Cite it as [Source n] with exactly that number, and only numbers you have been shown. Quote statutory text only from a passage in front of you, word for word${withTools ? "; to quote a provision you have not been shown in full, read it with read_act_section first" : ""}. A source cited earlier in this chat is still valid: do not withdraw or flag a citation because the passage was not retrieved again this turn — it is listed under EARLIER SOURCES IN THIS CHAT${withTools ? ", or reopen it with the tools" : ""}.`;
 }
+
+/**
+ * HOW THE FIRM WRITES: the style sheets (styleSheets/*.json, read once when
+ * this module is imported) as prompt text. FIRM_STYLE_CORE is the
+ * firm-wide sheet; styleSheetText(kindOrTypeName) is the core plus the
+ * family for a kind of document ("Escrow Agreement", "escrow", "RFP Volume
+ * I"), or the core alone for a kind that has no sheet. Both go next to
+ * FILL_INSTRUCTIONS in a draft turn and into the connector's get_firm_rules,
+ * so the Hub and claude.ai write to the same sheet; proofCheck.js
+ * runWordingCheck checks a draft against the same data.
+ */
+import { CORE as STYLE_CORE, FAMILY_SHEETS, TYPE_STYLE_SHEETS, styleSheetFor, styleSheetKeyFor } from "./styleSheets/index.js";
+
+export { TYPE_STYLE_SHEETS, styleSheetFor, styleSheetKeyFor };
+
+const STYLE_SECTIONS = [
+  ["voice", "Voice"], ["spelling", "Spelling"], ["defined_terms", "Defined terms"], ["numbers", "Numbers"],
+  ["money", "Money"], ["dates", "Dates"], ["placeholder", "Unknowns"], ["cross_refs", "Cross-references"],
+  ["headings", "Headings"], ["obligations", "Obligations"], ["statutes", "Statutes"], ["government", "Government"],
+];
+
+function styleLines(sheet) {
+  const lines = [];
+  for (const [key, label] of STYLE_SECTIONS) {
+    const s = sheet[key];
+    if (!s || typeof s !== "object") continue;
+    const bits = [];
+    if (s.rule) bits.push(s.rule);
+    const examples = s.examples ?? (s.example ? [s.example] : []);
+    if (examples.length && key !== "spelling") bits.push(`As in: ${examples.join("; ")}.`);
+    if (s.pointer_formula) bits.push(`Pointer: “${s.pointer_formula}”.`);
+    if (s.lead_in) bits.push(`Lead-in: “${s.lead_in}”`);
+    if (s.preamble) bits.push(`Preamble date: “${s.preamble}”.`);
+    if (s.cover) bits.push(`Cover: “${s.cover}”.`);
+    if (s.line) bits.push(`Date line: “${s.line}”.`);
+    if (bits.length) lines.push(`- ${label}: ${bits.join(" ")}`);
+  }
+  const formulae = Object.entries(sheet.formulae ?? {});
+  if (formulae.length) {
+    lines.push("- Formulae, word for word ([●] for the deal's facts):");
+    for (const [name, v] of formulae) lines.push(`  · ${name.replace(/_/g, " ")}: ${v.text ?? v}`);
+  }
+  const never = (sheet.banned ?? []).map((b) => b.reason).filter(Boolean);
+  if (never.length) lines.push(`- Never: ${never.join(" ")}`);
+  for (const n of sheet.notes ?? []) lines.push(`- ${n}`);
+  return lines;
+}
+
+/** The firm-wide style sheet as prompt text. */
+export const FIRM_STYLE_CORE = [
+  "HOW THE FIRM WRITES (every document; a lawyer may ask for an exception):",
+  ...styleLines(STYLE_CORE),
+  `- Another firm's draft shows: ${(STYLE_CORE.tells_of_counterparty ?? []).map((t) => t.tell).join("; ")}. In a counterparty's draft these are its conventions; in the firm's draft they are slips.`,
+].join("\n");
+
+/**
+ * The style sheet for a kind of document as prompt text: the firm-wide core
+ * and, when the kind has a sheet, what differs for it.
+ * @param {string|null} kindOrTypeName a style-sheet key, pack name or document type name
+ */
+export function styleSheetText(kindOrTypeName) {
+  const key = styleSheetKeyFor(kindOrTypeName);
+  if (!key) return FIRM_STYLE_CORE;
+  const family = FAMILY_SHEETS[key];
+  // The family's own lines only; where it turns a firm-wide rule off, say so.
+  const own = { ...family, banned: (family.banned ?? []) };
+  const lines = [`FOR ${String(family.title ?? key).toUpperCase()} (on top of the firm-wide rules; where they differ, these win):`, ...styleLines(own)];
+  if (family.voice?.we_allowed) lines.push("- \"we\" is allowed here: the document speaks in its signatory's voice.");
+  const tells = (family.tells_of_counterparty ?? []).map((t) => t.tell);
+  if (tells.length) lines.push(`- Another firm's draft of this kind shows: ${tells.join("; ")}.`);
+  return `${FIRM_STYLE_CORE}\n\n${lines.join("\n")}`;
+}

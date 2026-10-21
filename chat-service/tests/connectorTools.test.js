@@ -119,7 +119,7 @@ test('the modules under connector/tools/ register after the built-in eight, in f
   // The whole directory, every slice 1 to 4 tool, exactly as tools.js lists them.
   assert.deepEqual(names.slice(BUILT_IN_TOOL_NAMES.length), [...MODULE_TOOL_NAMES]);
   assert.deepEqual(names, [...ALL_TOOL_NAMES]);
-  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'documentInsight.js', 'fillStandard.js', 'fillStandardWrite.js', 'firmRules.js', 'housekeeping.js', 'markup.js', 'precedents.js', 'projects.js', 'saves.js', 'searchEverything.js', 'skills.js', 'standards.js', 'textChecks.js']);
+  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'clauses.js', 'documentInsight.js', 'fillStandard.js', 'fillStandardWrite.js', 'firmRules.js', 'housekeeping.js', 'markup.js', 'precedents.js', 'projects.js', 'saves.js', 'searchEverything.js', 'skills.js', 'standards.js', 'textChecks.js']);
   // The write tools, exactly as tools.js pins them: each marked write with
   // annotations that make claude.ai ask first; every other tool read-only.
   assert.deepEqual(list.filter((t) => t.write === true).map((t) => t.name), [...WRITE_TOOL_NAMES]);

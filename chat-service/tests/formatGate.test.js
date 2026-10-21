@@ -304,7 +304,9 @@ test('every Word fill path runs the gate before it stores, and the untrue "expor
   const upload = server.indexOf('.upload(storagePath, out.bytes', accept);
   assert.ok(accept > 0 && gate > accept && upload > gate, 'docx turn: accept, gate, upload');
   // Rows and the copy are written only inside the store storeUnlessRefused runs.
-  const gated = server.indexOf('const gated = await storeUnlessRefused(format, async () => {', gate);
+  // The store runs behind the format gate and the clause-list check together (draftChecks.js draftGate).
+  assert.ok(server.indexOf('const gate = draftGate(format, clauses, auto?.wording.line ?? "");', gate) > gate);
+  const gated = server.indexOf('const gated = await storeUnlessRefused(gate, async () => {', gate);
   assert.ok(gated > gate && gated < server.indexOf('editRecords(', gate) && server.indexOf('formatRefused = gated.refused;', gated) > upload, 'docx turn: rows and upload inside the gated store');
   assert.match(server.slice(gate, gated), /subject: docxBase\.bucket === "precedent-library" \? "the firm's standard" : "the version it was made from"/, 'only a file read from the library is the firm\'s standard');
   assert.match(server.slice(gate, gated), /variableParagraphs: variableLinesFor\(aligned, docxBase\.inspection\.byRef\)/);

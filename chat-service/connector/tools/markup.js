@@ -47,11 +47,12 @@ import { MAX_RESULT_CHARS, str, uuid } from "../tools.js";
 import { inspectDocx, applyDocxOps, acceptChangesBy, describeResults, OPS_PROTOCOL, DOCX_AUTHOR } from "../../docxAgent.js";
 import { alignCommentExpectations } from "../../libraryTools.js";
 import { checkFormat, variableLinesFor } from "../../formatFingerprint.js";
-import { findRevisions, countsWith, cleanRefusal, reconcile, placementNote, codeFor, stateOf } from "../../changes.js";
+import { findRevisions, countsWith, cleanRefusal, reconcile, placementNote, codeFor, stateOf, recordedResults } from "../../changes.js";
 import {
   workingFileOf, downloadFile, versionRows, highestRecordedVersionId, latestVersionOf, versionEditRows, carryForward, isWordPath,
 } from "../../versionChanges.js";
-import { readOps, sha256, MAX_OPS, MAX_OP_TEXT_CHARS, APPLY_TIMEOUT_MS, DOCX_MIME, OP_KINDS } from "./fillStandardWrite.js";
+import { readOps, readConfirmed, sha256, MAX_OPS, MAX_OP_TEXT_CHARS, APPLY_TIMEOUT_MS, DOCX_MIME, OP_KINDS } from "./fillStandardWrite.js";
+import { draftingTypeOf, draftingOf, autoCommentOps, skeletonGate, connectorConfirmSentence } from "../../draftChecks.js";
 import { rangeListing, MAX_RANGE } from "./fillStandard.js";
 
 export const SHOW_TOOL = "show_document_paragraphs";
@@ -390,7 +391,7 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
     {
       name: MARKUP_TOOL,
       title: "Mark up a Word document as tracked changes",
-      description: `Write changes into a project's Word document as real tracked changes by "AKLA AI" (and remarks as "AKLA Comments" margin comments), in the lawyer's own file, and file the result as the NEXT version of the same document; nothing is accepted, and the lawyer accepts or rejects each change in the Hub's Changes list beside the chat or in Word. Styles, numbering, tables and headers stay as they are. Use it after ${SHOW_TOOL}, with the ¶ numbers, the exact paragraph text and the fileHash it printed; say what you will change and wait for the lawyer's yes. It always saves a NEW version, never over one, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. Refused, with nothing saved, if the file changed since it was listed (a different fileHash), if a newer version of the document exists, or if the result's format differs from the version it was made from. At most ${MAX_OPS} changes a call; each must quote its paragraph's exact current text in expected, so a stale listing changes nothing. One mark-up runs on the Hub at a time. Returns each change made, each that could not be made and why, the new version's id and its Hub page. Filing is not legal approval.`,
+      description: `Write changes into a project's Word document as real tracked changes by "AKLA AI" (and remarks as "AKLA Comments" margin comments), in the lawyer's own file, and file the result as the NEXT version of the same document; nothing is accepted, and the lawyer accepts or rejects each change in the Hub's Changes list beside the chat or in Word. Styles, numbering, tables and headers stay as they are. Use it after ${SHOW_TOOL}, with the ¶ numbers, the exact paragraph text and the fileHash it printed; say what you will change and wait for the lawyer's yes. It always saves a NEW version, never over one, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. Refused, with nothing saved, if the file changed since it was listed (a different fileHash), if a newer version of the document exists, or if the result's format differs from the version it was made from. At most ${MAX_OPS} changes a call; each must quote its paragraph's exact current text in expected, so a stale listing changes nothing. One mark-up runs on the Hub at a time. When the document is of a type with a firm clause list, a change that takes out a part the firm always has is refused, naming its id; send it again with confirmedOmissions only once the lawyer confirms. Each wording point in the text you write (not the document's own words) gets an AKLA comment against the firm's style sheet, and a new heading not on the clause list the "New clause" comment; neither stops the filing. Returns each change made, each that could not be made and why, the new version's id and its Hub page. Filing is not legal approval.`,
       inputSchema: {
         versionId: z.string().describe(`The version ${SHOW_TOOL} listed.`),
         ops: z.array(z.object({
@@ -403,6 +404,7 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
         fileHash: z.string().describe(`The fileHash ${SHOW_TOOL} printed.`),
         label: z.string().optional().describe("Optional: a short label for the new version, e.g. \"Our comments on the client's draft\". \"Marked up in claude.ai\" and the date are added."),
         instruction: z.string().max(MAX_INSTRUCTION_CHARS).optional().describe("Optional: the lawyer's instruction in a line (\"cap liability at fees paid\"); shown as the reason of any change sent without its own why."),
+        confirmedOmissions: z.array(z.string()).optional().describe("Only after a refusal for a part the firm always has, and only once the lawyer confirms it may be taken out: the clause-list ids the refusal named."),
       },
       write: true,
       annotations: WRITE,
@@ -418,6 +420,7 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
           const fileHash = typeof input.fileHash === "string" && SHA256_RE.test(input.fileHash.trim()) ? input.fileHash.trim().toLowerCase() : null;
           if (!fileHash) throw new Error(`fileHash must be the file's fingerprint (a 64-character sha256) as ${SHOW_TOOL} printed it.`);
           const label = str(input.label, MAX_LABEL_CHARS);
+          const confirmedOmissions = readConfirmed(input.confirmedOmissions);
           const version = await wordVersion(input);
           const doc = version.matter_document;
           const matter = doc.matter;
@@ -437,11 +440,17 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
           // the listing printed), a comment quoting a paragraph the same
           // call rewrites accepted in either wording, the changes under the
           // deadline with ids above every id this document has used.
-          let out, inspection, aligned;
+          // The firm's rules for the document's kind (draftChecks.js): its
+          // style sheet (the firm-wide one when it has no type) and clause list.
+          const drafting = draftingOf(doc.document_type?.id ? await draftingTypeOf(supabase, doc.document_type.id).catch(() => doc.document_type) : doc.document_type ?? null);
+          let out, inspection, aligned, auto;
           const t0 = now();
           try {
             inspection = inspectDocx(bytes, { budget: Infinity });
-            aligned = alignCommentExpectations(ops, inspection.byRef);
+            // Their comments go into the same pass: one per wording point in
+            // the text this call writes, and "New clause" on a new heading.
+            auto = autoCommentOps({ ops, skeleton: drafting.skeleton, styleSheet: drafting.styleSheet, more: `check_text on the text you wrote${drafting.typeId ? ` with documentTypeId ${drafting.typeId}` : ""} lists them all` });
+            aligned = alignCommentExpectations([...ops, ...auto.ops], inspection.byRef);
             const idFloor = Math.max(9000, await highestRecordedVersionId(supabase, doc.id));
             out = await applyWithDeadline(bytes, aligned, inspection.byRef, idFloor);
           } catch (err) {
@@ -451,10 +460,12 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
             busy = false; locked = false;
           }
           const applyMs = now() - t0;
-          const described = describeResults(out.results);
+          // The changes sent; the comments the rules added are counted in
+          // their own lines below.
+          const described = describeResults(out.results.filter((r) => (r.i ?? 0) < ops.length));
           const made = described.filter((c) => c.status === "applied");
           const notMade = described.filter((c) => c.status !== "applied");
-          if (out.applied === 0) {
+          if (!out.results.some((r) => (r.i ?? 0) < ops.length && r.status === "applied")) {
             await record({ versionId: version.id, outcome: "refused" });
             const why = notMade.slice(0, 5).map((c) => `${c.summary} — ${placementNote(codeFor(c.reason)) ?? c.reason}`).join("; ");
             throw new Error(`None of the ${ops.length} ${plural(ops.length, "change")} could be made, so nothing was saved: ${why}. Call ${SHOW_TOOL} again and quote each paragraph's exact current text in expected.`);
@@ -468,6 +479,19 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
           if (gate.refused) {
             await record({ versionId: version.id, outcome: "refused" });
             throw new Error(`${gate.text} v${version.version_number} is unchanged.`);
+          }
+
+          // The clause list (draftChecks.js skeletonGate): a part the firm
+          // always has that this mark-up takes out is refused until the
+          // lawyer confirms it; a part the version never had is not this
+          // mark-up's doing.
+          const clauses = skeletonGate({
+            bytes: out.bytes, baseBytes: bytes, skeleton: drafting.skeleton, confirmedOmissions, full: false,
+            typeName: drafting.typeName, ops, confirmHow: connectorConfirmSentence(MARKUP_TOOL),
+          });
+          if (clauses?.refused) {
+            await record({ versionId: version.id, outcome: "refused" });
+            throw new Error(`${clauses.text} v${version.version_number} is unchanged.`);
           }
 
           // The file must still be the one marked up: a decision in the Hub
@@ -509,6 +533,8 @@ export function createMarkupTools(deps, { apply = applyDocxOps, applyTimeoutMs =
           }
           lines.push(
             gate.text,
+            ...(clauses?.line ? [clauses.line] : []),
+            ...(auto?.wording.line ? [auto.wording.line] : []),
             rowsLine,
             `documentId: ${doc.id}`,
             `versionId: ${saved.versionId}`,
@@ -651,7 +677,7 @@ async function recordRows({ supabase, version, saved, bytes, results, userId, lo
       const confirmed = new Set((data ?? []).map((r) => r.id));
       // A change made now carries its row's id, so reconcile can name the
       // row that took an earlier change over.
-      const textResults = results.filter((r) => ["replace", "insert_after", "delete"].includes(String(r.kind ?? "").toLowerCase()) && !(r.status === "applied" && r.removedIds?.length && !r.revisionIds?.length));
+      const textResults = recordedResults(results);
       if (textResults.length === rows.length) textResults.forEach((r, k) => { if (confirmed.has(rows[k].id)) r.rowId = rows[k].id; });
     }
     for (const { id, patch } of carried) await supabase.from("redline_suggestions").update(patch).eq("id", id);

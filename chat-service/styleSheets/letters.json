@@ -1,0 +1,135 @@
+{
+  "key": "letters",
+  "title": "Letters and notices",
+  "types": [
+    "Letter / Notice"
+  ],
+  "packs": [
+    "letters"
+  ],
+  "kind": "letter",
+  "voice": {
+    "we_allowed": true,
+    "rule": "A letter the firm drafts for a client speaks in the client's voice: \"We, [●] (the [role]), refer you, the [addressee], to the following:\"; \"you\" is the addressee. A letter in the firm's own name speaks as \"the Firm\" (Ali Khan Law Associates (the Firm)).",
+    "source": [
+      "EWPL20",
+      "EWPL2",
+      "ADB55.1"
+    ]
+  },
+  "cross_refs": {
+    "words": null,
+    "heading_required": false,
+    "rule": "Refer to a provision of the instrument with its own word and, where known, its heading: Schedule W (Proposed Detailed Design Approval Process) of the Concession Agreement.",
+    "source": [
+      "EWPL20"
+    ]
+  },
+  "dates": {
+    "line": "Dated: [Month DD, YYYY]",
+    "source": [
+      "EWPL20 (15 zero-padded, 0 unpadded)"
+    ]
+  },
+  "headings": {
+    "rule": "The Subject line is bold Title Case with small words capitalised: Subject: ⇥Alleged Unilateral Change Of [●].",
+    "source": [
+      "EWPL20"
+    ]
+  },
+  "defined_terms": {
+    "pointer_formula": "(Unless otherwise defined herein, all capitalised terms shall have the meanings ascribed to them under [●].)",
+    "rule": "Bold in brackets without quotation marks (31 of 31 in the firm's letters); a document's title goes in single quotes: the instrument entitled ‘[●]’ dated [●].",
+    "source": [
+      "EWPL20",
+      "letters folder"
+    ]
+  },
+  "formulae": {
+    "header": {
+      "text": "[To be printed on [●]'s letterhead] — when the firm writes on a client's behalf there is no client header or footer.",
+      "source": [
+        "Decisions 20 Oct 2026"
+      ]
+    },
+    "ref_dated_to": {
+      "text": "Ref: [●] / Dated: [●] / To, / [designation] / [address, ending Pakistan.]",
+      "source": [
+        "EWPL20",
+        "letter pack"
+      ]
+    },
+    "subject": {
+      "text": "Subject: ⇥[●]",
+      "source": [
+        "EWPL20"
+      ]
+    },
+    "salutation": {
+      "text": "Usually none; \"Dear Sir,\" where the letter is personal. Never \"Dear Sir/Madam\".",
+      "source": [
+        "EWPL20",
+        "EWPL17"
+      ]
+    },
+    "opening": {
+      "text": "We, [●] (the [●]), refer you, the [●], to the following:",
+      "source": [
+        "EWPL20",
+        "EWPL2"
+      ]
+    },
+    "recital_limbs": {
+      "text": "the letter issued by the [●] ‘No. [●]’ dated [●] (the [●]); … ; and",
+      "source": [
+        "EWPL20"
+      ]
+    },
+    "reservation": {
+      "text": "This letter is issued without prejudice to all rights, remedies, claims, and defences available to [●], all of which are expressly reserved.",
+      "source": [
+        "EWPL20"
+      ]
+    },
+    "signature": {
+      "text": "For And On Behalf Of / [entity] / ___________ / [Name] / [Designation] / [entity]",
+      "source": [
+        "EWPL20",
+        "letter pack"
+      ]
+    },
+    "enclosures": {
+      "text": "Attachments: (bold) with numbered items; Copy To: (bold) with numbered items ending \"; and\".",
+      "source": [
+        "EWPL20"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "yours",
+      "pattern": "\\bYours\\s+(?:sincerely|faithfully|truly)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm's letters close with the reservation line and the signature block, not \"Yours sincerely\".",
+      "source": [
+        "letters folder (no complimentary close in any letter)"
+      ]
+    },
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ],
+  "off": [
+    "voice_we"
+  ]
+}

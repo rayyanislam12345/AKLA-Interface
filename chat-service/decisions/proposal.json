@@ -1,0 +1,91 @@
+{
+  "key": "proposal",
+  "typeName": "Client Proposal Letter",
+  "source": "Derived 20 October 2026 from the proposal clause list (skeletons/proposal.json) and the firm's six proposals.",
+  "name": "Client proposal drafting decisions",
+  "documentLabel": "PROPOSAL",
+  "applyWhere": "the boxed section named above, the annexures and the fee tables",
+  "closing": "That completes the drafting decisions. What remains are the proposal's facts — the client, the date, the scope, the deliverables and fees, the assumptions particular to this engagement, and the team. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "proposal_form",
+      "section": "Form",
+      "title": "Form of the proposal",
+      "question": "Is this a full proposal or a supplementary (fee-only) proposal?",
+      "location": "The boxed sections and Annexures A and C",
+      "basis": "The firm's full proposals carry Scope Of Work, Assumptions and Limitation Of Liability with their annexures; supplementary and fee-only proposals carry the introduction, the fees and the acceptance.",
+      "options": [
+        {
+          "id": "full",
+          "label": "A full proposal"
+        },
+        {
+          "id": "supplementary",
+          "label": "A supplementary or fee-only proposal"
+        }
+      ]
+    },
+    {
+      "id": "currency",
+      "section": "Fees",
+      "title": "Currency of the fees",
+      "question": "In what currency are the fees?",
+      "location": "Professional Fees, Expenses, And Taxes; Annexure B fee tables (\"USD [●]/-\")",
+      "basis": "The firm's proposals are in US dollars for international clients and Pakistani rupees for local ones.",
+      "options": [
+        {
+          "id": "usd",
+          "label": "US dollars"
+        },
+        {
+          "id": "pkr",
+          "label": "Pakistani rupees"
+        }
+      ]
+    },
+    {
+      "id": "fee_basis",
+      "section": "Fees",
+      "title": "Fee basis",
+      "question": "How are the fees structured?",
+      "location": "Annexure B (Professional Fees, Expenses, And Taxes)",
+      "basis": "The firm's proposals price by deliverable within phases, by engagement period, or as a lump sum.",
+      "options": [
+        {
+          "id": "phased",
+          "label": "By deliverable, phase by phase"
+        },
+        {
+          "id": "periods",
+          "label": "By engagement period"
+        },
+        {
+          "id": "lump_sum",
+          "label": "One lump sum"
+        },
+        {
+          "id": "hourly",
+          "label": "Hourly rates"
+        }
+      ]
+    },
+    {
+      "id": "team_annexure",
+      "section": "Annexures",
+      "title": "Team annexure",
+      "question": "Should the proposal carry the team's profiles?",
+      "location": "Annexure D (Team Members Of The Firm)",
+      "basis": "One of the firm's six proposals carries it.",
+      "options": [
+        {
+          "id": "include",
+          "label": "Yes — add Annexure D"
+        },
+        {
+          "id": "omit",
+          "label": "No"
+        }
+      ]
+    }
+  ]
+}

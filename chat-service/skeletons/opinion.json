@@ -1,0 +1,179 @@
+{
+  "key": "opinion",
+  "typeName": "Legal Opinion",
+  "source": "Derived 20 October 2026 from the approved legal opinion pack (5 Packs to check/05 legal opinion, a shell cut from the firm's October 2026 opinion on a termination and release agreement, the owner's chosen base) and the firm's five other opinions: a transaction opinion runs Introduction, Documents Reviewed, Opinion, Assumptions, Qualifications, Benefit Of This Opinion; an advisory opinion runs Query, Documents Reviewed, Opinion, Qualifications (decision opinion_form). Fixed parts (Dated, To, addressee, Subject, signature) are found by kind and words.",
+  "completeLevels": [],
+  "headingKinds": {
+    "h1": 1,
+    "annexure_heading": 1
+  },
+  "items": [
+    {
+      "id": "dated",
+      "heading": "Dated line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "dated_line",
+      "pattern": "^dated?\\s*[:.]?(?:\\s|$)"
+    },
+    {
+      "id": "to",
+      "heading": "To line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "to_line",
+      "pattern": "^to\\s*,?\\s*$"
+    },
+    {
+      "id": "addressee",
+      "heading": "Addressee",
+      "label": "addressee",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "addressee"
+    },
+    {
+      "id": "salutation",
+      "heading": "Salutation",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "salutation",
+      "pattern": "^dear\\b"
+    },
+    {
+      "id": "subject",
+      "heading": "Subject line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "subject_line",
+      "pattern": "^(?:subject|re)\\s*:"
+    },
+    {
+      "id": "definitions_note",
+      "heading": "Definitions note",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "definitions_note",
+      "pattern": "^\\(?\\s*unless otherwise defined"
+    },
+    {
+      "id": "introduction",
+      "heading": "Introduction",
+      "level": 1,
+      "presence": "decision",
+      "decision": "opinion_form",
+      "when": [
+        "transaction"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Pakistan Legal Counsel"
+      ]
+    },
+    {
+      "id": "query",
+      "heading": "Query",
+      "level": 1,
+      "presence": "decision",
+      "decision": "opinion_form",
+      "when": [
+        "advisory"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Queries",
+        "The Query"
+      ]
+    },
+    {
+      "id": "documents_reviewed",
+      "heading": "Documents Reviewed",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Documents Reviewed And Transaction Documents",
+        "Reviewed Documents",
+        "Documents Examined"
+      ]
+    },
+    {
+      "id": "opinion",
+      "heading": "Opinion",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Opinions",
+        "Brief Answer Of The Query",
+        "Brief Answer",
+        "Opinion I"
+      ]
+    },
+    {
+      "id": "assumptions",
+      "heading": "Assumptions",
+      "level": 1,
+      "presence": "decision",
+      "decision": "opinion_form",
+      "when": [
+        "transaction"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "qualifications",
+      "heading": "Qualifications",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Qualifications And Limitations"
+      ]
+    },
+    {
+      "id": "benefit",
+      "heading": "Benefit Of This Opinion",
+      "level": 1,
+      "presence": "decision",
+      "decision": "opinion_form",
+      "when": [
+        "transaction"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Reliance",
+        "Benefit Of Opinion"
+      ]
+    },
+    {
+      "id": "signature",
+      "heading": "Signature block",
+      "label": "signature block",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "pattern": "^(?:sincerely yours|yours (?:faithfully|sincerely|truly)|for\\s*(?:and|&)\\s*on\\s+behalf\\s+of\\b|[._…]{6,})",
+      "inTable": true
+    },
+    {
+      "id": "annexure",
+      "heading": "Annexure [●]",
+      "label": "annexure",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Annexure [●] – [●]",
+        "Schedule [●] – [●]",
+        "Exhibit [●] – [●]"
+      ]
+    }
+  ]
+}

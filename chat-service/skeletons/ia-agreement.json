@@ -1,0 +1,518 @@
+{
+  "key": "ia-agreement",
+  "typeName": "Independent Auditors' Agreement",
+  "source": "Derived 20 October 2026 from the approved IA agreement pack (5 Packs to check/04b IA agreement, cut from the firm's June 2026 IA agreement) by reading its headings with skeletonCheck.js, and compared with the IE agreement, which has the same frame. Presence: an article (level 1) is \"always\" when every firm precedent of the family read for the study has it, \"optional\" when it belongs to one deal or one form, and \"decision\" when a drafting decision (decisions/ia-agreement.json) turns it on or off. Sections (level 2) are the pack's own, all optional except the ones every precedent has; they are listed so that a section the firm already uses is never reported as a new clause.",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "headingKinds": {
+    "h1": 1,
+    "h2": 2,
+    "schedule_heading": 1,
+    "signature_pages_heading": 1
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "The Independent Auditor Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Independent Auditor Agreement",
+        "Independent Auditors' Agreement"
+      ]
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions_and_interpretation",
+      "heading": "Definitions & Interpretation",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions",
+      "heading": "Definitions",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "interpretation",
+      "heading": "Interpretation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "term",
+      "heading": "Term",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "the_appointment",
+      "heading": "The Appointment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "term_and_extension",
+      "heading": "Term and Extension",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "reliance",
+      "heading": "Reliance",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "services_and_related_matters",
+      "heading": "Services & Related Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "general",
+      "heading": "General",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "performance_of_obligations_of_independent_audito",
+      "heading": "Performance of obligations of Independent Auditor Under the Concession Documents",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_financial_model",
+      "heading": "The Financial Model",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_phases",
+      "heading": "The Phases",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "other_key_matters_relating_to_services",
+      "heading": "Other Key Matters Relating to Services",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "concessionaires_cooperation",
+      "heading": "Concessionaire’s Cooperation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "sub_contracting",
+      "heading": "Sub-Contracting",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fee",
+      "heading": "Fee",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "monthly_fee",
+      "heading": "Monthly Fee",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fee_for_phase_iii",
+      "heading": "Fee for Phase III",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "taxes",
+      "heading": "Taxes",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fee_increase",
+      "heading": "Fee Increase",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "out_of_pocket_expenses",
+      "heading": "Out of Pocket Expenses",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "invoicing_and_payment",
+      "heading": "Invoicing and Payment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "funding_of_the_concessionaire_independent_audito",
+      "heading": "Funding of the Concessionaire Independent Auditor Payment Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independent_auditor_s_personnel",
+      "heading": "Independent Auditor’s Personnel",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "authorized_signatories",
+      "heading": "Authorized Signatories",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "authorized_representative",
+      "heading": "Authorized Representative",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independent_auditors_responsibility",
+      "heading": "Independent Auditor’s Responsibility",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "conflict_of_interest_ethical_standards_independe",
+      "heading": "Conflict of Interest, Ethical Standards, Independence & Standard of Care",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "conflict_of_interest",
+      "heading": "Conflict of Interest",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "ethical_standards",
+      "heading": "Ethical Standards",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independence",
+      "heading": "Independence",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "standard_of_care",
+      "heading": "Standard of Care",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "bribes_and_integrity",
+      "heading": "Bribes and integrity",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "assignment",
+      "heading": "Assignment",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "restriction_on_assignment",
+      "heading": "Restriction on Assignment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "permitted_assignment",
+      "heading": "Permitted Assignment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "termination",
+      "heading": "Termination",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "termination__termination",
+      "heading": "Termination",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "insurance",
+      "heading": "Insurance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "insurance__insurance",
+      "heading": "Insurance",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "representations",
+      "heading": "Representations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "representations__representations",
+      "heading": "Representations",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality",
+      "heading": "Confidentiality",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality__confidentiality",
+      "heading": "Confidentiality",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "usage",
+      "heading": "Usage",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "communications_and_notices",
+      "heading": "Communications & Notices",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "successors_in_interest",
+      "heading": "Successors in Interest",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "force_majeure_event",
+      "heading": "Force Majeure Event",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "indemnities",
+      "heading": "Indemnities",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "limitation_of_liability",
+      "heading": "Limitation of Liability",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "amendment",
+      "heading": "Amendment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "invalidity_and_severability",
+      "heading": "Invalidity & Severability",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law",
+      "heading": "Governing Law",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "dispute_resolution",
+      "heading": "Dispute Resolution",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "counterparts",
+      "heading": "Counterparts",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "no_partnership",
+      "heading": "No Partnership",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "waiver",
+      "heading": "Waiver",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "schedule_terms_of_reference",
+      "heading": "Schedule A – Terms of Reference",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Terms of Reference"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_clarifications",
+      "heading": "Schedule B – Clarifications to the Terms of Reference -Methodologies & Parameters",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Clarifications to the Terms of Reference -Methodologies & Parameters"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_notices",
+      "heading": "Schedule C – Notices",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Notices"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_standing_instructions",
+      "heading": "Schedule D – Form of Concessionaire Independent Auditor Payment Account Standing Instructions",
+      "level": 1,
+      "presence": "decision",
+      "decision": "payment_account",
+      "when": [
+        "account"
+      ],
+      "absentWhen": [
+        "direct"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Form of Concessionaire Independent Auditor Payment Account Standing Instructions"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_toll_audit",
+      "heading": "Schedule E – Toll Revenue & Collection Audit",
+      "level": 1,
+      "presence": "decision",
+      "decision": "toll_audit",
+      "when": [
+        "include"
+      ],
+      "absentWhen": [
+        "omit"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Toll Revenue & Collection Audit"
+      ],
+      "scan": false
+    },
+    {
+      "id": "signature_pages",
+      "heading": "Signature Page",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    }
+  ]
+}

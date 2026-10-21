@@ -1,0 +1,430 @@
+{
+  "key": "framework",
+  "typeName": "Framework Agreement",
+  "source": "Derived 20 October 2026 from the approved framework agreement pack (5 Packs to check/03 framework agreement, cut from the firm's November 2025 framework agreement, the owner's chosen base) by reading its headings with skeletonCheck.js. Its deal-specific articles (an earlier option agreement, a project company, a lease transfer, surrender and first refusal) are decisions or optional; the investment agency agreement read beside it is a different form (appointment, duties, resignation) and is not merged. Presence: an article (level 1) is \"always\" when every firm precedent of the family read for the study has it, \"optional\" when it belongs to one deal or one form, and \"decision\" when a drafting decision (decisions/framework.json) turns it on or off. Sections (level 2) are the pack's own, all optional except the ones every precedent has; they are listed so that a section the firm already uses is never reported as a new clause.",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "headingKinds": {
+    "h1": 1,
+    "h2": 2,
+    "schedule_heading": 1,
+    "signature_pages_heading": 1
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "Framework Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "[●] Framework Agreement",
+        "Agency Agreement",
+        "[●] Agency Agreement"
+      ]
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions_and_interpretation",
+      "heading": "Definitions & Interpretation",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions",
+      "heading": "Definitions",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "interpretation",
+      "heading": "Interpretation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "prior_agreement_article",
+      "heading": "Original Option Agreement & Matters Relating to Same",
+      "level": 1,
+      "presence": "decision",
+      "decision": "prior_agreement",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "grant_of_rights",
+      "heading": "Grant Of Rights",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "spv_article",
+      "heading": "Mining SPV & Related Critical Matters",
+      "level": 1,
+      "presence": "decision",
+      "decision": "spv",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "establishment_and_incorporation",
+      "heading": "Establishment & Incorporation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_board",
+      "heading": "The Board",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_management_and_advisors",
+      "heading": "The Management & Advisors",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "mining_spv_initial_shareholding_structure",
+      "heading": "Mining SPV Initial Shareholding Structure",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "party_b_support_and_royalty_payments",
+      "heading": "Party B Support & Royalty Payments",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "disclosures_and_filings",
+      "heading": "Disclosures & Filings",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "key_terms_of_the_royalty_agreement",
+      "heading": "Key Terms Of The Royalty Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "mining_lease_transfer",
+      "heading": "Mining Lease Transfer",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "surrender_of_rights_and_right_of_first_refusal",
+      "heading": "Surrender Of Rights & Right Of First Refusal",
+      "level": 1,
+      "presence": "decision",
+      "decision": "rofr",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "party_as_voluntary_surrender_of_rights",
+      "heading": "Party A’s Voluntary Surrender of Rights",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "right_of_first_refusal",
+      "heading": "Right Of First Refusal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "related_matters",
+      "heading": "Related Matters",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_definitive_documents",
+      "heading": "The Definitive Documents",
+      "level": 1,
+      "presence": "decision",
+      "decision": "definitive_documents",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "permission_to_carry_out_activities_immediately",
+      "heading": "Permission To Carry Out Activities Immediately",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "covenants_and_undertakings",
+      "heading": "Covenants & Undertakings",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "representation_and_warranties",
+      "heading": "Representation And Warranties",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "effectiveness_termination_material_breach_and_sp",
+      "heading": "Effectiveness, Termination, Material Breach & Specific Performance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law_and_dispute_resolution",
+      "heading": "Governing Law And Dispute Resolution",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law",
+      "heading": "Governing Law",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "dispute_resolution",
+      "heading": "Dispute Resolution",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "assignment_and_amendments",
+      "heading": "Assignment And Amendments",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "force_majeure",
+      "heading": "Force Majeure",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "entire_agreement",
+      "heading": "Entire Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality",
+      "heading": "Confidentiality",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "notices",
+      "heading": "Notices",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "counterparts",
+      "heading": "Counterparts",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "schedule_a",
+      "heading": "Schedule A – [●] Details, Description, [●] Partnership Agreement & Authorizations",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – [●] Details, Description, [●] Partnership Agreement & Authorizations"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_b",
+      "heading": "Schedule B – Certified True Copy Of [●]",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Certified True Copy Of [●]"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_c",
+      "heading": "Schedule C – Specific Covenants & Undertakings",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Specific Covenants & Undertakings"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_d",
+      "heading": "Schedule D – Specific Representations & Warranties",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Specific Representations & Warranties"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_e",
+      "heading": "Schedule E – Key Terms Of Joint Venture Agreement",
+      "level": 1,
+      "presence": "decision",
+      "decision": "spv",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Key Terms Of Joint Venture Agreement"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_f",
+      "heading": "Schedule F – Key Terms Of Shareholders’ Agreement",
+      "level": 1,
+      "presence": "decision",
+      "decision": "spv",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Key Terms Of Shareholders’ Agreement"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_g",
+      "heading": "Schedule G – Certified True Copy Of Original Option Agreement",
+      "level": 1,
+      "presence": "decision",
+      "decision": "prior_agreement",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Certified True Copy Of Original Option Agreement"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_h",
+      "heading": "Schedule H – Certified True Copy Of Original Option Termination Agreement",
+      "level": 1,
+      "presence": "decision",
+      "decision": "prior_agreement",
+      "when": [
+        "yes"
+      ],
+      "absentWhen": [
+        "no"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Certified True Copy Of Original Option Termination Agreement"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_addresses",
+      "heading": "Schedule I – Addresses",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Addresses"
+      ],
+      "scan": false
+    },
+    {
+      "id": "signature_pages",
+      "heading": "Signature Pages",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    }
+  ]
+}

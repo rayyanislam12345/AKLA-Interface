@@ -1,0 +1,988 @@
+{
+  "key": "concession-agreement",
+  "typeName": "Concession Agreement",
+  "source": "Derived 20 October 2026 from firm-skills/concession-agreement/references/fill-map.md (the 10 choices, the 11 optional blocks, the 4 directives and the 8 conditional footnotes, by slot id), schedules.md (Schedule P), known-issues.md (Change in Law) and the plan's clause list (Article 12, Article 17, the arbitration forum). The root decisions come first so that the footnotes and choices they settle are settled with them.",
+  "name": "Concession agreement drafting decisions",
+  "documentLabel": "CONCESSION AGREEMENT",
+  "applyWhere": "the clause named above, the definitions in Section 1.1 and Schedule B, the schedules and any other clause that depends on it",
+  "closing": "That completes the drafting decisions. What remains are the deal's facts — the Agency and the Concessionaire, the project and its jurisdiction, the dates, the periods and percentages in Schedule B, the revenue bands in Schedule R and the termination percentages in Schedule T. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "financing",
+      "section": "Structure",
+      "title": "Financing",
+      "question": "Is the Project financed with debt?",
+      "location": "Article 12 (Financing Matters), Schedule L (Financing Matters), the Financing definitions; footnotes 39, 65 and 71",
+      "basis": "The master is drafted for a financed project; its conditional footnotes say what changes when it is not (fill-map.md, Conditional amendments).",
+      "options": [
+        {
+          "id": "financed",
+          "label": "Yes — conventional debt"
+        },
+        {
+          "id": "islamic",
+          "label": "Yes — Islamic (Shariah-compliant) financing"
+        },
+        {
+          "id": "equity_only",
+          "label": "No — equity only, no Financial Close"
+        }
+      ]
+    },
+    {
+      "id": "article_12",
+      "section": "Structure",
+      "title": "Article 12",
+      "question": "What is Article 12?",
+      "location": "Article 12 (Financing Matters) and Schedule L",
+      "basis": "The plan's clause list: the firm's concession agreements have Article 12 as Financing Matters, as Drawings, or \"Not Used\".",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          },
+          "then": "not_used"
+        }
+      ],
+      "options": [
+        {
+          "id": "financing",
+          "label": "Financing Matters",
+          "hint": "The master's article, with Schedule L"
+        },
+        {
+          "id": "drawings",
+          "label": "Drawings"
+        },
+        {
+          "id": "not_used",
+          "label": "\"Not Used\"",
+          "hint": "No financing article; Schedule L goes too"
+        }
+      ]
+    },
+    {
+      "id": "article_17",
+      "section": "Revenue",
+      "title": "Article 17",
+      "question": "Is Article 17 Revenue Matters or Tolling Matters?",
+      "location": "Article 17 (Revenue Matters) and Schedule R (Revenue Matters)",
+      "basis": "The firm's concession agreements title Article 17 by how the Concessionaire is paid: revenue, or tolls levied on users.",
+      "options": [
+        {
+          "id": "revenue",
+          "label": "Revenue Matters",
+          "hint": "The master's article"
+        },
+        {
+          "id": "tolling",
+          "label": "Tolling Matters",
+          "hint": "A tolled project: the toll, its collection and its revision"
+        }
+      ]
+    },
+    {
+      "id": "equity_option",
+      "section": "Equity",
+      "title": "Equity architecture (Schedule P)",
+      "question": "Which equity architecture does Schedule P take?",
+      "location": "Schedule P (Equity Matters), the option table; Section 1.1 and Schedule B definitions; the Conditions Precedent",
+      "basis": "schedules.md, Schedule P: three options, each with deletions elsewhere that the build lists as manual actions.",
+      "options": [
+        {
+          "id": "a",
+          "label": "Option A — the Sponsor holds 100% Class A shares; no Agency equity",
+          "hint": "Delete the Class B Share references, the Agency component of the equity funding, Agency Funding Amount and the Class B Dividends mechanism"
+        },
+        {
+          "id": "b",
+          "label": "Option B — Class A and Class B shares",
+          "hint": "The master's baseline: fill Agency Funding Amount and Sponsor Base Equity Amount from the Financial Model"
+        },
+        {
+          "id": "c",
+          "label": "Option C — Class A shares and one Class E golden share",
+          "hint": "Replace Class B Shares with Class E Shares; remove the dividend mechanism; add step-in and information rights"
+        }
+      ]
+    },
+    {
+      "id": "change_in_law",
+      "section": "Structure",
+      "title": "Change in Law article",
+      "question": "Should the agreement carry a Change in Law article?",
+      "location": "Between Article 27 (Assignment and Charges) and Dispute Resolution; the Change in Law definitions and the four references to it",
+      "basis": "known-issues.md: the master has no Change in Law article although it defines Change in Law and refers to the article; both executed agreements have one.",
+      "options": [
+        {
+          "id": "include",
+          "label": "Yes — add the article where it belongs",
+          "hint": "Drafted in the master's style; the new-clause comment marks it"
+        },
+        {
+          "id": "omit",
+          "label": "No — leave it out",
+          "hint": "Then remove the definitions and references that point to it"
+        }
+      ]
+    },
+    {
+      "id": "agency_instrument",
+      "section": "Government support",
+      "title": "Agency Financial Instrument",
+      "question": "Does the Agency give a financial guarantee or Financial Instrument?",
+      "location": "Schedule W (Agency Financial Instrument And Related Matters); footnote 69",
+      "basis": "fill-map.md, footnote 69 and Schedule W's choices.",
+      "options": [
+        {
+          "id": "provided",
+          "label": "Yes — keep Schedule W"
+        },
+        {
+          "id": "none",
+          "label": "No — delete the instrument provisions",
+          "hint": "Footnote 69: delete item (a) and cross-refer Section 17"
+        }
+      ]
+    },
+    {
+      "id": "price_escalation",
+      "section": "Revenue",
+      "title": "Price escalation",
+      "question": "Does a price escalation mechanism apply?",
+      "location": "Schedule Q (Price Escalations); the Schedule B directive \"[INCLUDE ONLY IF PRICE ESCALATION MECHANISM APPLIES — see Schedule Z]\"",
+      "basis": "fill-map.md, Directives; known-issues.md (the directive points to a Schedule Z that does not exist).",
+      "options": [
+        {
+          "id": "applies",
+          "label": "Yes — keep Schedule Q and the escalation definitions"
+        },
+        {
+          "id": "none",
+          "label": "No — remove them"
+        }
+      ]
+    },
+    {
+      "id": "efu_agreement",
+      "section": "Equity",
+      "title": "Equity Funding & Utilization Agreement",
+      "question": "Does an Equity Funding & Utilization Agreement apply?",
+      "location": "Schedule B directive \"[INCLUDE ONLY IF EQUITY FUNDING & UTILIZATION AGREEMENT APPLIES — see Schedule Y]\"",
+      "basis": "fill-map.md, Directives.",
+      "options": [
+        {
+          "id": "applies",
+          "label": "Yes — keep the definitions it governs"
+        },
+        {
+          "id": "none",
+          "label": "No — remove them"
+        }
+      ]
+    },
+    {
+      "id": "arbitration_forum",
+      "section": "Disputes",
+      "title": "Arbitration forum",
+      "question": "Where will disputes under the agreement be finally resolved?",
+      "location": "Dispute Resolution",
+      "basis": "Owner's decision of 20 October 2026: arbitration has no default and is always asked; the master's comments leave local against international arbitration open.",
+      "options": [
+        {
+          "id": "act_1940",
+          "label": "Arbitration under the Arbitration Act, 1940, seated in Pakistan"
+        },
+        {
+          "id": "siac",
+          "label": "Arbitration under the SIAC Rules, seated in Singapore"
+        },
+        {
+          "id": "tiered",
+          "label": "Local arbitration below a threshold, international above it",
+          "hint": "State the threshold"
+        },
+        {
+          "id": "other",
+          "label": "Another forum",
+          "hint": "State it"
+        }
+      ]
+    },
+    {
+      "id": "fn39_financing",
+      "section": "Conditional amendments",
+      "title": "Delayed Payment Rate (footnote 39)",
+      "question": "If financing is involved, should the Delayed Payment Rate follow the weighted average cost of debt under the Financing Documents plus a margin, rather than KIBOR?",
+      "location": "Footnote 39 (If Financing Involved)",
+      "basis": "fill-map.md, Conditional amendments: \"Lenders may require the Delayed Payment Rate to equal the weighted average cost of debt … Align with the Financing Term Sheet.\"",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          },
+          "then": "not_applies"
+        }
+      ],
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn41_islamic",
+      "section": "Conditional amendments",
+      "title": "Shariah-compliant guarantees (footnote 41)",
+      "question": "Should \"bank guarantee\" read \"Shariah-compliant bank guarantee or kafalah instrument\", with a Takaful-based performance bond as an alternative?",
+      "location": "Footnote 41 (If Islamic Financing)",
+      "basis": "fill-map.md, Conditional amendments.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "islamic"
+            ]
+          },
+          "then": "applies"
+        },
+        {
+          "when": {
+            "is": [
+              "financing",
+              "financed",
+              "equity_only"
+            ]
+          },
+          "then": "not_applies"
+        }
+      ],
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn46_tax",
+      "section": "Conditional amendments",
+      "title": "Tax regime fixed in the bid (footnote 46)",
+      "question": "Is the tax regime fixed in the bid financial model, so that only changes to those tax heads count as Change in Law?",
+      "location": "Footnote 46 (If Tax Regime Is Fixed In Bid)",
+      "basis": "fill-map.md, Conditional amendments.",
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn65_no_financing",
+      "section": "Conditional amendments",
+      "title": "Repetition Dates without financing (footnote 65)",
+      "question": "Should \"(a) the Financial Close Date\" be deleted from the Repetition Dates?",
+      "location": "Footnote 65 (If No Financing)",
+      "basis": "fill-map.md, Conditional amendments: Financial Close will not occur.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          },
+          "then": "applies"
+        },
+        {
+          "when": {
+            "is": [
+              "financing",
+              "financed",
+              "islamic"
+            ]
+          },
+          "then": "not_applies"
+        }
+      ],
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn69_no_instrument",
+      "section": "Conditional amendments",
+      "title": "No Agency Financial Instrument (footnote 69)",
+      "question": "Should item (a) on the Agency's financial instrument be deleted and Section 17 cross-referred?",
+      "location": "Footnote 69 (If No Agency Financial Instrument)",
+      "basis": "fill-map.md, Conditional amendments.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "agency_instrument",
+              "none"
+            ]
+          },
+          "then": "applies"
+        },
+        {
+          "when": {
+            "is": [
+              "agency_instrument",
+              "provided"
+            ]
+          },
+          "then": "not_applies"
+        }
+      ],
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn71_no_financing",
+      "section": "Conditional amendments",
+      "title": "Financing conditions without financing (footnote 71)",
+      "question": "Should items (e), (f) and (g) on the Financing Term Sheet, the Financing Documents and the Financial Close Achievement Notice be deleted?",
+      "location": "Footnote 71 (If No Financing); Section 3",
+      "basis": "fill-map.md, Conditional amendments: an equity-funded project.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          },
+          "then": "applies"
+        },
+        {
+          "when": {
+            "is": [
+              "financing",
+              "financed",
+              "islamic"
+            ]
+          },
+          "then": "not_applies"
+        }
+      ],
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn80_phased",
+      "section": "Conditional amendments",
+      "title": "Phased project (footnote 80)",
+      "question": "Is the Project phased or segmented, so that Part B needs segment-specific references?",
+      "location": "Footnote 80 (If Project Is Phased); Schedule C, Part B",
+      "basis": "fill-map.md, Conditional amendments.",
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "fn81_sector",
+      "section": "Conditional amendments",
+      "title": "Sector-specific drawings (footnote 81)",
+      "question": "Is the Project outside generic infrastructure (water treatment, energy, port), so that the drawing types in Section 12.2A are replaced?",
+      "location": "Footnote 81 (If Non-Infrastructure Project); Section 12.2A",
+      "basis": "fill-map.md, Conditional amendments.",
+      "options": [
+        {
+          "id": "applies",
+          "label": "It applies — make the amendment",
+          "hint": "The footnote's instruction is carried out and the footnote removed"
+        },
+        {
+          "id": "not_applies",
+          "label": "It does not apply",
+          "hint": "The footnote is removed and the text stays as it is"
+        }
+      ]
+    },
+    {
+      "id": "insurer_rating",
+      "section": "Choices",
+      "title": "Insurers' rating",
+      "question": "What minimum rating must the insurers hold?",
+      "location": "Article 20 (Insurances): \"insurance companies holding a rating of at least [single A/AA] as per PACRA/JCR-VIS\" (slot s2502_239)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "single_a",
+          "label": "Single A"
+        },
+        {
+          "id": "aa",
+          "label": "AA"
+        }
+      ]
+    },
+    {
+      "id": "acceptable_bank_rating",
+      "section": "Choices",
+      "title": "Acceptable bank's rating",
+      "question": "What credit rating must an acceptable bank incorporated in Pakistan hold?",
+      "location": "Schedule B: \"having a credit rating of at least [A or higher by PACRA, or A or higher by VIS]\" (slot s3240_149)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "a_pacra_vis",
+          "label": "A or higher by PACRA, or A or higher by VIS",
+          "hint": "The master's wording"
+        },
+        {
+          "id": "other",
+          "label": "Another rating",
+          "hint": "State it"
+        }
+      ]
+    },
+    {
+      "id": "development_reporting_unit",
+      "section": "Choices",
+      "title": "Development reporting frequency",
+      "question": "In what unit is the reporting frequency during the Development Period?",
+      "location": "Schedule B: \"being a frequency of [●] ([●]) [days/weeks/months]\" (slot s3274_152)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "days",
+          "label": "Days"
+        },
+        {
+          "id": "weeks",
+          "label": "Weeks"
+        },
+        {
+          "id": "months",
+          "label": "Months"
+        }
+      ]
+    },
+    {
+      "id": "om_reporting_unit",
+      "section": "Choices",
+      "title": "O&M reporting frequency",
+      "question": "In what unit is the reporting frequency during the Operations Period?",
+      "location": "Schedule B: \"being a frequency of [●] ([●]) [days/weeks/months]\" (slot s3318_141)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "days",
+          "label": "Days"
+        },
+        {
+          "id": "weeks",
+          "label": "Weeks"
+        },
+        {
+          "id": "months",
+          "label": "Months"
+        }
+      ]
+    },
+    {
+      "id": "site_instrument",
+      "section": "Choices",
+      "title": "Project Site Land Instrument",
+      "question": "By what instrument does the Agency grant the Project Site?",
+      "location": "Schedule B, Project Site Land Instrument (slot s3362_035)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "lease",
+          "label": "Lease Deed"
+        },
+        {
+          "id": "sub_lease",
+          "label": "Sub-Lease Agreement"
+        },
+        {
+          "id": "licence",
+          "label": "Licence to Occupy"
+        },
+        {
+          "id": "row",
+          "label": "Right-of-Way Grant"
+        }
+      ]
+    },
+    {
+      "id": "site_period_unit",
+      "section": "Choices",
+      "title": "Site right period",
+      "question": "In what unit is the Project Site Land Instrument Right Period?",
+      "location": "Schedule B, Project Site Land Instrument Right Period (slot s3372_071)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "years",
+          "label": "Years"
+        },
+        {
+          "id": "months",
+          "label": "Months"
+        }
+      ]
+    },
+    {
+      "id": "revenue_threshold",
+      "section": "Choices",
+      "title": "Revenue-sharing threshold",
+      "question": "Above what threshold are revenues shared with the Agency?",
+      "location": "Schedule R (Revenue Matters): \"in excess of the [Projected Revenue Threshold / Base Toll Revenue as set out in the Financial Model]\" (slot s3930_165)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "article_17",
+              "tolling"
+            ]
+          },
+          "then": "base_toll"
+        }
+      ],
+      "options": [
+        {
+          "id": "projected",
+          "label": "Projected Revenue Threshold"
+        },
+        {
+          "id": "base_toll",
+          "label": "Base Toll Revenue as set out in the Financial Model"
+        }
+      ]
+    },
+    {
+      "id": "instrument_beneficiary",
+      "section": "Choices",
+      "title": "Instrument acceptable to",
+      "question": "To whom must the Agency's guarantee be acceptable?",
+      "location": "Schedule W: \"in a form and substance acceptable to [the Financiers / the Concessionaire]\" (slot s4046_137)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "agency_instrument",
+            "none"
+          ]
+        }
+      },
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing",
+              "financed",
+              "islamic"
+            ]
+          },
+          "then": "financiers"
+        },
+        {
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          },
+          "then": "concessionaire"
+        }
+      ],
+      "options": [
+        {
+          "id": "financiers",
+          "label": "The Financiers (where financing is present)"
+        },
+        {
+          "id": "concessionaire",
+          "label": "The Concessionaire (where there is no financing)"
+        }
+      ]
+    },
+    {
+      "id": "instrument_amount",
+      "section": "Choices",
+      "title": "Instrument amount",
+      "question": "What amount does the Agency's instrument cover?",
+      "location": "Schedule W: \"the aggregate amount of the [Projected Termination Payment / Maximum Financing Due]\" (slot s4048_146)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "agency_instrument",
+            "none"
+          ]
+        }
+      },
+      "hide": [
+        {
+          "options": [
+            "financing_due"
+          ],
+          "when": {
+            "is": [
+              "financing",
+              "equity_only"
+            ]
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "termination_payment",
+          "label": "Projected Termination Payment"
+        },
+        {
+          "id": "financing_due",
+          "label": "Maximum Financing Due"
+        }
+      ]
+    },
+    {
+      "id": "instrument_bank_rating",
+      "section": "Choices",
+      "title": "Issuing bank's rating",
+      "question": "What rating must the bank issuing the Agency's instrument hold?",
+      "location": "Schedule W: \"a scheduled bank in Pakistan with a minimum credit rating of at least [AA- as rated by JCR-VIS or an equivalent rating by PACRA]\" (slot s4050_117)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "agency_instrument",
+            "none"
+          ]
+        }
+      },
+      "options": [
+        {
+          "id": "aa_minus",
+          "label": "AA- by JCR-VIS or an equivalent rating by PACRA",
+          "hint": "The master's wording"
+        },
+        {
+          "id": "other",
+          "label": "Another rating",
+          "hint": "State it"
+        }
+      ]
+    },
+    {
+      "id": "ie_consortium_liability",
+      "section": "Optional parts",
+      "title": "IE consortium liability",
+      "question": "Where the Independent Engineer is a consortium, are its members jointly and severally liable?",
+      "location": "Article 5 (Independent Engineer): \"[the consortium members shall be jointly and severally liable …]\" (slot s1302_520)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — joint and several liability of a consortium Independent Engineer",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "ia_consortium_liability",
+      "section": "Optional parts",
+      "title": "IA consortium liability",
+      "question": "Where the Independent Auditor is a consortium, are its members jointly and severally liable?",
+      "location": "Article 6 (Independent Auditor) (slot s1368_539)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — joint and several liability of a consortium Independent Auditor",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "ia_state_approved_fallback",
+      "section": "Optional parts",
+      "title": "IA fallback appointment",
+      "question": "If no firm on the New IA List is appointed, do the Parties appoint a State Approved Accounting Firm by mutual consent?",
+      "location": "Article 6 (Independent Auditor) (slot s1398_087)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — the fallback appointment of a State Approved Accounting Firm",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "income_tax_change_in_law",
+      "section": "Optional parts",
+      "title": "Income tax as Change in Law",
+      "question": "Is income tax under the Income Tax Ordinance, 2001, as in force on the Bid Submission Date, carved out of Change in Law?",
+      "location": "Schedule B, Change in Law (slot s3284_000)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "fn46_tax",
+              "applies"
+            ]
+          },
+          "then": "delete"
+        }
+      ],
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — the income tax limb",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "modality_obligations",
+      "section": "Optional parts",
+      "title": "Project Modality obligations",
+      "question": "Does the Project Modality definition list the Concessionaire's obligations (investigate, study, procure, finance, develop, operate, maintain and transfer)?",
+      "location": "Schedule B, Project Modality (slot s3346_130)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — the obligations listed",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "sbp_approval",
+      "section": "Optional parts",
+      "title": "SBP Approval condition",
+      "question": "Is obtaining the SBP Approval one of the Concessionaire's conditions?",
+      "location": "Schedule B, the Concessionaire's specified permits (slot s3443_001)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — the SBP Approval limb",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "termination_equity_years",
+      "section": "Optional parts",
+      "title": "Termination equity return period",
+      "question": "Is the return on Sponsor Invested Equity measured over the three Accounting Years after the Termination Date?",
+      "location": "Schedule B, the termination equity return (slot s3459_098)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — three (3) Accounting Years falling immediately after the Termination Date",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "equity_reduction_basis",
+      "section": "Optional parts",
+      "title": "Equity reduction basis",
+      "question": "Is Sponsor Invested Equity reduced on a straight-line basis from the Substantial Completion Date?",
+      "location": "Schedule B, the equity reduction (slot s3461_138)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — straight-line from the Substantial Completion Date",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "drawing_types",
+      "section": "Optional parts",
+      "title": "Drawing types list",
+      "question": "Is the project-specific list of drawing types to be inserted in Schedule C?",
+      "location": "Schedule C (Development Works: Engineering, Design & Construction Drawings) (slot s3512_000)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "options": [
+        {
+          "id": "keep",
+          "label": "Yes — insert the list (from the technical adviser)",
+          "hint": "Until then the bracket stays as a blank"
+        },
+        {
+          "id": "delete",
+          "label": "No — delete the bracket"
+        }
+      ]
+    },
+    {
+      "id": "financiers_eod_rights",
+      "section": "Optional parts",
+      "title": "Financiers' rights in Events of Default",
+      "question": "Are the Financiers' rights protected alongside the Concessionaire's in the Event of Default triggers?",
+      "location": "Schedule L (Financing Matters) (slot s3758_268)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "article_12",
+            "not_used"
+          ]
+        }
+      },
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — the Financiers' rights",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    },
+    {
+      "id": "share_classes",
+      "section": "Optional parts",
+      "title": "Classes of shares",
+      "question": "Does the equity consist of two classes of shares (Class A Shares and Class B Shares)?",
+      "location": "Schedule P (Equity Matters) (slot s3861_147)",
+      "basis": "firm-skills/concession-agreement/references/fill-map.md",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "equity_option",
+              "b"
+            ]
+          },
+          "then": "keep"
+        },
+        {
+          "when": {
+            "is": [
+              "equity_option",
+              "a",
+              "c"
+            ]
+          },
+          "then": "delete"
+        }
+      ],
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep it — two classes of shares",
+          "hint": "Remove the brackets"
+        },
+        {
+          "id": "delete",
+          "label": "Delete it"
+        }
+      ]
+    }
+  ]
+}

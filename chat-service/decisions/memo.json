@@ -1,0 +1,65 @@
+{
+  "key": "memo",
+  "typeName": "Research Memo",
+  "aliases": [
+    "Concept Note"
+  ],
+  "source": "Derived 20 October 2026 from the memo clause list (skeletons/memo.json), the firm's memos and notes, and the owner's note of 20 October on annexures.",
+  "name": "Research memo drafting decisions",
+  "documentLabel": "MEMORANDUM",
+  "applyWhere": "the cover, the contents page, the section named above and the annexures",
+  "closing": "That completes the drafting decisions. What remains are the memo's substance — who it is for, the date, the query or issues, the documents and law reviewed. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "memo_form",
+      "section": "Form",
+      "title": "Form of the memo",
+      "question": "What kind of memo is this?",
+      "location": "The cover and the order of the sections",
+      "basis": "The firm's memos take three forms: the research memo (query, brief answer, detailed analysis in Annexure A), the key-issues memo (purpose and scope, an issue in each section, outstanding requirements) and the internal note or concept paper (no cover).",
+      "options": [
+        {
+          "id": "query_answer",
+          "label": "A research memo: Query, Brief Answer, detailed analysis in Annexure A",
+          "hint": "The firm's standard"
+        },
+        {
+          "id": "issues",
+          "label": "A key-issues memo: Purpose And Scope, one section per issue, Outstanding Requirements"
+        },
+        {
+          "id": "note",
+          "label": "An internal note or concept paper: introduction, sections, conclusion; no cover"
+        }
+      ]
+    },
+    {
+      "id": "annexures",
+      "section": "Annexures",
+      "title": "Annexures",
+      "question": "Which annexures does the memo carry?",
+      "location": "After the body: Annexure A (detailed analysis), Annexure B (the contract or document provisions), Annexure C (the law)",
+      "basis": "Owner's note of 20 October 2026: there is usually no Annexure B or C; when there is, B is the contract or document provision and C the law.",
+      "appliesWhen": {
+        "is": [
+          "memo_form",
+          "query_answer"
+        ]
+      },
+      "options": [
+        {
+          "id": "a_only",
+          "label": "Annexure A only"
+        },
+        {
+          "id": "a_b",
+          "label": "Annexures A and B (the provisions relied on)"
+        },
+        {
+          "id": "a_b_c",
+          "label": "Annexures A, B and C (the provisions and the law)"
+        }
+      ]
+    }
+  ]
+}

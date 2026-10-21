@@ -1,0 +1,103 @@
+{
+  "key": "memo",
+  "title": "Research memos and concept notes",
+  "types": [
+    "Research Memo",
+    "Concept Note"
+  ],
+  "packs": [
+    "memo"
+  ],
+  "kind": "memo",
+  "voice": {
+    "rule": "\"the Firm\", never \"we\", \"our\" or \"us\" (PTQ15.4: the Firm 2, we 0).",
+    "source": [
+      "PTQ15.4",
+      "NSCL5.9"
+    ]
+  },
+  "defined_terms": {
+    "pointer_formula": "has the meaning ascribed thereto in [●];",
+    "lead_in": "Unless otherwise defined in this Memorandum, capitalised terms used hereunder shall bear the meanings ascribed thereto in the Reviewed Documents (defined below):",
+    "rule": "Glossary entries: the term in bold, then \"means …;\" or \"has the meaning ascribed thereto in …;\"; in the body (the X) bold without quotation marks.",
+    "source": [
+      "PTQ15.4"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Section",
+      "Annexure"
+    ],
+    "rule": "Section 3 (Brief Answer), Annexure A (Detailed Analysis); the reviewed documents' own provisions are cited by their own words (Clause 3.1 of the [●]).",
+    "source": [
+      "PTQ15.4"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case with small words capitalised (Transaction Background And Query); annexure headings with an en dash: Annexure A – Detailed Analysis.",
+    "source": [
+      "PTQ15.4"
+    ]
+  },
+  "formulae": {
+    "cover": {
+      "text": "Memorandum On [●] / Dated: [●] / Prepared For: / Prepared By: / Table Of Contents",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "structure": {
+      "text": "1 Glossary; 2 Transaction Background And Query (2.1 Transaction Background, 2.2 Reviewed Documents, 2.3 Query); 3 Brief Answer; Annexure A – [title chosen for the subject]. There is usually no Annexure B or C; when there is, B reproduces the contract or document provision and C the law.",
+      "source": [
+        "PTQ15.4",
+        "Decisions 20 Oct 2026"
+      ]
+    },
+    "reviewed": {
+      "text": "For the purposes of this Memorandum, the Firm has reviewed [●] (the [●]), [●] and [●] (together, the Reviewed Documents).",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "query": {
+      "text": "The query framed for the purposes of this Memorandum (the Query) is as follows:",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "pointer_to_answer": {
+      "text": "For a brief answer to the Query, please refer to Section 3 (Brief Answer) below.",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "annexure_open": {
+      "text": "This Annexure A ([●]) sets out, for each provision identified in Section 3 (Brief Answer), …",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "reproduced": {
+      "text": "[Provision] of the [●] is reproduced below:",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "disclaimer": {
+      "text": "Disclaimer: This ‘[●]’ (this Memorandum) dated [●], has been prepared by Ali Khan Law Associates (the Firm) for [●]. This Memorandum reflects the Firm’s current understanding based on the limited documents provided and it is not exhaustive and does not constitute complete advice … The Firm disclaims all liability for reliance on this Memorandum …",
+      "source": [
+        "PTQ15.4"
+      ]
+    },
+    "page_end": {
+      "text": "[***The Rest Of This Page Has Been Intentionally Left Blank***]",
+      "source": [
+        "PTQ15.4"
+      ]
+    }
+  },
+  "notes": [
+    "No sign-off: the memo ends with its last section and the page-end line."
+  ]
+}

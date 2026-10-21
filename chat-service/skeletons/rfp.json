@@ -1,0 +1,718 @@
+{
+  "key": "rfp",
+  "typeName": "Request for Proposal (RFP)",
+  "source": "Derived 20 October 2026 from the firm's Volume I standard, Standard Request for Proposal (RFP) [AKLA] — Volume I Tender Procedure (Federal PPP) [16 September 2026] (AKLAHeading1 and AKLAHeading2 headings), read with skeletonCheck.js. The Qualified Project approval chain and Bidding Form F4 follow decisions approval_chain and f4 (decisions/rfp.json). Sections are optional except those every tender needs (Introduction, Bid Security, Bid Validity, Evaluation Criteria, Award Criteria, Performance Security, Corrupt and Fraudulent Practices).",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "items": [
+    {
+      "id": "glossary",
+      "heading": "Glossary",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "general",
+      "heading": "General",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "introduction",
+      "heading": "Introduction",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "overview_of_the_tender_procedure",
+      "heading": "Overview of the Tender Procedure",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "indicative_schedule",
+      "heading": "Indicative Schedule",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "eligible_bidder",
+      "heading": "Eligible Bidder",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "general_requirements",
+      "heading": "General Requirements",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "consortium_requirements",
+      "heading": "Consortium Requirements",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "conflict_of_interest",
+      "heading": "Conflict of Interest",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "site_visits",
+      "heading": "Site Visits",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "rfp_documents",
+      "heading": "RFP Documents",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "contents_of_the_rfp",
+      "heading": "Contents of the RFP",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "completeness_of_rfp",
+      "heading": "Completeness of RFP",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "clarifications_of_rfp",
+      "heading": "Clarifications of RFP",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "amendment_of_rfp",
+      "heading": "Amendment of RFP",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "preparation_of_bids",
+      "heading": "Preparation of Bids",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "costs_for_bids",
+      "heading": "Costs for Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "language_of_bids",
+      "heading": "Language of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "documents_comprising_the_bid",
+      "heading": "Documents Comprising the Bid",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "technical_proposal",
+      "heading": "Technical Proposal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "financial_proposal",
+      "heading": "Financial Proposal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "currencies_of_bid_and_payment",
+      "heading": "Currencies of Bid and Payment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "bid_security",
+      "heading": "Bid Security",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "bid_validity",
+      "heading": "Bid Validity",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "manner_of_signing_of_bid",
+      "heading": "Manner of Signing of Bid",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "submission_and_opening_of_bids",
+      "heading": "Submission and Opening of Bids",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "submission_of_bids",
+      "heading": "Submission of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "deadline_for_submission",
+      "heading": "Deadline for Submission",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "modification_substitution_and_withdrawal_of_bids",
+      "heading": "Modification, Substitution and Withdrawal of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "opening_of_bids",
+      "heading": "Opening of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "clarification_and_evaluation_of_bids",
+      "heading": "Clarification and Evaluation of Bids",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "clarification_of_bids",
+      "heading": "Clarification of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "preliminary_examination_of_bids",
+      "heading": "Preliminary Examination of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "determination_of_responsiveness_of_bids",
+      "heading": "Determination of Responsiveness of Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "evaluation_criteria",
+      "heading": "Evaluation Criteria",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "successful_bidder",
+      "heading": "Successful Bidder",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "agencys_right_to_verify_documents",
+      "heading": "Agency's Right to Verify Documents",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "award_of_concession",
+      "heading": "Award of Concession",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "award_criteria",
+      "heading": "Award Criteria",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "agencys_right_to_accept_reject_bids",
+      "heading": "Agency's Right to Accept/Reject Bids",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "notification_of_award",
+      "heading": "Notification of Award",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "formation_of_spv_by_the_successful_bidder",
+      "heading": "Formation of SPV by the Successful Bidder",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "performance_security",
+      "heading": "Performance Security",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "signing_of_the_concession_agreement",
+      "heading": "Signing of the Concession Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "regulatory_approvals_and_compliance",
+      "heading": "Regulatory Approvals and Compliance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "qualified_project_approval_chain",
+      "heading": "Qualified Project Approval Chain",
+      "level": 2,
+      "presence": "decision",
+      "decision": "approval_chain",
+      "when": [
+        "retain"
+      ],
+      "absentWhen": [
+        "delete"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "deviation_from_approved_terms",
+      "heading": "Deviation from Approved Terms",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "publication_and_advertisement",
+      "heading": "Publication and Advertisement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "other_considerations",
+      "heading": "Other Considerations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality",
+      "heading": "Confidentiality",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "corrupt_and_fraudulent_practices",
+      "heading": "Corrupt and Fraudulent Practices",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "integrity_pact",
+      "heading": "Integrity Pact",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "blacklisting_and_debarment",
+      "heading": "Blacklisting and Debarment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "grievance_redressal",
+      "heading": "Grievance Redressal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "no_lobbying",
+      "heading": "No Lobbying",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "data_sheet",
+      "heading": "Data Sheet",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "bidding_forms",
+      "heading": "Bidding Forms",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "technical_proposal_bidding_forms",
+      "heading": "Technical Proposal Bidding Forms",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "financial_proposal_bidding_forms",
+      "heading": "Financial Proposal Bidding Forms",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "bidding_form_t1_letter_of_technical_proposal",
+      "heading": "Bidding Form T1 – Letter of Technical Proposal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t2_form_of_integrity_pact",
+      "heading": "Bidding Form T2 – Form of Integrity Pact",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t3_form_of_power_of_attorney",
+      "heading": "Bidding Form T3 – Form of Power of Attorney",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t4_form_of_affidavit",
+      "heading": "Bidding Form T4 – Form of Affidavit",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t5_basic_information_form",
+      "heading": "Bidding Form T5 – Basic Information Form",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t6_pending_litigation",
+      "heading": "Bidding Form T6 – Pending Litigation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t7_average_annual_revenue_and_net_w",
+      "heading": "Bidding Form T7 – Average Annual Revenue and Net Worth of Assets Owned by the Bidder",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t8_debt_to_equity_ratio",
+      "heading": "Bidding Form T8 – Debt to Equity Ratio",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t9_project_finance_capability",
+      "heading": "Bidding Form T9 – Project Finance Capability",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t10_general_and_relevant_sector_con",
+      "heading": "Bidding Form T10 – General & Relevant Sector/Construction Experience",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t11_team_composition",
+      "heading": "Bidding Form T11 – Team Composition",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t12_format_of_curriculum_vitae_cv_f",
+      "heading": "Bidding Form T12 – Format of Curriculum Vitae (CV) for Proposed Key Staff",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t13_delivery_construction_methodolo",
+      "heading": "Bidding Form T13 – Delivery/Construction Methodology, Work Plan & Technology Integration",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_t14_form_of_bid_security",
+      "heading": "Bidding Form T14 – Form of Bid Security",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_f1_letter_of_financial_proposal",
+      "heading": "Bidding Form F1 – Letter of Financial Proposal",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_f2_financial_proposal_standard_form",
+      "heading": "Bidding Form F2 – Financial Proposal Standard Form",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_f3_financial_model_form",
+      "heading": "Bidding Form F3 – Financial Model Form",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "bidding_form_f4",
+      "heading": "Bidding Form F4 – Indicative Term Sheet / Letter of Intent",
+      "level": 2,
+      "presence": "decision",
+      "decision": "f4",
+      "when": [
+        "required"
+      ],
+      "absentWhen": [
+        "not_used"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Bidding Form F4 – [●]"
+      ],
+      "not_used_form": "Not Used",
+      "scan": false
+    },
+    {
+      "id": "bidding_documentary_requirements",
+      "heading": "Bidding Documentary Requirements",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "annexures",
+      "heading": "Annexures",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "annexure_a_basic_eligibility_criteria",
+      "heading": "Annexure A – Basic Eligibility Criteria",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "annexure_b_evaluation_criteria",
+      "heading": "Annexure B – Evaluation Criteria",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "annexure_c_requirements_for_consortium_agreement",
+      "heading": "Annexure C – Requirements for Consortium Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "annexure_d_document_checklist",
+      "heading": "Annexure D – Document Checklist",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "scan": false
+    },
+    {
+      "id": "terms_of_reference",
+      "heading": "Terms of Reference",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "project_term_and_parties",
+      "heading": "Project Term and Parties",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "ownership",
+      "heading": "Ownership",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "project_scope",
+      "heading": "Project Scope",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "financing",
+      "heading": "Financing",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "government_support",
+      "heading": "Government Support",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "allocation_of_risks_and_responsibilities",
+      "heading": "Allocation of Risks and Responsibilities",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "compensation_of_concessionaire",
+      "heading": "Compensation of Concessionaire",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "environmental_and_social_matters",
+      "heading": "Environmental and Social Matters",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "land_acquisition_and_right_of_way",
+      "heading": "Land Acquisition and Right of Way",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "utility_relocation",
+      "heading": "Utility Relocation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "key_performance_indicators",
+      "heading": "Key Performance Indicators",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    }
+  ]
+}

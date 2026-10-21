@@ -172,7 +172,12 @@ test('the first page is the Hub\'s own placeholder view, with the fill instructi
   assert.ok(out.includes(CONNECTOR_FILL_NOTE));
   assert.ok(out.indexOf(FILL_INSTRUCTIONS) < out.indexOf(OPS_PROTOCOL) && out.indexOf(OPS_PROTOCOL) < out.indexOf(FILL_DIRECT_NOTE) && out.indexOf(FILL_DIRECT_NOTE) < out.indexOf(CONNECTOR_FILL_NOTE));
   assert.match(CONNECTOR_FILL_NOTE, /fill_standard_to_project/);
-  assert.doesNotMatch(out, /This type has a drafting questionnaire/, 'this type has no questionnaire');
+  // A Concession Agreement has its decisions, style sheet and clause list from the data files, by its name (draftChecks.js).
+  assert.match(out, /This type has a drafting questionnaire: before any fill/);
+  assert.match(out, /\nHOW THE FIRM WRITES \(every document; a lawyer may ask for an exception\):\n/);
+  assert.match(out, /\nTHE FIRM'S CLAUSE LIST for this document, in order/);
+  assert.match(out, /\nTHE FIRM'S DRAFTING DECISIONS for this document/);
+  assert.match(out, /call get_clause_examples with this documentTypeId/);
   assert.match(CONNECTOR_FILL_NOTE, /ask the lawyer each decision in prose, one at a time/);
   assert.match(CONNECTOR_FILL_NOTE, /paragraphs set to a range such as "100-140"/);
   assert.match(CONNECTOR_FILL_NOTE, /from pages this listing only and never reaches a hidden paragraph/);

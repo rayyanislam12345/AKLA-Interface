@@ -1,0 +1,230 @@
+{
+  "key": "concession-agreement",
+  "title": "Concession agreements",
+  "types": [
+    "Concession Agreement"
+  ],
+  "packs": [],
+  "kind": "agreement",
+  "voice": {
+    "rule": "No voice: the Parties act in the third person (the Agency shall …).",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "spelling": {
+    "rule": "British -ise (authorised, utilisation, organisation), although the firm's agreement bases still carry -ize: change it as you write.",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "MM68 (-ise 4 / -ize 14)",
+      "SKM58 (4/16)"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Article",
+      "Section",
+      "Schedule",
+      "Clause",
+      "Paragraph",
+      "Part"
+    ],
+    "rule": "Articles and Sections in the body (Article 30 (Dispute Resolution), Section 10.3.3); \"Clause\" and \"Paragraph\" only inside the Schedules; Schedules lettered A to Y, the schedule heading with an en dash: Schedule B – Specific Definitions.",
+    "source": [
+      "CA master",
+      "firm-skills/concession-agreement/references/house-style.md"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case with every word capitalised, small words too: Grant Of Rights, Deposits & Withdrawals From Accounts. Schedules: Schedule A – [Title].",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "dates": {
+    "preamble": "is entered into on this [Date] of [Month], [Year] at [Location], Pakistan:",
+    "cover": "Dated: as of [●]",
+    "source": [
+      "CA master"
+    ]
+  },
+  "formulae": {
+    "parties_close": {
+      "text": "(the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns)",
+      "source": [
+        "CA master",
+        "SKM58"
+      ]
+    },
+    "rollup": {
+      "text": "(the Agency and the Concessionaire are hereinafter collectively referred to as the Parties and each individually as a Party).",
+      "source": [
+        "CA master"
+      ]
+    },
+    "recitals_open": {
+      "text": "Recitals: numbered limbs, no WHEREAS.",
+      "source": [
+        "CA master"
+      ]
+    },
+    "now_therefore": {
+      "text": "Now, therefore, this agreement witnesseth and it is hereby agreed to by and between the Parties as follows:",
+      "source": [
+        "CA master"
+      ]
+    },
+    "testimonium": {
+      "text": "In Witness Whereof, the Parties hereto have caused this Agreement to be executed on the day, month and year first above mentioned.",
+      "source": [
+        "CA master",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "execution": {
+      "text": "As [Party] / For and on behalf of [●] through its authorised signatory / Name: / Designation: / in the presence of / Witnesses: / Name: / Address: / CNIC / Passport No:",
+      "source": [
+        "CA master",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "governing_law": {
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the Islamic Republic of Pakistan.",
+      "source": [
+        "MM68",
+        "SKM58"
+      ]
+    },
+    "arbitration": {
+      "text": "No default: the seat, the rules (Arbitration Act, 1940 or institutional, e.g. SIAC), the number of arbitrators and the venue are always asked as a drafting question; the firm's files differ (a sole arbitrator under the Arbitration Act, 1940; a board of three under the Arbitration Act, 1940; SIAC seated in Singapore).",
+      "source": [
+        "Decisions 20 Oct 2026 (arbitration always asked)",
+        "MM68",
+        "SKM58",
+        "escrow base 2021",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "preamble": {
+      "text": "This ‘Concession Agreement’ (this Agreement) is entered into on this [Date] of [Month], [Year] at [Location], Pakistan:",
+      "source": [
+        "CA master"
+      ]
+    },
+    "parties": {
+      "text": "[●] having its offices at [●] for and on behalf of the [●] (the Agency); And [●], a company incorporated under the Applicable Laws of Pakistan, having its registered office located at [●] (the Concessionaire, which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns),",
+      "source": [
+        "CA master"
+      ]
+    },
+    "carve_outs": {
+      "text": "provided, however, that … / provided further, that … / Notwithstanding anything to the contrary set out herein …",
+      "source": [
+        "firm-skills/concession-agreement/references/house-style.md"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "hereinafter",
+      "pattern": "\\(\\s*hereinafter\\s+(?:referred\\s+to\\s+as|called)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm's party clause reads (the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns), not \"(hereinafter referred to as …\". The roll-up \"are hereinafter collectively referred to as the Parties\" is the firm's own.",
+      "source": [
+        "CA master",
+        "SKM58",
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "pointer_as",
+      "pattern": "\\bshall bear the meaning as ascribed\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The pointer reads \"shall bear the meaning ascribed thereto in …\", without \"as\".",
+      "source": [
+        "escrow base 2021"
+      ]
+    },
+    {
+      "id": "pointer_given",
+      "pattern": "\\bha(?:s|ve) the meanings? given to (?:it|them|that term|the term|such term)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "\"has the meaning given to it in\" is another firm's pointer; the firm writes \"shall have (or bear) the meaning ascribed thereto in …\".",
+      "source": [
+        "Bases from other counsel (CDA, SKM137)"
+      ]
+    },
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ],
+  "tells_of_counterparty": [
+    {
+      "id": "pointer_given",
+      "tell": "\"has the meaning given to it in\" pointers",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "party_clause",
+      "tell": "\"(hereinafter referred to as the X which expression shall mean and include …)\" with no \"where the context so permits\"",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "company",
+      "tell": "parties called \"the Company\" rather than by role (the Concessionaire, the Project Company)",
+      "source": [
+        "Bases from other counsel",
+        "LEL127"
+      ]
+    },
+    {
+      "id": "words_first",
+      "tell": "money with the words first: Pakistani Rupees [words] (PKR [●])",
+      "source": [
+        "Bases from other counsel"
+      ]
+    }
+  ],
+  "defined_terms": {
+    "pointer_formula": "shall have the meaning ascribed thereto in Schedule B (Specific Definitions)",
+    "lead_in": "In this Agreement (including the Recitals), unless the context shall otherwise require:",
+    "rule": "Bold at the point of definition, unquoted, initial capitals on every significant word; single curly quotes mark a term introduced in prose (this ‘Concession Agreement’). Capitals must match the definition exactly.",
+    "source": [
+      "CA master (142)",
+      "firm-skills/concession-agreement/references/house-style.md"
+    ]
+  },
+  "money": {
+    "rule": "Follow the slot: the master's slots read PKR [●] (Pakistani Rupees [●] only) and PKR [●]/- (Pakistani Rupees [words] only), lower-case \"only\".",
+    "source": [
+      "CA master",
+      "plan: What needs you, item 7"
+    ]
+  },
+  "off": [
+    "witnesseth"
+  ],
+  "notes": [
+    "The master's wording is the firm's: fill its slots and change nothing else; its -ize spelling is changed only where a clause is newly written.",
+    "The master's default arbitration seat is not a default: arbitration is always asked.",
+    "\"GoS\" names in the master (GoS Default Termination Amount, the GoS Agency) become Government terms."
+  ]
+}

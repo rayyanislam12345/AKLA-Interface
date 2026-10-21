@@ -495,3 +495,37 @@ test('a hub:read sign-in sees show_document_paragraphs and neither write tool; h
     await new Promise((r) => server.close(r));
   }
 });
+
+test('the firm\'s rules on a mark-up: a wording comment on the words written, a part the firm always has taken out is refused until confirmedOmissions names it', async () => {
+  // A document of a type with a clause list (the type's own row), whose governing-law clause is a fixed part known by its words.
+  const T = '99999999-9999-4999-8999-999999999999';
+  const typed = () => {
+    const t = fixtures();
+    const join = { ...docJoin, document_type_id: T, document_type: { id: T, name: 'Test Agreement' } };
+    t.document_versions[0].matter_document = join;
+    t.document_types = [{ id: T, name: 'Test Agreement', category: null, questionnaire: null, decisions: null, skeleton: { typeName: 'Test Agreement', items: [{ id: 'law', heading: 'Governing law clause', level: 0, presence: 'always', match: 'slot', pattern: '^This Agreement is governed by' }] } }];
+    return t;
+  };
+  // Wording: the turn's own "30 days" is commented on; the client's words are not.
+  const s = setup({ tables: typed() });
+  const out = await s.run(MARKUP_TOOL, markupInput({ ops: [{ op: 'replace', p: at(P_LAW), expected: P_LAW, text: 'This Agreement is governed by the laws of Pakistan, and a dispute is first referred to the Parties for 30 days.' }] }));
+  assert.match(out, /\nWording: 1 point to look at against the firm's style sheet in what was written this turn \(1 number or amount\); none stops the draft being filed\. Each is an AKLA comment\./);
+  assert.match(partOf(uploadsOf(s)[0].body, 'word/comments.xml'), /Wording \(number or amount\): Write it in words and figures: thirty \(30\) days\./);
+  assert.match(out, /^Changes: 1 of 1 made — 1 as tracked change by AKLA AI, 0 margin comments by AKLA Comments; 0 could not be made\.$/m, 'the account is of the changes sent');
+  // Taking the clause out: refused, nothing filed, the id named.
+  const r = setup({ tables: typed() });
+  await assert.rejects(r.run(MARKUP_TOOL, markupInput({ ops: [{ op: 'delete', p: at(P_LAW), expected: P_LAW }] })), (err) => {
+    assert.equal(err.message, 'Not filed: the firm\'s Test Agreement always has this part, and this change would take it out:\n- The governing law clause is missing.\nNothing was saved. Add it and send the changes again, or, only once the lawyer confirms the omission, call apply_tracked_changes again with the same changes and confirmedOmissions: ["law"]. v1 is unchanged.');
+    return true;
+  });
+  assert.equal(uploadsOf(r).length, 0);
+  assert.deepEqual(actions(r).map((a) => a.outcome), ['refused']);
+  // Confirmed: filed, and the reply says so.
+  const ok = await r.run(MARKUP_TOOL, markupInput({ ops: [{ op: 'delete', p: at(P_LAW), expected: P_LAW }], confirmedOmissions: ['law'] }));
+  assert.match(ok, /\nClause list: Left out as confirmed: Governing law clause\./);
+  assert.equal(uploadsOf(r).length, 1);
+  // An untyped document: the firm-wide style sheet, no clause list.
+  const plain = setup();
+  const untyped = await plain.run(MARKUP_TOOL, markupInput({ ops: [{ op: 'delete', p: at(P_LAW), expected: P_LAW }] }));
+  assert.doesNotMatch(untyped, /Clause list/);
+});

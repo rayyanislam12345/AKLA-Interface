@@ -1,0 +1,218 @@
+{
+  "key": "amendment",
+  "title": "Amendment agreements",
+  "types": [
+    "Amendment Agreement"
+  ],
+  "packs": [
+    "amendment"
+  ],
+  "kind": "agreement",
+  "voice": {
+    "rule": "No voice: the Parties act in the third person (the Agency shall …).",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "spelling": {
+    "rule": "British -ise (authorised, utilisation, organisation), although the firm's agreement bases still carry -ize: change it as you write.",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "MM68 (-ise 4 / -ize 14)",
+      "SKM58 (4/16)"
+    ]
+  },
+  "cross_refs": {
+    "words": null,
+    "rule": "Refer to the Principal Agreement's provisions with its own word (Clause or Section) and their headings: Clause [●] (Notices).",
+    "source": [
+      "amendment base (13 of 16 with heading)"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case with every word capitalised, small words too: Grant Of Rights, Deposits & Withdrawals From Accounts. Schedules: Schedule A – [Title].",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "dates": {
+    "preamble": "as of this [●] day of [●], [●] (the Amendment Effective Date)",
+    "cover": "Dated: As Of [●]",
+    "source": [
+      "amendment pack"
+    ]
+  },
+  "formulae": {
+    "parties_close": {
+      "text": "(the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns)",
+      "source": [
+        "CA master",
+        "SKM58"
+      ]
+    },
+    "rollup": {
+      "text": "(the [●] and the [●] are hereinafter collectively referred to as the Parties and each individually as a Party).",
+      "source": [
+        "CA master",
+        "SKM58",
+        "escrow base 2021"
+      ]
+    },
+    "recitals_open": {
+      "text": "Recitals: The Parties entered into an agreement entitled ‘[●]’ dated [●] (the Principal Agreement), pursuant to which … / The Parties now agree that certain amendments are required in the Principal Agreement, which amendments form the subject matter of this Amendment Agreement.",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "now_therefore": {
+      "text": "Now, Therefore, the Parties hereby agree as follows:",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "testimonium": {
+      "text": "In Witness Whereof, the Parties hereto have caused this Amendment Agreement to be executed on the day, month and year first above mentioned.",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "execution": {
+      "text": "As [Party] / For and on behalf of [●] through its authorised signatory / Name: / Designation: / in the presence of / Witnesses: / Name: / Address: / CNIC / Passport No:",
+      "source": [
+        "CA master",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "governing_law": {
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the Islamic Republic of Pakistan.",
+      "source": [
+        "MM68",
+        "SKM58"
+      ]
+    },
+    "arbitration": {
+      "text": "No default: the seat, the rules (Arbitration Act, 1940 or institutional, e.g. SIAC), the number of arbitrators and the venue are always asked as a drafting question; the firm's files differ (a sole arbitrator under the Arbitration Act, 1940; a board of three under the Arbitration Act, 1940; SIAC seated in Singapore).",
+      "source": [
+        "Decisions 20 Oct 2026 (arbitration always asked)",
+        "MM68",
+        "SKM58",
+        "escrow base 2021",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "preamble": {
+      "text": "This ‘[●] Amendment Agreement’ (this Amendment Agreement) is made and entered into as of this [●] day of [●], [●] (the Amendment Effective Date):",
+      "source": [
+        "amendment pack",
+        "EWPL4"
+      ]
+    },
+    "parties": {
+      "text": "By And Between: [●], a company incorporated under the laws of [●], having its principal office at [●] (the [First Party]); And … (the [First Party] and the [Second Party] are hereinafter referred to individually as a Party and collectively as the Parties).",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "lead_in": {
+      "text": "Pursuant to Clause [●] (Amendment) of the Principal Agreement, the Parties hereby agree that the Principal Agreement shall be amended as follows.",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "replace": {
+      "text": "… [the provision] shall stand deleted in its entirety and shall stand replaced with the following:",
+      "source": [
+        "amendment base",
+        "EWPL4",
+        "escrow amendments"
+      ]
+    },
+    "insert": {
+      "text": "In Clause [●] (Definitions) of the Principal Agreement, immediately before the term ‘[●]’ and its definition, a new term ‘[●]’ and its definition shall stand inserted as follows:",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "effect": {
+      "text": "This Amendment Agreement shall become effective on the Amendment Effective Date.",
+      "source": [
+        "amendment pack"
+      ]
+    },
+    "unchanged": {
+      "text": "Except as otherwise expressly set out in this Amendment Agreement, all other provisions of the Principal Agreement shall remain unchanged.",
+      "source": [
+        "amendment base",
+        "EWPL4"
+      ]
+    },
+    "incorporation": {
+      "text": "Clause [●] (Notices) … and Clause [●] (Dispute Resolution) of the Principal Agreement shall apply to this Amendment Agreement, mutatis mutandis.",
+      "source": [
+        "amendment pack"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "delete_replace",
+      "pattern": "\\bshall be deleted in its entirety and replaced with\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm writes \"shall stand deleted in its entirety and shall stand replaced with the following\".",
+      "source": [
+        "amendment base",
+        "EWPL4"
+      ]
+    }
+  ],
+  "tells_of_counterparty": [
+    {
+      "id": "pointer_given",
+      "tell": "\"has the meaning given to it in\" pointers",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "party_clause",
+      "tell": "\"(hereinafter referred to as the X which expression shall mean and include …)\" with no \"where the context so permits\"",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "company",
+      "tell": "parties called \"the Company\" rather than by role (the Concessionaire, the Project Company)",
+      "source": [
+        "Bases from other counsel",
+        "LEL127"
+      ]
+    },
+    {
+      "id": "words_first",
+      "tell": "money with the words first: Pakistani Rupees [words] (PKR [●])",
+      "source": [
+        "Bases from other counsel"
+      ]
+    }
+  ],
+  "defined_terms": {
+    "pointer_formula": "shall bear the meanings ascribed thereto in the Principal Agreement",
+    "lead_in": "Unless otherwise defined in this Amendment Agreement, all capitalised terms used but not defined herein shall bear the meanings ascribed thereto in the Principal Agreement.",
+    "rule": "Defined terms of this Amendment Agreement are bold in brackets without quotation marks; a definition inserted into the Principal Agreement follows the Principal Agreement's own style (quoted if it quotes).",
+    "source": [
+      "amendment base (SPA amendment)",
+      "amendment pack"
+    ]
+  },
+  "off": [
+    "pointer_given"
+  ],
+  "notes": [
+    "The amended agreement is \"the Principal Agreement\", never \"the Original Agreement\".",
+    "The pack's preamble year is [●], not a fixed year."
+  ]
+}

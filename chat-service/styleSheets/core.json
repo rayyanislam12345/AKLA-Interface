@@ -1,0 +1,346 @@
+{
+  "key": "core",
+  "title": "Firm-wide style (every document)",
+  "kind": "any",
+  "voice": {
+    "rule": "The firm speaks of itself as \"the Firm\", never \"we\", \"our\" or \"us\"; the client is \"the Client\". A document signed by someone else (a party's letter, consent or resolution, a power of attorney) speaks in that person's own voice.",
+    "self": "the Firm",
+    "we_allowed": false,
+    "source": [
+      "Decisions 20 Oct 2026",
+      "firm-skills/akla-dd-format/references/house-style.md",
+      "plan: How it will work: the wording"
+    ]
+  },
+  "spelling": {
+    "rule": "British spelling with -ise throughout: authorise, organisation, recognise, utilise, finalise; also colour, favour, labour, centre, defence, fulfil, instalment, programme, licence (noun), acknowledgement, cancelled, judgment (of a court).",
+    "convention": "ise",
+    "words": {
+      "analyze": "analyse",
+      "analyzed": "analysed",
+      "analyzing": "analysing",
+      "paralyze": "paralyse",
+      "color": "colour",
+      "favor": "favour",
+      "favorable": "favourable",
+      "favorably": "favourably",
+      "honor": "honour",
+      "labor": "labour",
+      "behavior": "behaviour",
+      "neighbor": "neighbour",
+      "neighboring": "neighbouring",
+      "endeavor": "endeavour",
+      "endeavors": "endeavours",
+      "harbor": "harbour",
+      "center": "centre",
+      "centers": "centres",
+      "defense": "defence",
+      "offense": "offence",
+      "fulfill": "fulfil",
+      "fulfillment": "fulfilment",
+      "enrollment": "enrolment",
+      "installment": "instalment",
+      "installments": "instalments",
+      "canceled": "cancelled",
+      "canceling": "cancelling",
+      "cancelation": "cancellation",
+      "labeled": "labelled",
+      "labeling": "labelling",
+      "modeling": "modelling",
+      "traveled": "travelled",
+      "acknowledgment": "acknowledgement",
+      "acknowledgments": "acknowledgements",
+      "catalog": "catalogue",
+      "dialog": "dialogue",
+      "gray": "grey",
+      "program": "programme",
+      "programs": "programmes"
+    },
+    "keep": [
+      "size",
+      "sized",
+      "sizes",
+      "seize",
+      "seized",
+      "seizes",
+      "seizure",
+      "prize",
+      "prizes",
+      "capsize",
+      "maize",
+      "baize",
+      "assize",
+      "assizes",
+      "downsize",
+      "oversize",
+      "oversized",
+      "resize",
+      "citizen",
+      "citizens"
+    ],
+    "keep_after": {
+      "program": [
+        "computer",
+        "software",
+        "training"
+      ],
+      "programs": [
+        "computer",
+        "software"
+      ]
+    },
+    "source": [
+      "Decisions 20 Oct 2026 (British -ise everywhere)",
+      "firm-skills/akla-dd-format/references/house-style.md"
+    ]
+  },
+  "defined_terms": {
+    "form": "bold-parenthesis-no-quotes",
+    "rule": "A term is defined once, in bold inside brackets, without quotation marks, and used with the same capitals ever after. In a definitions clause the term is bold without quotation marks, followed by \"means\" or the pointer formula.",
+    "examples": [
+      "(the **Concessionaire**)",
+      "(each a **Party** and together the **Parties**)",
+      "**Escrow Amount** means …"
+    ],
+    "pointer_formula": "shall have the meaning ascribed thereto in Section [●] ([●])",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "plan: How it will work: the wording",
+      "firm-skills/concession-agreement/references/house-style.md"
+    ]
+  },
+  "numbers": {
+    "rule": "Counts, periods and percentages in words then figures, the words in lower case with no hyphen. Figures in brackets are never zero-padded: five (5), not five (05).",
+    "examples": [
+      "thirty (30) days",
+      "twelve (12) months",
+      "two (2) years",
+      "fifty percent (50%)",
+      "one hundred and twenty five percent (125%)"
+    ],
+    "units": [
+      "day",
+      "days",
+      "Business Day",
+      "Business Days",
+      "Working Day",
+      "Working Days",
+      "week",
+      "weeks",
+      "month",
+      "months",
+      "year",
+      "years",
+      "hour",
+      "hours"
+    ],
+    "source": [
+      "plan: How it will work: the wording",
+      "firm-skills/concession-agreement/references/house-style.md",
+      "firm-skills/akla-dd-format/references/house-style.md",
+      "CA master (227 word-and-figure numbers)"
+    ]
+  },
+  "money": {
+    "rule": "The currency code, the figure with thousands separators and \"/-\", then the amount in words in Title Case in brackets on first mention; the figure alone thereafter. Inside a standard, follow the wording already in the slot.",
+    "examples": [
+      "PKR 1,000,000/- (Pakistani Rupees One Million Only)",
+      "USD 118,750,000/- (United States Dollars One Hundred Eighteen Million Seven Hundred Fifty Thousand Only)",
+      "PKR 350,000,000/- (thereafter)"
+    ],
+    "variants": [
+      "Pak Rupees (in older agreements)",
+      "lower-case \"only\" (in some standards)",
+      "no \"/-\" in the Concession Agreement master's slots",
+      "\"Pakistan Rupees\" (MM68) is a slip for Pakistani Rupees"
+    ],
+    "currency_codes": [
+      "PKR",
+      "USD",
+      "EUR",
+      "GBP"
+    ],
+    "first_mention_only": true,
+    "source": [
+      "plan: How it will work: the wording",
+      "firm-skills/akla-dd-format/references/house-style.md",
+      "firm-skills/concession-agreement/references/house-style.md",
+      "PQE4.3, AM7, PI45 (USD and PKR fee forms)"
+    ]
+  },
+  "dates": {
+    "rule": "Month in words, the day as two figures, a comma, the year in full; no \"th\". In an agreement's preamble the formula \"on this [●] day of [●], [●]\" is kept.",
+    "example": "October 19, 2026",
+    "examples": [
+      "October 19, 2026",
+      "May 07, 2014"
+    ],
+    "zero_pad": true,
+    "source": [
+      "Decisions 20 Oct 2026",
+      "firm-skills/akla-dd-format/references/house-style.md",
+      "firm-skills/concession-agreement/references/house-style.md",
+      "EWPL20 (15 zero-padded, 0 unpadded)"
+    ]
+  },
+  "placeholder": {
+    "rule": "Every unknown is [●] (a bracketed black circle). A neutral bracketed description is allowed where a reader needs to know what goes there: [relevant sales tax authority], [applicable PPP law]. No [•], [ ], [____] or XX.",
+    "token": "[●]",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "plan: How it will work: the wording"
+    ]
+  },
+  "cross_refs": {
+    "rule": "A reference to a provision of the same document carries its heading in brackets the first time it is made in a clause.",
+    "example": "Section 2.1 (The Appointment)",
+    "heading_required": true,
+    "words": null,
+    "source": [
+      "plan: How it will work: the wording",
+      "firm-skills/concession-agreement/references/house-style.md"
+    ]
+  },
+  "headings": {
+    "rule": "Headings in Title Case, the firm capitalising small words too (Grant Of Rights, Scope Of Work); the numbering is Word's own, never typed.",
+    "source": [
+      "plan: How it will work: the wording",
+      "Decisions 20 Oct 2026 (numbering)",
+      "MM68",
+      "PQE4.3",
+      "PTQ15.4"
+    ]
+  },
+  "obligations": {
+    "rule": "\"shall\" for an obligation, \"may\" for a discretion; never \"will\" for an obligation in an agreement.",
+    "source": [
+      "plan: How it will work: the wording"
+    ]
+  },
+  "statutes": {
+    "rule": "An Act is cited by its name, a comma and its year: Companies Act, 2017; Contract Act, 1872; Arbitration Act, 1940. A section of a statute is lower case (section 197); a section of the document is capitalised (Section 5.4).",
+    "source": [
+      "plan: How it will work: the wording",
+      "firm-skills/akla-dd-format/references/house-style.md"
+    ]
+  },
+  "government": {
+    "rule": "No government, province, provincial department or body, and no province-specific or federal-only PPP law, is named. The government party is the defined term Government, named once where it is defined in a deal's draft; departments and authorities are [●] or a neutral description in brackets. Nationwide laws and bodies stay (Companies Act, 2017; SECP; Arbitration Act, 1940; Contract Act, 1872; FBR).",
+    "defined_term": "Government",
+    "patterns": [
+      "\\bGovernment\\s+of\\s+(?:Sindh|(?:the\\s+)?Punjab|Khyber\\s+Pakhtunkhwa|KPK|Balochistan|Baluchistan|Gilgit[-\\s]Baltistan|Azad\\s+(?:Jammu\\s+and\\s+)?Kashmir|AJK|(?:the\\s+Islamic\\s+Republic\\s+of\\s+)?Pakistan|Islamabad\\s+Capital\\s+Territory)\\b",
+      "\\b(?:Sindh|Punjab|Punjab's|Khyber\\s+Pakhtunkhwa|Balochistan|Federal|Provincial)\\s+Government\\b",
+      "\\bProvince\\s+of\\s+(?:Sindh|(?:the\\s+)?Punjab|Khyber\\s+Pakhtunkhwa|Balochistan)\\b",
+      "\\b(?:GoS|GoP|GoPb|GoKP|GoKPK|GoB)\\b",
+      "\\b(?:Sindh|Punjab|Khyber\\s+Pakhtunkhwa|Balochistan|Gilgit[-\\s]Baltistan)\\s+(?:(?:[A-Z][\\w&'’-]*|of|on|and|for|the)\\s+){0,7}?(?:Act|Ordinance|Rules|Regulations|Authority|Board|Unit|Department|Commission|Agency|Cell)\\b",
+      "\\bPublic[-\\s]Private\\s+Partnership\\s+Authority\\s+Act\\b",
+      "\\b(?:SPPRA|SRB|KPRA|P3A|PPP\\s+Node)\\b",
+      "\\b(?:Governor|Chief\\s+Secretary)\\s*,?\\s+(?:of\\s+)?(?:Sindh|(?:the\\s+)?Punjab|Khyber\\s+Pakhtunkhwa|Balochistan)\\b",
+      "\\bProvince\\s+of\\s+\\[●\\]",
+      "\\bSPP\\s+Rules\\b"
+    ],
+    "source": [
+      "Decisions 20 Oct 2026 (no government or province is built in)"
+    ]
+  },
+  "formulae": {
+    "parties_close": {
+      "text": "…(the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns)",
+      "source": [
+        "CA master",
+        "SKM58",
+        "plan: How it will work: the wording"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "hereinafter",
+      "pattern": "\\(\\s*hereinafter\\s+(?:referred\\s+to\\s+as|called)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm defines a party as (the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns), not \"(hereinafter referred to as …\". The roll-up \"are hereinafter collectively referred to as the Parties\" is the firm's own.",
+      "source": [
+        "CA master",
+        "SKM58",
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "witnesseth",
+      "pattern": "\\b(?:W\\s?I\\s?T\\s?N\\s?E\\s?S\\s?S\\s?E\\s?T\\s?H|Witnesseth)\\b",
+      "flags": "",
+      "severity": "low",
+      "reason": "\"WITNESSETH\" is another firm's formula; the firm heads its recitals \"Recitals\" and closes them with \"Now, Therefore, … the Parties hereby agree as follows:\".",
+      "source": [
+        "Bases from other counsel (SKM137)"
+      ]
+    },
+    {
+      "id": "voice_we",
+      "check": "voice",
+      "severity": "medium",
+      "reason": "The firm speaks as \"the Firm\", never \"we\", \"our\" or \"us\".",
+      "source": [
+        "Decisions 20 Oct 2026",
+        "firm-skills/akla-dd-format/references/house-style.md"
+      ]
+    },
+    {
+      "id": "will_obligation",
+      "check": "will_obligation",
+      "kinds": [
+        "agreement"
+      ],
+      "severity": "low",
+      "reason": "An obligation in an agreement takes \"shall\", not \"will\".",
+      "source": [
+        "plan: How it will work: the wording"
+      ]
+    }
+  ],
+  "tells_of_counterparty": [
+    {
+      "id": "quoted_terms",
+      "tell": "Defined terms in quotation marks: (the \"Company\"), \"Agreement\" means …",
+      "source": [
+        "plan: How it will work: the wording"
+      ]
+    },
+    {
+      "id": "hereinafter",
+      "tell": "\"hereinafter referred to as\" instead of a bracketed definition",
+      "source": [
+        "plan: How it will work: the wording"
+      ]
+    },
+    {
+      "id": "witnesseth",
+      "tell": "\"WITNESSETH\" before the recitals",
+      "source": [
+        "plan: How it will work: the wording"
+      ]
+    },
+    {
+      "id": "american",
+      "tell": "American -ize spelling (authorize, organization)",
+      "source": [
+        "Decisions 20 Oct 2026"
+      ]
+    },
+    {
+      "id": "will",
+      "tell": "\"will\" for obligations",
+      "source": [
+        "plan: How it will work: the wording"
+      ]
+    },
+    {
+      "id": "dates",
+      "tell": "Dates written 19 October 2026 or 19th October, 2026",
+      "source": [
+        "Decisions 20 Oct 2026"
+      ]
+    }
+  ]
+}

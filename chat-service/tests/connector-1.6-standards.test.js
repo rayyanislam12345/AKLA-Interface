@@ -97,19 +97,23 @@ test('a standard links to its page on the Hub', () => {
 test('list_document_types groups the types by category with ids, standards, questionnaires and Hub links', async () => {
   const { run, supabase } = tools({ hubUrl: 'https://hub.test' });
   const out = await run('list_document_types', {});
-  assert.match(out, /^5 document types on the Hub: 3 with a standard, 1 with a drafting questionnaire\. read_standard reads a standard's text; get_drafting_decisions lists a type's drafting decisions\./);
+  // The Concession Agreement and the Board Resolution have their decisions from the data files, by name (questionnaire.js questionnaireFor).
+  assert.match(out, /^5 document types on the Hub: 3 with a standard, 3 with a drafting questionnaire\. read_standard reads a standard's text; get_drafting_decisions lists a type's drafting decisions\./);
   // Categories in alphabetical order, a type without one under Other.
   const heads = [...out.matchAll(/^[A-Z][A-Z ]+$/gm)].map((m) => m[0]);
   assert.deepEqual(heads, ['CORPORATE', 'INFRASTRUCTURE', 'OTHER', 'PROCUREMENT']);
   assert.match(out, new RegExp(`- RFP Volume I\\n  documentTypeId: ${T_RFP}\\n  Word standard: RFP Volume I standard\\.docx, updated 18 Sept 2026\\n  Open in Hub: https://hub\\.test/precedent-library/standardize/${T_RFP}\\n  drafting questionnaire: ${RFP.questions.length} decisions \\(get_drafting_decisions\\)`));
   assert.match(out, new RegExp(`- Concession Agreement\\n  documentTypeId: ${T_CA}\\n  Word standard: Standard Concession Agreement \\[AKLA\\]\\.docx, updated 1 Oct 2026\\n  Open in Hub: `));
+  // A type with a style sheet and a clause list says so, and where they are.
+  assert.match(out, /- Concession Agreement\n[\s\S]*?  drafting questionnaire: \d+ decisions \(get_drafting_decisions\)\n  the firm's rules for it: its own style sheet \("concession-agreement", on top of the firm-wide one: get_firm_rules with this documentTypeId\); a clause list of \d+ parts in the firm's order[^\n]*open_standard_for_filling lists it[^\n]*get_clause_examples/);
+  assert.doesNotMatch(out, /Non-Disclosure Agreement\n[^-]*the firm's rules for it/, 'a kind with neither has no such line');
   assert.match(out, new RegExp(`- Non-Disclosure Agreement\\n  documentTypeId: ${T_NDA}\\n  no standard yet\\n`));
   assert.match(out, /- Seeded Agreement\n  documentTypeId: [^\n]+\n  standard text \(no Word file\), updated 28 Aug 2026\n  Open in Hub: /);
   assert.doesNotMatch(out, /Seeded Agreement[\s\S]{0,300}drafting questionnaire/, 'a questionnaire key the service does not know is not offered');
   assert.match(out, /OTHER\n- Board Resolution\n/);
   assert.equal((out.match(/Open in Hub:/g) ?? []).length, 3, 'one link per standard, none for a type without one');
   assert.equal(supabase.calls.length, 1, 'one query');
-  assert.match(supabase.calls[0], /^document_types: id, name, category, questionnaire, standard:document_type_templates\(/);
+  assert.match(supabase.calls[0], /^document_types: id, name, category, questionnaire, skeleton, decisions, standard:document_type_templates\(/);
   assert.match(out, /\n\n\[End of the list\.\]$/);
   const empty = createHubTools({ supabase: fakeSupabase({}), voyageKey: 'v', log: () => {}, modules: [standards] }).find((t) => t.name === 'list_document_types');
   assert.equal(await empty.run({}, { userId: 'u1' }), 'The Hub has no document types yet.');
@@ -139,12 +143,12 @@ test('list_document_types pages a long list, repeating the category on a new pag
 test('read_standard returns the text in slices with the format rules, the Hub link and where to continue', async () => {
   const { run } = tools({ hubUrl: 'https://hub.test' });
   const first = await run('read_standard', { documentTypeId: T_RFP });
-  assert.match(first, new RegExp(`^The firm's standard for RFP Volume I \\(RFP Volume I standard\\.docx, a Word file\\), updated 18 Sept 2026 — characters 1–62 of 62\\.\\nThis type has a drafting questionnaire: get_drafting_decisions lists its decisions\\.\\nOpen in Hub: https://hub\\.test/precedent-library/standardize/${T_RFP}\\n\\nFORMAT RULES \\(how the Word file is laid out; a draft of this type follows them\\):\\nClauses are numbered 1, 1\\.1, 1\\.1\\.1; headings in bold capitals; body Arial 11\\.\\n\\nTEXT:\\n\\nVOLUME I\\n\\nINSTRUCTIONS TO BIDDERS\\n\\n1\\. The Agency invites bids\\.\\n\\n\\[End of the standard\\.\\]$`));
+  assert.match(first, new RegExp(`^The firm's standard for RFP Volume I \\(RFP Volume I standard\\.docx, a Word file\\), updated 18 Sept 2026 — characters 1–62 of 62\\.\\nThis type has a drafting questionnaire: get_drafting_decisions lists its decisions\\.\\nThe firm's rules for it: its own style sheet \\("rfp", on top of the firm-wide one: get_firm_rules with this documentTypeId\\); get_clause_examples gives the firm's own versions of a clause\\.\\nOpen in Hub: https://hub\\.test/precedent-library/standardize/${T_RFP}\\n\\nFORMAT RULES \\(how the Word file is laid out; a draft of this type follows them\\):\\nClauses are numbered 1, 1\\.1, 1\\.1\\.1; headings in bold capitals; body Arial 11\\.\\n\\nTEXT:\\n\\nVOLUME I\\n\\nINSTRUCTIONS TO BIDDERS\\n\\n1\\. The Agency invites bids\\.\\n\\n\\[End of the standard\\.\\]$`));
 
   // A long standard comes in slices; no rules line when there are none.
   const a = await run('read_standard', { documentTypeId: T_CA, chars: 5000 });
-  assert.match(a, /^The firm's standard for Concession Agreement \(Standard Concession Agreement \[AKLA\]\.docx, a Word file\), updated 1 Oct 2026 — characters 1–5,000 of [\d,]+\.\nOpen in Hub: /);
-  assert.doesNotMatch(a, /FORMAT RULES|drafting questionnaire/);
+  assert.match(a, /^The firm's standard for Concession Agreement \(Standard Concession Agreement \[AKLA\]\.docx, a Word file\), updated 1 Oct 2026 — characters 1–5,000 of [\d,]+\.\nThis type has a drafting questionnaire: get_drafting_decisions lists its decisions\.\nThe firm's rules for it: its own style sheet \("concession-agreement"[^\n]*a clause list of \d+ parts[^\n]*\nOpen in Hub: /);
+  assert.doesNotMatch(a, /FORMAT RULES/);
   assert.match(a, /\n\n\[The standard continues: call read_standard again with from: 5000\.\]$/);
   const body = a.slice(a.indexOf('TEXT:\n\n') + 7, a.lastIndexOf('\n\n[The standard continues'));
   assert.equal(body, longStandard.slice(0, 5000));
@@ -226,7 +230,9 @@ test('get_drafting_decisions prints the RFP questionnaire as numbered decisions 
 
 test('get_drafting_decisions says when a type has no questionnaire, or no Word standard', async () => {
   const { run } = tools();
-  assert.equal(await run('get_drafting_decisions', { documentTypeId: T_CA }), 'Concession Agreement has no drafting questionnaire. list_document_types shows which types have one; a draft of this type starts from read_standard and the facts the lawyer gives.');
+  assert.equal(await run('get_drafting_decisions', { documentTypeId: T_NDA }), 'Non-Disclosure Agreement has no drafting questionnaire. list_document_types shows which types have one; a draft of this type starts from read_standard and the facts the lawyer gives.');
+  // A type with no questionnaire key has the decisions of its data file, by name (questionnaire.js questionnaireFor).
+  assert.match(await run('get_drafting_decisions', { documentTypeId: T_CA }), /^Concession agreement drafting decisions: the \d+ drafting decisions the firm's questionnaire asks before Concession Agreement is drafted/);
   assert.match(await run('get_drafting_decisions', { documentTypeId: T_SEEDED }), /^Seeded Agreement has no drafting questionnaire\./, 'a key the service does not know counts as none');
   // A type with the questionnaire but no .docx standard: the decisions still come, with the note the Hub gives.
   const noFile = decisionsText(RFP, { type: { id: T_RFP, name: 'RFP Volume I' }, standard: { filename: null, storage_path: null }, hubUrl: 'https://hub.test' });

@@ -152,6 +152,55 @@ text into the pack). The pack columns are read with `withPackColumns`, so
 the service works before the migration is applied (no type then has a
 pack). `draftingPacks.js` is in all three lists in `deploy.sh`.
 
+## How the firm writes, and the parts it always has
+
+`draftChecks.js` wires slices 3 and 4 of the drafting plan into every Word
+turn (and into the connector's `open_standard_for_filling`,
+`fill_standard_to_project` and `apply_tracked_changes`). The type is read
+with its `skeleton` and `decisions` columns (`withDraftingColumns`; before
+`20261021100000_skeletons_and_decisions.sql` they come from
+`skeletons/*.json` and `decisions/*.json` by the type's name).
+
+- **The prompt.** A fill or draft turn on a standard gets the type's style
+  sheet (`firmRules.js styleSheetText`), its clause list
+  (`skeletonCheck.js skeletonText`), its decisions in a few lines, and the
+  firm's own versions of up to six clauses it is about to write (the ones
+  the message names, then the parts the file lacks), 2–3 each, at most
+  12,000 characters (`clauseBank.js`; skipped silently before
+  `20261021090000_clause_bank.sql` or on any error).
+- **Comments in the same pass.** Before `applyDocxOps`, the turn's own
+  operations are read: a heading written that is on no list gets "New
+  clause — not in the firm's precedents" if the model did not give it
+  one, and each wording point (`proofCheck.js runWordingCheck`, the type's
+  style sheet) in the words the turn wrote becomes an AKLA comment on the
+  paragraph it targets. A replaced paragraph's points are the new text's
+  less its old text's, so the pack's own legacy wording is never flagged.
+  At most 20 a turn; the reply says how many more, and the next turn is
+  shown them.
+- **The clause-list check.** After the accept and the format check, the
+  file is checked against the clause list; a missing "always" part
+  refuses the store exactly as format drift does (`draftGate`, then
+  `storeUnlessRefused`). A shell pack's draft must have every such part;
+  any other turn must only not take one out. The refusal names the part
+  and how to confirm the omission ("leave out the Subject line", "confirm
+  omission: subject"). The confirmed ids are kept on the thread
+  (`ai_chat_threads.questionnaire.confirmedOmissions`, beside a guided
+  draft's answers), and the refused reply's changes, kept on its message
+  (`metadata.skeletonRefused`), are filed again without a model call.
+- **Decisions.** `questionnaireFor(type)` reads the type's own row, then
+  its questionnaire key, then the data file of its name. Guided drafting
+  (one question at a time before anything is drafted) is still for a type
+  that names a questionnaire key (the RFP); other types' decisions are in
+  their fill prompt and in the connector's `get_drafting_decisions`.
+
+The block operations (`write`, `repeat_block`, `add_row`,
+`remove_block`) each make one change record (`changes.js editRecords`, as
+an addition or a deletion), so the Changes list accepts or rejects them in
+the file; a footnote a `write` added is decided with it.
+`clauseBank.js`, `decisions.js`, `skeletonCheck.js` and `draftChecks.js`
+are in all three lists in `deploy.sh`, and `styleSheets/`, `decisions/`
+and `skeletons/` are shipped whole.
+
 ## Review writes into the working file
 
 Review no longer rebuilds a file from the saved version it reviewed. It runs

@@ -1,0 +1,33 @@
+{
+  "key": "minutes",
+  "typeName": "Meeting Minutes",
+  "source": "Derived 20 October 2026 from the minutes clause list (skeletons/minutes.json) and the firm's six meeting notes.",
+  "name": "Meeting notes drafting decisions",
+  "documentLabel": "MEETING NOTES",
+  "applyWhere": "the title box and the sections",
+  "closing": "That completes the drafting decisions. What remains are the meeting's facts — its title and date, who attended, and what was discussed, agreed and left open. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "minutes_form",
+      "section": "Form",
+      "title": "Form of the notes",
+      "question": "What kind of meeting note is this?",
+      "location": "The title box and the order of the sections",
+      "basis": "The firm's notes record a meeting (attendance and purpose, the position, the items, points held open, next steps), set out pointers for a meeting to come, or record its outcome.",
+      "options": [
+        {
+          "id": "record",
+          "label": "A record of a meeting held"
+        },
+        {
+          "id": "pointers",
+          "label": "Discussion pointers for a meeting"
+        },
+        {
+          "id": "outcome",
+          "label": "An outcome note"
+        }
+      ]
+    }
+  ]
+}

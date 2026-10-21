@@ -65,6 +65,7 @@ export const BUILT_IN_TOOL_NAMES = Object.freeze(["search_law_library", "read_ac
  */
 export const MODULE_TOOL_NAMES = Object.freeze([
   "list_acts", "get_act_outline", // acts.js
+  "get_clause_examples", // clauses.js
   "get_document_checks", "compare_document_versions", // documentInsight.js
   "open_standard_for_filling", // fillStandard.js
   "fill_standard_to_project", // fillStandardWrite.js (writes)
@@ -242,7 +243,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
   const versionById = async (id, columns) => {
     const { data, error } = await supabase
       .from("document_versions")
-      .select(`${columns}, matter_document:matter_documents(id, title, matter_id, document_type:document_types(name), matter:matters(id, name))`)
+      .select(`${columns}, matter_document:matter_documents(id, title, matter_id, document_type:document_types(id, name), matter:matters(id, name))`)
       .eq("id", id)
       .maybeSingle();
     if (error) throw new Error(`Could not read the document version: ${error.message}`);

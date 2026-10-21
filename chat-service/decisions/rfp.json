@@ -1,0 +1,1081 @@
+{
+  "key": "rfp_federal_ppp",
+  "typeName": "Request for Proposal (RFP)",
+  "source": "Moved out of chat-service/questionnaire.js (RFP_FEDERAL_PPP) on 20 October 2026, word for word: AKLA's \"Federal PPP RFP — Drafting Options Matrix\" for Volume I (Tender Procedure) of the federal PPP standard. The rules that were functions (appliesWhen, auto, filter) are written as conditions: {\"is\": [question, option…]}, {\"answered\": question}, {\"not\": …}, {\"all\": […]}, {\"any\": […]}; auto is a list of {when, then}; hide is a list of {options, when} (the options not offered when the condition holds).",
+  "name": "Federal PPP RFP — Volume I drafting decisions",
+  "closing": "That completes the drafting decisions. What remains are the project's own facts — Agency name and address, the Transaction Advisor, key dates (issue, pre-bid meeting, bid submission, openings, award, signing), submission addresses and portal links, and the numeric thresholds (net worth, average annual revenue, Bid Security %, Performance Security %, bid validity, litigation threshold, Consortium ownership caps). Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "modality",
+      "section": "Project structure",
+      "title": "PPP delivery modality",
+      "question": "Which PPP delivery modality will the Project use?",
+      "location": "Glossary \"Project\" definition (\"delivered under PPP mode on a [●] basis\"); General/Introduction (\"engage a private party on a PPP basis to [design, finance, build, operate and transfer / [●]] the Project\"); Bidding Forms T1 and F1 (\"Re: [Design, finance, build, operate and transfer / [●]] of … Project\")",
+      "basis": "Bracketed alternative in the RFP; modality menu per standard PPP taxonomy and ADB's Pakistan PPP Landscape note.",
+      "options": [
+        {
+          "id": "bot",
+          "label": "Build-Operate-Transfer (BOT)"
+        },
+        {
+          "id": "boot",
+          "label": "Build-Own-Operate-Transfer (BOOT)"
+        },
+        {
+          "id": "dbfot",
+          "label": "Design-Build-Finance-Operate-Transfer (DBFOT)",
+          "hint": "The RFP's current default"
+        },
+        {
+          "id": "dbfo",
+          "label": "Design-Build-Finance-Operate (DBFO)"
+        },
+        {
+          "id": "dbfomt",
+          "label": "Design-Build-Finance-Operate-Maintain-Transfer (DBFOMT)"
+        },
+        {
+          "id": "dbfm",
+          "label": "Design-Build-Finance-Maintain (DBFM)"
+        }
+      ]
+    },
+    {
+      "id": "term",
+      "section": "Project structure",
+      "title": "Term structure of the concession",
+      "question": "How is the concession term to be structured?",
+      "location": "\"Term\" clause — construction period of [●] and operating period of [●]",
+      "basis": "Numeric placeholders in the RFP; alternatives per standard concession drafting.",
+      "options": [
+        {
+          "id": "fixed",
+          "label": "Fixed term",
+          "hint": "Fixed construction period + fixed operating period"
+        },
+        {
+          "id": "performance",
+          "label": "Output/performance-linked term",
+          "hint": "Extendable subject to KPI compliance"
+        },
+        {
+          "id": "revenue",
+          "label": "Traffic/revenue-linked term",
+          "hint": "Ends once a cumulative revenue/traffic target is reached — common for toll roads"
+        },
+        {
+          "id": "rolling",
+          "label": "Rolling/renewable term",
+          "hint": "Subject to periodic Agency review"
+        }
+      ]
+    },
+    {
+      "id": "qualified",
+      "section": "Status and approvals",
+      "title": "Qualified / non-Qualified Project",
+      "question": "Is this a Qualified Project under the P3A Act?",
+      "location": "\"Government Support\" section introduction; approval-chain references throughout",
+      "basis": "Section 2(v), P3A Act 2017.",
+      "options": [
+        {
+          "id": "qualified",
+          "label": "Qualified Project",
+          "hint": "Support required (VGF / Sovereign Guarantee / PDF) or so designated by the P3WP — the full P3WP → P3A Board → CDWP → ECNEC chain applies"
+        },
+        {
+          "id": "non_qualified",
+          "label": "Non-Qualified Project",
+          "hint": "Procured solely under the PPRA Rules; no P3A approval chain"
+        }
+      ]
+    },
+    {
+      "id": "approval_chain",
+      "section": "Status and approvals",
+      "title": "Regulatory approval chain",
+      "question": "For a non-Qualified Project, what should happen to the \"Regulatory Approvals and Compliance\" approval chain?",
+      "location": "\"Regulatory Approvals and Compliance\" section; \"Qualified Project Approval Chain\"",
+      "basis": "Mandatory for Qualified Projects; removable with legal sign-off for a non-Qualified federal PPP procured solely under the PPRA Rules.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "qualified",
+              "qualified"
+            ]
+          },
+          "then": "retain"
+        }
+      ],
+      "options": [
+        {
+          "id": "delete",
+          "label": "Delete the approval chain",
+          "hint": "With legal sign-off — procured solely under the PPRA Rules"
+        },
+        {
+          "id": "retain",
+          "label": "Retain the full chain",
+          "hint": "P3WP → P3A Board → CDWP → ECNEC"
+        }
+      ]
+    },
+    {
+      "id": "pcp_step",
+      "section": "Status and approvals",
+      "title": "Project Concept Proposal approval step",
+      "question": "Should the optional Project Concept Proposal approval step be kept in the approval chain?",
+      "location": "\"Qualified Project Approval Chain\", item (a): \"[Project Concept Proposal (optional) approved by the P3WP…]\"",
+      "basis": "Optional under section 13A(2)(a), P3A Act.",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "approval_chain",
+            "delete"
+          ]
+        }
+      },
+      "options": [
+        {
+          "id": "include",
+          "label": "Include it",
+          "hint": "Keep the Project Concept Proposal as a discrete approval step"
+        },
+        {
+          "id": "omit",
+          "label": "Omit it",
+          "hint": "Proceed directly to the Project Qualification Proposal"
+        }
+      ]
+    },
+    {
+      "id": "method",
+      "section": "Procurement",
+      "title": "Method of procurement",
+      "question": "Which method of procurement applies?",
+      "location": "\"Tender Procedure\" introductory clause",
+      "basis": "Rules 14 and 20, PPRA Rules 2004.",
+      "options": [
+        {
+          "id": "open",
+          "label": "Open competitive bidding",
+          "hint": "Rule 20, PPRA Rules — the RFP's default"
+        },
+        {
+          "id": "restricted",
+          "label": "Restricted / limited tendering",
+          "hint": "Rule 14 exception — requires prior PPRA approval"
+        },
+        {
+          "id": "direct",
+          "label": "Direct contracting",
+          "hint": "Only for IFI transaction advisers under the 2023 Regulations — not for the main procurement"
+        }
+      ]
+    },
+    {
+      "id": "competition",
+      "section": "Procurement",
+      "title": "Competitive bidding basis",
+      "question": "Is the tender national or international? (This sets the minimum notice period.)",
+      "location": "Indicative Schedule footnote (\"not less than [thirty (30)] days … international competitive bidding … or not less than [fifteen (15)] days for a national competitive bidding\"); Publication and Advertisement clause",
+      "basis": "Rule 13(1), PPRA Rules.",
+      "options": [
+        {
+          "id": "icb",
+          "label": "International competitive bidding",
+          "hint": "Minimum 30 days' notice; publication may extend to international platforms via MOFA / SIFC / BOI"
+        },
+        {
+          "id": "ncb",
+          "label": "National competitive bidding",
+          "hint": "Minimum 15 days' notice"
+        },
+        {
+          "id": "hybrid",
+          "label": "National, with international outreach",
+          "hint": "Where foreign private parties are to be invited"
+        }
+      ]
+    },
+    {
+      "id": "procedure",
+      "section": "Procurement",
+      "title": "Bidding procedure",
+      "question": "Which bidding procedure will be used?",
+      "location": "Data Sheet item 6: \"Bidding procedure [Single Stage Two Envelope / adopted [●]]\"",
+      "basis": "Rules 36 and 37(a), PPRA Rules.",
+      "options": [
+        {
+          "id": "ss1e",
+          "label": "Single-stage one-envelope"
+        },
+        {
+          "id": "ss2e",
+          "label": "Single-stage two-envelope",
+          "hint": "The firm's default for PPP concessions"
+        },
+        {
+          "id": "ts",
+          "label": "Two-stage bidding"
+        },
+        {
+          "id": "ts2e",
+          "label": "Two-stage two-envelope"
+        }
+      ]
+    },
+    {
+      "id": "submission",
+      "section": "Procurement",
+      "title": "Bid submission mechanism",
+      "question": "How will bids be submitted?",
+      "location": "\"Preparation of Bids\" clause (\"[simultaneously through [the PPRA/Agency e-procurement portal, where used] / by …]\"); Data Sheet item 10",
+      "basis": "Rule 22, PPRA Rules; PPRA e-procurement regulations.",
+      "options": [
+        {
+          "id": "physical",
+          "label": "Physical sealed bids",
+          "hint": "Rule 22, PPRA Rules"
+        },
+        {
+          "id": "eprocurement",
+          "label": "e-Procurement platform",
+          "hint": "Cite the PPRA e-procurement regulation relied on"
+        },
+        {
+          "id": "hybrid",
+          "label": "Electronic, with physical originals as backup"
+        }
+      ]
+    },
+    {
+      "id": "revenue_model",
+      "section": "Revenue",
+      "title": "Revenue / compensation structure",
+      "question": "How will the Concessionaire be paid?",
+      "location": "\"Compensation of Concessionaire\" clause (\"structured on a [revenue/availability-payment/hybrid] model … [levy and collect Revenues from users / receive availability payments from the Agency / [●]]\")",
+      "basis": "Regulation 9(2)(b), Process Flow Regulations 2021.",
+      "options": [
+        {
+          "id": "user_pays",
+          "label": "User-pays / toll revenue"
+        },
+        {
+          "id": "availability",
+          "label": "Availability payments",
+          "hint": "Paid by the Agency regardless of usage"
+        },
+        {
+          "id": "hybrid",
+          "label": "Hybrid",
+          "hint": "Base availability payment + revenue/traffic-linked top-up"
+        },
+        {
+          "id": "shadow_toll",
+          "label": "Shadow toll",
+          "hint": "Agency pays per user/vehicle; users pay nothing"
+        },
+        {
+          "id": "annuity",
+          "label": "Annuity / hybrid annuity model (HAM)"
+        },
+        {
+          "id": "gpu",
+          "label": "Government payment for use / capacity charge"
+        }
+      ]
+    },
+    {
+      "id": "revenue_sharing",
+      "section": "Revenue",
+      "title": "Revenue-sharing mechanism",
+      "question": "Should the Government share in revenue above a threshold?",
+      "location": "\"Compensation of Concessionaire\" clause (\"thresholds and sharing ratios to be inserted as placeholders: [●]% / [●]%\")",
+      "basis": "Placeholder in the RFP; standard concession revenue-share drafting.",
+      "auto": [
+        {
+          "when": {
+            "all": [
+              {
+                "answered": "revenue_model"
+              },
+              {
+                "not": {
+                  "is": [
+                    "revenue_model",
+                    "user_pays",
+                    "hybrid"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": "none"
+        }
+      ],
+      "options": [
+        {
+          "id": "none",
+          "label": "No revenue sharing"
+        },
+        {
+          "id": "single",
+          "label": "Single threshold",
+          "hint": "Revenue above a target shared at a fixed ratio"
+        },
+        {
+          "id": "tiered",
+          "label": "Tiered / banded",
+          "hint": "Several thresholds, rising Government share"
+        },
+        {
+          "id": "guarantee_upside",
+          "label": "Minimum guaranteed return with upside sharing"
+        }
+      ]
+    },
+    {
+      "id": "escalation",
+      "section": "Revenue",
+      "title": "Tariff / payment escalation",
+      "question": "How should the tariff or payments escalate over the term?",
+      "location": "Terms of Reference (\"escalation percentages … O&M cost caps\")",
+      "basis": "Flagged as project-specific in the standard's AKLA comments.",
+      "options": [
+        {
+          "id": "fixed",
+          "label": "Fixed annual percentage"
+        },
+        {
+          "id": "cpi",
+          "label": "CPI-indexed"
+        },
+        {
+          "id": "wpi",
+          "label": "WPI-indexed"
+        },
+        {
+          "id": "none",
+          "label": "No escalation",
+          "hint": "Fixed tariff/payment for the term"
+        }
+      ]
+    },
+    {
+      "id": "support",
+      "section": "Government support and financing",
+      "title": "Federal Government support",
+      "question": "Which forms of Federal Government support are on offer? Select all that apply.",
+      "multi": true,
+      "location": "\"Government Support\" clause, items (a)–(d)",
+      "basis": "Sections 11 and 12, P3A Act; Chapter IV, Federal PPP Policy 2023–2028.",
+      "hide": [
+        {
+          "options": [
+            "pdf",
+            "vgf",
+            "sovereign_guarantee"
+          ],
+          "when": {
+            "is": [
+              "qualified",
+              "non_qualified"
+            ]
+          }
+        },
+        {
+          "options": [
+            "mrg"
+          ],
+          "when": {
+            "all": [
+              {
+                "answered": "revenue_model"
+              },
+              {
+                "not": {
+                  "is": [
+                    "revenue_model",
+                    "user_pays",
+                    "hybrid"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "exclusive": [
+        "none"
+      ],
+      "options": [
+        {
+          "id": "pdf",
+          "label": "Project Development Facility (PDF)",
+          "hint": "Section 12, P3A Act"
+        },
+        {
+          "id": "vgf",
+          "label": "Viability Gap Fund (VGF)",
+          "hint": "Section 11, P3A Act"
+        },
+        {
+          "id": "sovereign_guarantee",
+          "label": "Sovereign guarantee",
+          "hint": "Per the Finance Division procedure"
+        },
+        {
+          "id": "mrg",
+          "label": "Minimum revenue guarantee (MRG)"
+        },
+        {
+          "id": "equity",
+          "label": "Government equity contribution",
+          "hint": "e.g. Class B equity in the SPV"
+        },
+        {
+          "id": "subdebt",
+          "label": "Subordinated debt from Government"
+        },
+        {
+          "id": "assets",
+          "label": "Asset-based support",
+          "hint": "Land, right of way"
+        },
+        {
+          "id": "administrative",
+          "label": "Administrative support",
+          "hint": "Licences, clearances, utility relocation"
+        },
+        {
+          "id": "none",
+          "label": "No Government support",
+          "hint": "Fully self-financed PPP"
+        }
+      ]
+    },
+    {
+      "id": "financing_source",
+      "section": "Government support and financing",
+      "title": "Primary source of financing",
+      "question": "How will the Project be financed?",
+      "location": "\"Financing\" clause (\"financed through a combination of [equity, [Federal Government support, if applicable,] and commercial debt]\")",
+      "basis": "Bracketed alternative in the RFP.",
+      "hide": [
+        {
+          "options": [
+            "equity_support"
+          ],
+          "when": {
+            "is": [
+              "support",
+              "none"
+            ]
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "debt_only",
+          "label": "Commercial debt only",
+          "hint": "No fresh sponsor equity — e.g. leveraged brownfield refinancing"
+        },
+        {
+          "id": "equity_only",
+          "label": "Sponsor equity only",
+          "hint": "No external debt"
+        },
+        {
+          "id": "debt_equity",
+          "label": "Commercial debt + sponsor equity",
+          "hint": "Standard project finance, e.g. 70:30 or 80:20"
+        },
+        {
+          "id": "equity_support",
+          "label": "Sponsor equity + Government support",
+          "hint": "Class B equity / sub-debt / MRG; little or no commercial debt"
+        },
+        {
+          "id": "dfi_equity",
+          "label": "Multilateral/DFI debt + sponsor equity"
+        },
+        {
+          "id": "none",
+          "label": "No external financing",
+          "hint": "Government-funded; the private party contributes services only"
+        }
+      ]
+    },
+    {
+      "id": "financing_mix",
+      "section": "Government support and financing",
+      "title": "Financing mix",
+      "question": "What is the composition of the blended financing?",
+      "location": "\"Financing\" clause (\"[equity, [Federal Government support, if applicable,] and commercial debt]\")",
+      "basis": "Bracketed alternative in the RFP.",
+      "appliesWhen": {
+        "is": [
+          "financing_source",
+          "debt_equity",
+          "dfi_equity"
+        ]
+      },
+      "hide": [
+        {
+          "options": [
+            "equity_debt_support"
+          ],
+          "when": {
+            "is": [
+              "support",
+              "none"
+            ]
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "equity_debt",
+          "label": "Equity + commercial debt",
+          "hint": "No Government support"
+        },
+        {
+          "id": "equity_debt_support",
+          "label": "Equity + commercial debt + Government support",
+          "hint": "Class B equity / sub-debt / MRG"
+        },
+        {
+          "id": "equity_islamic_debt",
+          "label": "Equity + Islamic (Shariah-compliant) financing + commercial debt"
+        },
+        {
+          "id": "equity_dfi_debt",
+          "label": "Equity + multilateral/DFI debt + commercial debt",
+          "hint": "Blended finance"
+        }
+      ]
+    },
+    {
+      "id": "currency",
+      "section": "Government support and financing",
+      "title": "Currency of bid and payment",
+      "question": "Which currencies may the bid and payments be in?",
+      "location": "\"Currencies of Bid and Payment\" clause (\"state all monetary amounts in Pakistani Rupees (PKR), unless the Data Sheet permits a different currency …\")",
+      "basis": "Conditional wording in the RFP.",
+      "options": [
+        {
+          "id": "pkr",
+          "label": "PKR only"
+        },
+        {
+          "id": "pkr_fx_items",
+          "label": "PKR, with foreign currency for specified line items",
+          "hint": "e.g. imported plant, foreign debt service"
+        },
+        {
+          "id": "dual",
+          "label": "Dual-currency bid",
+          "hint": "PKR + one nominated foreign currency (e.g. USD) for the whole Financial Proposal"
+        }
+      ]
+    },
+    {
+      "id": "benchmark",
+      "section": "Government support and financing",
+      "title": "Benchmark interest rate",
+      "question": "What benchmark should the financial model's debt be priced on?",
+      "location": "Financial Proposal / Terms of Reference (\"KIBOR/benchmark rate … workings\")",
+      "basis": "Flagged as project-specific in the standard's AKLA comments.",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "financing_source",
+            "equity_only",
+            "none"
+          ]
+        }
+      },
+      "options": [
+        {
+          "id": "kibor",
+          "label": "KIBOR + spread",
+          "hint": "PKR debt"
+        },
+        {
+          "id": "sofr",
+          "label": "SOFR + spread",
+          "hint": "Foreign-currency debt"
+        },
+        {
+          "id": "fixed",
+          "label": "Fixed rate"
+        },
+        {
+          "id": "pkrv",
+          "label": "PKRV-linked"
+        }
+      ]
+    },
+    {
+      "id": "bidder_structure",
+      "section": "Bidders and evaluation",
+      "title": "Bidder structure",
+      "question": "Who may bid?",
+      "location": "\"Consortium / Consortium Member\" glossary entries; Eligibility Criteria",
+      "basis": "Structure in the RFP; carve-out flagged in the standard's AKLA comments.",
+      "options": [
+        {
+          "id": "single",
+          "label": "Single entities only",
+          "hint": "No consortia"
+        },
+        {
+          "id": "consortium",
+          "label": "Consortia permitted",
+          "hint": "Lead Member + Members, with a cap on the number of Members"
+        },
+        {
+          "id": "consortium_epc",
+          "label": "Consortia, with separate EPC Contractor qualification"
+        },
+        {
+          "id": "consortium_soe",
+          "label": "Consortia, with a foreign/state-owned-enterprise carve-out",
+          "hint": "From the conflict-of-interest rules"
+        }
+      ]
+    },
+    {
+      "id": "epc",
+      "section": "Bidders and evaluation",
+      "title": "EPC / delivery contractor",
+      "question": "Is a separate EPC or delivery contractor required?",
+      "location": "Annexure A: \"Eligibility Criteria for EPC Contractor / Delivery Partner Only (where the delivery model contemplates a separate EPC/delivery contractor)\"",
+      "basis": "Conditional bracket in Annexure A.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "bidder_structure",
+              "consortium_epc"
+            ]
+          },
+          "then": "required"
+        }
+      ],
+      "options": [
+        {
+          "id": "required",
+          "label": "Required",
+          "hint": "Nominated within the Consortium, with its own eligibility criteria"
+        },
+        {
+          "id": "self_perform",
+          "label": "Not required",
+          "hint": "The Bidder / Lead Member self-performs construction"
+        },
+        {
+          "id": "optional",
+          "label": "Permitted but optional",
+          "hint": "At the Bidder's election"
+        }
+      ]
+    },
+    {
+      "id": "capability_label",
+      "section": "Bidders and evaluation",
+      "title": "Technical evaluation category",
+      "question": "How should the 60-mark capability category in the technical evaluation be labelled?",
+      "location": "Annexure B, Part 1 marking table: \"B) [Construction/Delivery] Capability — [60] marks\"",
+      "basis": "Bracketed alternative in the RFP.",
+      "options": [
+        {
+          "id": "construction",
+          "label": "Construction Capability",
+          "hint": "Works-heavy infrastructure"
+        },
+        {
+          "id": "delivery",
+          "label": "Delivery Capability",
+          "hint": "Service or non-construction PPPs — digital, social infrastructure"
+        },
+        {
+          "id": "technical",
+          "label": "Technical Capability",
+          "hint": "Generic label covering both"
+        }
+      ]
+    },
+    {
+      "id": "revenue_basis",
+      "section": "Bidders and evaluation",
+      "title": "Net worth / average annual revenue basis",
+      "question": "Should the financial eligibility test use construction revenue or sector revenue?",
+      "location": "\"Net Worth and Average Annual [Construction/Sector] Revenue of not less than PKR [●]\"",
+      "basis": "Bracketed alternative in the RFP.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "capability_label",
+              "construction"
+            ]
+          },
+          "then": "construction"
+        },
+        {
+          "when": {
+            "is": [
+              "capability_label",
+              "delivery"
+            ]
+          },
+          "then": "sector"
+        }
+      ],
+      "options": [
+        {
+          "id": "construction",
+          "label": "Construction revenue",
+          "hint": "Civil-works-heavy sectors"
+        },
+        {
+          "id": "sector",
+          "label": "Sector-specific revenue",
+          "hint": "e.g. IT/digital, social infrastructure, energy"
+        }
+      ]
+    },
+    {
+      "id": "scoring",
+      "section": "Bidders and evaluation",
+      "title": "Technical qualification scoring",
+      "question": "How should bidders be technically qualified?",
+      "location": "\"In order to be technically qualified, the Bidder must: (i) score at least [●]% in each category …; (ii) achieve an overall score of not less than [●] …\"",
+      "basis": "Bracketed thresholds in the RFP.",
+      "options": [
+        {
+          "id": "per_category",
+          "label": "Minimum per category + minimum overall score",
+          "hint": "The RFP's current default"
+        },
+        {
+          "id": "weighted",
+          "label": "Weighted scoring, no per-category minimum"
+        },
+        {
+          "id": "pass_fail",
+          "label": "Pass/fail against a checklist",
+          "hint": "No numerical scoring"
+        },
+        {
+          "id": "combined",
+          "label": "Combined technical + financial score at a single stage"
+        }
+      ]
+    },
+    {
+      "id": "award",
+      "section": "Bidders and evaluation",
+      "title": "Bid award criterion",
+      "question": "On what basis is the winning bid chosen?",
+      "location": "Financial Evaluation Criteria (Annexure B, Part 2); Bidding Form F2",
+      "basis": "Flagged in the standard's AKLA comments.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "scoring",
+              "combined"
+            ]
+          },
+          "then": "combined"
+        }
+      ],
+      "hide": [
+        {
+          "options": [
+            "lowest_tariff"
+          ],
+          "when": {
+            "all": [
+              {
+                "answered": "revenue_model"
+              },
+              {
+                "not": {
+                  "is": [
+                    "revenue_model",
+                    "user_pays",
+                    "hybrid",
+                    "shadow_toll"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "options": [
+            "highest_share"
+          ],
+          "when": {
+            "all": [
+              {
+                "answered": "revenue_model"
+              },
+              {
+                "not": {
+                  "is": [
+                    "revenue_model",
+                    "user_pays",
+                    "hybrid"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "options": [
+            "lowest_vgf"
+          ],
+          "when": {
+            "all": [
+              {
+                "answered": "support"
+              },
+              {
+                "not": {
+                  "is": [
+                    "support",
+                    "vgf"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "options": [
+            "combined"
+          ],
+          "when": {
+            "is": [
+              "scoring",
+              "pass_fail"
+            ]
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "lowest_cost",
+          "label": "Lowest pre-estimated project cost",
+          "hint": "The PTQ precedent's legacy criterion"
+        },
+        {
+          "id": "lowest_tariff",
+          "label": "Lowest tariff / toll to users"
+        },
+        {
+          "id": "highest_share",
+          "label": "Highest revenue share to Government"
+        },
+        {
+          "id": "combined",
+          "label": "Combined technical/financial weighted score"
+        },
+        {
+          "id": "highest_npv",
+          "label": "Highest NPV of payments to Government"
+        },
+        {
+          "id": "lowest_vgf",
+          "label": "Lowest subsidy / VGF requested"
+        }
+      ]
+    },
+    {
+      "id": "bid_security",
+      "section": "Securities",
+      "title": "Bid security",
+      "question": "What form of bid security is required?",
+      "location": "\"Bid Security\" clause",
+      "basis": "Rule 25 and its proviso, PPRA Rules.",
+      "options": [
+        {
+          "id": "bank_guarantee",
+          "label": "Unconditional bank guarantee",
+          "hint": "Up to 5% of estimated Project value — Rule 25"
+        },
+        {
+          "id": "declaration",
+          "label": "Bid-securing declaration",
+          "hint": "No bank guarantee — proviso to Rule 25"
+        },
+        {
+          "id": "insurance_bond",
+          "label": "Insurance-backed bid bond"
+        },
+        {
+          "id": "cash",
+          "label": "Cash deposit / pay order"
+        }
+      ]
+    },
+    {
+      "id": "f4",
+      "section": "Securities",
+      "title": "Financing evidence at bid stage (Form F4)",
+      "question": "Should bidders provide evidence of financing (an indicative term sheet or letter of intent) with their bid?",
+      "location": "Bidding Form F4 — Indicative Term Sheet / Letter of Intent",
+      "basis": "Flagged in the standard's AKLA comments.",
+      "auto": [
+        {
+          "when": {
+            "is": [
+              "financing_source",
+              "none",
+              "equity_only"
+            ]
+          },
+          "then": "not_used"
+        }
+      ],
+      "options": [
+        {
+          "id": "required",
+          "label": "Required",
+          "hint": "Keep Form F4 in template form"
+        },
+        {
+          "id": "not_used",
+          "label": "Not required",
+          "hint": "Mark Form F4 \"Not Used\""
+        }
+      ]
+    },
+    {
+      "id": "environment",
+      "section": "Environment, land and utilities",
+      "title": "Applicable environmental legislation",
+      "question": "Which environmental legislation applies?",
+      "location": "Site visit clause (\"Applicable Laws (including applicable federal or provincial environmental legislation)\"); Environmental and Social Matters clause",
+      "basis": "Flagged in the standard's AKLA comments.",
+      "options": [
+        {
+          "id": "federal",
+          "label": "Pakistan Environmental Protection Act, 1997",
+          "hint": "Federal"
+        },
+        {
+          "id": "provincial",
+          "label": "The relevant provincial Environmental Protection Act",
+          "hint": "Sindh / Punjab / KP / Balochistan — per the Project's location"
+        },
+        {
+          "id": "both",
+          "label": "Both federal and provincial"
+        },
+        {
+          "id": "both_esms",
+          "label": "Statutory regime plus the P3A ESMS",
+          "hint": "P3A Environmental and Social Management System"
+        }
+      ]
+    },
+    {
+      "id": "land_handover",
+      "section": "Environment, land and utilities",
+      "title": "Land handover",
+      "question": "How will the Project Site be handed over?",
+      "location": "\"Land Acquisition and Right of Way\" clause",
+      "basis": "Flagged in the standard's AKLA comments.",
+      "options": [
+        {
+          "id": "before_close",
+          "label": "Full vacant possession before Financial Close"
+        },
+        {
+          "id": "phased",
+          "label": "Phased handover during construction"
+        },
+        {
+          "id": "assisted",
+          "label": "Concessionaire-assisted acquisition, reimbursed by the Agency"
+        }
+      ]
+    },
+    {
+      "id": "resettlement",
+      "section": "Environment, land and utilities",
+      "title": "Resettlement Action Plan",
+      "question": "Is a Resettlement Action Plan required?",
+      "location": "\"Land Acquisition and Right of Way\" clause",
+      "basis": "Flagged in the standard's AKLA comments.",
+      "options": [
+        {
+          "id": "rap",
+          "label": "Yes — involuntary resettlement is involved"
+        },
+        {
+          "id": "no_rap",
+          "label": "No — the site is vacant, unencumbered Government land"
+        }
+      ]
+    },
+    {
+      "id": "utilities",
+      "section": "Environment, land and utilities",
+      "title": "Utility relocation cost",
+      "question": "Who bears the cost of relocating utilities?",
+      "location": "\"Utility Relocation\" clause (\"confirmed in the Data Sheet: [●]\")",
+      "basis": "Placeholder in the RFP.",
+      "options": [
+        {
+          "id": "agency",
+          "label": "The Agency, in full"
+        },
+        {
+          "id": "concessionaire",
+          "label": "The Concessionaire, in full"
+        },
+        {
+          "id": "shared",
+          "label": "Shared / cost-reimbursable"
+        }
+      ]
+    },
+    {
+      "id": "kpis",
+      "section": "Performance monitoring",
+      "title": "Source of KPIs and penalties",
+      "question": "Where will the KPIs and performance penalties be set out?",
+      "location": "\"Key Performance Indicators\" clause (\"set out in the [O&M Manual / Service Level Agreement]\")",
+      "basis": "Bracketed alternative in the RFP.",
+      "options": [
+        {
+          "id": "om_manual",
+          "label": "O&M Manual",
+          "hint": "Standalone technical document"
+        },
+        {
+          "id": "sla",
+          "label": "Service Level Agreement",
+          "hint": "A schedule to the Concession Agreement"
+        },
+        {
+          "id": "both",
+          "label": "O&M Manual and SLA"
+        },
+        {
+          "id": "in_ca",
+          "label": "A KPI schedule in the Concession Agreement itself"
+        }
+      ]
+    }
+  ]
+}

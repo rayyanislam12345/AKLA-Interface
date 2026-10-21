@@ -38,6 +38,19 @@ or the build stops. Kinds on a clause list get "restart": false.
 Literals may be regexes; {"regex", "with", "reason"} substitutes the match
 (backreferences allowed) instead of blanking it to [●].
 
+Spelling (config "spelling", "british" unless set to false): American
+-ize/-yze/-ization forms and the style sheet's word list (color, program,
+installment ...) become British in every story part, case kept, across run
+boundaries, only the letters that differ touched. The list and its
+exceptions (size, seize, prize, citizen ...) are read from
+chat-service/styleSheets/core.json. Kept as written: a capitalised
+Organization in a proper name, "spelling_keep" phrases, and words inside
+quotation marks unless "spelling_quotes_own" lists the quoted text as the
+firm's own. Every change is counted in report.json "spelling".
+
+"unquote_terms": [{"term", "reason"}] puts a quoted defined term in the
+firm's form: “Term” loses its quotation marks and is bold.
+
 Edits are made on the XML. Parts that are not changed are written back
 byte-for-byte (styles, numbering, theme, fontTable, settings and any header
 or footer the pack does not need to change).
@@ -2261,6 +2274,290 @@ def run_on_kinds(kinds, pkg):
 
 
 # --------------------------------------------------------------------------
+# spelling: British -ise everywhere (the owner's decision of 20 Oct 2026)
+# --------------------------------------------------------------------------
+CORE_SHEET = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                                           "chat-service", "styleSheets", "core.json"))
+# the wording check's own patterns (chat-service/proofCheck.js), case-blind
+# here so ORGANIZE becomes ORGANISE too
+IZE_WORD = re.compile(r"\b[A-Za-z]*?(?:iz(?:e|es|ed|ing|ation|ations|ational|er|ers|able)|yz(?:e|es|ed|ing|er|ers))\b", re.I)
+IZE_KEEP = re.compile(r"(?:size|sized|sizes|sizing|seize|seized|seizes|seizing|seizure|prize|prizes|prized|maize|baize|assize|"
+                      r"assizes|citizen\w*|denizen\w*|wizard\w*|blizzard\w*)$")
+IZE_SUFFIX = re.compile(r"iz(e|es|ed|ing|ation|ations|ational|er|ers|able)$")
+YZE_SUFFIX = re.compile(r"yz(e|es|ed|ing|er|ers)$")
+# words before "Organization" that do not make it a name ("The Organization")
+NAME_LEADS = {"the", "this", "that", "such", "each", "any", "every", "an", "a", "its", "their", "said", "relevant", "other", "no", "our", "your"}
+# a quotation: “…”, "…", or ‘…’ opened at the start or after a space or bracket
+QUOTED = re.compile(r"[“\"][^“”\"\n]{0,400}[”\"]|(?:^|(?<=[\s(\[]))‘[^‘’\n]{1,200}’(?![A-Za-z])")
+
+
+def match_case(model, word):
+    if len(model) > 1 and model == model.upper():
+        return word.upper()
+    if model[:1].isupper():
+        return word[:1].upper() + word[1:]
+    return word
+
+
+def edit_segments(segs, bounds, pos, old, new):
+    """Replace text[pos:pos+len(old)] by `new` in the paragraph's text
+    segments, touching only the letters that differ (authori[z]e ->
+    authori[s]e, colo[]r -> colo[u]r), so every other letter keeps its run."""
+    a = 0
+    while a < min(len(old), len(new)) and old[a] == new[a]:
+        a += 1
+    b = 0
+    while b < min(len(old), len(new)) - a and old[len(old) - 1 - b] == new[len(new) - 1 - b]:
+        b += 1
+    s, e, mid = pos + a, pos + len(old) - b, new[a:len(new) - b]
+    if s == e:
+        # a pure insertion goes after the letter before it
+        for i, (x, y) in enumerate(bounds):
+            if segs[i][0] is not None and x < s <= y:
+                segs[i][1] = segs[i][1][:s - x] + mid + segs[i][1][s - x:]
+                return
+        return
+    first = True
+    for i, (x, y) in enumerate(bounds):
+        if y <= s or x >= e or segs[i][0] is None:
+            continue
+        ls, le = max(s, x) - x, min(e, y) - x
+        segs[i][1] = segs[i][1][:ls] + (mid if first else "") + segs[i][1][le:]
+        first = False
+
+
+def paragraph_segments(p):
+    """[[w:t or None, text]] of a paragraph's own text, as blank_paragraph reads it."""
+    segs = []
+    for el in p.iter(w("t"), w("tab"), w("br"), w("cr"), w("noBreakHyphen")):
+        if owning_p(el) is not p:
+            continue
+        if el.tag == w("t"):
+            segs.append([el, el.text or ""])
+        elif el.tag == w("tab") and el.getparent().tag != w("r"):
+            continue
+        else:
+            segs.append([None, "\n" if el.tag != w("tab") else "\t"])
+    return segs
+
+
+def write_segments(segs):
+    for el, t in segs:
+        if el is not None and (el.text or "") != t:
+            set_text(el, t)
+
+
+class Speller:
+    """American -ize/-yze/-ization forms, and the style sheet's word list
+    (color, favor, program, installment ...), made British, case kept, across
+    run boundaries. Kept: the sheet's exceptions (size, seize, prize,
+    citizen ...), a capitalised Organization in a proper name, "program"
+    after computer/software/training, any phrase the config lists in
+    "spelling_keep", and words inside quotation marks (a term quoted from
+    another instrument) unless the config lists the quoted text in
+    "spelling_quotes_own" as the firm's own."""
+
+    def __init__(self, sheet_path=CORE_SHEET, keep_phrases=(), quotes_own=()):
+        if not os.path.exists(sheet_path):
+            raise SystemExit("spelling: the style sheet %s is not there (set \"spelling\": false to build without it)" % sheet_path)
+        with open(sheet_path, encoding="utf-8") as f:
+            sp = json.load(f).get("spelling", {})
+        if sp.get("convention") != "ise":
+            raise SystemExit("spelling: %s does not ask for -ise" % sheet_path)
+        self.sheet_path = sheet_path
+        self.words = {k.lower(): v for k, v in (sp.get("words") or {}).items()}
+        self.keep = {k.lower() for k in sp.get("keep") or []}
+        self.keep_after = {k.lower(): [x.lower() for x in v] for k, v in (sp.get("keep_after") or {}).items()}
+        self.map_rx = re.compile(r"\b(" + "|".join(re.escape(k) for k in sorted(self.words, key=len, reverse=True)) + r")\b", re.I) if self.words else None
+        self.keep_phrases = [k for k in keep_phrases if k]
+        self.quotes_own = set(quotes_own)
+        self.changes = {}     # (part, from, to) -> count
+        self.kept = {}        # (part, word, why) -> count
+
+    def _bump(self, d, k):
+        d[k] = d.get(k, 0) + 1
+
+    def british(self, text, m, mapped):
+        """The British form of the word matched, or (None, why kept)."""
+        word = m.group(0)
+        lower = word.lower()
+        if mapped:
+            prev = re.search(r"([A-Za-z]+)\s+$", text[max(0, m.start() - 20):m.start()])
+            if prev and prev.group(1).lower() in self.keep_after.get(lower, []):
+                return None, "after '%s'" % prev.group(1)
+            return match_case(word, self.words[lower]), None
+        if len(lower) < 5 or lower in self.keep or IZE_KEEP.search(lower):
+            return None, "an exception the style sheet keeps"
+        if lower.startswith("organization") and word[:1].isupper():
+            before = text[max(0, m.start() - 30):m.start()]
+            after = text[m.end():m.end() + 30]
+            lead = re.search(r"([A-Z][\w&-]*)\s+$", before)
+            if (lead and lead.group(1).lower() not in NAME_LEADS) or re.match(r"\s+(?:for|of)\s+[A-Z]", after):
+                return None, "a named Organization (a proper name keeps its own spelling)"
+        new = YZE_SUFFIX.sub(r"ys\1", IZE_SUFFIX.sub(r"is\1", lower))
+        if new == lower:
+            return None, None
+        return match_case(word, new), None
+
+    def paragraph(self, p, part):
+        segs = paragraph_segments(p)
+        text = "".join(s[1] for s in segs)
+        if not text.strip():
+            return 0
+        guard = []
+        for k in self.keep_phrases:
+            for mm in re.finditer(re.escape(k), text):
+                guard.append((mm.start(), mm.end(), "listed in spelling_keep"))
+        for mm in QUOTED.finditer(text):
+            inner = mm.group(0)[1:-1]
+            if inner not in self.quotes_own:
+                guard.append((mm.start(), mm.end(), "inside quotation marks (a term quoted from another instrument)"))
+        edits = {}
+        for rx, mapped in ((IZE_WORD, False), (self.map_rx, True)):
+            if rx is None:
+                continue
+            for m in rx.finditer(text):
+                if m.start() in edits:
+                    continue
+                g = next((why for a, b, why in guard if a <= m.start() and m.end() <= b), None)
+                new, why = self.british(text, m, mapped)
+                if new is None or new == m.group(0):
+                    if why:
+                        self._bump(self.kept, (part, m.group(0), why))
+                    continue
+                if g:
+                    self._bump(self.kept, (part, m.group(0), g))
+                    continue
+                edits[m.start()] = (m.group(0), new)
+        if not edits:
+            return 0
+        bounds = []
+        pos = 0
+        for s in segs:
+            bounds.append((pos, pos + len(s[1])))
+            pos += len(s[1])
+        for at in sorted(edits, reverse=True):
+            old, new = edits[at]
+            edit_segments(segs, bounds, at, old, new)
+            self._bump(self.changes, (part, old, new))
+        write_segments(segs)
+        return len(edits)
+
+    def run(self, pkg):
+        """Every story part (document, headers, footers, footnotes, endnotes);
+        only parts that change are re-written."""
+        for part in [x for x in pkg.parts() if STORY.match(x)]:
+            n = sum(self.paragraph(p, part) for p in pkg.xml(part).iter(w("p")))
+            if n:
+                pkg.touch(part)
+
+    def report(self):
+        ch = [{"part": a, "from": b, "to": c, "count": n} for (a, b, c), n in sorted(self.changes.items())]
+        kept = [{"part": a, "word": b, "why": c, "count": n} for (a, b, c), n in sorted(self.kept.items())]
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(CORE_SHEET)))
+        sheet = os.path.relpath(self.sheet_path, repo) if os.path.abspath(self.sheet_path).startswith(repo + os.sep) else self.sheet_path
+        return {"convention": "british (-ise)", "sheet": sheet,
+                "changed": sum(x["count"] for x in ch), "changes": ch, "kept": kept}
+
+
+# --------------------------------------------------------------------------
+# a quoted defined term put in the firm's form: (the **Term**), no quotes
+# --------------------------------------------------------------------------
+def _is_bold(r):
+    b = r.find("w:rPr/w:b", NS)
+    return b is not None and wa(b, "val", "1") not in ("0", "false")
+
+
+def _set_bold(r):
+    rpr = r.find(w("rPr"))
+    if rpr is None:
+        rpr = etree.Element(w("rPr"))
+        r.insert(0, rpr)
+    for x in rpr.findall(w("b")):
+        rpr.remove(x)
+    b = etree.Element(w("b"))
+    at = 0
+    for i, ch in enumerate(rpr):
+        if ch.tag in (w("rStyle"), w("rFonts")):
+            at = i + 1
+    rpr.insert(at, b)
+
+
+def _split_run(t, start, end):
+    """The run holding w:t `t` split so that t.text[start:end] is a run of
+    its own (copies of the run's rPr on each piece); returns that run."""
+    r = t.getparent()
+    if [ch.tag for ch in r if ch.tag != w("rPr")] != [w("t")]:
+        raise SystemExit("unquote_terms: a run holding more than its text; put the term in its own run by hand")
+    s = t.text or ""
+    pieces = [(s[:start], False), (s[start:end], True), (s[end:], False)]
+    out = None
+    for txt, mine in pieces:
+        if not txt:
+            continue
+        nr = copy.deepcopy(r)
+        set_text(nr.find(w("t")), txt)
+        r.addprevious(nr)
+        if mine:
+            out = nr
+    r.getparent().remove(r)
+    return out
+
+
+def unquote_terms(pkg, terms, log):
+    """terms: [{"term", "reason"}]. Each “Term” (or "Term") loses its
+    quotation marks and is bold; a run left with no text is removed."""
+    if not terms:
+        return 0
+    n = 0
+    for part in [x for x in pkg.parts() if STORY.match(x)]:
+        changed = False
+        for p in list(pkg.xml(part).iter(w("p"))):
+            for spec in terms:
+                term = spec["term"]
+                while True:
+                    segs = paragraph_segments(p)
+                    text = "".join(s[1] for s in segs)
+                    m = re.search(r"[“\"](" + re.escape(term) + r")[”\"]", text)
+                    if not m:
+                        break
+                    bounds = []
+                    pos = 0
+                    for s in segs:
+                        bounds.append((pos, pos + len(s[1])))
+                        pos += len(s[1])
+                    had = {id(sg[0]) for sg in segs if sg[0] is not None and sg[1]}
+                    edit_segments(segs, bounds, m.end() - 1, text[m.end() - 1], "")
+                    edit_segments(segs, bounds, m.start(), text[m.start()], "")
+                    write_segments(segs)
+                    emptied = [sg[0] for sg in segs if sg[0] is not None and not sg[1] and id(sg[0]) in had]
+                    # bold on every letter of the term
+                    ts, te = m.start(), m.end() - 2
+                    pos = 0
+                    for el, t in [(s[0], s[1]) for s in paragraph_segments(p)]:
+                        a, b = pos, pos + len(t)
+                        pos = b
+                        if el is None or b <= ts or a >= te:
+                            continue
+                        r = el.getparent()
+                        if _is_bold(r):
+                            continue
+                        ls, le = max(ts, a) - a, min(te, b) - a
+                        piece = r if (ls, le) == (0, len(t)) else _split_run(el, ls, le)
+                        _set_bold(piece)
+                    for t in emptied:   # a run that held only a quotation mark
+                        r = t.getparent()
+                        if r is not None and r.getparent() is not None and [ch.tag for ch in r if ch.tag != w("rPr")] == [w("t")]:
+                            r.getparent().remove(r)
+                    log.append((part, "", m.group(0), "%s -> %s (bold, no quotation marks)" % (spec.get("reason", "defined term in the firm's form"), term)))
+                    n += 1
+                    changed = True
+        if changed:
+            pkg.touch(part)
+    return n
+
+
+# --------------------------------------------------------------------------
 # the build
 # --------------------------------------------------------------------------
 def prepare(pkg):
@@ -2446,6 +2743,17 @@ def build(cfg, out_dir):
                 n = sum(blanker.blank_paragraph(p, (part, "kept note")) for p in pkg.xml(part).iter(w("p")))
                 if n:
                     pkg.touch(part)
+    # a quoted defined term made the firm's form, then British spelling
+    report["terms_unquoted"] = unquote_terms(pkg, cfg.get("unquote_terms", []), blanker.log)
+    sp = cfg.get("spelling", "british")
+    if sp:
+        if sp != "british":
+            raise SystemExit("spelling: only \"british\" (or false) is known, not %r" % sp)
+        speller = Speller(cfg.get("spelling_sheet", CORE_SHEET), cfg.get("spelling_keep", []), cfg.get("spelling_quotes_own", []))
+        speller.run(pkg)
+        report["spelling"] = speller.report()
+    else:
+        report["spelling"] = None
     report["orphans_removed"] = fix_orphans(root)
     for part in [p for p in pkg.parts() if STORY.match(p)]:
         if part in pkg.dirty:

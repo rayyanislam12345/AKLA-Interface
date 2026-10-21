@@ -1,0 +1,94 @@
+{
+  "key": "escrow",
+  "typeName": "Escrow Agreement",
+  "source": "Derived 20 October 2026 from the escrow clause list (skeletons/escrow.json): what genuinely varies between the firm's escrow precedents.",
+  "name": "Escrow agreement drafting decisions",
+  "documentLabel": "ESCROW AGREEMENT",
+  "applyWhere": "the clause named above, the definitions in Article 1, the parties and recitals, Schedule A (Notices), Schedule B (Accounts) and any other clause that depends on it",
+  "closing": "That completes the drafting decisions. What remains are the deal's facts — the parties and their offices, the Signing Date, the accounts and their banks, the Concession Agreement's date, the notice details and the fee of the Escrow Agent. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "arbitration_forum",
+      "section": "Disputes",
+      "title": "Arbitration forum",
+      "question": "Where will disputes under this agreement be finally resolved?",
+      "location": "Article 8 (Governing Law & Dispute Resolution), the Arbitration section",
+      "basis": "Owner's decision of 20 October 2026: arbitration has no default and is always asked; the firm's precedents use both the Arbitration Act, 1940 and SIAC.",
+      "options": [
+        {
+          "id": "act_1940",
+          "label": "Arbitration under the Arbitration Act, 1940, seated in Pakistan",
+          "hint": "The firm's usual forum for a domestic counterparty"
+        },
+        {
+          "id": "siac",
+          "label": "Arbitration under the SIAC Rules, seated in Singapore",
+          "hint": "Where a foreign party or lender asks for an offshore seat"
+        },
+        {
+          "id": "other",
+          "label": "Another forum",
+          "hint": "State it: another institution or seat, or the courts"
+        }
+      ]
+    },
+    {
+      "id": "government_funding",
+      "section": "Accounts",
+      "title": "Government funding accounts",
+      "question": "Does the Government fund an account under the escrow (a minimum revenue guarantee or a similar contribution)?",
+      "location": "Article 3 (MRG Funding Account, MRG Funding Amount, MRG Contribution Amount, Encashment Proceeds & Related Matters); the related definitions; Schedule B (Accounts)",
+      "basis": "The firm's escrow precedents differ: one carries the Government's minimum revenue guarantee accounts, another the Government's funding and viability gap accounts, another none.",
+      "options": [
+        {
+          "id": "funded",
+          "label": "Yes — keep the Government's funding accounts article",
+          "hint": "Fill the account names and the funding mechanics"
+        },
+        {
+          "id": "none",
+          "label": "No — the Government funds no account",
+          "hint": "Remove the article, or mark it \"Not Used\", with its definitions and Schedule B rows"
+        }
+      ]
+    },
+    {
+      "id": "step_in",
+      "section": "Financing",
+      "title": "Step-in and substitution",
+      "question": "Do the Financiers need the escrow to follow their step-in and substitution rights under the Concession Direct Agreement?",
+      "location": "Article 7 (\"Not Used\" in the pack; Step-In, Substitution & Concession Direct Agreement Coordination where it applies)",
+      "basis": "The firm's 2026 escrow agreement has the article; the pack's base marks Article 7 \"Not Used\".",
+      "options": [
+        {
+          "id": "include",
+          "label": "Yes — write Article 7 as the step-in coordination article",
+          "hint": "Acknowledgement of the Concession Direct Agreement, coordination with step-in, substitution, termination payments, the Finance Parties' rights"
+        },
+        {
+          "id": "not_used",
+          "label": "No — keep Article 7 \"Not Used\""
+        }
+      ]
+    },
+    {
+      "id": "agent_bank",
+      "section": "Parties",
+      "title": "Agent Bank",
+      "question": "Is there an Agent Bank party acting for the Financiers?",
+      "location": "The parties, the recitals, Schedule A (Notices) and the signature pages",
+      "basis": "The pack's base has four parties (the Government, the Concessionaire, the Escrow Agent and the Agent Bank); an unfinanced project has no Agent Bank.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — four parties, with the Agent Bank"
+        },
+        {
+          "id": "no",
+          "label": "No — remove the Agent Bank as a party",
+          "hint": "Its notice block, signature page and references go"
+        }
+      ]
+    }
+  ]
+}

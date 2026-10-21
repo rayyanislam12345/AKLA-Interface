@@ -1,0 +1,73 @@
+{
+  "key": "consent",
+  "title": "Certificates, consents and NOCs",
+  "types": [
+    "Certificate / Consent / NOC"
+  ],
+  "packs": [
+    "consent"
+  ],
+  "kind": "letter",
+  "voice": {
+    "we_allowed": true,
+    "rule": "In the issuing party's voice: \"We, [●] (the [●]), refer you, being [●] (the [●]), to the following:\"; a certificate speaks of itself as \"this Certificate\".",
+    "source": [
+      "SC12",
+      "MM2 NOC"
+    ]
+  },
+  "cross_refs": {
+    "words": null,
+    "rule": "Refer to the instrument's provisions with its own word and heading: Clause 22.16 (Tariff) of the Common Terms Agreement.",
+    "source": [
+      "SC12 (4 of 4 with heading)"
+    ]
+  },
+  "defined_terms": {
+    "pointer_formula": "(Unless otherwise defined in this letter (this Letter), all capitalised terms shall have the meanings ascribed to them under the [●].)",
+    "source": [
+      "SC12"
+    ]
+  },
+  "formulae": {
+    "heading": {
+      "text": "Ref: [●] / Dated: [●] / To, / [addressee] / Subject: ⇥Consent Under Clause [●] ([●]) Of The [●] – [●]",
+      "source": [
+        "SC12"
+      ]
+    },
+    "grant": {
+      "text": "Pursuant to Clause [●] ([●]) of the [●] …, we, in our capacity as the [●], hereby grant our consent (the Consent) to [●]. For the avoidance of doubt, the Consent: (a) is limited to [●] and does not extend to any other …; (b) shall not constitute, and shall not be construed as, a waiver of any [●] …; and (c) is granted without prejudice to any and all rights, powers, discretions and remedies available to [●] …, each of which is expressly reserved.",
+      "source": [
+        "SC12"
+      ]
+    },
+    "close": {
+      "text": "This Letter … shall be governed by and construed in accordance with the laws of the Islamic Republic of Pakistan. It is issued without prejudice to any and all rights, powers, discretions and remedies available to [●].",
+      "source": [
+        "SC12"
+      ]
+    },
+    "signature": {
+      "text": "For And On Behalf Of / [●] / (in its capacity as the [●]) / ___________ / Name: [●] / Designation: [●]; then Copy To: with numbered items.",
+      "source": [
+        "SC12"
+      ]
+    },
+    "certificate": {
+      "text": "This certificate (this Certificate) is being provided pursuant to … / (Unless otherwise expressly defined herein, the words and expressions defined in the [●] shall have the same meaning when used in this Certificate.)",
+      "source": [
+        "certificates folder"
+      ]
+    },
+    "noc": {
+      "text": "We refer to … we hereby provide our no objection to [●] …",
+      "source": [
+        "MM2 NOC"
+      ]
+    }
+  },
+  "off": [
+    "voice_we"
+  ]
+}

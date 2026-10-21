@@ -18,7 +18,16 @@
 // number-word agreement), widened from the concession master to any draft.
 // Every rule leans towards silence: a check a lawyer learns to ignore is
 // worse than no check.
+//
+// The wording check (runWordingCheck, at the end) is a second pass over the
+// same reading against the firm's style sheet for the kind of document
+// (styleSheets/): defined-term form, numbers and money in words and figures,
+// dates, the [●] placeholder, cross-references with their headings, -ise
+// spelling, banned phrasings and a named government or province. Its
+// findings never block saving.
 import { assignSections, isCapsHeading, layout, parseLabel } from "./indexing/chunk.js";
+import { styleSheetFor } from "./styleSheets/index.js";
+import { headingNorm } from "./clauseBank.js";
 
 export const CATEGORIES = ["placeholders", "undefined_terms", "unused_definitions", "broken_references", "number_words", "numbering"];
 export const MAX_ITEMS_PER_CATEGORY = 100;
@@ -957,4 +966,522 @@ export function runProofCheck(structuredText) {
     omitted,
     notes,
   };
+}
+
+// ------------------------------------------------------------ the wording check
+//
+// runWordingCheck(blocks, { styleSheet }) reads a draft against the firm's
+// style sheet for its kind of document (styleSheets/; a key, a document type
+// name or a merged sheet) and returns findings in the proof check's shape.
+// Wording findings never block saving: a lawyer may want an exception.
+
+export const WORDING_CATEGORIES = ["defined_term_form", "number_words", "date_format", "placeholder_style", "cross_ref_heading", "spelling_convention", "banned_phrase", "government_named"];
+
+const SMALL_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS_WORDS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+function below1000(n, and) {
+  const h = Math.floor(n / 100);
+  const r = n % 100;
+  const parts = [];
+  if (h) parts.push(`${SMALL_WORDS[h]} hundred`);
+  if (r) {
+    const words = r < 20 ? SMALL_WORDS[r] : `${TENS_WORDS[Math.floor(r / 10)]}${r % 10 ? ` ${SMALL_WORDS[r % 10]}` : ""}`;
+    parts.push(h && and ? `and ${words}` : words);
+  }
+  return parts.join(" ");
+}
+
+/** An integer in the firm's words: "one hundred and twenty five" (counts), or without "and" for money. Null outside 0 to 999,999,999,999. */
+export function numberToWords(n, { and = true } = {}) {
+  if (!Number.isInteger(n) || n < 0 || n >= 1e12) return null;
+  if (n === 0) return "zero";
+  const out = [];
+  let r = n;
+  for (const [v, w] of [[1e9, "billion"], [1e6, "million"], [1e3, "thousand"]]) {
+    if (r >= v) { out.push(`${below1000(Math.floor(r / v), and)} ${w}`); r %= v; }
+  }
+  if (r) out.push(`${and && out.length && r < 100 ? "and " : ""}${below1000(r, and)}`);
+  return out.join(" ");
+}
+
+const titleWords = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+const pad2 = (d) => String(d).padStart(2, "0");
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_ABBR = { jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+const MONTHS_RE = MONTH_NAMES.join("|");
+const CURRENCY_NAMES = { PKR: "Pakistani Rupees", USD: "United States Dollars", EUR: "Euros", GBP: "Pounds Sterling" };
+
+const quotedSpans = (text) => [...text.matchAll(/[“"][^“”"\n]{0,400}[”"]/g)].map((m) => [m.index, m.index + m[0].length]);
+const within = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
+
+// Compiled once per style sheet.
+const COMPILED = new Map();
+function compile(sheet) {
+  const key = sheet;
+  if (COMPILED.has(key)) return COMPILED.get(key);
+  const units = [...new Set(sheet.numbers?.units ?? [])].sort((a, b) => b.length - a.length).map(escapeRe);
+  const spellingWords = Object.keys(sheet.spelling?.words ?? {});
+  const c = {
+    period: units.length ? new RegExp(`(?<![\\w(.,/\\-–])(\\d{1,4})(?![\\d,.]\\d)(?!\\))\\s+(?:(?:calendar|clear|consecutive)\\s+)?(${units.join("|")})\\b`, "g") : null,
+    spellingMap: spellingWords.length ? new RegExp(`\\b(${spellingWords.map(escapeRe).join("|")})\\b`, "gi") : null,
+    banned: (sheet.banned ?? []).filter((b) => b.pattern).map((b) => ({ ...b, re: new RegExp(b.pattern, `${(b.flags ?? "").replace(/g/g, "")}g`) })),
+    government: (sheet.government?.patterns ?? []).map((p) => new RegExp(p, "g")),
+  };
+  COMPILED.set(key, c);
+  return c;
+}
+
+// --- defined terms in the firm's form: (the **Term**), no quotation marks
+const DEFINITION_HEAD_QUOTED = /^\s*(?:\(?[a-z0-9]{1,4}\)\s*)?[“"]([^“”"\n]{1,80})[”"]\s*(?:,\s*)?(?:shall\s+)?(?:means?\b|includes?\b|has the meaning|shall have the meaning|shall bear the meaning|bears the meaning)/i;
+
+function definedTermFormItems(paragraphs, sheet, tells) {
+  if (sheet.defined_terms?.form !== "bold-parenthesis-no-quotes") return [];
+  const out = [];
+  for (const p of paragraphs) {
+    const head = DEFINITION_HEAD_QUOTED.exec(p.body);
+    if (head) {
+      tells.quoted++;
+      const at = p.bodyOffset + head.index + head[0].indexOf(head[1]) - 1;
+      out.push(item("defined_term_form", "low", p, `In the definitions the term is bold without quotation marks: **${head[1].trim()}** means …`, at, head[1].length + 2));
+    }
+    for (const paren of p.text.matchAll(/\(([^()]{1,240})\)/g)) {
+      for (const q of paren[1].matchAll(QUOTED)) {
+        const term = (q[1] ?? q[2]).trim();
+        // A quoted phrase in brackets that is not a definition ("(the words “in writing”)") stays.
+        const before = paren[1].slice(0, q.index);
+        if (before.trim() && !/(?:^|\b)(?:the|each|a|an|together|collectively|jointly|individually|both|hereinafter(?: referred to as)?(?: the)?|referred to as(?: the)?|and together the|and collectively the|or)\s*,?\s*$/i.test(before)) continue;
+        tells.quoted++;
+        out.push(item("defined_term_form", "low", p, `Defined terms are bold in brackets without quotation marks: (the **${term}**).`, paren.index + 1 + q.index, q[0].length));
+      }
+    }
+  }
+  return out;
+}
+
+// --- numbers and money in words and figures
+const MONEY = /(PKR|Rs\.?|Rupees|USD|US\$|\$|EUR|GBP)\s?(\d[\d,]*(?:\.\d+)?)(\s*\/-)?(?:\s*(million|billion|thousand|lakh|lac|crore)\b)?/g;
+const BEFORE_IS_REFERENCE = /(?:section|clause|article|schedule|annex(?:ure)?|appendix|paragraph|para|rule|regulation|page|no\.?|item|part|chapter|form|table|figure|exhibit)\s*$/i;
+
+function numberFormItems(paragraphs, sheet, compiled) {
+  const out = [];
+  if (compiled.period) {
+    for (const p of paragraphs) {
+      if (p.inTable) continue;
+      for (const m of p.text.matchAll(compiled.period)) {
+        if (m.index < p.bodyOffset || BEFORE_IS_REFERENCE.test(p.text.slice(Math.max(0, m.index - 14), m.index))) continue;
+        const n = Number(m[1]);
+        const words = numberToWords(n);
+        if (!words) continue;
+        out.push(item("number_words", "low", p, `Write it in words and figures: ${words} (${n}) ${m[2]}.`, m.index, m[0].length));
+      }
+      for (const m of p.text.matchAll(/(?<![\w(.,/\-–])(\d{1,3}(?:\.\d+)?)\s*(%|percent\b|per cent\b)(?!\))/g)) {
+        if (m.index < p.bodyOffset) continue;
+        const n = Number(m[1]);
+        const words = Number.isInteger(n) ? numberToWords(n) : null;
+        out.push(item("number_words", "low", p, words ? `Write it in words and figures: ${words} percent (${n}%).` : "Write a percentage in words and figures, as in fifty percent (50%).", m.index, m[0].length));
+      }
+    }
+  }
+  // Money: every amount once in words (its first mention), and in PKR, not Rs.
+  const codes = sheet.money?.currency_codes ?? ["PKR", "USD"];
+  const seen = [];
+  const worded = new Set();
+  for (const p of paragraphs) {
+    if (p.inTable) continue;
+    for (const m of p.text.matchAll(MONEY)) {
+      const prev = p.text[m.index - 1];
+      if (prev && /[\w]/.test(prev)) continue;
+      const value = toNumber(m[2], m[4]);
+      if (value === null) continue;
+      const after = p.text.slice(m.index + m[0].length, m.index + m[0].length + 240);
+      const before = p.text.slice(Math.max(0, m.index - 240), m.index);
+      const hasWords = /^\s*\([^()]{0,220}?(?:Rupees|Dollars|Euros?|Pounds)/i.test(after) || (prev === "(" && /(?:Rupees|Dollars|Euros?|Pounds)\b[^()]{0,220}$/i.test(before.slice(0, -1)));
+      if (hasWords) worded.add(value);
+      seen.push({ p, m, value, hasWords });
+    }
+  }
+  const reported = new Set();
+  for (const { p, m, value, hasWords } of seen) {
+    const raw = m[1].replace(/\.$/, "");
+    const code = /^(?:Rs|Rupees)$/i.test(raw) ? "PKR" : /^(?:US\$|\$)$/.test(raw) ? "USD" : raw;
+    const figure = Number.isInteger(value) ? value.toLocaleString("en-US") : String(value);
+    if (!codes.includes(raw)) {
+      out.push(item("number_words", "low", p, `The firm writes the currency as ${code}: ${code} ${figure}/-.`, m.index, m[0].length));
+    }
+    if (hasWords || worded.has(value) || reported.has(value)) continue;
+    reported.add(value);
+    const words = Number.isInteger(value) ? numberToWords(value, { and: false }) : null;
+    const name = CURRENCY_NAMES[code] ?? code;
+    out.push(item("number_words", "low", p, words ? `Write the amount in figures and words where it first appears: ${code} ${figure}/- (${name} ${titleWords(words)} Only).` : `Write the amount in figures and words where it first appears, as in PKR 1,000,000/- (Pakistani Rupees One Million Only).`, m.index, m[0].length));
+  }
+  return out;
+}
+
+// --- dates: October 19, 2026
+function dateFormatItems(paragraphs, sheet, tells) {
+  const out = [];
+  const pad = sheet.dates?.zero_pad !== false;
+  const say = (month, day, year) => `${MONTH_NAMES[month]} ${pad ? pad2(day) : day}, ${year}`;
+  const note = (s) => `Write dates as ${s} (month, day, year).`;
+  const DMY = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(day\\s+of\\s+)?(${MONTHS_RE})\\s*,?\\s+(\\d{4})\\b`, "g");
+  const MDY = new RegExp(`\\b(${MONTHS_RE})\\s+(\\d{1,2})(st|nd|rd|th)?(,?)\\s+(\\d{4})\\b`, "g");
+  const ABBR_MDY = /\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.?\s+(\d{1,2}),?\s+(\d{4})\b/g;
+  const ABBR_DMY = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.?,?\s+(\d{4})\b/g;
+  const NUMERIC = /(?<![\d.\/-])(\d{1,2})([\/.-])(\d{1,2})\2(\d{4})(?![\d\/.-])/g;
+  const ISO = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+  const monthOf = (name) => MONTH_NAMES.findIndex((m) => m.toLowerCase() === name.toLowerCase());
+  for (const p of paragraphs) {
+    const t = p.text;
+    for (const m of t.matchAll(DMY)) {
+      if (m[2]) continue; // "on this 19th day of October, 2026": the preamble's own formula
+      tells.dates++;
+      out.push(item("date_format", "low", p, note(say(monthOf(m[3]), Number(m[1]), m[4])), m.index, m[0].length));
+    }
+    for (const m of t.matchAll(MDY)) {
+      const day = Number(m[2]);
+      if (!m[3] && m[4] && !(pad && m[2].length === 1)) continue;
+      if (m[3]) tells.dates++;
+      out.push(item("date_format", "low", p, note(say(monthOf(m[1]), day, m[5])), m.index, m[0].length));
+    }
+    for (const m of t.matchAll(ABBR_MDY)) out.push(item("date_format", "low", p, note(say(MONTH_ABBR[m[1].toLowerCase()], Number(m[2]), m[3])), m.index, m[0].length));
+    for (const m of t.matchAll(ABBR_DMY)) out.push(item("date_format", "low", p, note(say(MONTH_ABBR[m[2].toLowerCase()], Number(m[1]), m[3])), m.index, m[0].length));
+    for (const m of t.matchAll(NUMERIC)) {
+      let day = Number(m[1]);
+      let month = Number(m[3]);
+      if (month > 12 && day <= 12) [day, month] = [month, day];
+      if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+      out.push(item("date_format", "low", p, note(say(month - 1, day, m[4])), m.index, m[0].length));
+    }
+    for (const m of t.matchAll(ISO)) {
+      const month = Number(m[2]);
+      if (month < 1 || month > 12) continue;
+      out.push(item("date_format", "low", p, note(say(month - 1, Number(m[3]), m[1])), m.index, m[0].length));
+    }
+  }
+  return out;
+}
+
+// --- the placeholder: [●]
+function placeholderStyleItems(paragraphs, sheet) {
+  const token = sheet.placeholder?.token ?? "[●]";
+  const out = [];
+  const say = `The firm's placeholder is ${token}.`;
+  for (const p of paragraphs) {
+    const text = p.text;
+    const spans = [];
+    for (const m of text.matchAll(BRACKET)) {
+      spans.push([m.index, m.index + m[0].length]);
+      if (m[0] === token || classifyBracket(m[0], text.slice(0, m.index)) !== "blank") continue;
+      out.push(item("placeholder_style", "low", p, say, m.index, m[0].length));
+    }
+    for (const m of text.matchAll(/[●•]/g)) {
+      if (within(spans, m.index)) continue;
+      const lineStart = text.lastIndexOf("\n", m.index) + 1;
+      if (!text.slice(lineStart, m.index).trim()) continue; // a bullet
+      out.push(item("placeholder_style", "low", p, say, m.index, 1));
+    }
+    const letters = text.replace(/[^A-Za-z]/g, "").length;
+    if (text.length > 20 && letters >= 8 && !SIGNATURE_LINE.test(text)) {
+      for (const m of text.matchAll(/_{4,}/g)) if (!within(spans, m.index)) out.push(item("placeholder_style", "low", p, say, m.index, m[0].length));
+    }
+  }
+  return out;
+}
+
+// --- cross-references: Section 2.1 (The Appointment), pointing at something that exists
+function headingTitles(paragraphs) {
+  const titles = new Map();
+  paragraphs.forEach((p, i) => {
+    if (!p.key || p.toc) return;
+    let title = p.isHeading ? p.body.trim() : "";
+    if (!title && !p.body.trim()) {
+      const next = paragraphs[i + 1];
+      if (next && !next.info && looksLikeTitle(next.text)) title = next.text.trim();
+    }
+    if (!title && p.info?.kind !== "sub") {
+      // A run-in heading: "14.2 Dispute Resolution. Any dispute …"
+      const m = /^([A-Z][^.:;]{1,70}?)[.:]\s+\S/.exec(p.body.trim());
+      if (m && looksLikeTitle(m[1]) && m[1].split(/\s+/).length <= 8) title = m[1];
+    }
+    title = title.replace(/[\s.–—-]+$/, "");
+    // A clause's opening words are not its heading.
+    if (!title || title.length > 120 || /[;:,]$/.test(title) || /\b(?:shall|will|may|must|is|are|has|have|hereby)\b/.test(title)) return;
+    if (!titles.has(p.key)) titles.set(p.key, isAllCaps(title) ? titleCase(title) : title);
+  });
+  return titles;
+}
+
+function crossRefItems(paragraphs, sheet, { amends, extract, definesItself }) {
+  const targets = referenceTargets(paragraphs);
+  if (targets.clauseCount < 3 || extract) return [];
+  const titles = headingTitles(paragraphs);
+  const words = Array.isArray(sheet.cross_refs?.words) ? sheet.cross_refs.words : null;
+  const titleFor = (family, id) => {
+    const up = id.toUpperCase();
+    if (family === "Clause" || family === "Section") return titles.get(id) ?? titles.get(`Section ${id}`) ?? titles.get(`Clause ${id}`) ?? titles.get(`Article ${id}`) ?? null;
+    if (family === "Article") return titles.get(`Article ${up}`) ?? titles.get(id) ?? null;
+    return titles.get(`${family} ${up}`) ?? null;
+  };
+  const maxTop = Math.max(0, ...[...targets.numbers].map((n) => Number(n.split(".")[0])).filter(Number.isFinite));
+  const exists = (family, idMain) => {
+    if (family === "Part") return true; // Parts restart inside each Schedule
+    // "Section 301" in an agreement of thirty Articles is a statute's section.
+    if (/^\d/.test(idMain) && Number(idMain.split(".")[0]) > maxTop) return true;
+    if (family === "Clause" || family === "Section") return !/^\d/.test(idMain) || targets.numbers.has(idMain) || (targets.named.get("Section")?.has(idMain.toUpperCase()) ?? false);
+    const known = targets.named.get(family);
+    if (!known || !known.size) return true; // the document numbers none of its own
+    return known.has(idMain.toUpperCase()) || (family === "Article" && targets.numbers.has(idMain));
+  };
+  const usedWords = new Set();
+  const wrongWord = [];
+  const out = [];
+  for (const p of paragraphs) {
+    if (p.toc || p.pageNumber) continue;
+    const text = p.text;
+    const mentioned = new Set();
+    for (const m of text.matchAll(REF)) {
+      if (m.index < p.bodyOffset) continue;
+      const family = refFamily(m[1]);
+      if (!family) continue;
+      const after = text.slice(m.index + m[0].length, m.index + m[0].length + 160);
+      if (EXTERNAL_AFTER.test(after)) {
+        const ext = EXTERNAL_AFTER.exec(after)[0];
+        if (!(/\bthis\b/i.test(ext) || (definesItself && /\bthe\s+(?:Agreement|Contract)\s*$/i.test(ext)))) continue;
+      }
+      if (OF_CONTAINER.test(after) && (family === "Clause" || family === "Section")) continue;
+      const ids = m[2].split(/\s*(?:,|and|or|to|through|-|–)\s*/).map((s) => s.trim()).filter(Boolean);
+      if (["Clause", "Section", "Article"].includes(family) && ids.some((x) => /^\d/.test(x))) {
+        usedWords.add(family);
+        if (words && !words.includes(family)) wrongWord.push({ p, m, family, id: ids[0] });
+      }
+      for (const raw of ids) {
+        // "Section 5 (Fees)": a four-letter heading read as a sub-clause letter.
+        const subHeading = /\s*\(([A-Z][a-z]{2,3})\)$/.exec(raw);
+        const rawId = subHeading ? raw.slice(0, subHeading.index) : raw;
+        const idMain = rawId.replace(/\s*\(.*$/, "");
+        const shown = `${family} ${rawId.replace(/\s+/g, "")}`;
+        if (!amends && !exists(family, idMain)) {
+          out.push(item("cross_ref_heading", "high", p, `${shown} is referred to, but this document has no ${shown}.`, m.index, m[0].length));
+          continue;
+        }
+        if (ids.length !== 1 || rawId !== idMain) continue; // a range, or a limb: no heading expected
+        const title = titleFor(family, idMain);
+        if (!title) continue;
+        const given = subHeading ? subHeading[1] : /^\s*\(([^()]{2,120})\)/.exec(after)?.[1] ?? null;
+        if (given) {
+          const g = headingNorm(given);
+          const t = headingNorm(title);
+          if (g && t && !g.includes(t) && !t.includes(g)) {
+            out.push(item("cross_ref_heading", "medium", p, `The heading in brackets, “${given.trim()}”, is not the heading of ${shown}, which is “${title}”.`, m.index, m[0].length));
+          }
+        } else if (sheet.cross_refs?.heading_required && !mentioned.has(shown)) {
+          out.push(item("cross_ref_heading", "low", p, `Give the heading with the reference: ${shown} (${title}).`, m.index, m[0].length));
+        }
+        mentioned.add(shown);
+      }
+    }
+  }
+  // "Clause 4.2" in a document that otherwise says "Section": only a mix is reported.
+  if (words && wrongWord.length && words.some((w) => usedWords.has(w))) {
+    const preferred = words.find((w) => usedWords.has(w)) ?? words[0];
+    for (const { p, m, family, id } of wrongWord) {
+      out.push(item("cross_ref_heading", "low", p, `This document calls its provisions “${preferred}”: “${family} ${id}” should read “${preferred} ${id}”.`, m.index, m[0].length));
+    }
+  }
+  return out;
+}
+
+// --- spelling: British -ise
+const IZE_WORD = /\b[A-Za-z]*?(?:iz(?:e|es|ed|ing|ation|ations|ational|er|ers|able)|yz(?:e|es|ed|ing|er|ers))\b/g;
+const IZE_KEEP = /(?:size|sized|sizes|sizing|seize|seized|seizes|seizing|seizure|prize|prizes|prized|maize|baize|assize|assizes|citizen\w*|denizen\w*|wizard\w*|blizzard\w*)$/;
+
+const matchCase = (model, word) => (model === model.toUpperCase() && model.length > 1 ? word.toUpperCase() : /^[A-Z]/.test(model) ? word.charAt(0).toUpperCase() + word.slice(1) : word);
+
+function spellingItems(paragraphs, sheet, compiled, tells) {
+  if (sheet.spelling?.convention !== "ise") return [];
+  const keep = new Set((sheet.spelling.keep ?? []).map((w) => w.toLowerCase()));
+  const keepAfter = sheet.spelling.keep_after ?? {};
+  const map = sheet.spelling.words ?? {};
+  const found = new Map(); // lower-case word -> { p, at, word, suggest, count }
+  const note = (p, at, word, suggest) => {
+    const k = word.toLowerCase();
+    const f = found.get(k);
+    if (f) f.count++;
+    else found.set(k, { p, at, word, suggest, count: 1 });
+  };
+  for (const p of paragraphs) {
+    const text = p.text;
+    for (const m of text.matchAll(IZE_WORD)) {
+      const w = m[0];
+      const lower = w.toLowerCase();
+      if (lower.length < 5 || keep.has(lower) || IZE_KEEP.test(lower)) continue;
+      // "World Health Organization": a name keeps its own spelling.
+      if (/^organization/.test(lower) && /^[A-Z]/.test(w)) {
+        const before = text.slice(Math.max(0, m.index - 30), m.index);
+        const after = text.slice(m.index + w.length, m.index + w.length + 30);
+        if (/[A-Z][\w&-]*\s+$/.test(before) || /^\s+(?:for|of)\s+[A-Z]/.test(after)) continue;
+      }
+      const suggest = lower.replace(/iz(e|es|ed|ing|ation|ations|ational|er|ers|able)$/, "is$1").replace(/yz(e|es|ed|ing|er|ers)$/, "ys$1");
+      if (suggest === lower) continue;
+      note(p, m.index, w, matchCase(w, suggest));
+    }
+    if (compiled.spellingMap) {
+      for (const m of text.matchAll(compiled.spellingMap)) {
+        const w = m[0];
+        const lower = w.toLowerCase();
+        const prevWord = /([A-Za-z]+)\s+$/.exec(text.slice(Math.max(0, m.index - 20), m.index))?.[1]?.toLowerCase();
+        if (prevWord && (keepAfter[lower] ?? []).includes(prevWord)) continue;
+        note(p, m.index, w, matchCase(w, map[lower] ?? map[Object.keys(map).find((k) => k.toLowerCase() === lower)]));
+      }
+    }
+  }
+  tells.american = [...found.keys()].length;
+  return [...found.values()].map((f) => item("spelling_convention", "low", f.p, `British spelling: “${f.suggest}”, not “${f.word}”${f.count > 1 ? ` (${f.count} times)` : ""}.`, f.at, f.word.length));
+}
+
+// --- banned phrasings
+const WE_WORDS = /\b(?:we|We|WE|our|Our|OUR|ours|us)\b/g;
+const WILL_OBLIGATION = /\b((?:[A-Z][\w’'-]*\s+){0,3}[A-Z][\w’'-]*)\s+will\s+(?!be\s+deemed\b|have\s+the\s+meaning\b)([a-z]{3,})/g;
+const NOT_A_PARTY = /^(?:It|This|That|There|These|Those|Which|What|If|When|Where|Who|He|She|They|You|I)$/;
+const isRecital = (p) => /^\s*(?:WHEREAS|Whereas|RECITALS?)\b/.test(p.text) || p.path.some((e) => /recital|background|whereas/i.test(e));
+
+function bannedItems(paragraphs, sheet, compiled, tells) {
+  const out = [];
+  for (const b of compiled.banned) {
+    for (const p of paragraphs) {
+      for (const m of p.text.matchAll(b.re)) {
+        if (b.id === "hereinafter") tells.hereinafter++;
+        if (b.id === "witnesseth") tells.witnesseth++;
+        out.push(item("banned_phrase", b.severity ?? "low", p, b.reason, m.index, m[0].length));
+      }
+    }
+  }
+  const checks = new Map((sheet.banned ?? []).filter((b) => b.check).map((b) => [b.check, b]));
+  const voice = checks.get("voice");
+  if (voice && sheet.voice?.we_allowed === false) {
+    for (const p of paragraphs) {
+      const quotes = quotedSpans(p.text);
+      const hits = [...p.text.matchAll(WE_WORDS)].filter((m) => !within(quotes, m.index) && !/^US$/.test(m[0]));
+      if (!hits.length) continue;
+      out.push(item("banned_phrase", voice.severity ?? "medium", p, `${voice.reason}${hits.length > 1 ? ` (${hits.length} times in this paragraph)` : ""}`, hits[0].index, hits[0][0].length));
+    }
+  }
+  const will = checks.get("will_obligation");
+  if (will && (!will.kinds || will.kinds.includes(sheet.kind))) {
+    for (const p of paragraphs) {
+      if (isRecital(p) || p.isHeading) continue;
+      const quotes = quotedSpans(p.text);
+      for (const m of p.text.matchAll(WILL_OBLIGATION)) {
+        const subject = m[1].split(/\s+/);
+        if (NOT_A_PARTY.test(subject[subject.length - 1]) || within(quotes, m.index)) continue;
+        tells.will++;
+        const at = m.index + m[0].indexOf(" will ") + 1;
+        out.push(item("banned_phrase", will.severity ?? "low", p, will.reason, at, 4));
+      }
+    }
+  }
+  return out;
+}
+
+// --- a named government or province
+const DEFINES_GOVERNMENT = /\bGovernment[”"’*]*\s+(?:means|shall mean)\b|\(\s*(?:the\s+)?[“"‘*]*Government[”"’*]*\s*\)/;
+const LAW_END = /\b(?:Act|Ordinance|Rules|Regulations)$/;
+
+function governmentItems(paragraphs, sheet, compiled) {
+  if (!compiled.government.length) return [];
+  const out = [];
+  for (const p of paragraphs) {
+    if (DEFINES_GOVERNMENT.test(p.text)) continue; // where the deal's Government is named, once
+    const seen = new Set();
+    for (const re of compiled.government) {
+      for (const m of p.text.matchAll(re)) {
+        if (seen.has(m.index)) continue;
+        seen.add(m.index);
+        const law = LAW_END.test(m[0]);
+        out.push(item("government_named", "medium", p, law
+          ? `“${m[0]}” is a province-specific or federal-only law: write [applicable PPP law] (or [●]) so the document fits any government.`
+          : `“${m[0]}” names a government, province or provincial body: use the defined term Government (named once, where it is defined), or [●] or a neutral description in brackets.`, m.index, m[0].length));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The wording check: a draft read against the firm's style sheet.
+ * @param {{ blocks: Array<object> } | Array<object>} blocks the reader's output (extractForIndex) or its blocks
+ * @param {{ styleSheet?: string|object|null }} [options] a style-sheet key or document type name, or a merged sheet (styleSheets/index.js styleSheetFor); the firm-wide core when absent
+ * @returns {{ version: number, kind: 'wording', style_sheet: string, blocking: false, checked_at: string, paragraphs: number, counts: Record<string, number>, total: number, items: Array<object>, omitted: Record<string, number>, notes: string[], ms: number }}
+ */
+export function runWordingCheck(blocks, { styleSheet = null } = {}) {
+  const started = Date.now();
+  const sheet = styleSheet && typeof styleSheet === "object" ? styleSheet : styleSheetFor(styleSheet ?? "core");
+  const compiled = compile(sheet);
+  const { text: fullText, paragraphs: all } = toParagraphs(blocks);
+  const paragraphs = all.filter((p) => !p.toc && !p.pageNumber);
+  const notes = [];
+  if ((sheet.key ?? "core") === "core") notes.push("No style sheet for this kind of document: the firm-wide rules were applied.");
+  const sites = definitionSites(all);
+  const definesItself = sites.some((s) => /^(?:Agreement|Contract)$/.test(s.term)) || /\bthis (?:Agreement|Contract)\b/.test(fullText);
+  const start = firstNumber(all);
+  const extract = start !== null && start.n > 3;
+  const amends = !extract && AMENDS.test(fullText);
+  const tells = { quoted: 0, hereinafter: 0, witnesseth: 0, american: 0, will: 0, dates: 0 };
+  const found = {
+    defined_term_form: definedTermFormItems(paragraphs, sheet, tells),
+    number_words: numberFormItems(paragraphs, sheet, compiled),
+    date_format: dateFormatItems(paragraphs, sheet, tells),
+    placeholder_style: placeholderStyleItems(paragraphs, sheet),
+    cross_ref_heading: crossRefItems(all, sheet, { amends, extract, definesItself }),
+    spelling_convention: spellingItems(paragraphs, sheet, compiled, tells),
+    banned_phrase: bannedItems(paragraphs, sheet, compiled, tells),
+    government_named: governmentItems(paragraphs, sheet, compiled),
+  };
+  if (extract) notes.push(`This file looks like part of a longer document (its numbering starts at ${start.label}), so cross-references were not checked.`);
+  else if (amends) notes.push("This document amends another, so whether its cross-references exist was not checked.");
+  // The marks of another firm's draft.
+  const marks = [
+    tells.quoted >= 3 && "defined terms in quotation marks",
+    tells.hereinafter >= 1 && "\"hereinafter referred to as\"",
+    tells.witnesseth >= 1 && "\"WITNESSETH\"",
+    tells.american >= 3 && "American -ize spelling",
+    tells.will >= 3 && "\"will\" for obligations",
+    tells.dates >= 2 && "dates written day-month",
+  ].filter(Boolean);
+  if (marks.length >= 2) notes.push(`This reads like another firm's draft (${marks.join(", ")}). If it is the counterparty's, these are its conventions, not slips; if it is to become the firm's draft, bring it to the firm's form.`);
+  const counts = {};
+  const omitted = {};
+  const items = [];
+  for (const category of WORDING_CATEGORIES) {
+    const list = found[category];
+    counts[category] = list.length;
+    if (list.length > MAX_ITEMS_PER_CATEGORY) omitted[category] = list.length - MAX_ITEMS_PER_CATEGORY;
+    const ordered = list.map((x, i) => ({ x, i })).sort((a, b) => (SEVERITY_ORDER[a.x.severity] - SEVERITY_ORDER[b.x.severity]) || (a.i - b.i)).map((o) => o.x);
+    for (const x of ordered.slice(0, MAX_ITEMS_PER_CATEGORY)) items.push(x);
+  }
+  return {
+    version: 1,
+    kind: "wording",
+    style_sheet: sheet.key ?? "core",
+    blocking: false,
+    checked_at: new Date().toISOString(),
+    paragraphs: all.length,
+    counts,
+    total: Object.values(counts).reduce((a, b) => a + b, 0),
+    items,
+    omitted,
+    notes,
+    ms: Date.now() - started,
+  };
+}
+
+/** One line for a reply: "Wording: 3 points to look at (2 dates, 1 defined term) — none stops the draft being filed." */
+export function wordingSummary(result) {
+  if (!result) return "";
+  const names = { defined_term_form: "defined term", number_words: "number or amount", date_format: "date", placeholder_style: "placeholder", cross_ref_heading: "cross-reference", spelling_convention: "spelling", banned_phrase: "phrasing", government_named: "named government" };
+  const parts = WORDING_CATEGORIES.filter((c) => result.counts?.[c]).map((c) => `${result.counts[c]} ${names[c]}${result.counts[c] === 1 ? "" : "s"}`);
+  if (!parts.length) return "Wording: nothing to report against the firm's style sheet.";
+  return `Wording: ${result.total} point${result.total === 1 ? "" : "s"} to look at against the firm's style sheet (${parts.join(", ")}); none stops the draft being filed.`;
 }

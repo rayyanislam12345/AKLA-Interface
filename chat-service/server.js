@@ -28,12 +28,13 @@ import { chatTools, makeToolRunner, createSourceRegistry, sourceText, citedNumbe
 import { retrieve, MIN_RELEVANCE } from "./retrieve.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
-import { editRecords, reviewRecords, reconcile, findRevisions, countsFor, countsWith, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, notDoneFor, undecidable, cleanRefusal, CHANGED_WHILE_DECIDING, NO_CHANGES_YET } from "./changes.js";
+import { editRecords, recordedResults, reviewRecords, reconcile, findRevisions, countsFor, countsWith, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, notDoneFor, undecidable, cleanRefusal, CHANGED_WHILE_DECIDING, NO_CHANGES_YET } from "./changes.js";
 import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
 import { checkFormat, formatRecord, variableLinesFor, storeUnlessRefused, openWorkingCopy } from "./formatFingerprint.js";
 import { packForBase, packPromptBlock, packMap, packTypesOf, packTypeFor, packPointer, withPackColumns, PACK_COLUMNS } from "./draftingPacks.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
-import { QUESTIONNAIRES, startQuestionnaire, readAnswer, advance, answerInstruction } from "./questionnaire.js";
+import { questionnaireFor, startQuestionnaire, readAnswer, advance, answerInstruction } from "./questionnaire.js";
+import { withDraftingColumns, DRAFTING_COLUMNS, draftingTypeOf, draftingOf, draftingPromptText, examplesHeadings, clauseExamplesBlock, autoCommentOps, moreWordingText, skeletonGate, draftGate, omissionsConfirmedIn } from "./draftChecks.js";
 import { parseSkillZip, publishSkill, unpublishSkill, uploadInputFile, downloadOutputFile, runSkillTurn, MAX_SKILL_BYTES } from "./claudeSkills.js";
 import { ON_DEMAND_READ_MS, TOO_LONG_MESSAGE, deadlineStop, proofCheckVersion, compareVersionPair } from "./documentInsight.js";
 import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, ARTIFACT_RULES, FILL_INSTRUCTIONS, FILL_DIRECT_NOTE, lookingUpRules, citingRules } from "./firmRules.js";
@@ -738,7 +739,7 @@ async function waitingRows(supabase, rootId) {
 // so reconcile can name the row that replaced an earlier change. Only rows
 // the database confirmed are attached.
 function attachRowIds(results, rows, insertedIds) {
-  const recorded = results.filter((r) => ["replace", "insert_after", "delete"].includes(String(r.kind ?? "").toLowerCase()) && !(r.status === "applied" && r.removedIds?.length && !r.revisionIds?.length));
+  const recorded = recordedResults(results);
   if (recorded.length !== rows.length) return;
   const confirmed = new Set(insertedIds);
   recorded.forEach((r, k) => { if (confirmed.has(rows[k].id)) r.rowId = rows[k].id; });
@@ -761,6 +762,20 @@ function couldNotBePlaced(skipped) {
 // The file was read before the model was called. A decision landing in
 // between moved the head on, and the changes belong to the old bytes.
 const HEAD_MOVED_TEXT = "This document changed while the assistant was working (a change was decided). Ask again.";
+
+// A reply the clause-list check refused keeps its changes on the message
+// (metadata.skeletonRefused) so that the lawyer's "leave it out" files them
+// again without asking the model to redo the draft; a change list longer
+// than this is not kept, and the model redoes it.
+const MAX_RETRY_OPS_CHARS = 400_000;
+// That retry as a generated reply: a sentence for the lawyer, then the
+// changes in the fenced block extractOps reads.
+function retryReply(retry, skeleton, send) {
+  const names = retry.confirmed.map((id) => (Array.isArray(skeleton) ? skeleton : skeleton?.items ?? []).find((it) => it.id === id)?.heading ?? id);
+  const prose = `Filing the draft without ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}, as you confirmed.`;
+  send("delta", { text: prose });
+  return { text: `${prose}\n\n\`\`\`json\n${JSON.stringify({ ops: retry.ops })}\n\`\`\``, generated: "", incomplete: false, stoppedByClient: false };
+}
 
 // A review outside a project has no project to look the law up for; the
 // review records that plainly rather than as a failure.
@@ -1129,7 +1144,9 @@ async function handleChat(req, res) {
       matterId ? supabase.from("matter_context").select("content").eq("matter_id", matterId).maybeSingle() : none(null),
       matterId ? supabase.from("matter_relevant_laws").select("act_name").eq("matter_id", matterId).eq("status", "available") : none([]),
       skill?.documentTypeId
-        ? supabase.from("document_types").select("id, name, category, required_fields, questionnaire").eq("id", skill.documentTypeId).single()
+        // The clause list and decisions come too (read without them until
+        // 20261021100000 is applied; draftChecks.js then reads the data files).
+        ? withDraftingColumns((withDrafting) => supabase.from("document_types").select(`id, name, category, required_fields, questionnaire${withDrafting ? `, ${DRAFTING_COLUMNS}` : ""}`).eq("id", skill.documentTypeId).single())
         : Promise.resolve({ data: null }),
       skill?.key === "custom" && skill.customSkillId
         ? supabase.from("ai_skills").select("id, name, instructions, produces_document, kind, anthropic_skill_id, anthropic_version_id").eq("id", skill.customSkillId).single()
@@ -1442,8 +1459,15 @@ async function handleChat(req, res) {
   const noStandardNotice = skill?.key === "draft" && documentType?.questionnaire && !hasWordStandard
     ? `There is no Word standard for ${documentType.name} yet, so this draft starts from the firm's general format.`
     : null;
-  const guide = !standardising && skill?.key === "draft" && documentType?.questionnaire && hasWordStandard ? QUESTIONNAIRES[documentType.questionnaire] ?? null : null;
-  const guideState = guide ? thread.questionnaire ?? null : null;
+  // The decisions are data (questionnaire.js questionnaireFor: the type's
+  // own row, then its questionnaire key, then the data file of its name).
+  // Being taken through them one at a time before anything is drafted is
+  // for a type that names a questionnaire (the RFP); every other type's
+  // decisions go into its fill prompt (draftChecks.js decisionsPromptText).
+  // The thread's questionnaire column also keeps the clause-list omissions
+  // the lawyer confirmed, so a state is a guide's only when it names one.
+  const guide = !standardising && skill?.key === "draft" && documentType?.questionnaire && hasWordStandard ? questionnaireFor(documentType) : null;
+  const guideState = guide && thread.questionnaire?.key ? thread.questionnaire : null;
   const guideStart = !!guide && !guideState && !isContinuation;
   let guideTurn = null;
   if (guide && guideState && requestedSkill?.answer && !isContinuation) {
@@ -1458,6 +1482,31 @@ async function handleChat(req, res) {
       state: { key: guide.key, answers: next.answers, pending: next.pending, done: !next.pending },
     };
   }
+
+  // ---- the firm's drafting rules for the Word file worked on (draftChecks.js) ----
+  // Its kind of document's style sheet, clause list and decisions; the
+  // clause-list omissions the lawyer has confirmed on this thread; and, when
+  // the last reply was refused for a missing part and this message confirms
+  // leaving it out, that reply's changes to file again without a new call.
+  const draftingType = standardising || !docxBase ? null
+    : documentType && (!docxBase.documentTypeId || docxBase.documentTypeId === documentType.id) ? documentType
+      : docxBase.documentTypeId ? await draftingTypeOf(supabase, docxBase.documentTypeId).catch(() => null) : null;
+  const drafting = docxBase && !standardising ? draftingOf(draftingType) : null;
+  let confirmedOmissions = Array.isArray(thread.questionnaire?.confirmedOmissions) ? thread.questionnaire.confirmedOmissions : [];
+  let skeletonRetry = null;
+  const refusedOn = [...priorMessages].reverse().find((m) => m.role === "assistant")?.metadata?.skeletonRefused ?? null;
+  if (drafting?.skeleton && refusedOn && !isContinuation && !guideTurn && message.trim()) {
+    const confirmed = omissionsConfirmedIn(message, drafting.skeleton, refusedOn.missing ?? []);
+    if (confirmed.length) {
+      confirmedOmissions = [...new Set([...confirmedOmissions, ...confirmed])];
+      const state = { ...(thread.questionnaire ?? {}), confirmedOmissions };
+      await supabase.from("ai_chat_threads").update({ questionnaire: state }).eq("id", threadId);
+      thread = { ...thread, questionnaire: state };
+      if (refusedOn.storagePath === docxBase.storagePath && Array.isArray(refusedOn.ops) && refusedOn.ops.length) skeletonRetry = { ops: refusedOn.ops, confirmed };
+    }
+  }
+  // A guided state written back keeps the confirmed omissions beside it.
+  const withOmissions = (state) => (confirmedOmissions.length ? { ...state, confirmedOmissions } : state);
 
   let userMessageId = null;
   if (!isContinuation) {
@@ -1573,7 +1622,7 @@ async function handleChat(req, res) {
       // A working copy the format check refused is not stored, and the
       // questionnaire does not start.
       if (state && !state.pending) content += `\n\n${guide.closing}`;
-      if (state) await supabase.from("ai_chat_threads").update({ questionnaire: state }).eq("id", threadId);
+      if (state) await supabase.from("ai_chat_threads").update({ questionnaire: withOmissions(state) }).eq("id", threadId);
       send("delta", { text: content.replace(/\n\n\[\[artifact:[^\]]+\]\]/, "") });
       const { data: msg } = await supabase
         .from("ai_chat_messages")
@@ -2395,6 +2444,9 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
       // In a shell pack, which blank paragraphs are fixed parts and which
       // are examples to remove once the body is written.
       docxBase.packMap = docxBase.pack ? packMap(docxBase.bytes, docxBase.pack) : "";
+      // Filing a refused reply's changes again: they were checked against
+      // this very file when they were made, whatever this listing shows.
+      if (skeletonRetry) for (const ref of docxBase.inspection.byRef.values()) ref.shown = true;
       send("notice", { text: `Working on ${docxBase.fileName} (${docxBase.inspection.paragraphCount} paragraphs).` });
     }
 
@@ -2414,7 +2466,8 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
     let sources = [];
     let templateHtml = templateRow?.content_html ?? null;
     let templateRules = templateRow?.format_rules ?? null;
-    if (retrievalQuery) {
+    // Filing a refused reply again needs no search: no model is called.
+    if (retrievalQuery && !skeletonRetry) {
       const actNames = (relevantLaws ?? []).map((r) => r.act_name).filter(Boolean);
       // A standard is checked against the law the associate named, so
       // more of it is read than a question in a project chat needs.
@@ -2525,6 +2578,18 @@ ${JSON.stringify(suggestions.map((s) => ({ pass: s.review_type, clause: s.clause
         ? "\n\nNothing relevant was retrieved from the firm's library for this message by the automatic search; use the tools to look."
         : "\n\nNothing relevant was retrieved from the firm's library for this message.";
 
+    // A draft from the firm's standard is told how the firm writes this kind
+    // of document, its clause list and its decisions, and is shown the
+    // firm's own versions of the clauses it is about to write (none before
+    // the clause bank's migration, or if the bank cannot be read).
+    let draftingBlock = "";
+    if (docxBase?.standard && !docxBase.revising && drafting && !skeletonRetry) {
+      const headings = examplesHeadings({ skeleton: drafting.skeleton, bytes: docxBase.bytes, kinds: docxBase.pack?.kinds ?? null, answers: thread.questionnaire?.answers ?? null, message });
+      const examples = await clauseExamplesBlock({ supabase, typeId: drafting.typeId, typeName: drafting.typeName, headings });
+      if (examples.skipped) console.log(`docx thread=${threadId}: no clause examples (${examples.skipped})`);
+      draftingBlock = `\n\n${draftingPromptText({ typeName: drafting.typeName, skeleton: drafting.skeleton, questionnaire: drafting.questionnaire })}${examples.text ? `\n\n${examples.text}` : ""}`;
+    }
+
     let skillBlock = "";
     if (docxBase && skill?.key === "standardise") {
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
@@ -2559,7 +2624,7 @@ ${FIRM_MARKDOWN_RULES}
 ${ARTIFACT_RULES}`;
     } else if (docxBase && guideTurn) {
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this decision is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
-      skillBlock = `\n\nSKILL IN FORCE — GUIDED DRAFTING OF A "${documentType.name}" FROM THE FIRM'S STANDARD, a Word file.\n\n${listing}\n\n${answerInstruction(guideTurn.decisions, guideState.answers)}\n\n${OPS_PROTOCOL}`;
+      skillBlock = `\n\nSKILL IN FORCE — GUIDED DRAFTING OF A "${documentType.name}" FROM THE FIRM'S STANDARD, a Word file.\n\n${listing}\n\n${answerInstruction(guideTurn.decisions, guideState.answers, guide)}\n\n${OPS_PROTOCOL}`;
     } else if (docxBase && (!skill || skill?.key === "edit" || skill?.key === "draft")) {
       const src = docxBase.editSource ?? {};
       const listing = `CURRENT DOCUMENT — the paragraphs of ${docxBase.fileName}${docxBase.inspection.partial ? `, ${docxBase.inspection.shown} of its ${docxBase.inspection.paragraphCount} paragraphs — the ones this turn is about, with the gaps marked. If what you need is in a gap, use the read protocol to request that paragraph range` : ""}:\n${docxBase.inspection.listing}`;
@@ -2571,7 +2636,7 @@ ${ARTIFACT_RULES}`;
         const earlierText = docxBase.pack && currentDraft?.trim()
           ? `\n\nTEXT OF THIS DOCUMENT WRITTEN EARLIER IN THIS CHAT, to be written into the pack: keep its substance and set it in the pack's kinds:\n${currentDraft.slice(0, MAX_EDIT_CHARS)}`
           : "";
-        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\n${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}${packBlock}${earlierText}\n\n${OPS_PROTOCOL}\n\n${FILL_DIRECT_NOTE}`;
+        skillBlock = `\n\nSKILL IN FORCE — DRAFT A "${documentType.name}" (${documentType.category}) FOR THIS PROJECT BY FILLING IN THE FIRM'S STANDARD.\n\n${listing}\n\n${FILL_INSTRUCTIONS}${templateRules?.trim() ? `\n\nHow the standard is formatted: ${templateRules.trim()}` : ""}${packBlock}${draftingBlock}${earlierText}\n\n${OPS_PROTOCOL}\n\n${FILL_DIRECT_NOTE}`;
       } else {
         skillBlock = `\n\nSKILL IN FORCE — EDIT "${src.title ?? docxBase.fileName}"${src.versionNumber ? ` (from v${src.versionNumber})` : ""}, a Word file, as the lawyer instructs.\n\n${listing}\n\nHow to work: make exactly the changes asked for and leave everything else as it is. When the lawyer points at another document or version (attached above), lift the clause or wording from that text and adapt its defined terms and cross-references to fit this document. If it is genuinely unclear where a change belongs, ask one short question rather than guess. If the lawyer is asking a question about the document rather than for a change, answer it and send no block. If they want a different document altogether, say that a new Draft chat is the place for it.${otherDocuments.length ? ` Other documents in this conversation, not loaded for changes this turn: ${otherDocuments.map((d) => `"${d.title}"`).join(", ")}. If the lawyer means one of those, say which one you have open and ask them to open the other in the panel (click its card) and send the request again — never say a document cannot be reached.` : ""}${docxBase.rendered ? " The file is set in the firm's house format already — Arial, the navy title banner, numbered section headings with a rule beneath, the unindented numbered outline, the running header — so a request to format it to AKLA style needs no change to its text; say so, and deal with anything specific they point to." : ""}${docxBase.pack ? `\n\n${packPromptBlock(docxBase.pack, { editing: true })}${docxBase.packMap ? `\n${docxBase.packMap}` : ""}` : ""}\n\n${OPS_PROTOCOL}`;
       }
@@ -2632,6 +2697,9 @@ ${ARTIFACT_RULES.replace('kind="draft|memo"', 'kind="memo"')}`;
     }
 
     if (currentDraft && !docxBase && !editBase) skillBlock += `\n\nCURRENT DRAFT TO REVISE (preserve all unrequested content):\n${currentDraft}`;
+    // The wording points the last change counted past its comment cap.
+    const moreWording = docxBase ? moreWordingText([...priorMessages].reverse().find((m) => m.role === "assistant")?.metadata?.wordingCheck?.more) : "";
+    if (moreWording) skillBlock += `\n\n${moreWording}`;
     const researchBlock = research ? `\n\nLIVE RESEARCH STATUS: ${research.status}. ${research.unresolved.join("; ")}. Downloaded sources are candidates; do not claim all applicable law has been found or current applicability established. Cite them by source number and explain any jurisdiction/date uncertainty.` : "";
     const workingOn = general
       ? `You are the firm's general assistant for an associate working outside any one project. You are grounded in the firm's precedent library and law library and in any files attached to this chat; no project documents are in view. If a question plainly concerns one of the firm's projects, say the answer would be stronger inside that project's workspace, where its documents and context are available, and still answer as far as the sources allow.`
@@ -2729,7 +2797,11 @@ You answer the way a careful senior associate would: precise, conservative, and 
         { initialText, clientSignal: clientGone.signal, runTool, onRound: () => send("sources", (sourceSummaries = registry.thisTurn())) },
       )
       : anthropicComplete({ model: CHAT_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages }, deltas, { initialText, clientSignal: clientGone.signal });
-    let { text: fullText, generated, incomplete, stoppedByClient } = await generate(anthropicMessages, onDelta, resumeMessage?.content ?? "");
+    // A refused reply filed again (the lawyer confirmed the omission): its
+    // own changes, with no model call.
+    let { text: fullText, generated, incomplete, stoppedByClient } = skeletonRetry
+      ? retryReply(skeletonRetry, drafting.skeleton, send)
+      : await generate(anthropicMessages, onDelta, resumeMessage?.content ?? "");
 
     for (let reads = 0; docxBase && !incomplete && !stoppedByClient && extractOps(fullText).reads; reads++) {
       if (reads >= 5) throw new Error("Document reading limit reached; narrow the requested edit. No changes were applied.");
@@ -2820,9 +2892,15 @@ You answer the way a careful senior associate would: precise, conservative, and 
       const metadata = { sources: sourceSummaries, skill: skill ?? null, ...citationMeta };
       if (ops?.length) {
         send("notice", { text: "Applying the changes to the Word file…" });
+        // The firm's rules add their comments to the same pass
+        // (draftChecks.js): the "New clause" comment a new heading was
+        // written without, and one for each wording point in what this turn
+        // wrote (never in the words it left alone). They come after the
+        // reply's own operations.
+        const auto = drafting ? autoCommentOps({ ops, skeleton: drafting.skeleton, styleSheet: drafting.styleSheet }) : null;
         // A comment on a paragraph this reply also rewrites may quote either
         // wording; it is checked against the paragraph as it stood.
-        const aligned = alignCommentExpectations(ops, docxBase.inspection.byRef);
+        const aligned = alignCommentExpectations([...ops, ...(auto?.ops ?? [])], docxBase.inspection.byRef);
         // A draft from a firm pack, or an edit of one, writes in the pack's kinds.
         const out = await applyDocxOps(docxBase.bytes, aligned, docxBase.inspection.byRef, { idFloor: await highestRecordedId(supabase, root.id), ...(docxBase.pack ? { kinds: docxBase.pack.kinds } : {}) });
         // A draft from the firm's standard is a new document: the facts go
@@ -2831,7 +2909,9 @@ You answer the way a careful senior associate would: precise, conservative, and 
         const fillIn = docxBase.standard && !docxBase.revising;
         if (fillIn && out.applied > 0) out.bytes = acceptChangesBy(out.bytes);
         const changes = describeResults(out.results);
-        const skipped = changes.filter((c) => c.status !== "applied");
+        // A comment the rules added that could not be placed is not the
+        // lawyer's to hear about: only the reply's own operations are listed.
+        const skipped = changes.filter((c, k) => c.status !== "applied" && out.results[k].i < ops.length);
         // The format gate (formatFingerprint.js): the file about to be stored
         // against the one it came from — the firm's standard for a fill, the
         // version being worked on for an edit, a guided answer or a revision
@@ -2852,10 +2932,30 @@ You answer the way a careful senior associate would: precise, conservative, and 
           metadata.formatCheck = formatRecord(format);
           console.log(`docx thread=${threadId} ${docxBase.fileName}: format ${format.result.status}${format.refused ? " (refused, nothing stored)" : ""}${format.result.ms != null ? ` in ${format.result.ms}ms` : ""}${format.result.findings?.length ? `: ${format.result.findings.join("; ")}` : ""}`);
         }
+        // The clause-list check (draftChecks.js skeletonGate) on the file
+        // about to be stored: a part the firm always has that is missing
+        // stops it, as format drift does, until the lawyer confirms the
+        // omission. A draft from a shell pack (its body written fresh) needs
+        // every part; any other turn must only not take one out.
+        const clauses = out.applied > 0 && drafting?.skeleton ? skeletonGate({
+          bytes: out.bytes, baseBytes: docxBase.bytes, skeleton: drafting.skeleton, kinds: docxBase.pack?.kinds ?? null,
+          answers: guideTurn?.state.answers ?? thread.questionnaire?.answers ?? null, confirmedOmissions,
+          full: fillIn && docxBase.pack?.mode === "shell", report: fillIn, typeName: drafting.typeName, ops,
+        }) : null;
+        if (clauses) {
+          metadata.clauseList = clauses.record;
+          console.log(`docx thread=${threadId} ${docxBase.fileName}: clause list ${clauses.record.status}${clauses.refused ? ` (refused: ${clauses.record.blocking.join(", ")})` : ""}`);
+        }
+        // Kept so that "leave it out" files these same changes again.
+        if (clauses?.refused) metadata.skeletonRefused = { storagePath: docxBase.storagePath, missing: clauses.record.blocking, ...(JSON.stringify(ops).length <= MAX_RETRY_OPS_CHARS ? { ops } : {}) };
+        // The points past the comment cap are kept for the next turn ("ask to see them").
+        if (auto?.wording.checked) metadata.wordingCheck = { counts: auto.wording.result.counts, total: auto.wording.result.total, commented: auto.wording.shown, ...(auto.wording.rest.length ? { more: auto.wording.rest.slice(0, 200) } : {}) };
         // A refusal stores nothing: the store below never runs, so no copy
         // is uploaded and no change row is written. Otherwise the format
-        // line (or report mode's warning) follows what the store said.
-        const gated = await storeUnlessRefused(format, async () => {
+        // line (or report mode's warning), the clause-list line and the
+        // wording line follow what the store said.
+        const gate = draftGate(format, clauses, auto?.wording.line ?? "");
+        const gated = await storeUnlessRefused(gate, async () => {
           const { rows, withdrawals } = editRecords(out.results.filter((r) => r.kind !== "comment"), { threadId, rootId: root.id, userId: user.id, fillIn });
           mintRowIds(rows);
           // The file was read before the model was called. A decision landing
@@ -3007,7 +3107,7 @@ You answer the way a careful senior associate would: precise, conservative, and 
     // file the format gate refused, leaves the question where it was, to be
     // answered again.
     if (guideTurn && !formatRefused && !(docxBase && extractOps(fullText).parseError)) {
-      await supabase.from("ai_chat_threads").update({ questionnaire: guideTurn.state }).eq("id", threadId);
+      await supabase.from("ai_chat_threads").update({ questionnaire: withOmissions(guideTurn.state) }).eq("id", threadId);
       const notes = [
         ...guideTurn.autos.map((d) => `Also settled by your answers: **${d.question.title}** — ${d.optionIds.map((id) => d.question.options.find((o) => o.id === id)?.label).join("; ")}.`),
         ...(guideTurn.state.pending ? [] : [guide.closing]),

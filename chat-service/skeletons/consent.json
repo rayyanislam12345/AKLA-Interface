@@ -1,0 +1,160 @@
+{
+  "key": "consent",
+  "typeName": "Certificate / Consent / NOC",
+  "source": "Derived 20 October 2026 from the approved consent pack (5 Packs to check/10 consent or NOC, a shell cut from the firm's July 2026 consent letter) and the firm's other certificates and NOCs: consent and NOC letters carry Ref, Dated, To, Subject, an opening, the signature block and Name/Designation lines; certificates carry a certification instead of To and Subject (decision consent_form). Parts are found by kind and words.",
+  "completeLevels": [],
+  "items": [
+    {
+      "id": "ref",
+      "heading": "Ref line",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "ref_line",
+      "pattern": "^(?:our\\s+)?ref(?:erence)?(?:\\s*no\\.?)?\\s*[:.]"
+    },
+    {
+      "id": "dated",
+      "heading": "Dated line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "dated_line",
+      "pattern": "^dated?\\s*[:.]?(?:\\s|$)"
+    },
+    {
+      "id": "to",
+      "heading": "To line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "consent_form",
+      "when": [
+        "consent_letter",
+        "noc_letter"
+      ],
+      "absentWhen": [
+        "certificate"
+      ],
+      "match": "slot",
+      "slot": "to_line",
+      "pattern": "^to\\s*,?\\s*$"
+    },
+    {
+      "id": "subject",
+      "heading": "Subject line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "consent_form",
+      "when": [
+        "consent_letter",
+        "noc_letter"
+      ],
+      "absentWhen": [
+        "certificate"
+      ],
+      "match": "slot",
+      "slot": "subject_line",
+      "pattern": "^(?:subject|re)\\s*:"
+    },
+    {
+      "id": "certification",
+      "heading": "Certification",
+      "label": "certifying paragraph (… hereby certifies …)",
+      "level": 0,
+      "presence": "decision",
+      "decision": "consent_form",
+      "when": [
+        "certificate"
+      ],
+      "match": "slot",
+      "pattern": "\\bhereby\\s+certif(?:y|ies)\\b"
+    },
+    {
+      "id": "opening",
+      "heading": "Opening paragraph",
+      "label": "opening paragraph (We, [party] (the [role]), refer you to …)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": [
+        "opening",
+        "body"
+      ],
+      "pattern": "^(?!_{3,}\\s*$)\\S"
+    },
+    {
+      "id": "definitions_note",
+      "heading": "Definitions note",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "definitions_note",
+      "pattern": "^\\(?\\s*unless otherwise defined"
+    },
+    {
+      "id": "signature",
+      "heading": "Signature block",
+      "label": "signature block (For And On Behalf Of)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "signature_for",
+      "pattern": "^(?:for\\s*(?:and|&)\\s*on\\s+behalf\\s+of\\b|_{3,})"
+    },
+    {
+      "id": "capacity",
+      "heading": "Capacity line",
+      "label": "capacity line ((in its capacity as the [role]))",
+      "level": 0,
+      "presence": "decision",
+      "decision": "capacity",
+      "when": [
+        "stated"
+      ],
+      "absentWhen": [
+        "not_stated"
+      ],
+      "match": "slot",
+      "slot": "capacity_line",
+      "pattern": "^\\(?\\s*in\\s+its\\s+capacity\\s+as\\b"
+    },
+    {
+      "id": "signatory_name",
+      "heading": "Name line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "consent_form",
+      "when": [
+        "consent_letter",
+        "noc_letter"
+      ],
+      "match": "slot",
+      "slot": "signatory_name",
+      "pattern": "^name\\s*:"
+    },
+    {
+      "id": "signatory_title",
+      "heading": "Designation line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "consent_form",
+      "when": [
+        "consent_letter",
+        "noc_letter"
+      ],
+      "match": "slot",
+      "slot": "signatory_title",
+      "pattern": "^designation\\s*:"
+    },
+    {
+      "id": "copy_to",
+      "heading": "Copy To",
+      "label": "Copy To list",
+      "level": 0,
+      "presence": "optional",
+      "match": "slot",
+      "slot": "copy_to_heading",
+      "pattern": "^(?:copy|copies)\\s+to\\s*:?$|^cc\\s*:?$"
+    }
+  ]
+}

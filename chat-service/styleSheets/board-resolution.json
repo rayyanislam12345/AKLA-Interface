@@ -1,0 +1,77 @@
+{
+  "key": "board-resolution",
+  "title": "Board resolutions",
+  "types": [
+    "Board Resolution"
+  ],
+  "packs": [
+    "board-resolution"
+  ],
+  "kind": "resolution",
+  "voice": {
+    "we_allowed": true,
+    "rule": "The company and its certifying officer: \"I, [●], the [●] of [●] (the Company), hereby certify …\".",
+    "source": [
+      "board resolution base",
+      "board resolution pack"
+    ]
+  },
+  "spelling": {
+    "rule": "British -ise: authorised, authorises, finalise (the pack's \"authorized\" and \"finalize\" are changed).",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "board resolution base",
+      "SC75"
+    ]
+  },
+  "formulae": {
+    "title": {
+      "text": "Certified True Copy Of The Resolution Passed By The Board Of Directors Of [●] On [●]",
+      "source": [
+        "board resolution base"
+      ]
+    },
+    "certification": {
+      "text": "I, [●], the [●] of [●] (the Company), hereby certify that the following resolution was passed by the Board of Directors during the meeting held on [●]: Quote … Unquote",
+      "source": [
+        "board resolution pack"
+      ]
+    },
+    "resolved": {
+      "text": "Resolved That [●] (the Company) hereby approves …",
+      "source": [
+        "board resolution base"
+      ]
+    },
+    "further_resolved": {
+      "text": "Further Resolved That the Company hereby authorises [●] (with power to sub-delegate) to …",
+      "source": [
+        "board resolution base"
+      ]
+    },
+    "ratification": {
+      "text": "Further Resolved That the Company hereby ratifies all prior and future acts, deeds and things lawfully undertaken by [●] …",
+      "source": [
+        "board resolution base"
+      ]
+    },
+    "duration": {
+      "text": "Further Resolved That this resolution shall remain effective and in full force until it is revoked or amended by another resolution and such revocation or amendment is duly notified and acknowledged.",
+      "source": [
+        "board resolution base"
+      ]
+    },
+    "signature": {
+      "text": "For And On Behalf Of [●] / ___________ / Name: / Designation: / Date:",
+      "source": [
+        "board resolution base"
+      ]
+    }
+  },
+  "notes": [
+    "\"Resolved That\" / \"Further Resolved That\" in Title Case (the base); the pack's \"UNANIMOUSLY RESOLVED that\" is the alternative when the board was unanimous."
+  ],
+  "off": [
+    "voice_we"
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "key": "ia-agreement",
+  "typeName": "Independent Auditors' Agreement",
+  "source": "Derived 20 October 2026 from the IA agreement clause list (skeletons/ia-agreement.json).",
+  "name": "Independent auditor agreement drafting decisions",
+  "documentLabel": "IA AGREEMENT",
+  "applyWhere": "the clause named above, the definitions, Schedule A (Terms of Reference) and any other clause that depends on it",
+  "closing": "That completes the drafting decisions. What remains are the deal's facts — the parties, the project, the Concession Agreement's date, the term, the monthly and phase fees, the personnel and the notice details. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "fee_basis",
+      "section": "Fees",
+      "title": "Fee basis",
+      "question": "How is the Independent Auditor paid?",
+      "location": "Article 4 (Fee): Monthly Fee, Fee for Phase III",
+      "basis": "The firm's IA agreements pay a monthly fee with a separate fee for the post-construction phase.",
+      "options": [
+        {
+          "id": "monthly_phase",
+          "label": "A monthly fee, with a separate fee for Phase III",
+          "hint": "The pack's form"
+        },
+        {
+          "id": "monthly",
+          "label": "A monthly fee throughout"
+        },
+        {
+          "id": "lump_sum",
+          "label": "Lump sums per phase"
+        }
+      ]
+    },
+    {
+      "id": "payment_account",
+      "section": "Fees",
+      "title": "Payment account",
+      "question": "Are the fees paid through a dedicated payment account with standing instructions?",
+      "location": "Article 4 (Funding of the Concessionaire Independent Auditor Payment Account); Schedule D (Form of Standing Instructions)",
+      "basis": "In the pack's base.",
+      "options": [
+        {
+          "id": "account",
+          "label": "Yes — keep the payment account and Schedule D"
+        },
+        {
+          "id": "direct",
+          "label": "No — the Concessionaire pays directly; remove them"
+        }
+      ]
+    },
+    {
+      "id": "toll_audit",
+      "section": "Services",
+      "title": "Toll revenue audit",
+      "question": "Is the project tolled, so that the Independent Auditor audits toll revenue and collection?",
+      "location": "Schedule E (Toll Revenue & Collection Audit)",
+      "basis": "The pack's base is a tolled road; a project paid by availability payments has no toll audit.",
+      "options": [
+        {
+          "id": "include",
+          "label": "Yes — keep Schedule E"
+        },
+        {
+          "id": "omit",
+          "label": "No — remove it"
+        }
+      ]
+    },
+    {
+      "id": "arbitration_forum",
+      "section": "Disputes",
+      "title": "Arbitration forum",
+      "question": "Where will disputes under this agreement be finally resolved?",
+      "location": "Article 12 (Miscellaneous), the Dispute Resolution section",
+      "basis": "Owner's decision of 20 October 2026: arbitration has no default and is always asked; the firm's precedents use both the Arbitration Act, 1940 and SIAC.",
+      "options": [
+        {
+          "id": "act_1940",
+          "label": "Arbitration under the Arbitration Act, 1940, seated in Pakistan",
+          "hint": "The firm's usual forum for a domestic counterparty"
+        },
+        {
+          "id": "siac",
+          "label": "Arbitration under the SIAC Rules, seated in Singapore",
+          "hint": "Where a foreign party or lender asks for an offshore seat"
+        },
+        {
+          "id": "other",
+          "label": "Another forum",
+          "hint": "State it: another institution or seat, or the courts"
+        }
+      ]
+    }
+  ]
+}

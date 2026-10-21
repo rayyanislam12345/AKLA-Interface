@@ -246,3 +246,19 @@ test('one file read runs at a time: a second caller is told to try again while o
   await assert.rejects(other.run('compare_text_with_version', { versionId: V2, text: NOTES_V1 }), /missing from storage/);
   assert.match(await other.run('compare_text_with_version', { versionId: V3, text: REDRAFT }), /2 changed, 0 added/);
 });
+
+test('check_text with a documentTypeId (or a style sheet by name) also checks the wording against the firm\'s style sheet, its findings after the proof check\'s', async () => {
+  const T = '56565656-5656-4565-8565-565656565656';
+  const { run } = tools({}, { tables: { ...fixtures().tables, document_types: [{ id: T, name: 'Escrow Agreement' }] } });
+  const text = '1. Fees\n\n1.1 The Company shall pay the fee within 30 days and shall organize the accounts (the "Escrow Account").';
+  const plain = await run('check_text', { text });
+  assert.doesNotMatch(plain, /Wording:/, 'without a type or sheet, the proof check alone');
+  const out = await run('check_text', { text, documentTypeId: T });
+  assert.match(out, /\nWording: 3 points to look at against the firm's style sheet \(1 defined term, 1 number or amount, 1 spelling\); none stops the draft being filed\. \(Style sheet: "escrow" on top of the firm-wide rules, for Escrow Agreement\.\)/);
+  assert.match(out, /\[wording: spelling, low\][^\n]*British spelling: “organise”, not “organize”\./);
+  assert.match(out, /\[wording: numbers and money in words and figures, low\][^\n]*thirty \(30\) days/);
+  const byName = await run('check_text', { text, styleSheet: 'core' });
+  assert.match(byName, /Style sheet: the firm-wide rules\./);
+  await assert.rejects(run('check_text', { text, styleSheet: 'nonsense' }), /There is no style sheet called "nonsense"/);
+  await assert.rejects(run('check_text', { text, documentTypeId: 'not-a-uuid' }), /documentTypeId must be a document type id/);
+});

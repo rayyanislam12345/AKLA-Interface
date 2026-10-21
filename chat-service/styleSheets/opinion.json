@@ -1,0 +1,96 @@
+{
+  "key": "opinion",
+  "title": "Legal opinions",
+  "types": [
+    "Legal Opinion"
+  ],
+  "packs": [
+    "opinion"
+  ],
+  "kind": "opinion",
+  "voice": {
+    "rule": "\"the Firm\" throughout (SKM142.2: the Firm 15, we 0); \"you\" only for the addressee in the reliance section.",
+    "source": [
+      "SKM142.2"
+    ]
+  },
+  "defined_terms": {
+    "pointer_formula": "(Unless otherwise defined herein, all capitalised terms shall have the meanings ascribed thereto in the [●] dated [●] … (the [●]).)",
+    "source": [
+      "SKM142.2"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Section",
+      "Annexure",
+      "paragraph"
+    ],
+    "rule": "Section 4 (Assumptions), Section 5 (Qualifications), Annexure B (Authorisation Documents); limbs as \"paragraphs (a) and (b) above\".",
+    "source": [
+      "SKM142.2"
+    ]
+  },
+  "formulae": {
+    "heading": {
+      "text": "Dated: [●] / To, / The [●], / As Listed In Annexure A. / Dear Madam/Sir, / Subject: ⇥Legal Opinion On The [●]",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "introduction": {
+      "text": "Ali Khan Law Associates (the Firm) has acted as legal counsel to [●] in connection with the [●].",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "documents": {
+      "text": "For the purposes of this opinion (this Opinion), the Firm has examined: (a) …; (b) …; and (c) copies of the documents listed in Annexure B (Authorisation Documents) (… together, the Reviewed Documents).",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "opinion": {
+      "text": "On the basis of the Reviewed Documents, and subject to the assumptions in Section 4 (Assumptions) and the qualifications in Section 5 (Qualifications), the Firm is of the opinion that:",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "assumptions": {
+      "text": "For the purposes of this Opinion, the Firm has assumed, without independent verification: that all documents provided to the Firm are complete, all signatures, seals and stamps on them are genuine …;",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "qualifications": {
+      "text": "This Opinion is subject to the following qualifications: this Opinion is limited to the laws of Pakistan in force on its date. The Firm expresses no opinion on the laws of any other jurisdiction; … the term ‘enforceable’ means …; the Firm expresses no opinion on any matter of Islamic jurisprudence or Shariah; and …",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "reliance": {
+      "text": "This Opinion is addressed to [●] and may be relied upon by them only. / This Opinion speaks only as of its date … / This Opinion is given by the Firm, and no partner or employee of the Firm assumes any personal responsibility for it.",
+      "source": [
+        "SKM142.2"
+      ]
+    },
+    "signature": {
+      "text": "For And On Behalf Of / Ali Khan Law Associates / ___________ / [signing partner] / [designation] / Ali Khan Law Associates",
+      "source": [
+        "SKM142.2"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "sincerely",
+      "pattern": "\\bSincerely\\s+yours\\b|\\bYours\\s+sincerely\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm's opinion has no complimentary close: the reliance section, then the signature block.",
+      "source": [
+        "SKM142.2"
+      ]
+    }
+  ]
+}

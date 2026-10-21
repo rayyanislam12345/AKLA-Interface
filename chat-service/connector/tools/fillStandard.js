@@ -40,6 +40,7 @@ import { z } from "zod";
 import { inspectDocx, OPS_PROTOCOL } from "../../docxAgent.js";
 import { FILL_INSTRUCTIONS, FILL_DIRECT_NOTE } from "../../firmRules.js";
 import { packOf, packPromptBlock, packMap, withPackColumns, PACK_COLUMNS } from "../../draftingPacks.js";
+import { withDraftingColumns, DRAFTING_COLUMNS, draftingOf, draftingPromptText } from "../../draftChecks.js";
 import { MAX_RESULT_CHARS, str, uuid, when } from "../tools.js";
 import { openStandard } from "./standards.js";
 
@@ -64,6 +65,9 @@ const RANGE_RE = /^\s*¶?\s*(\d{1,7})\s*(?:[-–—]\s*¶?\s*(\d{1,7}))?\s*$/;
 /** What claude.ai must do with the listing instead of the Hub chat's fenced block. */
 export const CONNECTOR_FILL_NOTE = `IN CLAUDE.AI: do not end your reply with the fenced block. The order is: read the project's documents (search_project_documents, read_document) and, when this type has a drafting questionnaire, call get_drafting_decisions and ask the lawyer each decision in prose, one at a time, waiting for the answer; only then call fill_standard_to_project with the operations as its "ops" argument (op, p, expected, text, why), the project, a title and this reply's templateHash. The sentence "Do not stop to ask the lawyer before filling in" in the fill instructions is about the fill call itself, once the decisions are answered and the project's documents are read; it does not cover the drafting decisions. The {"read": …} protocol is not available here: a paragraph behind a "… not shown …" line (each names the ¶ numbers it hides) is read by calling open_standard_for_filling with paragraphs set to a range such as "100-140" (at most ${MAX_RANGE} at a time); from pages this listing only and never reaches a hidden paragraph. Only a paragraph you have seen with its ¶ number can take an operation, and expected must be its exact text. Only "replace" and "comment" fill a standard; use insert_after and delete only where the standard's own wording calls for a block to be added or removed (a bracketed alternative to drop, an optional block to keep or remove), reading the paragraphs first. At most 300 changes a call; file the rest as the next version of the same document. If the Hub says the standard was replaced (a different templateHash), open it again and redo the fill against the new listing.`;
 
+/** Where the firm's own clauses come from, and the new-clause and wording comments the fill earns. */
+export const CLAUSE_EXAMPLES_NOTE = `THE FIRM'S OWN CLAUSES: before writing a clause (a section of a body, or a new clause), call get_clause_examples with this documentTypeId and the clause's heading, follow the firm's wording, and tell the lawyer which precedent you followed. When the fill is filed, a heading that is not on the clause list above gets the AKLA comment "New clause — not in the firm's precedents: …" if you did not give it one, every wording point in what you wrote (not the standard's own words) becomes an AKLA comment, and a part the list marks "always" that the draft lacks stops the filing until the lawyer confirms it may be left out.`;
+
 /**
  * What claude.ai is told on top of CONNECTOR_FILL_NOTE when the standard is
  * one of the firm's packs (draftingPacks.js): the four block operations go
@@ -87,7 +91,9 @@ export function clearStandardCache() { cache.clear(); }
  * fillStandardWrite.js reads through this too.
  */
 export async function standardRows(supabase, documentTypeId) {
-  const { data: type, error: typeError } = await supabase.from("document_types").select("id, name, category, questionnaire").eq("id", documentTypeId).maybeSingle();
+  // With its clause list and decisions (read without them until
+  // 20261021100000 is applied; draftChecks.js then reads the data files).
+  const { data: type, error: typeError } = await withDraftingColumns((withDrafting) => supabase.from("document_types").select(`id, name, category, questionnaire${withDrafting ? `, ${DRAFTING_COLUMNS}` : ""}`).eq("id", documentTypeId).maybeSingle());
   if (typeError) throw new Error(`Could not read the document type: ${typeError.message}`);
   if (!type) throw new Error("There is no document type with that id. list_document_types gives them.");
   // Only what locates the file: content_html is the whole standard as HTML
@@ -334,10 +340,22 @@ export default ({ supabase, hubUrl, now }) => {
           snapshot ? `Standard snapshot: ${snapshot.id} (filed ${when(snapshot.created_at)}); the Hub keeps this filing of the standard whole even if it is later replaced.` : "Standard snapshot: none recorded for this file.",
           openStandard(type.id, hubUrl),
         ];
+        let firmAt = -1;
+        let shortFirm = "";
         if (from === 0) {
-          if (type.questionnaire) head.push(`This type has a drafting questionnaire: before any fill, call get_drafting_decisions and ask the lawyer each decision in prose, one at a time; the fill instructions' "do not stop to ask" applies to the fill call once the decisions are answered.`);
+          // The firm's rules for this kind of document (draftChecks.js): its
+          // style sheet, its clause list and its decisions, the words the
+          // Hub's own fill turn is given.
+          const drafting = draftingOf(type);
+          if (drafting.questionnaire) head.push(`This type has a drafting questionnaire: before any fill, call get_drafting_decisions and ask the lawyer each decision in prose, one at a time; the fill instructions' "do not stop to ask" applies to the fill call once the decisions are answered.`);
           const rules = str(template.format_rules, MAX_RULES_CHARS);
           head.push("", `FILL INSTRUCTIONS (the Hub's own, for a draft from this standard):\n${FILL_INSTRUCTIONS}${rules ? `\n\nHow the standard is formatted: ${rules}` : ""}`);
+          head.push("", draftingPromptText({ typeName: type.name, skeleton: drafting.skeleton, questionnaire: drafting.questionnaire }));
+          firmAt = head.length - 1;
+          // A short form for when the page would leave the listing no room:
+          // the firm-wide style alone, and where the rest is.
+          shortFirm = `${draftingPromptText({ typeName: null, skeleton: drafting.skeleton, questionnaire: drafting.questionnaire })}\n(How the firm writes a ${type.name} in particular did not fit on this page: get_firm_rules with task "draft" and this documentTypeId gives it.)`;
+          head.push("", CLAUSE_EXAMPLES_NOTE);
           // A firm pack: its mode's instructions and its kinds, the words the
           // Hub's own fill turn shows beside the protocol.
           if (pack) {
@@ -349,6 +367,7 @@ export default ({ supabase, hubUrl, now }) => {
         } else {
           head.push("The fill instructions and the operations protocol are on the first page (from: 0).");
         }
+        if (firmAt >= 0 && head.join("\n").length > MAX_RESULT_CHARS - 4_000 - PAGE_MARGIN) head[firmAt] = shortFirm;
         const headText = head.join("\n");
         const budget = Math.max(2_000, MAX_RESULT_CHARS - headText.length - PAGE_MARGIN);
         const page = pageOfListing(listing, from, budget);

@@ -1,0 +1,53 @@
+{
+  "key": "opinion",
+  "typeName": "Legal Opinion",
+  "source": "Derived 20 October 2026 from the opinion clause list (skeletons/opinion.json) and the firm's six opinions.",
+  "name": "Legal opinion drafting decisions",
+  "documentLabel": "LEGAL OPINION",
+  "applyWhere": "the section named above and the fixed parts",
+  "closing": "That completes the drafting decisions. What remains are the opinion's facts — the addressee, the date, the subject, the documents reviewed, the opinions given, and any assumptions and qualifications particular to this matter. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "opinion_form",
+      "section": "Form",
+      "title": "Form of the opinion",
+      "question": "What kind of opinion is this?",
+      "location": "The order of the sections",
+      "basis": "The firm's transaction opinions run Introduction, Documents Reviewed, Opinion, Assumptions, Qualifications, Benefit Of This Opinion; its advisory opinions run Query, Documents Reviewed, Opinion, Qualifications.",
+      "options": [
+        {
+          "id": "transaction",
+          "label": "A transaction opinion (to finance parties or a counterparty)"
+        },
+        {
+          "id": "advisory",
+          "label": "An advisory opinion on a query (to the client)"
+        }
+      ]
+    },
+    {
+      "id": "reliance",
+      "section": "Reliance",
+      "title": "Who may rely on it",
+      "question": "Who may rely on the opinion?",
+      "location": "Benefit Of This Opinion",
+      "basis": "The firm's transaction opinions limit reliance to the addressee, sometimes with named parties.",
+      "appliesWhen": {
+        "is": [
+          "opinion_form",
+          "transaction"
+        ]
+      },
+      "options": [
+        {
+          "id": "addressee",
+          "label": "The addressee only"
+        },
+        {
+          "id": "named",
+          "label": "The addressee and named parties (their successors and permitted assigns)"
+        }
+      ]
+    }
+  ]
+}

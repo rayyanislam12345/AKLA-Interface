@@ -1,0 +1,101 @@
+{
+  "key": "board-resolution",
+  "typeName": "Board Resolution",
+  "source": "Derived 20 October 2026 from the board resolution clause list (skeletons/board-resolution.json), the owner's chosen base (a certified copy of a resolution) and the second base (an extract of resolutions).",
+  "name": "Board resolution drafting decisions",
+  "documentLabel": "BOARD RESOLUTION",
+  "applyWhere": "the fixed part named above and the resolution",
+  "closing": "That completes the drafting decisions. What remains are the facts — the company, the date of the meeting or circulation, the certifying officer, the person authorised, the documents and matters named, and the signatory. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "resolution_form",
+      "section": "Form",
+      "title": "Form of the resolution",
+      "question": "In what form is the resolution given?",
+      "location": "The title, the certifying paragraph and the Quote / Unquote lines",
+      "basis": "The owner's bases: a certified copy of a resolution, and an extract of resolutions; a resolution in writing signed by the directors has no certification.",
+      "options": [
+        {
+          "id": "ctc",
+          "label": "A certified copy of the resolution",
+          "hint": "\"Certified Copy Of Resolution Of The Board Of Directors\", certified by an officer"
+        },
+        {
+          "id": "extract",
+          "label": "An extract of resolutions",
+          "hint": "\"Extract Of Resolutions Passed By The Board Of Directors Of [●]\""
+        },
+        {
+          "id": "direct",
+          "label": "A resolution in writing signed by the directors",
+          "hint": "No certification, Quote or Unquote"
+        }
+      ]
+    },
+    {
+      "id": "passed",
+      "section": "Form",
+      "title": "How it was passed",
+      "question": "How was the resolution passed?",
+      "location": "The certifying paragraph (\"… passed by the Board of Directors of the Company at its meeting held on [●]\")",
+      "basis": "The firm's resolutions record both.",
+      "appliesWhen": {
+        "not": {
+          "is": [
+            "resolution_form",
+            "direct"
+          ]
+        }
+      },
+      "options": [
+        {
+          "id": "meeting",
+          "label": "At a meeting of the Board"
+        },
+        {
+          "id": "circulation",
+          "label": "By circulation"
+        }
+      ]
+    },
+    {
+      "id": "powers",
+      "section": "Substance",
+      "title": "Powers given",
+      "question": "What does the resolution authorise? Select all that apply.",
+      "multi": true,
+      "location": "The resolution and its (a), (b) limbs",
+      "basis": "The firm's resolutions authorise named persons to sign documents, deal with authorities, make filings, submit bids and do all things incidental.",
+      "options": [
+        {
+          "id": "execute",
+          "label": "Negotiate, sign, execute and deliver named documents"
+        },
+        {
+          "id": "authorities",
+          "label": "Represent the Company before authorities and regulators"
+        },
+        {
+          "id": "filings",
+          "label": "Make applications, submissions and filings"
+        },
+        {
+          "id": "bid",
+          "label": "Prepare and submit a bid or proposal"
+        },
+        {
+          "id": "bank",
+          "label": "Open and operate bank accounts"
+        },
+        {
+          "id": "delegate",
+          "label": "Delegate these powers to others"
+        },
+        {
+          "id": "ratify",
+          "label": "Ratify acts already done"
+        }
+      ]
+    }
+  ]
+}

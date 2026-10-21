@@ -1,0 +1,121 @@
+{
+  "key": "amendment",
+  "typeName": "Amendment Agreement",
+  "source": "Derived 20 October 2026 from the amendment agreement clause list (skeletons/amendment.json) and the firm's four amendment agreements.",
+  "name": "Amendment agreement drafting decisions",
+  "documentLabel": "AMENDMENT AGREEMENT",
+  "applyWhere": "the clause named above, the recitals, the definitions and the amendment instructions in Clause 2",
+  "closing": "That completes the drafting decisions. What remains are the deal's facts — the Principal Agreement's title and date, the parties, each clause amended (its number and heading) and the new wording. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "agreement_kind",
+      "section": "The Principal Agreement",
+      "title": "Agreement amended",
+      "question": "What kind of agreement is being amended?",
+      "location": "The title, the recitals and Clause 1 (Definitions): the Principal Agreement is \"[●]\"",
+      "basis": "The pack is general (owner's decision of 20 October 2026): the agreement amended is named per deal.",
+      "options": [
+        {
+          "id": "project",
+          "label": "A concession or other project agreement"
+        },
+        {
+          "id": "financing",
+          "label": "A financing or security document"
+        },
+        {
+          "id": "shares",
+          "label": "A share purchase or shareholders' agreement"
+        },
+        {
+          "id": "services",
+          "label": "A services appointment (IE, IA, O&M or advisory)"
+        },
+        {
+          "id": "other",
+          "label": "Another agreement"
+        }
+      ]
+    },
+    {
+      "id": "amendment_moves",
+      "section": "The amendments",
+      "title": "How the clauses change",
+      "question": "How does this agreement change the Principal Agreement? Select all that apply.",
+      "multi": true,
+      "location": "Clause 2 (Amendments To Principal Agreement): one instruction per clause, with the quoted text set out between the quotation lines",
+      "basis": "The firm's amendment agreements replace clauses wholesale, insert new clauses and delete clauses, each as its own numbered instruction.",
+      "options": [
+        {
+          "id": "replace",
+          "label": "Replace clauses or definitions with new wording"
+        },
+        {
+          "id": "insert",
+          "label": "Insert new clauses or definitions"
+        },
+        {
+          "id": "delete",
+          "label": "Delete clauses or definitions"
+        },
+        {
+          "id": "schedule",
+          "label": "Replace or add a schedule"
+        }
+      ]
+    },
+    {
+      "id": "extra_terms",
+      "section": "Further terms",
+      "title": "Covenants and representations",
+      "question": "Does the amendment give fresh covenants or representations? Select all that apply.",
+      "location": "A Transaction Covenants clause or a Representations And Warranties clause before Effectiveness",
+      "basis": "One of the firm's amendment agreements adds transaction covenants, another fresh representations; most add neither.",
+      "exclusive": [
+        "none"
+      ],
+      "options": [
+        {
+          "id": "covenants",
+          "label": "Transaction covenants"
+        },
+        {
+          "id": "representations",
+          "label": "Representations and warranties"
+        },
+        {
+          "id": "none",
+          "label": "Neither"
+        }
+      ]
+    },
+    {
+      "id": "arbitration_forum",
+      "section": "Disputes",
+      "title": "Arbitration forum",
+      "question": "Where will disputes under this agreement be finally resolved?",
+      "location": "Clause 5 (Governing Law), with dispute resolution where it is stated",
+      "basis": "Owner's decision of 20 October 2026: arbitration has no default and is always asked; an amendment usually follows the Principal Agreement.",
+      "options": [
+        {
+          "id": "principal",
+          "label": "As in the Principal Agreement",
+          "hint": "The amendment adopts the Principal Agreement's dispute clause"
+        },
+        {
+          "id": "act_1940",
+          "label": "Arbitration under the Arbitration Act, 1940, seated in Pakistan"
+        },
+        {
+          "id": "siac",
+          "label": "Arbitration under the SIAC Rules, seated in Singapore"
+        },
+        {
+          "id": "other",
+          "label": "Another forum",
+          "hint": "State it"
+        }
+      ]
+    }
+  ]
+}

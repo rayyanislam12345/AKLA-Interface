@@ -1,0 +1,200 @@
+{
+  "key": "memo",
+  "typeName": "Research Memo",
+  "aliases": [
+    "Concept Note"
+  ],
+  "source": "Derived 20 October 2026 from the approved research memo pack (5 Packs to check/02 research memo, a shell cut from the firm's October 2026 memorandum, the owner's chosen base) and the firm's five other memos and notes: the cover (Dated, Prepared For, Prepared By), the contents page, the Glossary, then Transaction Background And Query and Brief Answer with the detailed analysis in Annexure A (the research memo), or Purpose And Scope and issue sections (a key-issues memo), or an introduction and sections (an internal note or concept paper, no cover); the owner's note of 20 October: annexure headings follow the subject, Annexure B is the contract or document provisions and Annexure C the law, when there are any. Body headings are the subject's own, so nothing is checked for new clauses.",
+  "completeLevels": [],
+  "headingKinds": {
+    "h1_glossary": 1,
+    "h1": 1,
+    "h2": 2,
+    "h3": 3,
+    "annexure_heading": 1,
+    "annex_h1": 2
+  },
+  "items": [
+    {
+      "id": "dated",
+      "heading": "Cover: Dated",
+      "label": "cover's Dated line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer",
+        "issues"
+      ],
+      "match": "slot",
+      "slot": "cover_label",
+      "pattern": "^dated\\s*:?$"
+    },
+    {
+      "id": "prepared_for",
+      "heading": "Cover: Prepared For",
+      "label": "cover's Prepared For line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer",
+        "issues"
+      ],
+      "match": "slot",
+      "slot": "cover_label",
+      "pattern": "^prepared\\s+for\\s*:?$"
+    },
+    {
+      "id": "prepared_by",
+      "heading": "Cover: Prepared By",
+      "label": "cover's Prepared By line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer",
+        "issues"
+      ],
+      "match": "slot",
+      "pattern": "^prepared\\s+by\\s*:?$"
+    },
+    {
+      "id": "contents",
+      "heading": "Table Of Contents",
+      "level": 0,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Contents"
+      ]
+    },
+    {
+      "id": "glossary",
+      "heading": "Glossary",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "query",
+      "heading": "Transaction Background And Query",
+      "level": 1,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Transaction Background & Queries",
+        "Transaction Background And Queries",
+        "Background And Query",
+        "Background And Queries",
+        "Query",
+        "Queries"
+      ]
+    },
+    {
+      "id": "purpose",
+      "heading": "Purpose And Scope",
+      "level": 1,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "issues",
+        "note"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Purpose And Summary",
+        "Introduction",
+        "Purpose"
+      ]
+    },
+    {
+      "id": "brief_answer",
+      "heading": "Brief Answer",
+      "level": 1,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Brief Answers",
+        "Summary Of Advice",
+        "Executive Summary"
+      ]
+    },
+    {
+      "id": "outstanding",
+      "heading": "Outstanding Requirements",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Matters Requiring Attention",
+        "Next Steps"
+      ]
+    },
+    {
+      "id": "conclusion",
+      "heading": "Conclusion",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Conclusions"
+      ]
+    },
+    {
+      "id": "annexure_a",
+      "heading": "Annexure A – [●]",
+      "label": "Annexure A (the detailed analysis)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "memo_form",
+      "when": [
+        "query_answer"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Annexure A1 – [●]"
+      ]
+    },
+    {
+      "id": "annexure_b",
+      "heading": "Annexure B – [●]",
+      "label": "Annexure B (the contract or document provisions)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "annexures",
+      "when": [
+        "a_b",
+        "a_b_c"
+      ],
+      "absentWhen": [
+        "a_only"
+      ],
+      "match": "heading"
+    },
+    {
+      "id": "annexure_c",
+      "heading": "Annexure C – [●]",
+      "label": "Annexure C (the law)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "annexures",
+      "when": [
+        "a_b_c"
+      ],
+      "absentWhen": [
+        "a_only",
+        "a_b"
+      ],
+      "match": "heading"
+    }
+  ]
+}

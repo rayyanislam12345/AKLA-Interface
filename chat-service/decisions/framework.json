@@ -1,0 +1,108 @@
+{
+  "key": "framework",
+  "typeName": "Framework Agreement",
+  "source": "Derived 20 October 2026 from the framework agreement clause list (skeletons/framework.json): its deal-specific articles and schedules become decisions.",
+  "name": "Framework agreement drafting decisions",
+  "documentLabel": "FRAMEWORK AGREEMENT",
+  "applyWhere": "the clause named above, the definitions, the recitals, the schedules and any other clause that depends on it",
+  "closing": "That completes the drafting decisions. What remains are the deal's facts — the parties, the asset or rights covered, the consideration, the dates and the notice details. Give them to me in the chat, or point me at the project documents that hold them, and I will fill each [●].",
+  "questions": [
+    {
+      "id": "prior_agreement",
+      "section": "Structure",
+      "title": "Earlier agreement",
+      "question": "Does this agreement replace or build on an earlier agreement between the parties (an option or heads of terms)?",
+      "location": "Article 2 (Original Option Agreement & Matters Relating to Same); Schedules G and H (certified copies of the earlier agreement and its termination)",
+      "basis": "The pack's base supersedes an earlier option agreement; most framework agreements have none.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — keep the earlier-agreement article and its schedules"
+        },
+        {
+          "id": "no",
+          "label": "No — remove them"
+        }
+      ]
+    },
+    {
+      "id": "spv",
+      "section": "Structure",
+      "title": "Project company",
+      "question": "Will the parties form a special purpose company under this agreement?",
+      "location": "Article 4 (the project company and related critical matters); Schedules E and F (key terms of the joint venture and shareholders' agreements)",
+      "basis": "The pack's base forms a project company; a framework for services or rights alone does not.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — keep the project company article and the key-terms schedules"
+        },
+        {
+          "id": "no",
+          "label": "No — remove them"
+        }
+      ]
+    },
+    {
+      "id": "definitive_documents",
+      "section": "Structure",
+      "title": "Definitive documents",
+      "question": "Are definitive documents to follow this agreement?",
+      "location": "Article 7 (The Definitive Documents)",
+      "basis": "A framework agreement usually leads to definitive documents; one that is itself the final agreement does not.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — keep the definitive documents article"
+        },
+        {
+          "id": "no",
+          "label": "No — remove it"
+        }
+      ]
+    },
+    {
+      "id": "rofr",
+      "section": "Rights",
+      "title": "Surrender and right of first refusal",
+      "question": "Does a party surrender rights or grant a right of first refusal?",
+      "location": "Article 6 (Surrender Of Rights & Right Of First Refusal)",
+      "basis": "In the pack's base only.",
+      "options": [
+        {
+          "id": "yes",
+          "label": "Yes — keep the article"
+        },
+        {
+          "id": "no",
+          "label": "No — remove it"
+        }
+      ]
+    },
+    {
+      "id": "arbitration_forum",
+      "section": "Disputes",
+      "title": "Arbitration forum",
+      "question": "Where will disputes under this agreement be finally resolved?",
+      "location": "Article 12 (Governing Law And Dispute Resolution), the Dispute Resolution section",
+      "basis": "Owner's decision of 20 October 2026: arbitration has no default and is always asked; the firm's precedents use both the Arbitration Act, 1940 and SIAC.",
+      "options": [
+        {
+          "id": "act_1940",
+          "label": "Arbitration under the Arbitration Act, 1940, seated in Pakistan",
+          "hint": "The firm's usual forum for a domestic counterparty"
+        },
+        {
+          "id": "siac",
+          "label": "Arbitration under the SIAC Rules, seated in Singapore",
+          "hint": "Where a foreign party or lender asks for an offshore seat"
+        },
+        {
+          "id": "other",
+          "label": "Another forum",
+          "hint": "State it: another institution or seat, or the courts"
+        }
+      ]
+    }
+  ]
+}

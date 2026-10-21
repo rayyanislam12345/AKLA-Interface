@@ -1,0 +1,608 @@
+{
+  "key": "ie-agreement",
+  "typeName": "Independent Engineer's Agreement",
+  "source": "Derived 20 October 2026 from the approved IE agreement pack (5 Packs to check/04 IE agreement, cut from the firm's June 2026 IE agreement, the owner's chosen base) by reading its headings with skeletonCheck.js, and compared with the firm's 2026 independent expert agreement (the same articles and schedules) and the IA agreement. Presence: an article (level 1) is \"always\" when every firm precedent of the family read for the study has it, \"optional\" when it belongs to one deal or one form, and \"decision\" when a drafting decision (decisions/ie-agreement.json) turns it on or off. Sections (level 2) are the pack's own, all optional except the ones every precedent has; they are listed so that a section the firm already uses is never reported as a new clause.",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "headingKinds": {
+    "h1": 1,
+    "h2": 2,
+    "schedule_heading": 1,
+    "signature_pages_heading": 1
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "The Independent Engineer Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Independent Engineer Agreement",
+        "The Independent Expert Agreement",
+        "Independent Expert Agreement"
+      ]
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions_and_interpretation",
+      "heading": "Definitions & Interpretation",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions",
+      "heading": "Definitions",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "interpretation",
+      "heading": "Interpretation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "appointment_term_reliance_independent_engineer_a",
+      "heading": "Appointment, Term, Reliance, Independent Engineer & Independent Engineer Party",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "the_appointment",
+      "heading": "The Appointment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "term_and_extension",
+      "heading": "Term and Extension",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "reliance",
+      "heading": "Reliance",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independent_engineer_and_independent_engineer_pa",
+      "heading": "Independent Engineer & Independent Engineer Party",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "services_and_related_matters",
+      "heading": "Services & Related Matters",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "general",
+      "heading": "General",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "performance_of_obligations_of_independent_engine",
+      "heading": "Performance of obligations of Independent Engineer Under the Concession Documents",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "o_and_m_phase",
+      "heading": "O&M Phase",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_phases",
+      "heading": "The Phases",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "other_key_matters_relating_to_services",
+      "heading": "Other Key Matters Relating to Services",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "concessionaires_cooperation",
+      "heading": "Concessionaire’s Cooperation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independent_engineers_facilities",
+      "heading": "Independent Engineer’s Facilities",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "reporting_services",
+      "heading": "Reporting Services",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "sub_contracting",
+      "heading": "Sub-Contracting",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fees",
+      "heading": "Fees",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "the_fees",
+      "heading": "The Fees",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fees_during_the_design_phase",
+      "heading": "Fees during the Design Phase",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "other_fees",
+      "heading": "Other Fees",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "fee_increase",
+      "heading": "Fee Increase",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "taxes",
+      "heading": "Taxes",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "invoicing_and_payment",
+      "heading": "Invoicing and Payment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "funding_of_the_concessionaire_independent_engine",
+      "heading": "Funding of the Concessionaire Independent Engineer Payment Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_independent_engineers_personnel",
+      "heading": "The Independent Engineer’s Personnel",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "authorized_signatories",
+      "heading": "Authorized Signatories",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "authorized_representative",
+      "heading": "Authorized Representative",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "personnel",
+      "heading": "Personnel",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "the_independent_engineers_responsibility",
+      "heading": "The Independent Engineer’s Responsibility",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "conflict_of_interest_ethical_standards_independe",
+      "heading": "Conflict of Interest, Ethical Standards, Independence & Standard of Care",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "conflict_of_interest",
+      "heading": "Conflict of Interest",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "ethical_standards",
+      "heading": "Ethical Standards",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "independence",
+      "heading": "Independence",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "standard_of_care",
+      "heading": "Standard of Care",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "bribes_and_integrity",
+      "heading": "Bribes and integrity",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "assignment",
+      "heading": "Assignment",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "restriction_on_assignment",
+      "heading": "Restriction on Assignment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "permitted_assignment",
+      "heading": "Permitted Assignment",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "termination",
+      "heading": "Termination",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "termination__termination",
+      "heading": "Termination",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "insurance",
+      "heading": "Insurance",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "insurance__insurance",
+      "heading": "Insurance",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "representations",
+      "heading": "Representations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "representations__representations",
+      "heading": "Representations",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality",
+      "heading": "Confidentiality",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality__confidentiality",
+      "heading": "Confidentiality",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "usage",
+      "heading": "Usage",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "communications_and_notices",
+      "heading": "Communications & Notices",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "language",
+      "heading": "Language",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "successors_in_interest",
+      "heading": "Successors in Interest",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "suspension_of_construction_works",
+      "heading": "Suspension Of Construction Works",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "indemnities",
+      "heading": "Indemnities",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "limitation_of_liability",
+      "heading": "Limitation of Liability",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "liquidated_damages",
+      "heading": "Liquidated Damages",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "amendment",
+      "heading": "Amendment",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "invalidity_and_severability",
+      "heading": "Invalidity & Severability",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law",
+      "heading": "Governing Law",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "dispute_resolution",
+      "heading": "Dispute Resolution",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "counterparts",
+      "heading": "Counterparts",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "no_partnership",
+      "heading": "No Partnership",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "waiver",
+      "heading": "Waiver",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "schedule_a_part_i",
+      "heading": "Schedule A – Services – Part I – General",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Services – Part I – General"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_a_part_ii",
+      "heading": "Schedule A – Services – Part II – Design Phase",
+      "level": 1,
+      "presence": "decision",
+      "decision": "ie_phases",
+      "when": [
+        "design"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule A – Services – Part II – Design Review Phase",
+        "Schedule A – Services – Part II – Design Phase Phase",
+        "Schedule [●] – Services – Part II – Design Phase"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_a_part_iii",
+      "heading": "Schedule A – Services – Part III – Construction Supervision Services",
+      "level": 1,
+      "presence": "decision",
+      "decision": "ie_phases",
+      "when": [
+        "construction"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Services – Part III – Construction Supervision Services"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_a_part_iv",
+      "heading": "Schedule A – Services – Part IV – O&M Phase",
+      "level": 1,
+      "presence": "decision",
+      "decision": "ie_phases",
+      "when": [
+        "om"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Services – Part IV – O&M Phase"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_notices",
+      "heading": "Schedule B - Notices",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Notices"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_fees",
+      "heading": "Schedule C - Fees",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Fees"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_standing_instructions",
+      "heading": "Schedule E – Form of Concessionaire Independent Engineer Payment Account Standing Instructions",
+      "level": 1,
+      "presence": "decision",
+      "decision": "payment_account",
+      "when": [
+        "account"
+      ],
+      "absentWhen": [
+        "direct"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Form of [●] Independent [●] Payment Account Standing Instructions"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_kpis",
+      "heading": "Schedule F – Key Performance Indicators",
+      "level": 1,
+      "presence": "decision",
+      "decision": "kpis",
+      "when": [
+        "include"
+      ],
+      "absentWhen": [
+        "omit"
+      ],
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Key Performance Indicators"
+      ],
+      "scan": false
+    },
+    {
+      "id": "signature_pages",
+      "heading": "Signature Pages",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    }
+  ]
+}

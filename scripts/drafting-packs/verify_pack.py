@@ -355,7 +355,8 @@ def write_review(cfg, out_dir, repo):
         if len(txt) > 160:
             txt = txt[:157] + "..."
         where = b["part"].replace("word/", "") + (" " + b["where"] if b["where"] else "")
-        add("  - [%s] %s  ->  [●]   (%s)" % (where, txt, b["reason"]))
+        reason, to = (b["reason"].rsplit(" -> ", 1) + ["[●]"])[:2] if " -> " in b["reason"] else (b["reason"], "[●]")
+        add("  - [%s] %s  ->  %s   (%s)" % (where, txt, to, reason))
     if rep.get("time_periods_kept"):
         add("  Kept on purpose (time periods are settled terms, not deal facts): " + "; ".join(rep["time_periods_kept"][:30]))
     if rep.get("properties_blanked"):
@@ -381,6 +382,19 @@ def write_review(cfg, out_dir, repo):
         add("  Substitutions made for this: none needed.")
     if gov["kept"]:
         add("  Kept as written (they apply nationwide whatever the project): " + "; ".join("%s (x%d)" % kv for kv in gov["kept"]))
+    sp = rep.get("spelling")
+    add("  SPELLING (British -ise everywhere, the owner's decision of 20 Oct 2026; word list and exceptions from %s):"
+        % ((sp or {}).get("sheet") or "chat-service/styleSheets/core.json"))
+    if sp is None:
+        add("  !! Spelling was not converted for this pack (\"spelling\": false in the config).")
+    elif not sp["changes"]:
+        add("  Nothing to change: no American spelling in the pack.")
+    else:
+        add("  %d words changed (each change with how many times, and where):" % sp["changed"])
+        for c in sp["changes"]:
+            add("    - %s -> %s  (x%d, %s)" % (c["from"], c["to"], c["count"], c["part"].replace("word/", "")))
+    for k in (sp or {}).get("kept", []):
+        add("    kept: %s  (x%d, %s): %s" % (k["word"], k["count"], k["part"].replace("word/", ""), k["why"]))
     add("")
     add("3. KINDS AVAILABLE (kinds.json)")
     for name, k in kj["kinds"].items():

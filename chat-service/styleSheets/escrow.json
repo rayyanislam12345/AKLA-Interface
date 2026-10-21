@@ -1,0 +1,251 @@
+{
+  "key": "escrow",
+  "title": "Escrow agreements",
+  "types": [
+    "Escrow Agreement"
+  ],
+  "packs": [
+    "escrow"
+  ],
+  "kind": "agreement",
+  "voice": {
+    "rule": "No voice: the Parties act in the third person (the Agency shall …).",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "spelling": {
+    "rule": "British -ise (authorised, utilisation, organisation), although the firm's agreement bases still carry -ize: change it as you write.",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "MM68 (-ise 4 / -ize 14)",
+      "SKM58 (4/16)"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Article",
+      "Section",
+      "Schedule",
+      "Annexure",
+      "Appendix",
+      "Part"
+    ],
+    "rule": "Articles and Sections in the body, Schedules lettered; the heading in brackets on the first reference in a clause: Section 8.3 (Conciliation), Schedule B (Accounts).",
+    "source": [
+      "SKM58",
+      "IE Agreement base June 2026"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case with every word capitalised, small words too: Grant Of Rights, Deposits & Withdrawals From Accounts. Schedules: Schedule A – [Title].",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "dates": {
+    "preamble": "on this [●] day of [●] (the Signing Date) at [●], Pakistan",
+    "cover": "Dated: As Of [●]",
+    "source": [
+      "SKM58",
+      "escrow base 2021"
+    ]
+  },
+  "formulae": {
+    "parties_close": {
+      "text": "(the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns)",
+      "source": [
+        "CA master",
+        "SKM58"
+      ]
+    },
+    "rollup": {
+      "text": "(the [●] and the [●] are hereinafter collectively referred to as the Parties and each individually as a Party).",
+      "source": [
+        "CA master",
+        "SKM58",
+        "escrow base 2021"
+      ]
+    },
+    "recitals_open": {
+      "text": "Recitals / Whereas: then numbered or lettered limbs, the last \"And whereas, …\"",
+      "source": [
+        "escrow base 2021",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "now_therefore": {
+      "text": "Now, Therefore, in view of the foregoing and in consideration of the mutual benefits to be derived and the representations and warranties, covenants and agreements contained herein and other good and valuable consideration, the sufficiency of which is hereby acknowledged and intending to be legally bound, the Parties hereby agree as follows:",
+      "source": [
+        "escrow base 2021",
+        "MM68"
+      ]
+    },
+    "testimonium": {
+      "text": "In Witness Whereof, the Parties have executed this Agreement as of the Signing Date first above written.",
+      "source": [
+        "SKM58"
+      ]
+    },
+    "execution": {
+      "text": "As [Party] / For and on behalf of [●] through its authorised signatory / Name: / Designation: / in the presence of / Witnesses: / Name: / Address: / CNIC / Passport No:",
+      "source": [
+        "CA master",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "governing_law": {
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the Islamic Republic of Pakistan.",
+      "source": [
+        "MM68",
+        "SKM58"
+      ]
+    },
+    "arbitration": {
+      "text": "No default: the seat, the rules (Arbitration Act, 1940 or institutional, e.g. SIAC), the number of arbitrators and the venue are always asked as a drafting question; the firm's files differ (a sole arbitrator under the Arbitration Act, 1940; a board of three under the Arbitration Act, 1940; SIAC seated in Singapore).",
+      "source": [
+        "Decisions 20 Oct 2026 (arbitration always asked)",
+        "MM68",
+        "SKM58",
+        "escrow base 2021",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "preamble": {
+      "text": "This Escrow Agreement (this Agreement) is entered into on this [●] day of [●] (the Signing Date) at [●], Pakistan:",
+      "source": [
+        "escrow base 2021",
+        "SKM58"
+      ]
+    },
+    "government_party": {
+      "text": "The [●], having his offices at [●] for and on behalf of the [●] (the Government, which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns);",
+      "source": [
+        "escrow base 2021",
+        "Decisions 20 Oct 2026"
+      ]
+    },
+    "bank_party": {
+      "text": "[●], a banking company incorporated under the Applicable Laws, having its registered office at [●] and its principal place of business at [●] (the Escrow Agent, which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns);",
+      "source": [
+        "escrow base 2021"
+      ]
+    },
+    "appointment": {
+      "text": "The Concessionaire hereby appoints the Escrow Agent to act as fiduciary of the Concession Agreement Parties … and the Escrow Agent hereby accepts such appointment pursuant to the terms hereof and agrees to operate the Escrow Account in terms of this Agreement.",
+      "source": [
+        "escrow base 2021"
+      ]
+    },
+    "deposit": {
+      "text": "[●] hereby agrees and undertakes that it shall, within two (2) Business Days of receipt thereof, deposit into and credit to the Escrow Account all [●] received or receivable …",
+      "source": [
+        "SKM58"
+      ]
+    },
+    "dispute": {
+      "text": "Any dispute, difference or controversy of whatever nature howsoever arising under or out of or in relation to this Agreement (including its interpretation) (the Dispute) … shall, in the first instance, be attempted to be resolved amicably in accordance with the conciliation procedure set forth in Section [●] (Conciliation).",
+      "source": [
+        "escrow base 2021"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "hereinafter",
+      "pattern": "\\(\\s*hereinafter\\s+(?:referred\\s+to\\s+as|called)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm's party clause reads (the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns), not \"(hereinafter referred to as …\". The roll-up \"are hereinafter collectively referred to as the Parties\" is the firm's own.",
+      "source": [
+        "CA master",
+        "SKM58",
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "pointer_as",
+      "pattern": "\\bshall bear the meaning as ascribed\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The pointer reads \"shall bear the meaning ascribed thereto in …\", without \"as\".",
+      "source": [
+        "escrow base 2021"
+      ]
+    },
+    {
+      "id": "pointer_given",
+      "pattern": "\\bha(?:s|ve) the meanings? given to (?:it|them|that term|the term|such term)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "\"has the meaning given to it in\" is another firm's pointer; the firm writes \"shall have (or bear) the meaning ascribed thereto in …\".",
+      "source": [
+        "Bases from other counsel (CDA, SKM137)"
+      ]
+    },
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ],
+  "tells_of_counterparty": [
+    {
+      "id": "pointer_given",
+      "tell": "\"has the meaning given to it in\" pointers",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "party_clause",
+      "tell": "\"(hereinafter referred to as the X which expression shall mean and include …)\" with no \"where the context so permits\"",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "company",
+      "tell": "parties called \"the Company\" rather than by role (the Concessionaire, the Project Company)",
+      "source": [
+        "Bases from other counsel",
+        "LEL127"
+      ]
+    },
+    {
+      "id": "words_first",
+      "tell": "money with the words first: Pakistani Rupees [words] (PKR [●])",
+      "source": [
+        "Bases from other counsel"
+      ]
+    }
+  ],
+  "defined_terms": {
+    "pointer_formula": "shall bear the meaning ascribed thereto in Section [●] ([●])",
+    "lead_in": "Unless specified otherwise herein, in this Agreement (including the Recitals), all capitalised terms shall have the meanings assigned to them under the Concession Agreement (as defined below). In addition, the following terms shall have the following meanings, unless the context otherwise requires:",
+    "source": [
+      "SKM58 (shall bear 81)",
+      "escrow base 2021"
+    ]
+  },
+  "money": {
+    "rule": "PKR [●]/- (Pakistani Rupees [words] Only); the agreement may define \"Pakistani Rupees (PKR)\".",
+    "source": [
+      "SKM58",
+      "escrow base 2021"
+    ]
+  },
+  "notes": [
+    "The escrow pack has no testimonium and an underscore day placeholder; write both the firm's way.",
+    "Arbitration is always asked: the escrow precedents differ (SIAC seated in Singapore; a board of three under the Arbitration Act, 1940)."
+  ]
+}

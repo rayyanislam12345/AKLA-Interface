@@ -9,7 +9,8 @@
 // tool result here numbers its sources from 1 each call.
 
 import { z } from "zod";
-import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, lookingUpRules } from "../../firmRules.js";
+import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, FIRM_STYLE_CORE, styleSheetText, lookingUpRules } from "../../firmRules.js";
+import { uuid } from "../tools.js";
 
 export const TASKS = ["draft", "answer", "review"];
 
@@ -39,25 +40,40 @@ export const CONNECTOR_SHAPE_NOTE = "The Hub turns Markdown in this shape into t
 
 const REVIEWING = "REVIEWING: read the document with get_document_summary and then read_document in slices before you say anything about it. Every point you raise names the clause it concerns, and, where it turns on a law or a precedent, cites the passage as above; keep what the document says apart from what you recommend.";
 
-/** The rules for one task, as get_firm_rules returns them. */
-export function firmRulesText(task) {
+/**
+ * The rules for one task, as get_firm_rules returns them. A draft carries
+ * the firm's style sheet: the firm-wide core, or, for a kind of document
+ * (`typeName`), the core and what differs for that kind (firmRules.js
+ * styleSheetText, the words the Hub's own draft prompt carries).
+ */
+export function firmRulesText(task, { typeName = null } = {}) {
   const parts = [`AKLA's rules for ${task === "draft" ? "drafting" : task === "review" ? "reviewing" : "answering"} from the Hub. Follow them for the whole task.`, "", CONNECTOR_GROUNDING, "", CONNECTOR_SOURCING, "", CONNECTOR_CITING];
-  if (task === "draft") parts.push("", COMPLETENESS_RULES, "", FIRM_MARKDOWN_RULES, "", CONNECTOR_SHAPE_NOTE);
+  if (task === "draft") parts.push("", COMPLETENESS_RULES, "", FIRM_MARKDOWN_RULES, "", CONNECTOR_SHAPE_NOTE, "", typeName ? styleSheetText(typeName) : FIRM_STYLE_CORE);
   if (task === "review") parts.push("", REVIEWING);
   return parts.join("\n");
 }
 
-export default [
+export default ({ supabase } = {}) => [
   {
     name: "get_firm_rules",
     title: "The firm's rules",
-    description: "AKLA's rules for working from the Hub: search the firm's precedents and law library before drafting or answering, cite every passage as [Source n], quote a statute only from a passage in front of you, and (for a draft) the house Markdown shape and the rule that a document is written in full. Call it once at the start of a drafting, answering or review task and follow what it returns. Takes `task`: draft (the full drafting rules), answer (sourcing and citing) or review.",
+    description: "AKLA's rules for working from the Hub: search the firm's precedents and law library before drafting or answering, cite every passage as [Source n], quote a statute only from a passage in front of you, and (for a draft) the house Markdown shape, the rule that a document is written in full, and how the firm writes (its style sheet: defined terms, numbers, money, dates, cross-references, spelling, voice). Call it once at the start of a drafting, answering or review task and follow what it returns. Takes `task`: draft (the full drafting rules), answer (sourcing and citing) or review; for a draft of a kind of document the firm has a standard for, pass its documentTypeId (list_document_types) for that kind's own style sheet.",
     inputSchema: {
       task: z.enum(TASKS).optional().describe("What the rules are for: draft, answer or review. Default draft."),
+      documentTypeId: z.string().optional().describe("Optional, for a draft: the document type's id from list_document_types, for how the firm writes that kind of document in particular."),
     },
     async run(input) {
       const task = TASKS.includes(input.task) ? input.task : "draft";
-      return firmRulesText(task);
+      let typeName = null;
+      if (task === "draft" && input.documentTypeId != null && String(input.documentTypeId).trim() !== "") {
+        const id = uuid(input.documentTypeId);
+        if (!id) throw new Error("documentTypeId must be a document type id (a UUID). list_document_types gives them.");
+        const { data, error } = await supabase.from("document_types").select("id, name").eq("id", id).maybeSingle();
+        if (error) throw new Error(`Could not read the document type: ${error.message}`);
+        if (!data) throw new Error("There is no document type with that id. list_document_types gives them.");
+        typeName = data.name;
+      }
+      return firmRulesText(task, { typeName });
     },
   },
 ];

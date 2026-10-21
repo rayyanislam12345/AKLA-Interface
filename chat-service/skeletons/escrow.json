@@ -1,0 +1,497 @@
+{
+  "key": "escrow",
+  "typeName": "Escrow Agreement",
+  "source": "Derived 20 October 2026 from the approved escrow pack (5 Packs to check/08 escrow agreement, cut from the owner's chosen base, the firm's 2021 escrow execution draft) by reading its headings with skeletonCheck.js, and compared with the firm's two other escrow precedents: the 2026 escrow agreement (it replaces Article 7 \"Not Used\" with Step-In, Substitution & Concession Direct Agreement Coordination, whose five sections are listed here, and funds the Government's accounts differently) and the 2025 escrow agreement for a project company and advisor (a different, shorter form). Presence: an article (level 1) is \"always\" when every firm precedent of the family read for the study has it, \"optional\" when it belongs to one deal or one form, and \"decision\" when a drafting decision (decisions/escrow.json) turns it on or off. Sections (level 2) are the pack's own, all optional except the ones every precedent has; they are listed so that a section the firm already uses is never reported as a new clause.",
+  "completeLevels": [
+    1,
+    2
+  ],
+  "headingKinds": {
+    "h1": 1,
+    "h2": 2,
+    "schedule_heading": 1,
+    "signature_pages_heading": 1
+  },
+  "items": [
+    {
+      "id": "title",
+      "heading": "Escrow Agreement",
+      "level": 0,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "[●] Escrow Agreement"
+      ]
+    },
+    {
+      "id": "recitals",
+      "heading": "Recitals",
+      "level": 0,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions_and_interpretation",
+      "heading": "Definitions and Interpretation",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "definitions",
+      "heading": "Definitions",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "interpretation",
+      "heading": "Interpretation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "order_of_precedence",
+      "heading": "Order of Precedence",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "deposits",
+      "heading": "Deposits in the Escrow Account & Escrow Agreement Certificate",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "deposits_by_the_concessionaire",
+      "heading": "Deposits by the Concessionaire",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "deposits_by_the_government",
+      "heading": "Deposits by the Government",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "escrow_agreement_certificate",
+      "heading": "Escrow Agreement Certificate",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "government_funding_accounts",
+      "heading": "MRG Funding Account, MRG Funding Amount, MRG Contribution Amount, Encashment Proceeds & Related Matters",
+      "label": "the Government's funding accounts article (MRG Funding Account and related matters)",
+      "level": 1,
+      "presence": "decision",
+      "decision": "government_funding",
+      "when": [
+        "funded"
+      ],
+      "absentWhen": [
+        "none"
+      ],
+      "match": "heading",
+      "not_used_form": "Not Used"
+    },
+    {
+      "id": "mrg_funding_account",
+      "heading": "MRG Funding Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "mrg_funding_amount",
+      "heading": "MRG Funding Amount",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "payment_of_mrg_contribution_amount",
+      "heading": "Payment of MRG Contribution Amount",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "encashment_proceeds",
+      "heading": "Encashment Proceeds",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "deposits_and_withdrawals",
+      "heading": "Deposits & Withdrawals From Accounts",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "standing_instructions",
+      "heading": "Escrow Account – Standing Instructions For Utilization Of Revenues & Related Payments Deposited",
+      "level": 1,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Escrow Account – Standing Instructions for Utilization of [●] Revenues and Related Payments"
+      ]
+    },
+    {
+      "id": "major_maintenance_payment_account",
+      "heading": "Major Maintenance Payment Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "additional_cost_account",
+      "heading": "Additional Cost Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "financial_instrument_full_encashment_proceeds_ac",
+      "heading": "Financial Instrument Full Encashment Proceeds Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "termination_compensation_designated_account",
+      "heading": "Termination Compensation Designated Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "concessionaire_revenue_account",
+      "heading": "Concessionaire Revenue Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "concessionaire_distribution_account",
+      "heading": "Concessionaire Distribution Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "government_related_account",
+      "heading": "Government Related Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "general",
+      "heading": "General",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "escrow_agent_obligations",
+      "heading": "Escrow Account and Escrow Agent Related Obligations",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "escrow_agent_to_act_as_trustee",
+      "heading": "Escrow Agent to Act as Trustee",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "acceptance_of_the_escrow_agent",
+      "heading": "Acceptance of the Escrow Agent",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "establishment_and_operation_of_the_escrow_accoun",
+      "heading": "Establishment and Operation of the Escrow Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "escrow_agent_fee",
+      "heading": "Escrow Agent Fee",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "rights_of_the_parties",
+      "heading": "Rights of the Parties",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "segregation_of_funds",
+      "heading": "Segregation of Funds",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "specific_reporting_obligations",
+      "heading": "Specific Reporting Obligations",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "right_of_independent_auditor_to_determine_and_re",
+      "heading": "Right Of Independent Auditor To Determine and Review in respect of the Escrow Account",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Right of Independent Auditor to Determine and Review"
+      ]
+    },
+    {
+      "id": "determination_of_discrepancy_in_revenues_and_iss",
+      "heading": "Determination of Discrepancy in Revenues and Issuance of Discrepancy Certificate",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading",
+      "synonyms": [
+        "Determination of Discrepancy and Issuance of Discrepancy Notices"
+      ]
+    },
+    {
+      "id": "duration_and_termination",
+      "heading": "Duration and Termination of this Agreement",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "duration_of_this_agreement",
+      "heading": "Duration of this Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "termination",
+      "heading": "Termination",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "step_in",
+      "heading": "Step-In, Substitution & Concession Direct Agreement Coordination",
+      "level": 1,
+      "presence": "decision",
+      "decision": "step_in",
+      "when": [
+        "include"
+      ],
+      "absentWhen": [
+        "not_used"
+      ],
+      "match": "heading",
+      "not_used_form": "Not Used"
+    },
+    {
+      "id": "acknowledgement_of_concession_direct_agreement",
+      "heading": "Acknowledgement of Concession Direct Agreement",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "coordination_with_step_in_rights",
+      "heading": "Coordination with Step-In Rights",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "substitution_and_appointment_of_substitute",
+      "heading": "Substitution and Appointment of Substitute",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "termination_payment_coordination",
+      "heading": "Termination Payment Coordination",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "preservation_of_finance_parties_rights",
+      "heading": "Preservation of Finance Parties’ Rights",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law_and_disputes",
+      "heading": "Governing Law & Dispute Resolution",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "governing_law",
+      "heading": "Governing Law",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "dispute_resolution",
+      "heading": "Dispute Resolution",
+      "level": 2,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "conciliation",
+      "heading": "Conciliation",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "arbitration",
+      "heading": "Arbitration",
+      "label": "Arbitration (the forum is a drafting decision: arbitration_forum)",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "miscellaneous",
+      "heading": "Miscellaneous",
+      "level": 1,
+      "presence": "always",
+      "match": "heading"
+    },
+    {
+      "id": "waiver",
+      "heading": "Waiver",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "survival",
+      "heading": "Survival",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "amendments",
+      "heading": "Amendments",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "notices",
+      "heading": "Notices",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "confidentiality",
+      "heading": "Confidentiality",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "payments",
+      "heading": "Payments",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "severability",
+      "heading": "Severability",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "language",
+      "heading": "Language",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "exclusion_of_implied_warranties",
+      "heading": "Exclusion of Implied Warranties",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "counterparts",
+      "heading": "Counterparts",
+      "level": 2,
+      "presence": "optional",
+      "match": "heading"
+    },
+    {
+      "id": "schedule_notices",
+      "heading": "Schedule A - Notices",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Notices"
+      ],
+      "scan": false
+    },
+    {
+      "id": "schedule_accounts",
+      "heading": "Schedule B - Accounts",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "synonyms": [
+        "Schedule [●] – Accounts"
+      ],
+      "scan": false
+    },
+    {
+      "id": "signature_pages",
+      "heading": "Signature Pages",
+      "level": 1,
+      "presence": "always",
+      "match": "heading",
+      "scan": false
+    }
+  ]
+}

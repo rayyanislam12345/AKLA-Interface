@@ -1,0 +1,110 @@
+{
+  "key": "board-resolution",
+  "typeName": "Board Resolution",
+  "source": "Derived 20 October 2026 from the approved board resolution pack (5 Packs to check/09 board resolution, a shell cut from the firm's April 2026 certified copy of a board resolution, the owner's chosen base) and the second base, an extract of resolutions (no Dated line, a bare date; \"Resolve\" for \"Resolved\"; a rule and name in place of For And On Behalf Of). A resolution in writing signed by the directors has no certification, Quote or Unquote (decision resolution_form). Parts are found by kind and words.",
+  "completeLevels": [],
+  "items": [
+    {
+      "id": "title",
+      "heading": "Title",
+      "label": "title (Certified Copy Of Resolution Of The Board Of Directors, or Extract Of Resolutions)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "title",
+      "pattern": "resolution|resolutions"
+    },
+    {
+      "id": "dated",
+      "heading": "Dated line",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "dated_line",
+      "pattern": "^(?:dated?\\s*[:.]?(?:\\s|$)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\\s+\\d{1,2},\\s+\\d{4}\\s*$)"
+    },
+    {
+      "id": "certification",
+      "heading": "Certification",
+      "label": "certifying paragraph (I, [name], the [designation] of [company] …, hereby certify …)",
+      "level": 0,
+      "presence": "decision",
+      "decision": "resolution_form",
+      "when": [
+        "ctc",
+        "extract"
+      ],
+      "absentWhen": [
+        "direct"
+      ],
+      "match": "slot",
+      "slot": "certification",
+      "pattern": "\\bhereby\\s+certif(?:y|ies)\\b"
+    },
+    {
+      "id": "quote",
+      "heading": "Quote line",
+      "label": "Quote line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "resolution_form",
+      "when": [
+        "ctc",
+        "extract"
+      ],
+      "absentWhen": [
+        "direct"
+      ],
+      "match": "slot",
+      "slot": "quote_marker",
+      "pattern": "^quote\\s*:?$"
+    },
+    {
+      "id": "resolution",
+      "heading": "Resolution",
+      "label": "resolution (RESOLVED that …)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "resolution",
+      "pattern": "\\bresolve[ds]?\\b"
+    },
+    {
+      "id": "unquote",
+      "heading": "Unquote line",
+      "label": "Unquote line",
+      "level": 0,
+      "presence": "decision",
+      "decision": "resolution_form",
+      "when": [
+        "ctc",
+        "extract"
+      ],
+      "absentWhen": [
+        "direct"
+      ],
+      "match": "slot",
+      "slot": "unquote",
+      "pattern": "^unquote\\s*:?$"
+    },
+    {
+      "id": "signature",
+      "heading": "Signature block",
+      "label": "signature block (For And On Behalf Of, or the signature rule)",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "signature_for",
+      "pattern": "^(?:for\\s*(?:and|&)\\s*on\\s+behalf\\s+of\\b|_{3,})"
+    },
+    {
+      "id": "signatory",
+      "heading": "Signatory",
+      "label": "signatory's name",
+      "level": 0,
+      "presence": "always",
+      "match": "slot",
+      "slot": "signatory_name"
+    }
+  ]
+}

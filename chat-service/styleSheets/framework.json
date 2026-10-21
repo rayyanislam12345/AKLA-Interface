@@ -1,0 +1,217 @@
+{
+  "key": "framework",
+  "title": "Framework agreements",
+  "types": [
+    "Framework Agreement"
+  ],
+  "packs": [
+    "framework"
+  ],
+  "kind": "agreement",
+  "voice": {
+    "rule": "No voice: the Parties act in the third person (the Agency shall …).",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "spelling": {
+    "rule": "British -ise (authorised, utilisation, organisation), although the firm's agreement bases still carry -ize: change it as you write.",
+    "source": [
+      "Decisions 20 Oct 2026",
+      "MM68 (-ise 4 / -ize 14)",
+      "SKM58 (4/16)"
+    ]
+  },
+  "cross_refs": {
+    "words": [
+      "Article",
+      "Section",
+      "Schedule",
+      "Annexure",
+      "Appendix",
+      "Part"
+    ],
+    "rule": "Articles and Sections in the body, Schedules lettered; the heading in brackets on the first reference in a clause: Section 8.3 (Conciliation), Schedule B (Accounts).",
+    "source": [
+      "SKM58",
+      "IE Agreement base June 2026"
+    ]
+  },
+  "headings": {
+    "rule": "Title Case with every word capitalised, small words too: Grant Of Rights, Deposits & Withdrawals From Accounts. Schedules: Schedule A – [Title].",
+    "source": [
+      "MM68",
+      "SKM58"
+    ]
+  },
+  "dates": {
+    "preamble": "is made as of [●] (the Effective Date)",
+    "cover": "Dated As Of: [●]",
+    "source": [
+      "MM68"
+    ]
+  },
+  "formulae": {
+    "parties_close": {
+      "text": "(the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns)",
+      "source": [
+        "CA master",
+        "SKM58"
+      ]
+    },
+    "rollup": {
+      "text": "(Party A, Party B and Party C are hereinafter collectively referred to as the Parties and each individually as a Party).",
+      "source": [
+        "MM68"
+      ]
+    },
+    "recitals_open": {
+      "text": "Recitals: lettered paragraphs, no WHEREAS.",
+      "source": [
+        "MM68"
+      ]
+    },
+    "now_therefore": {
+      "text": "Now, Therefore, in view of the foregoing and in consideration of the mutual benefits to be derived and the representations and warranties, covenants and agreements contained herein and other good and valuable consideration, the sufficiency of which is hereby acknowledged and intending to be legally bound, the Parties hereby agree as follows:",
+      "source": [
+        "MM68"
+      ]
+    },
+    "testimonium": {
+      "text": "In Witness Whereof, the Parties hereto have caused this Agreement to be executed on the day, month and year first above mentioned.",
+      "source": [
+        "MM68"
+      ]
+    },
+    "execution": {
+      "text": "As Party A / For and on behalf of [●] through its authorised signatory / Signature / Name: / Address: / CNIC/Passport: / In Presence Of: / Signature Of Witness / Name: / Address: / CNIC/Passport:",
+      "source": [
+        "MM68"
+      ]
+    },
+    "governing_law": {
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the Islamic Republic of Pakistan.",
+      "source": [
+        "MM68",
+        "SKM58"
+      ]
+    },
+    "arbitration": {
+      "text": "No default: the seat, the rules (Arbitration Act, 1940 or institutional, e.g. SIAC), the number of arbitrators and the venue are always asked as a drafting question; the firm's files differ (a sole arbitrator under the Arbitration Act, 1940; a board of three under the Arbitration Act, 1940; SIAC seated in Singapore).",
+      "source": [
+        "Decisions 20 Oct 2026 (arbitration always asked)",
+        "MM68",
+        "SKM58",
+        "escrow base 2021",
+        "IE Agreement base June 2026"
+      ]
+    },
+    "preamble": {
+      "text": "This Framework Agreement (this Agreement) is made as of [●] (the Effective Date) by and between:",
+      "source": [
+        "MM68"
+      ]
+    },
+    "party": {
+      "text": "[●], a company duly incorporated and validly existing under the laws of Pakistan with its registered office located at [●] (Party A, which expression shall, where the context so permits, mean and include its successors-in-interest and permitted assigns);",
+      "source": [
+        "MM68"
+      ]
+    }
+  },
+  "banned": [
+    {
+      "id": "hereinafter",
+      "pattern": "\\(\\s*hereinafter\\s+(?:referred\\s+to\\s+as|called)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The firm's party clause reads (the [●], which expression shall, where the context so permits, be deemed to mean and include its successors-in-interest and permitted assigns), not \"(hereinafter referred to as …\". The roll-up \"are hereinafter collectively referred to as the Parties\" is the firm's own.",
+      "source": [
+        "CA master",
+        "SKM58",
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "pointer_as",
+      "pattern": "\\bshall bear the meaning as ascribed\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "The pointer reads \"shall bear the meaning ascribed thereto in …\", without \"as\".",
+      "source": [
+        "escrow base 2021"
+      ]
+    },
+    {
+      "id": "pointer_given",
+      "pattern": "\\bha(?:s|ve) the meanings? given to (?:it|them|that term|the term|such term)\\b",
+      "flags": "i",
+      "severity": "low",
+      "reason": "\"has the meaning given to it in\" is another firm's pointer; the firm writes \"shall have (or bear) the meaning ascribed thereto in …\".",
+      "source": [
+        "Bases from other counsel (CDA, SKM137)"
+      ]
+    },
+    {
+      "id": "padded_figure",
+      "pattern": "\\b[a-z]+\\s+\\(0\\d\\)",
+      "flags": "",
+      "severity": "low",
+      "reason": "Figures in brackets are not zero-padded: five (5) days, not five (05) days.",
+      "source": [
+        "PQE4.3",
+        "EWPL2",
+        "RFP master"
+      ]
+    }
+  ],
+  "tells_of_counterparty": [
+    {
+      "id": "pointer_given",
+      "tell": "\"has the meaning given to it in\" pointers",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "party_clause",
+      "tell": "\"(hereinafter referred to as the X which expression shall mean and include …)\" with no \"where the context so permits\"",
+      "source": [
+        "Bases from other counsel"
+      ]
+    },
+    {
+      "id": "company",
+      "tell": "parties called \"the Company\" rather than by role (the Concessionaire, the Project Company)",
+      "source": [
+        "Bases from other counsel",
+        "LEL127"
+      ]
+    },
+    {
+      "id": "words_first",
+      "tell": "money with the words first: Pakistani Rupees [words] (PKR [●])",
+      "source": [
+        "Bases from other counsel"
+      ]
+    }
+  ],
+  "defined_terms": {
+    "pointer_formula": "shall have the meaning ascribed to it in Section [●]",
+    "lead_in": "In this Agreement the following terms shall have the following meanings, unless the context otherwise requires:",
+    "source": [
+      "MM68 (25)"
+    ]
+  },
+  "money": {
+    "rule": "PKR [●]/- (Pakistani Rupees [words] Only) — the base's \"Pakistan Rupees\" is a slip.",
+    "source": [
+      "MM68"
+    ]
+  },
+  "notes": [
+    "The base carries most cross-references without a heading (1 of 47); add the heading on the first reference in a clause.",
+    "The pack still has \"Province of [●]\" and \"Name: []\": write [●] and no province."
+  ]
+}

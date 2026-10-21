@@ -24,8 +24,9 @@
 
 import { z } from "zod";
 import { READ_ONLY } from "../app.js";
-import { short } from "../tools.js";
-import { runProofCheck } from "../../proofCheck.js";
+import { short, uuid } from "../tools.js";
+import { runProofCheck, runWordingCheck, wordingSummary } from "../../proofCheck.js";
+import { FAMILY_KEYS, styleSheetKeyFor } from "../../styleSheets/index.js";
 import { COMPARABLE_EXTENSIONS, compareVersions, readForCompare } from "../../versionCompare.js";
 import { ON_DEMAND_READ_MS, TOO_LONG_MESSAGE, deadlineStop } from "../../documentInsight.js";
 import { BUSY, CATEGORY_NAMES, RESULT_CACHE_MS, pageOf } from "./documentInsight.js";
@@ -54,6 +55,9 @@ export const LONG_WORD = `The text has an unbroken run of more than ${MAX_WORD_C
 const LONG_WORD_RE = new RegExp(`\\S{${MAX_WORD_CHARS + 1},}`);
 
 const VERSION_COLUMNS = "id, version_number, file_name, storage_path, is_ai_generated";
+
+/** The wording check's categories as the reply names them. */
+export const WORDING_NAMES = { defined_term_form: "defined-term form", number_words: "numbers and money in words and figures", date_format: "dates", placeholder_style: "placeholder style", cross_ref_heading: "cross-references and their headings", spelling_convention: "spelling", banned_phrase: "phrasing the firm does not use", government_named: "a government or province named" };
 
 // One file read at a time in this module (see the header).
 let reading = false;
@@ -130,23 +134,48 @@ export default ({ supabase, log, now, helpers }) => {
     {
       name: "check_text",
       title: "Proof-check a draft before it is saved",
-      description: "The Hub's proof check, run on text you have written or are about to file (plain text or Markdown): every blank and placeholder ([●], [insert …], TBD), term used but not defined, definition never used, cross-reference to a clause or schedule that does not exist, number whose words and figures disagree, and gap in clause numbering, each with the clause it sits in. No model is involved, nothing is saved and nothing in the Hub changes. Use it on a draft or a redraft before filing it with save_note_to_project or save_draft_to_project, and fix what it finds first; it is the same check the Hub stores for a saved version (get_document_checks), so a draft that is clean here is clean there. Returns the counts by category, then the findings numbered from 1, in pages: start at from: 0 and send the same text again with the from the reply gives. Text up to 300,000 characters a call.",
+      description: "The Hub's proof check, run on text you have written or are about to file (plain text or Markdown): every blank and placeholder ([●], [insert …], TBD), term used but not defined, definition never used, cross-reference to a clause or schedule that does not exist, number whose words and figures disagree, and gap in clause numbering, each with the clause it sits in. No model is involved, nothing is saved and nothing in the Hub changes. Use it on a draft or a redraft before filing it with save_note_to_project or save_draft_to_project, and fix what it finds first; it is the same check the Hub stores for a saved version (get_document_checks), so a draft that is clean here is clean there. With documentTypeId (or a styleSheet by name) it also checks the wording against the firm's style sheet for that kind of document — defined terms bold in brackets without quotation marks, numbers and money in words and figures, dates, [●], cross-references with their headings, British spelling, phrasing the firm does not use — and lists those findings after the proof check's; they never stop a filing. Returns the counts by category, then the findings numbered from 1, in pages: start at from: 0 and send the same text (and the same documentTypeId) again with the from the reply gives. Text up to 300,000 characters a call.",
       inputSchema: {
         // No .max here: the SDK would refuse the call with a validation dump before run(); readText refuses over-long text with the plain sentence instead.
         text: z.string().describe(`The draft to check: plain text or Markdown, exactly as it would be saved. Up to ${MAX_TEXT_CHARS.toLocaleString("en")} characters.`),
         from: z.number().int().min(0).optional().describe("The index of the first finding to show, from the previous reply. Default 0."),
+        documentTypeId: z.string().optional().describe("Optional: the document type's id (list_document_types), to check the wording against the firm's style sheet for that kind of document as well."),
+        styleSheet: z.string().optional().describe(`Optional, instead of documentTypeId: a style sheet by name (${FAMILY_KEYS.join(", ")}, or "core" for the firm-wide rules alone).`),
       },
       annotations: READ_ONLY,
       async run(input) {
+        // The style sheet, when one is asked for: by the type's name, or by its own name.
+        let sheet = null;
+        if (input.documentTypeId != null && String(input.documentTypeId).trim() !== "") {
+          const id = uuid(input.documentTypeId);
+          if (!id) throw new Error("documentTypeId must be a document type id (a UUID). list_document_types gives them.");
+          const { data, error } = await supabase.from("document_types").select("id, name").eq("id", id).maybeSingle();
+          if (error) throw new Error(`Could not read the document type: ${error.message}`);
+          if (!data) throw new Error("There is no document type with that id. list_document_types gives them.");
+          sheet = { key: styleSheetKeyFor(data.name) ?? "core", typeName: data.name };
+        } else if (typeof input.styleSheet === "string" && input.styleSheet.trim()) {
+          const name = input.styleSheet.trim();
+          const key = name.toLowerCase() === "core" ? "core" : styleSheetKeyFor(name);
+          if (!key) throw new Error(`There is no style sheet called "${name}": the firm's are ${FAMILY_KEYS.join(", ")}, and "core" for the firm-wide rules.`);
+          sheet = { key, typeName: null };
+        }
         const read = await readText(input.text);
         const pc = runProofCheck(read);
         const out = [`Proof check of the text given (${chars(input.text)}, ${plural(pc.paragraphs ?? 0, "paragraph")}): checked now, without a model; nothing was saved.`];
         const counts = pc.counts ?? {};
-        const items = Array.isArray(pc.items) ? pc.items : [];
+        let items = Array.isArray(pc.items) ? pc.items : [];
         out.push(`${plural(pc.total ?? items.length, "finding")}: ${Object.keys(CATEGORY_NAMES).map((k) => `${CATEGORY_NAMES[k]} ${counts[k] ?? 0}`).join("; ")}.`);
         for (const n of pc.notes ?? []) out.push(n);
         const omitted = Object.entries(pc.omitted ?? {}).filter(([, n]) => n > 0);
         if (omitted.length) out.push(`Not listed (the check keeps at most 100 findings in a category): ${omitted.map(([k, n]) => `${n} more under ${CATEGORY_NAMES[k] ?? k}`).join("; ")}.`);
+        // The wording check against the firm's style sheet, beside the proof
+        // check: its findings follow the proof check's in the same list.
+        if (sheet) {
+          const wc = runWordingCheck(read, { styleSheet: sheet.key });
+          out.push(`${wordingSummary(wc)} (Style sheet: ${wc.style_sheet === "core" ? "the firm-wide rules" : `"${wc.style_sheet}" on top of the firm-wide rules`}${sheet.typeName ? `, for ${sheet.typeName}` : ""}.)`);
+          for (const n of wc.notes ?? []) out.push(n);
+          items = [...items, ...(wc.items ?? []).map((it) => ({ ...it, category: `wording: ${WORDING_NAMES[it.category] ?? it.category}` }))];
+        }
         if (!items.length) return out.join("\n");
         const from = startAt(input);
         if (from >= items.length) return `${out[0]}\nThere are ${plural(items.length, "finding")}; there is nothing at from: ${from}.`;
