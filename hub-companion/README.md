@@ -29,6 +29,7 @@ What it does, and all it does:
   a link, colours, push or slide over, where the Hub shows, all settings)
   and, in the drawer, Close. The chat's colour theme is passed to the Hub
   (`aiTheme`), so the chat and the document wear the same colours.
+- **Alt+H** shows or hides the drawer (or opens Chrome's side panel in the side view). Change it at `chrome://extensions/shortcuts`.
 - If **Follow new links** is on (the default), an open panel follows the
   newest Hub link Claude mentions: straight away when the panel has only
   just opened or changed page, otherwise as a one-line "Claude mentioned a

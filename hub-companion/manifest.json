@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AKLA Hub companion",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Shows the firm's Hub beside your claude.ai chat. Reads only Hub links on claude.ai and sends nothing anywhere.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtwBZdvaK1PB/HbYMBHif2xxNx1YirRct07w7yD23zrJrABrV+VDib24J2qCttnHer4FJwcpvBs67cZIWoKiGjKp2+IY5ctfGflIeDKUqFfWpOPKo+MO/yblq/oi9IXhY6Ms6iGrmSEhheSfdrsuj7eH42SGXH+7FXTf5AR6GI4ZWDoSTlKokr4qLb7JyTwMJmO7AN15g3dGvBBvd3qkdsAY5qykRad+/6Wakkw1qb4REcgwNt7m/wutkbgH6f5OaW/r7F0k3WsuM91Q171JiqXuSekEV4gNFjGCly6mrKailZ8cNNK4+LmMYaDJxX/zgiKsSZda3eOxIwl/VCBC/+QIDAQAB",
   "minimum_chrome_version": "116",
@@ -71,5 +71,14 @@
         "https://claude.ai/*"
       ]
     }
-  ]
+  ],
+  "commands": {
+    "toggle-hub": {
+      "suggested_key": {
+        "default": "Alt+H",
+        "mac": "Alt+H"
+      },
+      "description": "Show or hide the Hub beside the chat"
+    }
+  }
 }

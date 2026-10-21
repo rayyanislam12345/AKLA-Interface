@@ -1,9 +1,11 @@
 // The AI workspace's colour themes. The tokens live in src/index.css under
 // `.ai-app[data-ai-theme=...]`; this is the list the Appearance panel shows,
 // plus reading and writing the choice. Night and Monokai are dark only: the
-// picker switches the light/dark mode to dark when one is chosen.
+// picker switches the light/dark mode to dark when one is chosen. Slate and
+// High contrast match the companion's chat themes of the same name
+// (hub-companion/themes.js), so the drawer beside the chat wears its colours.
 
-export type AiThemeId = "warm" | "blue" | "pink" | "orange" | "green" | "night" | "monokai";
+export type AiThemeId = "warm" | "blue" | "pink" | "orange" | "green" | "slate" | "contrast" | "night" | "monokai";
 
 export interface AiThemeInfo {
   id: AiThemeId;
@@ -23,6 +25,8 @@ export const AI_THEMES: AiThemeInfo[] = [
   { id: "pink", name: "Pink", swatch: { light: ["hsl(340 30% 98%)", "hsl(340 35% 95%)", "hsl(335 70% 36%)"], dark: ["hsl(335 15% 10%)", "hsl(335 16% 7%)", "hsl(338 75% 72%)"] } },
   { id: "orange", name: "Orange", swatch: { light: ["hsl(32 35% 98%)", "hsl(32 38% 94%)", "hsl(24 85% 32%)"], dark: ["hsl(28 12% 10%)", "hsl(28 13% 7%)", "hsl(28 85% 64%)"] } },
   { id: "green", name: "Green", swatch: { light: ["hsl(140 22% 98%)", "hsl(140 24% 94%)", "hsl(150 60% 26%)"], dark: ["hsl(150 12% 10%)", "hsl(150 13% 7%)", "hsl(145 55% 62%)"] } },
+  { id: "slate", name: "Slate", swatch: { light: ["hsl(216 18.5% 94.7%)", "hsl(220 14.3% 91.8%)", "hsl(206 54.4% 40.4%)"], dark: ["hsl(213 20% 10.8%)", "hsl(213 24.4% 8.8%)", "hsl(207 57.6% 63.9%)"] } },
+  { id: "contrast", name: "High contrast", swatch: { light: ["hsl(0 0% 97.6%)", "hsl(0 0% 95.7%)", "hsl(240 100% 42%)"], dark: ["hsl(0 0% 3.5%)", "hsl(0 0% 1.2%)", "hsl(50 100% 52%)"] } },
   { id: "night", name: "Night", darkOnly: true, swatch: { dark: ["hsl(0 0% 12%)", "hsl(0 0% 9%)", "hsl(206 92% 64%)"] } },
   { id: "monokai", name: "Monokai", darkOnly: true, swatch: { dark: ["hsl(70 8% 15%)", "hsl(70 8% 12%)", "hsl(80 76% 53%)"] } },
 ];

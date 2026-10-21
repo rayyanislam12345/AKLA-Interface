@@ -42,8 +42,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Only fires while openPanelOnActionClick is off, i.e. in the page view.
-chrome.action.onClicked.addListener((tab) => {
+// The toolbar button (only while openPanelOnActionClick is off, i.e. in the
+// page view) and the keyboard shortcut (Alt+H by default; people can change
+// it at chrome://extensions/shortcuts) do the same thing.
+function toggleHub(tab) {
   if (tab && tab.id != null && tab.url && tab.url.startsWith("https://claude.ai/")) {
     chrome.tabs.sendMessage(tab.id, { type: "pane:toggle" }).catch(() => {
       // The page loaded before the extension did: no drawer script there yet.
@@ -52,6 +54,17 @@ chrome.action.onClicked.addListener((tab) => {
     return;
   }
   if (tab && tab.id != null) chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+}
+chrome.action.onClicked.addListener(toggleHub);
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command !== "toggle-hub" || !tab) return;
+  // In the side view the shortcut opens Chrome's side panel (a shortcut counts
+  // as the user's own action, which sidePanel.open needs).
+  if (view === "side" && tab.id != null) {
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    return;
+  }
+  toggleHub(tab);
 });
 
 // The Hub origin, kept in memory so the address check below stays

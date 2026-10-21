@@ -19,7 +19,7 @@ Everything for the first upload is in `~/Desktop/AKLA Companion for the Web Stor
 ## 2. First upload (Rayyan, about 20 minutes)
 
 1. In the developer console: **New item** → upload
-   `akla-hub-companion-0.4.0.zip`.
+   `akla-hub-companion-0.5.0.zip`.
 2. **Store listing** tab:
    - Description: paste the text in section 5 below.
    - Category: *Productivity* (Workflow & Planning). Language: English.

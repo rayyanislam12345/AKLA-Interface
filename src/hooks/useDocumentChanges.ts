@@ -16,6 +16,7 @@ import {
   type Decision,
   type DecideResult,
 } from "@/lib/documentSave";
+import { beginCompanionBusy } from "@/lib/companionBusy";
 
 // The Changes list of one working document (every copy of one Word file in
 // a chat), read from the chat service. Keyed on the working document, so a
@@ -45,10 +46,12 @@ export function useDocumentChanges(artifact: ChatArtifact | null) {
     mutationFn: async (decisions: Decision[]): Promise<DecideResult> => {
       if (!artifactId || !workingDocumentId) throw new Error("No document is open.");
       beginDecision(workingDocumentId);
+      const endBusy = beginCompanionBusy();
       try {
         return await decideChanges(artifactId, decisions);
       } finally {
         endDecision(workingDocumentId);
+        endBusy();
       }
     },
     onSuccess: (result) => {

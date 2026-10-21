@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Ban, Check, ChevronDown, ChevronRight, Clock, FileArchive, FileText, FolderUp, Loader2, MessageSquare, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import CopyForClaude from "@/ai/components/CopyForClaude";
 
 const NO_DOCUMENTS: IntakeDocument[] = [];
 
@@ -39,9 +41,15 @@ interface ProjectFilesPanelProps {
   onRetry: () => void;
   /** The version in the document window, if any. */
   activeVersionId?: string | null;
-  onOpenVersion: (versionId: string) => void;
-  /** Put these in the prompt box. */
-  onUseInChat: (attachments: ChatAttachment[]) => void;
+  onOpenVersion?: (versionId: string) => void;
+  /** Put these in the prompt box. Without it there is no "Use in chat". */
+  onUseInChat?: (attachments: ChatAttachment[]) => void;
+  /**
+   * In the companion's drawer, where the chat is claude.ai's: each version
+   * is a link to its own page (/ai/d/<id>) and each file carries a small
+   * "Copy for Claude" instead of anything that starts a Hub chat.
+   */
+  companion?: { projectName: string };
 }
 
 // The project's files in the AI workspace: grouped by the kind of document,
@@ -49,7 +57,7 @@ interface ProjectFilesPanelProps {
 // Tick several to download them as one zip or put them in the prompt box.
 // Files can be dropped anywhere on the panel; the same intake as the
 // project page on the site checks them and uploads on Start.
-export default function ProjectFilesPanel({ matterId, matterName, documents, isLoading, error, onRetry, activeVersionId, onOpenVersion, onUseInChat }: ProjectFilesPanelProps) {
+export default function ProjectFilesPanel({ matterId, matterName, documents, isLoading, error, onRetry, activeVersionId, onOpenVersion, onUseInChat, companion }: ProjectFilesPanelProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
@@ -155,6 +163,7 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
     });
 
   const useSelectedInChat = () => {
+    if (!onUseInChat) return;
     const attachments = selectedDocs.flatMap((d) => {
       const latest = groups.flatMap((g) => g.documents).find((row) => row.doc.id === d.id)?.latest;
       return latest ? [attachmentForVersion(d, latest)] : [];
@@ -206,9 +215,11 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
           {selectedDocs.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 px-3 py-2" data-testid="files-bulk-bar">
               <span className="text-xs font-medium">{selectedDocs.length} selected</span>
-              <Button size="sm" className="h-7 text-xs" onClick={useSelectedInChat} data-testid="use-in-chat">
-                <MessageSquare className="mr-1.5 h-3.5 w-3.5" />Use in chat
-              </Button>
+              {onUseInChat && (
+                <Button size="sm" className="h-7 text-xs" onClick={useSelectedInChat} data-testid="use-in-chat">
+                  <MessageSquare className="mr-1.5 h-3.5 w-3.5" />Use in chat
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -257,11 +268,25 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
                               onCheckedChange={(checked) => toggle(doc.id, checked === true)}
                               aria-label={`Select "${doc.title}"`}
                             />
+                            {companion && latest ? (
+                              <Link to={`/ai/d/${latest.id}`} className="group flex min-w-0 flex-1 items-center gap-2 text-left" title="Open" data-testid="file-link">
+                                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm group-hover:underline">{doc.title}</span>
+                                  <span className="block truncate text-[11px] text-muted-foreground">
+                                    v{latest.version_number}
+                                    {latest.label ? ` · ${latest.label}` : ""}
+                                    {typeName ? ` · ${typeName}` : ""}
+                                    {` · ${new Date(latest.created_at).toLocaleDateString()}`}
+                                  </span>
+                                </span>
+                              </Link>
+                            ) : (
                             <button
                               type="button"
                               className="group flex min-w-0 flex-1 items-center gap-2 text-left"
                               title={latest ? "Open" : "No file yet"}
-                              onClick={() => (latest ? onOpenVersion(latest.id) : toggleExpanded(doc.id))}
+                              onClick={() => (latest ? onOpenVersion?.(latest.id) : toggleExpanded(doc.id))}
                             >
                               <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                               <span className="min-w-0 flex-1">
@@ -273,6 +298,7 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
                                 </span>
                               </span>
                             </button>
+                            )}
                             {latest && state && (
                               <ReadStateBadge version={latest as MatterDocumentVersion} state={state} />
                             )}
@@ -280,6 +306,9 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
                               <Button size="sm" variant="ghost" className="h-7 shrink-0 px-2 text-xs" onClick={() => void readAgain(doc, latest as MatterDocumentVersion)} data-testid="read-again">
                                 Try again
                               </Button>
+                            )}
+                            {companion && latest && (
+                              <CopyForClaude compact title={doc.title} versionId={latest.id} versionNumber={latest.version_number} fileName={latest.file_name} projectName={companion.projectName} />
                             )}
                             {versions.length > 1 && (
                               <button type="button" className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground" title={isExpanded ? "Hide older versions" : `${versions.length} versions`} onClick={() => toggleExpanded(doc.id)}>
@@ -291,11 +320,19 @@ export default function ProjectFilesPanel({ matterId, matterName, documents, isL
                             <ul className="mt-1 space-y-0.5 pl-10">
                               {versions.map((v) => (
                                 <li key={v.id}>
-                                  <button type="button" className={cn("flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-accent", v.id === activeVersionId && "bg-accent")} onClick={() => onOpenVersion(v.id)}>
+                                  {companion ? (
+                                    <Link to={`/ai/d/${v.id}`} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-accent">
+                                      <span className="font-medium">v{v.version_number}</span>
+                                      <span className="truncate text-muted-foreground">{v.label || v.file_name || ""}</span>
+                                      <span className="ml-auto shrink-0 text-muted-foreground">{new Date(v.created_at).toLocaleDateString()}</span>
+                                    </Link>
+                                  ) : (
+                                  <button type="button" className={cn("flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-accent", v.id === activeVersionId && "bg-accent")} onClick={() => onOpenVersion?.(v.id)}>
                                     <span className="font-medium">v{v.version_number}</span>
                                     <span className="truncate text-muted-foreground">{v.label || v.file_name || ""}</span>
                                     <span className="ml-auto shrink-0 text-muted-foreground">{new Date(v.created_at).toLocaleDateString()}</span>
                                   </button>
+                                  )}
                                 </li>
                               ))}
                             </ul>

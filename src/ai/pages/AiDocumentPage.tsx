@@ -34,8 +34,10 @@ export default function AiDocumentPage() {
   const back = () => {
     // Back where the lawyer came from when there is somewhere to go back to
     // (the router numbers its entries); the project page for a pasted link.
+    // In the companion's drawer there are no entries to go back through
+    // (src/lib/companionHistory.ts): the project page then too.
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (idx > 0) navigate(-1);
+    if (idx > 0 && !companion) navigate(-1);
     else navigate(projectPath);
   };
 

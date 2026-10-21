@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { supabase } from "@/integrations/supabase/client";
 import { formatShortDate, safeDownloadName } from "@/lib/fileNames";
+import { whileCompanionBusy } from "@/lib/companionBusy";
 
 // Several project files as one .zip, built in the browser. Files are fetched
 // one at a time and stored without recompression (Word and PDF files are
@@ -69,6 +70,11 @@ export async function downloadZip(
   zipName: string,
   onProgress: (p: ZipProgress) => void,
 ): Promise<{ failed: string[] }> {
+  // Being made: the companion leaves the page alone meanwhile.
+  return whileCompanionBusy(() => packZip(entries, zipName, onProgress));
+}
+
+async function packZip(entries: ZipEntry[], zipName: string, onProgress: (p: ZipProgress) => void): Promise<{ failed: string[] }> {
   const zip = new JSZip();
   const used = new Set<string>();
   const failed: string[] = [];

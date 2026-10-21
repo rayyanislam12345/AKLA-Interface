@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { toast } from "@/hooks/use-toast";
 import { saveDraftToMatter } from "@/lib/saveDraftToMatter";
+import { whileCompanionBusy } from "@/lib/companionBusy";
 import {
   chooseExpectedVersionId,
   pickClientKeys,
@@ -295,14 +296,16 @@ export function downloadBlob(blob: Blob, name: string) {
 
 /** Downloads the working document in either form. A refused clean copy throws CleanCopyRefused with the service's sentence. */
 export async function downloadWorkingDocument(artifactId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
-  const file = await fetchDocumentFile(artifactId, form, opts);
+  // Being made: the companion leaves the page alone meanwhile.
+  const file = await whileCompanionBusy(() => fetchDocumentFile(artifactId, form, opts));
   downloadBlob(file.blob, file.fileName);
   return file;
 }
 
 /** Downloads a stored version's working file in either form. A refused clean copy throws CleanCopyRefused with the service's sentence. */
 export async function downloadVersionFile(versionId: string, form: "tracked" | "clean", opts: { acceptOthers?: boolean } = {}): Promise<DocumentFile> {
-  const file = await fetchVersionFile(versionId, form, opts);
+  // Being made: the companion leaves the page alone meanwhile.
+  const file = await whileCompanionBusy(() => fetchVersionFile(versionId, form, opts));
   downloadBlob(file.blob, file.fileName);
   return file;
 }

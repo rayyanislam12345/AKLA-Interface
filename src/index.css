@@ -678,6 +678,179 @@ All colors MUST be HSL.
     --ai-bubble: 32 30% 24%;
     --ai-bubble-foreground: 60 30% 96%;
   }
+
+  /* Slate and High contrast match the companion's chat themes of the same
+     name (hub-companion/themes.js), so the Hub in the drawer wears the
+     chat's colours: the page, card, text, accent and message-bubble colours
+     are the chat's own, read off its grey ramp and accent; the rest follow
+     the steps the other themes use. High contrast holds every text pair to
+     WCAG AAA (7:1) in both modes and draws its borders strong, as the chat
+     theme does (the text colour at 60% over the page).
+     tests/aiThemes.test.js measures every theme's pairs. */
+
+  .ai-app[data-ai-theme="slate"] {
+    --background: 216 18.5% 94.7%;
+    --foreground: 215 20% 11.8%;
+    --card: 216 29.4% 96.7%;
+    --card-foreground: 215 20% 11.8%;
+    --popover: 216 29.4% 96.7%;
+    --popover-foreground: 215 20% 11.8%;
+    --primary: 206 54.4% 40.4%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 206 43.1% 49.6%;
+    --primary-glow: 206 46.2% 61.4%;
+    --secondary: 216 10.6% 90.8%;
+    --secondary-foreground: 215 20% 11.8%;
+    --muted: 220 14.3% 91.8%;
+    --muted-foreground: 213 4.7% 37.5%;
+    --accent: 216 8.8% 88.8%;
+    --accent-foreground: 215 20% 11.8%;
+    --accent-light: 220 18.7% 93.7%;
+    --gold: 206 54.4% 40.4%;
+    --gold-foreground: 0 0% 100%;
+    --success: 142 60% 30%;
+    --success-foreground: 0 0% 98%;
+    --warning: 40 90% 50%;
+    --warning-foreground: 30 12% 12%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 6.5% 82%;
+    --input: 213 3.7% 47.3%;
+    --ring: 206 54.4% 40.4%;
+    --sidebar-background: 220 14.3% 91.8%;
+    --sidebar-foreground: 215 20% 11.8%;
+    --sidebar-primary: 206 54.4% 40.4%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 8.8% 86.7%;
+    --sidebar-accent-foreground: 215 20% 11.8%;
+    --sidebar-border: 220 6.5% 82%;
+    --sidebar-ring: 206 54.4% 40.4%;
+    --ai-bubble: 206 53.8% 92.4%;
+    --ai-bubble-foreground: 215 20% 11.8%;
+  }
+
+  .dark .ai-app[data-ai-theme="slate"] {
+    --background: 213 20% 10.8%;
+    --foreground: 216 18.5% 94.7%;
+    --card: 215 17.1% 13.7%;
+    --card-foreground: 216 18.5% 94.7%;
+    --popover: 215 15% 15.7%;
+    --popover-foreground: 216 18.5% 94.7%;
+    --primary: 207 57.6% 63.9%;
+    --primary-foreground: 215 30% 7.8%;
+    --primary-light: 208 62.9% 75.7%;
+    --primary-glow: 206 46.2% 61.4%;
+    --secondary: 213 12.9% 16.7%;
+    --secondary-foreground: 216 18.5% 94.7%;
+    --muted: 215 15% 15.7%;
+    --muted-foreground: 214 3.6% 62.2%;
+    --accent: 218 12.1% 17.8%;
+    --accent-foreground: 216 18.5% 94.7%;
+    --accent-light: 213 9.6% 22.5%;
+    --gold: 207 57.6% 63.9%;
+    --gold-foreground: 215 30% 7.8%;
+    --success: 142 60% 46%;
+    --success-foreground: 30 8% 9%;
+    --warning: 40 90% 60%;
+    --warning-foreground: 30 8% 9%;
+    --destructive: 0 75% 66%;
+    --destructive-foreground: 30 8% 9%;
+    --border: 213 9.6% 22.5%;
+    --input: 213 3.7% 47.3%;
+    --ring: 207 57.6% 63.9%;
+    --sidebar-background: 213 24.4% 8.8%;
+    --sidebar-foreground: 216 13.5% 92.7%;
+    --sidebar-primary: 207 57.6% 63.9%;
+    --sidebar-primary-foreground: 215 30% 7.8%;
+    --sidebar-accent: 213 14.7% 14.7%;
+    --sidebar-accent-foreground: 216 18.5% 94.7%;
+    --sidebar-border: 213 12.9% 16.7%;
+    --sidebar-ring: 207 57.6% 63.9%;
+    --ai-bubble: 210 38.3% 18.4%;
+    --ai-bubble-foreground: 216 18.5% 94.7%;
+  }
+
+  .ai-app[data-ai-theme="contrast"] {
+    --background: 0 0% 97.6%;
+    --foreground: 0 0% 4.3%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 4.3%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4.3%;
+    --primary: 240 100% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 240 100% 32.9%;
+    --primary-glow: 240 100% 60%;
+    --secondary: 0 0% 95.7%;
+    --secondary-foreground: 0 0% 4.3%;
+    --muted: 0 0% 96.9%;
+    --muted-foreground: 0 0% 27.8%;
+    --accent: 0 0% 93.3%;
+    --accent-foreground: 0 0% 4.3%;
+    --accent-light: 0 0% 97.6%;
+    --gold: 240 100% 42%;
+    --gold-foreground: 0 0% 100%;
+    --success: 140 100% 18%;
+    --success-foreground: 0 0% 100%;
+    --warning: 50 100% 52%;
+    --warning-foreground: 0 0% 0%;
+    --destructive: 0 100% 32%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 41.6%;
+    --input: 0 0% 22.4%;
+    --ring: 240 100% 42%;
+    --sidebar-background: 0 0% 95.7%;
+    --sidebar-foreground: 0 0% 4.3%;
+    --sidebar-primary: 240 100% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 89%;
+    --sidebar-accent-foreground: 0 0% 4.3%;
+    --sidebar-border: 0 0% 41.6%;
+    --sidebar-ring: 240 100% 42%;
+    --ai-bubble: 240 100% 93.9%;
+    --ai-bubble-foreground: 0 0% 4.3%;
+  }
+
+  .dark .ai-app[data-ai-theme="contrast"] {
+    --background: 0 0% 3.5%;
+    --foreground: 0 0% 97.6%;
+    --card: 0 0% 6.7%;
+    --card-foreground: 0 0% 97.6%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 97.6%;
+    --primary: 50 100% 52%;
+    --primary-foreground: 0 0% 0%;
+    --primary-light: 51 100% 70%;
+    --primary-glow: 50 100% 45.1%;
+    --secondary: 0 0% 11%;
+    --secondary-foreground: 0 0% 97.6%;
+    --muted: 0 0% 9%;
+    --muted-foreground: 0 0% 77.6%;
+    --accent: 0 0% 16.9%;
+    --accent-foreground: 0 0% 97.6%;
+    --accent-light: 0 0% 22.4%;
+    --gold: 50 100% 52%;
+    --gold-foreground: 0 0% 0%;
+    --success: 142 69.2% 58%;
+    --success-foreground: 0 0% 0%;
+    --warning: 50 100% 52%;
+    --warning-foreground: 0 0% 0%;
+    --destructive: 0 100% 75.1%;
+    --destructive-foreground: 0 0% 0%;
+    --border: 0 0% 60%;
+    --input: 0 0% 66.7%;
+    --ring: 50 100% 52%;
+    --sidebar-background: 0 0% 1.2%;
+    --sidebar-foreground: 0 0% 97.6%;
+    --sidebar-primary: 50 100% 52%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 11%;
+    --sidebar-accent-foreground: 0 0% 97.6%;
+    --sidebar-border: 0 0% 60%;
+    --sidebar-ring: 50 100% 52%;
+    --ai-bubble: 51 100% 10%;
+    --ai-bubble-foreground: 0 0% 97.6%;
+  }
 }
 
 /* An assistant reply in the AI workspace: serif, 16px, roomy lines. Set

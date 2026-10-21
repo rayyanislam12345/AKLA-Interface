@@ -16,9 +16,11 @@ import { seedSkillFor } from "@/lib/threadSkill";
 import { chatStatus, relativeDay } from "@/lib/chatStatus";
 import { openParam, parseOpenParam } from "@/lib/aiLinks";
 import { readProjectSeeds } from "@/lib/projectSeeds";
+import { useCompanionHost } from "@/lib/embedMode";
 import { useAiPageTitle, useAiWorkspace } from "@/ai/AiWorkspaceContext";
 import { useOpenEditChat } from "@/ai/useOpenEditChat";
 import AiDocumentWindow from "@/ai/components/AiDocumentWindow";
+import CompanionProjectView from "@/ai/components/CompanionProjectView";
 import HomePrompt from "@/ai/components/HomePrompt";
 import ProjectFilesPanel from "@/ai/components/ProjectFilesPanel";
 import ProjectInstructions from "@/ai/components/ProjectInstructions";
@@ -44,9 +46,15 @@ import { cn } from "@/lib/utils";
 //   ?mode=review&doc=<id>&version=   that document attached (the latest version otherwise)
 //   ?update=<lawUpdateId>            a Revise link: Review, the affected document, the prompt filled in
 //   ?attach=v:<versionId>            a stored version put in the prompt box ("Ask about this")
+// Framed by the companion (useCompanionHost) the page is CompanionProjectView
+// instead: files, instructions and recent activity, and no Hub chat at all.
 export default function AiProjectPage() {
   const { matterId } = useParams<{ matterId: string }>();
+  // In the companion's drawer the chat is claude.ai's: a read-only view of
+  // the project that starts no Hub chat (the address's seeds are ignored).
+  const companion = useCompanionHost();
   // Keyed so moving between projects resets every pane.
+  if (companion) return <CompanionProjectView key={matterId} matterId={matterId!} />;
   return <ProjectView key={matterId} matterId={matterId!} />;
 }
 

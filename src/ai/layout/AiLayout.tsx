@@ -12,6 +12,7 @@ import { enterDarkOnlyMode, isAiThemeId, isDarkOnlyAiTheme } from "@/ai/theme";
 import { EMBED_PARAM, isCompanionOrigin, companionHref, postToCompanion, resolveCompanionHost, useEmbedMode, withoutEmbed } from "@/lib/embedMode";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { startCompanionBusy } from "@/lib/companionBusy";
 import { cn } from "@/lib/utils";
 
 // The AI workspace at /ai: its own shell, without the site's navy sidebar
@@ -27,7 +28,8 @@ import { cn } from "@/lib/utils";
 // names the place and links to the same page in the ordinary Hub. When the
 // companion frames it with ?host=companion, the companion's own bar does that
 // job, so there is no header at all: the page posts its address and name to
-// the companion instead, and takes the chat's colour theme from it.
+// the companion instead, says when the lawyer is busy, and takes the chat's
+// colour theme from it.
 export default function AiLayout() {
   useEffect(() => {
     document.body.classList.add("ai-app");
@@ -67,6 +69,13 @@ function AiShell() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [companion, setAiTheme]);
+  // While the lawyer is mid-task (typing, a dialog open, an upload or a
+  // decision under way) the companion offers Claude's next document as a
+  // link rather than switching the page (src/lib/companionBusy.ts).
+  useEffect(() => {
+    if (!companion) return;
+    return startCompanionBusy(postToCompanion);
+  }, [companion]);
   const { theme, setTheme } = useTheme();
   // ?embed=0 has done its work (the mode is off): take it out of the address.
   useEffect(() => {

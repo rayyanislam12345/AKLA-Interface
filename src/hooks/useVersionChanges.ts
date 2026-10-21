@@ -9,6 +9,7 @@ import {
   type VersionChangesList,
   type VersionDecideResult,
 } from "@/lib/documentSave";
+import { beginCompanionBusy } from "@/lib/companionBusy";
 import { decisionErrorText, isMissingTable, type VersionChangeHead, type VersionChangeState } from "@/lib/versionChangesRules";
 
 // The Changes list of a stored project version: one the claude.ai
@@ -90,11 +91,14 @@ export function useVersionChanges(versionId: string | null | undefined, { enable
   const decide = useMutation({
     mutationFn: async (decisions: Decision[]): Promise<VersionDecideResult> => {
       if (!versionId) throw new Error("No document is open.");
+      const endBusy = beginCompanionBusy();
       try {
         return await decideVersionChanges(versionId, decisions);
       } catch (err) {
         if (err instanceof ChatApiError) throw new ChatApiError(err.status, decisionErrorText(err.status, err.message), err.body);
         throw err;
+      } finally {
+        endBusy();
       }
     },
     onSuccess: (result) => {

@@ -13,6 +13,7 @@ import {
   fetchStoredFileSizes,
   saveVersionDetails,
 } from "@/hooks/useMatterDocuments";
+import { useCompanionBusy } from "@/lib/companionBusy";
 import { collectFromDrop, collectFromFileList, extensionOf, sha256, type Collected } from "./collectFiles";
 import { plainUploadError } from "./uploadErrors";
 
@@ -220,6 +221,13 @@ export function useDocumentIntake({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [hasActive]);
+
+  // Beside a claude.ai chat, a list being read, waiting for Start or going up
+  // keeps the companion from switching the page (src/lib/companionBusy.ts).
+  useCompanionBusy(
+    gatheringRef.current > 0 ||
+      itemsRef.current.some((i) => i.status === "checking" || i.status === "ready" || ACTIVE.includes(i.status) || i.status === "reading"),
+  );
 
   const isAlreadyStored = async (item: IntakeItem): Promise<string | null> => {
     if (!matterId) return null;
