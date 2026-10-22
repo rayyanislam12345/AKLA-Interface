@@ -37,6 +37,7 @@ def main():
     todo = [a for a in approved if source(a) not in done][:limit]
     print(f"{len(todo)} to ingest ({len(done)} SharePoint files already in)", flush=True)
     os.makedirs(STAGE, exist_ok=True)
+    skipped = []
     for n, a in enumerate(todo, 1):
         print(f"[{n}/{len(todo)}] {a['filename']}", flush=True)
         staged = os.path.join(STAGE, a["filename"])
@@ -44,8 +45,24 @@ def main():
         while shutil.disk_usage(STAGE).free < 1_000_000_000 + 2 * a.get("size", 0):
             print("  (low disk, waiting)", flush=True)
             time.sleep(60)
-        shutil.copyfile(a["path"], staged)
+        # OneDrive sometimes times out fetching a file; retry, and if it still
+        # will not come down, skip it rather than end the whole run.
+        fetched = False
+        for attempt in range(3):
+            try:
+                shutil.copyfile(a["path"], staged)
+                fetched = True
+                break
+            except OSError as err:
+                print(f"  (download failed, attempt {attempt + 1}: {err.__class__.__name__})", flush=True)
+                time.sleep(30)
         subprocess.run([EVICT, a["path"]], capture_output=True)
+        if not fetched:
+            if os.path.exists(staged):
+                os.remove(staged)
+            skipped.append(a["filename"])
+            print("  -> skipped: OneDrive would not download it", flush=True)
+            continue
         key = ingest.manifest_key(source(a), os.stat(staged).st_mtime)
         row = {
             "path": staged, "source_path": source(a), "filename": a["filename"], "folder": "SharePoint",
@@ -68,6 +85,8 @@ def main():
         print(f"  -> {manifest[key]['outcome']}", flush=True)
         if n < len(todo):
             time.sleep(ingest.INGEST_THROTTLE_SECONDS)
+    if skipped:
+        print(f"Skipped (download failed): {skipped}", flush=True)
 
 
 if __name__ == "__main__":
