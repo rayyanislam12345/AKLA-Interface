@@ -62,7 +62,10 @@ export function useRedlineSuggestions(documentVersionId: string | undefined, rev
         .from("redline_suggestions")
         .select("*")
         .eq("document_version_id", documentVersionId!)
-        .in("review_type", [...REVIEW_TYPES]);
+        .in("review_type", [...REVIEW_TYPES])
+        // A finding placed into a later version from claude.ai (apply_review_to_version)
+        // has moved on: it is decided in that version's Changes list, not here.
+        .or("placement.is.null,placement.neq.superseded");
       if (reviewRunId) query = query.eq("review_run_id", reviewRunId);
       else query = query.is("review_run_id", null);
       const { data, error } = await query.order("created_at");

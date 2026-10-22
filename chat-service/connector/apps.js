@@ -6,12 +6,12 @@
 // Two apps: the changes panel (ui://akla/changes, changesPanelHtml.js), a
 // version's tracked changes with Accept / Reject per change, Accept all /
 // Reject all and Open in Hub, drawn under the reply of list_changes,
-// apply_tracked_changes and decide_changes; and the document panel
-// (ui://akla/document, documentPanelHtml.js), a version's text to read full
-// screen and quote from into the chat, under open_document_panel
-// (connector/tools/documentPanel.js says why it draws the text itself
-// instead of framing the Hub). What the spec asks of a server, and what
-// this module does for it:
+// apply_tracked_changes, apply_review_to_version and decide_changes; and
+// the document panel (ui://akla/document, documentPanelHtml.js), a
+// version's text to read full screen and quote from into the chat, under
+// open_document_panel (connector/tools/documentPanel.js says why it draws
+// the text itself instead of framing the Hub). What the spec asks of a
+// server, and what this module does for it:
 //
 // - the UI is a resource with a ui:// URI and the mimeType
 //   "text/html;profile=mcp-app", served by resources/list and resources/read
@@ -76,7 +76,7 @@ export const CHANGES_UI_META = Object.freeze({ ui: Object.freeze({ prefersBorder
 export function registerAppResources(server) {
   server.registerResource("AKLA changes panel", CHANGES_UI, {
     title: "AKLA changes panel",
-    description: "A version's tracked changes with Accept and Reject, drawn under list_changes, apply_tracked_changes and decide_changes.",
+    description: "A version's tracked changes with Accept and Reject, drawn under list_changes, apply_tracked_changes, apply_review_to_version and decide_changes.",
     mimeType: APP_MIME_TYPE,
     _meta: CHANGES_UI_META,
   }, async () => ({

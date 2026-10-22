@@ -20,7 +20,8 @@
 // tables), signIn.js (the Hub login, server-side), tools.js (what a lawyer's
 // Claude can look up, plus every module under tools/), projectWrites.js
 // (the one way a tool saves, the record and the caps), hubLinks.js (the
-// links back to the site), app.js (the routes). See docs/claude-ai-connector.md.
+// links back to the site), reviewRuns.js (the reviews start_review runs
+// detached), app.js (the routes). See docs/claude-ai-connector.md.
 
 import "dotenv/config";
 import { createServer } from "node:http";
@@ -32,6 +33,7 @@ import { createSignIn } from "./signIn.js";
 import { createHubTools, loadToolModules } from "./tools.js";
 import { appsOn } from "./apps.js";
 import { DEFAULT_HUB_URL } from "./hubLinks.js";
+import { activeReviewRuns, failOrphanedRuns, stopReviewRuns } from "./reviewRuns.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -50,7 +52,9 @@ const APPS = appsOn(process.env);
 for (const [name, value] of Object.entries({ SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY, VOYAGE_API_KEY: VOYAGE_KEY })) {
   if (!value) { console.error(`${name} is not set`); process.exit(1); }
 }
-if (!ANTHROPIC_KEY) console.warn("ANTHROPIC_API_KEY is not set: searches run without the question rewrite");
+// Not required to start: without it searches run without the question
+// rewrite, and start_review says in one sentence that reviews cannot run.
+if (!ANTHROPIC_KEY) console.warn("ANTHROPIC_API_KEY is not set: searches run without the question rewrite, and reviews cannot be started from claude.ai");
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 
@@ -83,7 +87,7 @@ const modules = await loadToolModules();
 const app = createApp({
   store: createSupabaseStore(db),
   signIn: createSignIn({ supabaseUrl: SUPABASE_URL, publishableKey: PUBLISHABLE_KEY, serviceClient: db, log }),
-  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, log, hubUrl: HUB_URL, modules, apps: APPS }),
+  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, anthropicKey: ANTHROPIC_KEY ?? null, log, hubUrl: HUB_URL, modules, apps: APPS }),
   isMember: async (userId) => {
     const { data, error } = await db.rpc("is_firm_member", { _user_id: userId });
     if (error) throw new Error(`is_firm_member: ${error.message}`);
@@ -94,6 +98,9 @@ const app = createApp({
   allowLoopback: ALLOW_LOOPBACK,
   apps: APPS,
   version,
+  // deploy.sh reads this before a restart, to warn that a review started
+  // from claude.ai would be cut off.
+  status: () => ({ reviewsRunning: activeReviewRuns().length }),
   log,
 });
 if (ALLOW_LOOPBACK) console.warn("CONNECTOR_ALLOW_LOOPBACK is set: http://localhost redirect URIs are accepted (dev only)");
@@ -108,10 +115,24 @@ server.listen(PORT, "127.0.0.1", () => {
   log(`hub-connector listening on 127.0.0.1:${PORT} as ${ISSUER} (commit ${version.commit ?? "unknown"}); redirects allowed to ${(REDIRECT_HOSTS.length ? REDIRECT_HOSTS : ["claude.ai", "claude.com"]).join(", ")}; Hub links to ${HUB_URL}; ${modules.length} tool module${modules.length === 1 ? "" : "s"} loaded; MCP Apps trial ${APPS ? "ON (changes panel)" : "off"}`);
 });
 
+// A review an earlier process was running when it was killed outright is
+// still "running" in the database; nothing runs it now, so it is marked
+// failed (reviewRuns.js). It never stops the start.
+failOrphanedRuns({ supabase: db, log }).catch(() => {});
+
+// systemd stops the connector on every deploy and allows it five seconds.
+// A review running here is aborted and marked failed with a plain sentence
+// inside that window (stopReviewRuns waits at most 2.5 s for it, then
+// writes); only then does the process exit, at the latest after five
+// seconds whatever is still open.
+let stopping = false;
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
+    if (stopping) return;
+    stopping = true;
     log(`${sig}: closing`);
-    server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5_000).unref();
+    const reviewsStopped = stopReviewRuns({ supabase: db, log }).catch(() => 0);
+    server.close(() => { reviewsStopped.finally(() => process.exit(0)); });
   });
 }

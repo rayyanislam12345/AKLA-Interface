@@ -339,8 +339,11 @@ export function splitReviewSegments(text, size = 30000) {
 // `lookUpLaw`, when given, runs the live search of official sources once the
 // document's text is known, so the law researched is the law this document
 // raises. It must not throw: a lookup that could not finish is recorded as a
-// limitation of the review, not a failure of it.
-export async function runReview({ supabase, anthropicKey, voyageKey, documentVersionId, userId, signal, notice, researchRunId = null, lookUpLaw = null }) {
+// limitation of the review, not a failure of it. `onStarted(runId)`, when
+// given, is called as soon as the run row exists (reviewDocument), so a
+// caller that runs the review detached (the claude.ai connector's
+// start_review) can hand the run id back before the passes finish.
+export async function runReview({ supabase, anthropicKey, voyageKey, documentVersionId, userId, signal, notice, researchRunId = null, lookUpLaw = null, onStarted = null }) {
   const { data: version, error: versionError } = await supabase
     .from("document_versions")
     .select("id, storage_path, matter_document:matter_documents(id, title, matter_id, document_type_id, document_type:document_types(name))")
@@ -364,7 +367,7 @@ export async function runReview({ supabase, anthropicKey, voyageKey, documentVer
     ownStoragePath: version.storage_path,
     ownDocumentId: md?.id ?? null,
     run: { document_version_id: documentVersionId },
-    userId, signal, notice, researchRunId, lookUpLaw,
+    userId, signal, notice, researchRunId, lookUpLaw, onStarted,
   });
   try {
     const inserted = await commitReview(supabase, { runId: review.runId, rows: review.tagged, passes: review.passes, coverage: review.coverage });
@@ -383,8 +386,9 @@ export async function runReview({ supabase, anthropicKey, voyageKey, documentVer
  * (`commitReview`) or first writes them into the file as tracked changes and
  * records them with their revision ids. Throws with a plain reason if no
  * pass could be trusted; the run is marked failed before the error leaves.
+ * `onStarted(runId)` is called once the run row is inserted, before any pass.
  */
-export async function reviewDocument({ supabase, anthropicKey, voyageKey, bytes, fileName, title = null, documentTypeId = null, documentTypeName = "document", matterId = null, ownStoragePath = null, ownDocumentId = null, run, userId, signal, notice, researchRunId = null, lookUpLaw = null }) {
+export async function reviewDocument({ supabase, anthropicKey, voyageKey, bytes, fileName, title = null, documentTypeId = null, documentTypeName = "document", matterId = null, ownStoragePath = null, ownDocumentId = null, run, userId, signal, notice, researchRunId = null, lookUpLaw = null, onStarted = null }) {
   const sourceHash = createHash("sha256").update(bytes).digest("hex");
   // A version-anchored caller names no artifact column at all, so the row it
   // inserts is the one it always inserted.
@@ -397,6 +401,8 @@ export async function reviewDocument({ supabase, anthropicKey, voyageKey, bytes,
   const runId = started.id;
 
   try {
+    // Inside the try: a callback that throws leaves the run failed, not running.
+    onStarted?.(runId);
     const { text: fullText } = await extractTextFromFile(new Blob([bytes]), fileName);
     if (!fullText?.trim()) throw new Error("No text content could be extracted from the document");
     notice?.(`Reviewing ${title ?? fileName} (${fullText.length.toLocaleString("en-GB")} characters).`);

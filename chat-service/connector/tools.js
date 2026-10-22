@@ -74,6 +74,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "show_document_paragraphs", "apply_tracked_changes", "make_clean_copy", // markup.js (the last two write)
   "list_precedents", "find_precedent_clauses", "read_precedent", // precedents.js
   "get_project_overview", "find_document_by_title", // projects.js
+  "start_review", "get_review", "apply_review_to_version", // reviews.js (the first and last write)
   "save_note_to_project", "save_draft_to_project", // saves.js (writes)
   "search_everything", // searchEverything.js
   "list_skills", "read_skill", // skills.js
@@ -84,7 +85,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   // APP_TOOL_NAMES, not here, so the list with the switch off is unchanged.
 ]);
 /**
- * The tools that save or change something (slices 2 to 4), in registration
+ * The tools that save or change something (slices 2 to 5), in registration
  * order. Each is `write: true` with `annotations: WRITE` in its module, is
  * listed only for a sign-in that carries hub:write, and records every call
  * in connector_actions. Pinned here, as MODULE_TOOL_NAMES is, so a read
@@ -95,6 +96,7 @@ export const WRITE_TOOL_NAMES = Object.freeze([
   "fill_standard_to_project", // fillStandardWrite.js
   "set_project_instructions", "label_version", "rename_document", "set_document_status", "create_document_record", "reindex_document", // housekeeping.js
   "apply_tracked_changes", "make_clean_copy", // markup.js
+  "start_review", "apply_review_to_version", // reviews.js
   "save_note_to_project", "save_draft_to_project", // saves.js
 ]);
 /** Every tool the connector offers, in registration order. */
@@ -212,6 +214,7 @@ export function stitchPassages(rows) {
  * @param {object} deps.supabase   service-role client
  * @param {string} deps.voyageKey
  * @param {Function} deps.anthropicJson   the quick model call retrieve.js rewrites queries with (may be null)
+ * @param {string} [deps.anthropicKey]     the AI key the Hub's review runs with (start_review, reviews.js); null when unset
  * @param {object} [deps.library]  the four library readers (tests stub them)
  * @param {Function} [deps.readFile]  (bytes, fileName) -> { blocks: [{ text }] } (tests stub it)
  * @param {Function} [deps.log]
@@ -221,7 +224,7 @@ export function stitchPassages(rows) {
  * @param {boolean} [deps.apps]    the MCP Apps trial (CONNECTOR_APPS=on, connector/apps.js): the changes panel's tools are added
  * @returns {Array<{ name, title, description, inputSchema, run: (input, ctx) => Promise<string>, write?: boolean, annotations?: object }>}
  */
-export function createHubTools({ supabase, voyageKey, anthropicJson = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null, apps = false }) {
+export function createHubTools({ supabase, voyageKey, anthropicJson = null, anthropicKey = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null, apps = false }) {
   const lib = { ...defaultLibrary, ...library };
   const textCache = new Map();
   const site = hubBase(hubUrl);
@@ -544,7 +547,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
   // function gets the readers and the helpers above; a name used twice is
   // a mistake two builders made at once, and stops the process at startup.
   const deps = {
-    supabase, voyageKey, anthropicJson, library: lib, readFile, log, now, hubUrl: site,
+    supabase, voyageKey, anthropicJson, anthropicKey: anthropicKey || null, library: lib, readFile, log, now, hubUrl: site,
     helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, textOfBytes, link, open, showPassages: passagesText },
     writes: projectWrites,
     apps: apps === true,

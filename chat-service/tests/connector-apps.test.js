@@ -1,7 +1,8 @@
 // The MCP Apps trial (connector/apps.js, CONNECTOR_APPS=on): the changes
-// panel (ui://akla/changes) under list_changes, decide_changes and
-// apply_tracked_changes, and the document panel (ui://akla/document) under
-// open_document_panel. With the switch off nothing changes: the same tools,
+// panel (ui://akla/changes) under list_changes, decide_changes,
+// apply_tracked_changes and apply_review_to_version, and the document panel
+// (ui://akla/document) under open_document_panel. With the switch off
+// nothing changes: the same tools,
 // no extension declared, no resources. With it on: the extension declared
 // in initialize, both pages listed and read with the MCP Apps mimeType and
 // their _meta, the tools linked to them, structuredContent beside the same
@@ -201,7 +202,7 @@ async function serve(s, { apps }) {
 }
 
 const markupInput = () => ({ versionId: V1, fileHash: HASH, ops: [{ op: 'replace', p: at(P_CAP), expected: P_CAP, text: CAPPED, why: 'Cap at fees paid, as instructed.' }] });
-const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL, 'fill_standard_to_project'];
+const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL, 'fill_standard_to_project', 'apply_review_to_version'];
 // The tools whose result is drawn by the document panel; the rest use the changes panel.
 const DOCUMENT_UI_TOOLS = [OPEN_TOOL, 'fill_standard_to_project'];
 

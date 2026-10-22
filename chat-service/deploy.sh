@@ -106,7 +106,17 @@ echo "Restarting the index worker…"
 ssh -i "$KEY" "$HOST" "sudo systemctl restart index-worker && sleep 2 && systemctl is-active index-worker && sudo journalctl -u index-worker -n 3 --no-pager -o cat"
 
 # The connector keeps no session (one MCP server per request), so a restart
-# costs a lawyer's claude.ai at most one retried call.
+# costs a lawyer's claude.ai at most one retried call. The exception is a
+# review started from claude.ai (start_review, connector/reviewRuns.js): it
+# runs inside the connector, and a restart stops it and marks it failed
+# ("The connector restarted during this review; start it again"). Its
+# /health counts only the connector's own reviews; the Hub chat's reviews
+# run in chat-service and are never touched here.
+reviews=$(ssh -i "$KEY" "$HOST" "curl -s -m 5 http://127.0.0.1:8095/health" | sed -n 's/.*"reviewsRunning":\([0-9]*\).*/\1/p' || true)
+if [ -n "$reviews" ] && [ "$reviews" != "0" ]; then
+  echo "  WARNING: $reviews review(s) started from claude.ai are running in the connector. This restart stops them and marks them failed; the lawyer will have to start them again. Ctrl-C now to wait instead."
+  sleep 10
+fi
 echo "Restarting the hub connector…"
 ssh -i "$KEY" "$HOST" "sudo systemctl restart hub-connector && sleep 2 && systemctl is-active hub-connector && sudo journalctl -u hub-connector -n 3 --no-pager -o cat"
 
