@@ -100,3 +100,16 @@ test("swatches come from the theme itself", () => {
   assert.equal(T.isTheme("slate"), true);
   assert.equal(T.isTheme(""), false);
 });
+
+test("every chat theme tells the Hub which of its own themes to wear (HUB_THEME in panel.js)", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("../panel.js", import.meta.url), "utf8");
+  const m = src.match(/var HUB_THEME = (\{[^}]+\})/);
+  assert.ok(m, "HUB_THEME is declared in panel.js");
+  const map = Function("return (" + m[1] + ")")();
+  const hubIds = ["warm", "blue", "pink", "orange", "green", "slate", "contrast", "night", "monokai"]; // src/ai/theme.ts
+  for (const t of T.THEMES) {
+    assert.ok(t.id in map, `${t.id} has a Hub theme`);
+    assert.ok(hubIds.includes(map[t.id]), `${t.id} maps to a Hub theme the Hub knows (${map[t.id]})`);
+  }
+});

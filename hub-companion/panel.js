@@ -43,7 +43,10 @@
 
   // The chat's themes (themes.js) and the Hub's own (src/ai/theme.ts) are two
   // lists; each chat theme is given the Hub theme closest to it.
-  var HUB_THEME = { default: "warm", akla: "warm", sky: "blue", rose: "pink", paper: "orange", slate: "slate", forest: "green", contrast: "contrast" };
+  // The Hub's nearest own theme for each chat theme (src/ai/theme.ts). The
+  // two pink-paper themes wear the Hub's pink: the paper is what the eye
+  // matches across the seam, not the accent.
+  var HUB_THEME = { default: "warm", akla: "warm", sky: "blue", rose: "pink", meadow: "pink", orchid: "pink", paper: "orange", slate: "slate", forest: "green", contrast: "contrast" };
 
   var LOAD_WAIT = 12000; // ms before "did not load" is shown
   var FRESH = 4000; // ms after a page is shown during which a new link may replace it outright

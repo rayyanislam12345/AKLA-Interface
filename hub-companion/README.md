@@ -73,8 +73,8 @@ What it does, and all it does:
   window). The button never shows in the ordinary Hub, only in the
   companion.
 - **Chat colours.** Looks for the claude.ai chat itself: Claude (no change),
-  AKLA navy, Sky blue, Rose pink, Warm paper, Slate, Forest and High
-  contrast, each in light and dark. Pick one in the panel bar or the settings page; it
+  AKLA navy, Sky blue, Rose pink, Pastel pink & green, Pink & purple, Warm
+  paper, Slate, Forest and High contrast, each in light and dark. Pick one in the panel bar or the settings page; it
   applies at once on every claude.ai tab and the panel bar matches.
 
 How the themes work: claude.ai paints everything from CSS variables on its
