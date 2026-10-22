@@ -1,0 +1,79 @@
+{
+  "id": "a97758e5-6273-42cb-a9e5-40c9aad16e71",
+  "name": "rfp-volume-i",
+  "description": "Draft Volume I (Instruction to Bidders) of a Pakistani PPP RFP by filling the AKLA standard master authored from the Karachi Port to Qayumabad Corridor Project RFP format. Takes a client-supplied fact list and extracts what it can, then asks for the rest one question at a time rather than in batches. Reproduces the master's Sindh Public Procurement Rules boilerplate verbatim, fills the Data Sheet and eligibility/evaluation thresholds, flags every figure carried over from Sindh PPP practice for confirmation, and marks genuinely bespoke content (the Terms of Reference, individual Bidding Forms) as drafting stubs rather than inventing it. Use whenever someone says draft Volume I, prepare the Instructions to Bidders, draft the ITB for a new RFP, or hands over a client brief for a tender.",
+  "instructions": "# Drafting Volume I: Instruction to Bidders\n\n**This is a fill-in job for Sections 1–9, and a genuine drafting job for Parts 2–5.** The Sindh\nPublic Procurement Rules-driven procedure in Sections 1 through 8 reflects a standing legal\nrequirement, not a choice made for one project, and is reproduced from the master essentially\nas-is. The Bid Data Sheet, the eligibility and evaluation thresholds, and the Terms of Reference\nare the deal's own facts, and some of them — the evaluation scoring in particular — decide who\nwins the tender. Treat those two halves differently: fill the first, and never fill the second\nwithout the Transaction Advisor's figures behind it.\n\nRun every command from the skill's own directory.\n\n## Workflow\n\n### 1. Get the facts\n\nIf a client list, brief or checklist exists, run it through the extractor first:\n\n```bash\ncd ~/.claude/skills/rfp-volume-i\npython3 scripts/read_template.py \"assets/Standard-Instructions-to-Bidders-AKLA.docx\" -o deal.yaml\npython3 scripts/intake_extract.py client_list.docx --merge deal.yaml\n```\n\nRead the extractor's report — it names the source line for every value it found, so each can be\nchecked rather than trusted blind. Then work through `references/intake-questions.md`, asking for\nwhat is still blank **one question at a time**, in the order that document sets out — parties and\ntimetable first, Bid Security and eligibility thresholds next, evaluation criteria last, and only\nwith input from whoever holds the Financial Model or the evaluation methodology. Never invent a\npercentage, tenor, PKR amount or scoring formula. If nothing is supplied, the value stays `[●]` and\nis reported as open.\n\nWhere the master carries a `[CONFIRM - ...]` marker — a figure carried over from Sindh PPP\npractice on the source RFP, such as the 15% abnormal-bid threshold or the 51%/49% consortium split\n— read the current value back and ask whether it holds for this deal, rather than treating either\nsilence or a default as an answer.\n\n### 2. Confirm before building\n\nRead back what will be filled, what stays `[●]`, which confirm markers are being changed versus\nkept, and which draft stubs (Part 5's sixteen headings, the individual Bidding Forms) still need\nbespoke content from elsewhere. Building is cheap; a draft with an unconfirmed evaluation threshold\ncirculated to bidders is not.\n\n### 3. Build\n\n```bash\npython3 scripts/build_itb.py deal.yaml -o \"Volume I - Instructions to Bidders [Project] [AKLA Draft] [Month DD, YYYY].docx\"\n```\n\nThe build clones the master and writes into existing runs, so the auto-numbering, the header and\nfooter, and the live table-of-contents field all come through untouched. Read the report it\nprints: `FILLED`, `LEFT OPEN`, `CONFIRM MARKERS` (replaced vs. still pending), and `DRAFT STUBS`\nstill to be written by hand.\n\n### 4. Prove nothing else moved, and audit — do not skip this\n\n```bash\npython3 scripts/check_itb.py \"…docx\" --against \"assets/Standard-Instructions-to-Bidders-AKLA.docx\"\n```\n\nThe change proof treats any difference from the master that is not at a `[●]` or `[CONFIRM]`\nmarker as a `FAIL`, along with a Section reference outside Part 1's nine sections, a numbering or\nstyle part that changed, or a paragraph/table count drift. It then reports every remaining `[●]`,\n`[CONFIRM]` and `[DRAFT]` marker by zone. `references/known-issues.md` explains which `WARN`\nfindings (mostly table and list labels flagged by the truncation check) are expected noise. **If\nit prints a `FAIL`, do not hand the file over.**\n\n### 5. Report\n\nTell the user, in order: the file name; what was filled, by variable; what remains `[●]`, by\nSection or Annexure; which confirm markers were changed and which were kept as the KPQC default;\nand the draft stubs still needing content, naming who should supply each (per\n`references/schedules.md`). Do not produce a second file for this — the report is the message.\n\n## Essentials\n\n| Property | Value |\n|---|---|\n| Paper | A4 portrait, ~0.5\" margins on all sides |\n| Header/footer | \"VOLUME I: INSTRUCTION TO BIDDERS / REQUEST FOR PROPOSAL / [PROJECT]\" running header; \"N \\| P a g e\" footer |\n| Numbering | Word auto-numbering, restarting per Part; every cross-reference is typed text |\n| Fill surface | 69 value blanks (41 named variables), 22 confirm markers, 29 draft stubs |\n| Sections 1–8 | Reproduced from the Sindh SPP Rules-driven KPQC exemplar, essentially verbatim |\n| Part 5 / Bidding Forms | Structural scaffold only — content is genuinely bespoke, never invented |\n\nThe full measured format is in `references/itb-format.md`, the complete variable list in\n`references/fill-map.md`, the one-by-one intake order in `references/intake-questions.md`, and\nwhat Parts 2–5 need and from whom in `references/schedules.md`.\n\n## What this skill will not do\n\nInvent a Bid Security amount, an eligibility threshold, or an evaluation scoring formula. Silently\naccept or silently drop a `[CONFIRM - ...]` marker. Draft Part 5's Terms of Reference or an\nindividual Bidding Form's body from nothing — it drafts from the concession agreement or form bank\nactually in hand, or reports the gap. Ask for all its facts in one batch — it asks one at a time,\nper `references/intake-questions.md`.\n\n## Sharing this skill\n\n`./package.sh` zips `SKILL.md`, `INSTALL.md`, `install.sh`, `references/`, `scripts/` and `assets/`\nto the Desktop. The master ships inside `assets/` so the folder is self-contained. Nothing else,\nand no connection to any wider system.",
+  "produces_document": false,
+  "created_by": "ef5f1fd4-9aa8-44cb-bbc1-09cad426403e",
+  "created_at": "2026-09-14 10:18:19.517205+00",
+  "updated_at": "2026-09-14 10:18:18.81+00",
+  "kind": "claude_skill",
+  "anthropic_skill_id": "skill_01H93RC78Ew3RmGnUpZF5z4v",
+  "anthropic_version_id": "skver_01VLEzqpBWUz4bFLedFYoPNT",
+  "skill_files": [
+    {
+      "path": "rfp-volume-i/references/schedules.md",
+      "size": 4256
+    },
+    {
+      "path": "rfp-volume-i/references/itb-format.md",
+      "size": 4756
+    },
+    {
+      "path": "rfp-volume-i/references/known-issues.md",
+      "size": 2688
+    },
+    {
+      "path": "rfp-volume-i/references/fill-map.md",
+      "size": 4083
+    },
+    {
+      "path": "rfp-volume-i/references/intake-questions.md",
+      "size": 3620
+    },
+    {
+      "path": "rfp-volume-i/install.sh",
+      "size": 739
+    },
+    {
+      "path": "rfp-volume-i/INSTALL.md",
+      "size": 1753
+    },
+    {
+      "path": "rfp-volume-i/scripts/build_master.py",
+      "size": 75171
+    },
+    {
+      "path": "rfp-volume-i/scripts/docbuilder.py",
+      "size": 10605
+    },
+    {
+      "path": "rfp-volume-i/scripts/docxlib.py",
+      "size": 11032
+    },
+    {
+      "path": "rfp-volume-i/scripts/build_itb.py",
+      "size": 6826
+    },
+    {
+      "path": "rfp-volume-i/scripts/check_itb.py",
+      "size": 6408
+    },
+    {
+      "path": "rfp-volume-i/scripts/read_template.py",
+      "size": 15624
+    },
+    {
+      "path": "rfp-volume-i/scripts/intake_extract.py",
+      "size": 4908
+    },
+    {
+      "path": "rfp-volume-i/SKILL.md",
+      "size": 6344
+    },
+    {
+      "path": "rfp-volume-i/assets/Standard-Instructions-to-Bidders-AKLA.docx",
+      "size": 60201
+    }
+  ]
+}
