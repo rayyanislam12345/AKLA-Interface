@@ -309,6 +309,11 @@ button.link { border: none; min-height: 32px; padding: 0 4px; color: var(--brand
     var tools = el("div", "tools");
     var modes = state.hostContext.availableDisplayModes || [];
     if (modes.indexOf && modes.indexOf("fullscreen") >= 0) tools.appendChild(button(isFullscreen() ? "Back to the chat" : "Full screen", "link", function () { setMode(isFullscreen() ? "inline" : "fullscreen"); }));
+    // Picture in picture, where the host offers it: the document floats and
+    // stays in view while the chat goes on (the nearest a panel comes to
+    // sitting beside the chat).
+    var floating = state.hostContext.displayMode === "pip";
+    if (modes.indexOf && modes.indexOf("pip") >= 0) tools.appendChild(button(floating ? "Back into the reply" : "Keep in view", "link", function () { setMode(floating ? "inline" : "pip"); }));
     if (d.hubUrl) tools.appendChild(button("Open in Hub ↗", "link", function () { openLink(d.hubUrl); }));
     app.appendChild(tools);
     if (state.linkShown && d.hubUrl) app.appendChild(el("div", "url", d.hubUrl));
@@ -413,7 +418,7 @@ button.link { border: none; min-height: 32px; padding: 0 4px; color: var(--brand
   // ------------------------------------------------------------ start
   request("ui/initialize", {
     appInfo: { name: "AKLA document panel", version: "0.1.0" },
-    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+    appCapabilities: { availableDisplayModes: ["inline", "fullscreen", "pip"] },
     protocolVersion: PROTOCOL_VERSION
   }, 30000).then(function (result) {
     result = result || {};

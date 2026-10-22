@@ -82,7 +82,7 @@ export function createDocumentPanelTools(deps) {
     {
       name: OPEN_TOOL,
       title: "Open a document in a panel to quote from",
-      description: `Open a project document version in an interactive panel under the reply (where Claude shows one): the document's text, which the lawyer can read full screen, select a passage in, and send to the chat as a quoted passage with its versionId, the same as highlighting it in the Hub beside the chat. Use it when the lawyer asks to open, show or look through a document to pick a clause. It returns no document text to you: read_document reads the text, and show_document_paragraphs opens a Word version for a mark-up. Nothing is changed.`,
+      description: `Open a project document version in an interactive panel under the reply (where Claude shows one): the document's text, which the lawyer can read full screen, select a passage in, and send to the chat as a quoted passage with its versionId, the same as highlighting it in the Hub beside the chat. Use it when the lawyer asks to open, show or look through a document to pick a clause. The panel sits under your reply, with Full screen (and Keep in view, where Claude offers it); it cannot sit beside the chat. When the lawyer wants the document beside the chat, give its "Open in Hub:" address written out on its own line: in the Claude desktop app a click opens it in the side pane next to the chat, and in Chrome with the firm's AKLA Hub companion it opens in the drawer beside the chat. It returns no document text to you: read_document reads the text, and show_document_paragraphs opens a Word version for a mark-up. Nothing is changed.`,
       inputSchema: {
         versionId: z.string().describe("The version's id, from list_project_documents or find_document_by_title."),
         from: z.number().int().min(1).optional().describe("Used by the panel to fetch the next page: the paragraph to start from."),
@@ -102,6 +102,7 @@ export function createDocumentPanelTools(deps) {
           `versionId: ${v.id}`,
           open("version", v.id),
           "Where no panel shows, read_document reads the text and the lawyer can highlight a passage in the Hub.",
+          "The panel sits under the reply and cannot be moved beside the chat; for that, give the lawyer the Open in Hub address above, written out: a click opens it in the Claude desktop app's side pane, or in the AKLA Hub companion's drawer in Chrome.",
         ];
         return { text: lines.join("\n"), structuredContent };
       },
