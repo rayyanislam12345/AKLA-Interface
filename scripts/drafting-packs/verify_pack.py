@@ -339,6 +339,12 @@ def write_review(cfg, out_dir, repo):
         add("  %d example paragraphs/tables were kept (example text replaced by [●])." % sh["examples"])
         for t in sh.get("toc") or []:
             add("  Contents: " + t)
+    elif rep.get("composed"):
+        sh = rep.get("shell") or {}
+        add("  A fresh firm standard: the base's furniture and the look of its paragraph kinds were kept")
+        add("  (%d top-level blocks deleted) and %d paragraphs of new firm text were written in those kinds;"
+            % (sh.get("deleted", 0), rep["composed"]))
+        add("  none of the base's own clauses remain.")
     else:
         add("  The whole text of the base, with revisions accepted, comments removed and the deal facts")
         add("  below replaced by [●].")

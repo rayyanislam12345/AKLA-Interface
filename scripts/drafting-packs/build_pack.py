@@ -51,6 +51,35 @@ firm's own. Every change is counted in report.json "spelling".
 "unquote_terms": [{"term", "reason"}] puts a quoted defined term in the
 firm's form: “Term” loses its quotation marks and is bold.
 
+Wave-2 options (each runs only when its key is in the config, so a config
+without them builds exactly as before):
+  "font_map" / "size_map"   move fonts ({"Times New Roman": "Arial"}, theme
+                            fonts too) and sizes in half-points ({"25": "22"})
+                            in the story parts, styles and list levels
+  "margins_twips"           set every section's margins (twips)
+  "turn_margins": false     landscape -> portrait keeps the margins as they
+                            are instead of turning them with the page
+  "keep_landscape": true    a landscape page stays landscape, on A4
+  "fit_tables": true        tables wider than the text width (body, headers,
+                            footers) are scaled down to it
+  "cut": "shell"            a form pack cut like a shell (a fresh standard:
+                            the firm's furniture and kinds only)
+  "compose"                 [{"after": <block>, "blocks": [{"kind", "text"}]}]
+                            writes the firm's own text in the pack's kinds
+                            (**Term** bold); "compose_spacer" (a kind) puts an
+                            empty paragraph after each block; "compose_restart"
+                            (kinds) starts each run of those lists again at (a)
+  "drop_examples": true     the shell's [●] examples go once kinds.json holds
+                            their look (a composed pack)
+  "heading_numbers"         {"pattern", "numId", "lvlText"}: a typed heading
+                            line ("Article 2") becomes level 1 of its clauses'
+                            list, so 2.1 counts from it
+  "unquote_all": true       every quoted defined term in a defining formula
+                            takes the firm's form (bold, no quotation marks)
+  shell "table_headers_kept" a list of example tables whose first row keeps its
+                            words, or {table: n} for n header rows, blanked like
+                            furniture; shell "table_rows" {table: rows kept}
+
 Edits are made on the XML. Parts that are not changed are written back
 byte-for-byte (styles, numbering, theme, fontTable, settings and any header
 or footer the pack does not need to change).
@@ -58,6 +87,7 @@ or footer the pack does not need to change).
 The config holds client facts (literal names to blank), so it lives with
 the outputs, never in the repository.
 """
+import collections
 import copy
 import json
 import os
@@ -676,7 +706,7 @@ def _is_blank(s):
 # --------------------------------------------------------------------------
 # page set-up, letterhead, notes, orphans
 # --------------------------------------------------------------------------
-def to_a4(root):
+def to_a4(root, turn=True, keep_landscape=False):
     changes = []
     for i, sp in enumerate(root.iter(w("sectPr"))):
         sz = sp.find(w("pgSz"))
@@ -688,6 +718,14 @@ def to_a4(root):
         name = PAPER.get(key, "%sx%s" % key)
         if name == "A4" and not land:
             continue
+        if keep_landscape and land:
+            # "keep_landscape": a wide table's page stays landscape, on A4
+            if name == "A4":
+                continue
+            sz.set(w("w"), str(A4_H))
+            sz.set(w("h"), str(A4_W))
+            changes.append("section %d: %s landscape -> A4 landscape (margins kept)" % (i + 1, name))
+            continue
         sz.set(w("w"), str(A4_W))
         sz.set(w("h"), str(A4_H))
         if sz.get(w("orient")) is not None:
@@ -695,12 +733,12 @@ def to_a4(root):
         if sz.get(w("code")) is not None:
             sz.set(w("code"), "9")
         mar = sp.find(w("pgMar"))
-        if land and mar is not None:
+        if land and mar is not None and turn:
             # landscape -> portrait: the margins turn with the page
             t, r, b, l = (wa(mar, k) for k in ("top", "right", "bottom", "left"))
             mar.set(w("top"), l); mar.set(w("right"), t); mar.set(w("bottom"), r); mar.set(w("left"), b)
         changes.append("section %d: %s%s -> A4 portrait (margins kept%s)" % (i + 1, name, " landscape" if land else "",
-                                                                           ", turned with the page" if land else ""))
+                                                                           ", turned with the page" if land and turn else ""))
     return changes
 
 
@@ -1116,15 +1154,18 @@ def blank_note(pkg, fid):
         pkg.touch(part)
 
 
-def strip_table_to_example(tbl, keep_rows=2, keep_footnote=False, first_text=BLANK, log=None):
+def strip_table_to_example(tbl, keep_rows=2, keep_footnote=False, first_text=BLANK, log=None, keep_header=False):
     """Keep the first `keep_rows` rows; every cell keeps one paragraph whose
     text becomes [●] (empty cells stay empty); the very first cell's text
-    becomes `first_text`."""
+    becomes `first_text`. With keep_header the first row keeps its words
+    (column headings are the firm's furniture)."""
     rows = tbl.findall(w("tr"))
     for tr in rows[keep_rows:]:
         tbl.remove(tr)
     first = True
-    for tr in tbl.findall(w("tr")):
+    for ri, tr in enumerate(tbl.findall(w("tr"))):
+        if ri < int(keep_header):
+            continue
         for tc in tr.findall(w("tc")):
             paras = tc.findall(w("p"))
             had_text = any(para_text(p).strip() for p in paras)
@@ -2560,6 +2601,354 @@ def unquote_terms(pkg, terms, log):
 # --------------------------------------------------------------------------
 # the build
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# wave-2 options (each runs only when its config key is present, so a
+# config without them builds exactly as before)
+# --------------------------------------------------------------------------
+FONT_ATTRS = ("ascii", "hAnsi", "cs", "eastAsia")
+FONT_PARTS = re.compile(r"^word/(document|header\d+|footer\d+|footnotes|endnotes|styles|numbering)\.xml$")
+
+
+def convert_fonts(pkg, font_map, size_map, extra=()):
+    """"font_map": {"Times New Roman": "Arial"} and "size_map": {"25": "22"}
+    (half-points): every explicit font and size in the story parts, styles
+    (document defaults included) and list levels is moved to the house
+    font and size. A theme font reference (asciiTheme ...) whose theme
+    typeface is mapped is replaced by the explicit house font. `extra` are
+    detached elements (kind examples) to convert as well."""
+    theme = {}
+    for part in [p for p in pkg.parts() if re.match(r"^word/theme/theme\d+\.xml$", p)]:
+        root = pkg.xml(part)
+        A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        for key, tag in (("minor", "minorFont"), ("major", "majorFont")):
+            el = root.find(".//%s%s/%slatin" % (A, tag, A))
+            if el is not None:
+                theme[key] = el.get("typeface")
+    counts = collections.Counter()
+
+    def fix(root, where):
+        n = 0
+        for rf in root.iter(w("rFonts")):
+            for a in FONT_ATTRS:
+                v = rf.get(w(a))
+                if v in font_map:
+                    rf.set(w(a), font_map[v])
+                    counts["%s -> %s" % (v, font_map[v])] += 1
+                    n += 1
+            for a in ("asciiTheme", "hAnsiTheme", "cstheme", "eastAsiaTheme"):
+                v = rf.get(w(a))
+                if v is None:
+                    continue
+                face = theme.get("major" if v.startswith("major") else "minor")
+                if face in font_map:
+                    del rf.attrib[w(a)]
+                    plain = {"asciiTheme": "ascii", "hAnsiTheme": "hAnsi", "cstheme": "cs", "eastAsiaTheme": "eastAsia"}[a]
+                    rf.set(w(plain), font_map[face])
+                    counts["theme %s (%s) -> %s" % (v, face, font_map[face])] += 1
+                    n += 1
+        for tag in ("sz", "szCs"):
+            for el in root.iter(w(tag)):
+                v = el.get(w("val"))
+                if v in size_map:
+                    el.set(w("val"), size_map[v])
+                    counts["size %s -> %s half-points" % (v, size_map[v])] += 1
+                    n += 1
+        return n
+
+    for part in [p for p in pkg.parts() if FONT_PARTS.match(p)]:
+        if fix(pkg.xml(part), part):
+            pkg.touch(part)
+    for el in extra:
+        if el is not None and el.getparent() is None:
+            fix(el, "example")
+    # a paragraph or run with no explicit font falls back to the document
+    # defaults: make sure those name the house font
+    if pkg.has("word/styles.xml") and font_map:
+        st = pkg.xml("word/styles.xml")
+        house = sorted(set(font_map.values()))[0]
+        rpr = st.find("w:docDefaults/w:rPrDefault/w:rPr", NS)
+        if rpr is not None:
+            rf = rpr.find(w("rFonts"))
+            if rf is None:
+                rf = etree.Element(w("rFonts"))
+                rpr.insert(0, rf)
+            if not any(rf.get(w(a)) for a in FONT_ATTRS[:2]):
+                for a in list(rf.attrib):
+                    if a.endswith("Theme") or a.endswith("theme"):
+                        del rf.attrib[a]
+                rf.set(w("ascii"), house)
+                rf.set(w("hAnsi"), house)
+                rf.set(w("cs"), house)
+                counts["document default font set to %s" % house] += 1
+                pkg.touch("word/styles.xml")
+    return dict(counts)
+
+
+def set_margins(root, margins):
+    """"margins_twips": {"top": ..., "bottom": ..., "left": ..., "right": ...}
+    written on every section."""
+    out = []
+    for i, sp in enumerate(root.iter(w("sectPr"))):
+        mar = sp.find(w("pgMar"))
+        if mar is None:
+            continue
+        was = {k: wa(mar, k) for k in margins}
+        for k, v in margins.items():
+            mar.set(w(k), str(v))
+        out.append("section %d: margins %s -> %s" % (i + 1, was, margins))
+    return out
+
+
+def fit_tables(root, pkg=None):
+    """Scale every table wider than the text width (after the page turned
+    or shrank) down to the text width: grid, table width and cell widths
+    alike, in proportion. With `pkg`, tables in headers and footers too."""
+    sects = list(root.iter(w("sectPr")))
+    if not sects:
+        return []
+    sp = sects[-1]
+    sz, mar = sp.find(w("pgSz")), sp.find(w("pgMar"))
+    text_w = int(wa(sz, "w", "0")) - int(wa(mar, "left", "0")) - int(wa(mar, "right", "0"))
+    out = []
+    body = root.find(w("body"))
+    tables = [(i, b) for i, b in enumerate(body_blocks(body)) if b.tag == w("tbl")]
+    if pkg is not None:
+        for part in [p for p in pkg.parts() if re.match(r"^word/(header|footer)\d+\.xml$", p)]:
+            tables += [(part, t) for t in pkg.xml(part).iter(w("tbl"))]
+    for i, b in tables:
+        if b.tag != w("tbl"):
+            continue
+        tblpr = b.find(w("tblPr"))
+        tw = tblpr.find(w("tblW")) if tblpr is not None else None
+        ind = tblpr.find(w("tblInd")) if tblpr is not None else None
+        grid = [g for g in b.find(w("tblGrid")).findall(w("gridCol"))] if b.find(w("tblGrid")) is not None else []
+        gw = sum(int(wa(g, "w", "0")) for g in grid)
+        width = int(wa(tw, "w", "0")) if tw is not None and wa(tw, "type") == "dxa" else gw
+        off = int(wa(ind, "w", "0")) if ind is not None and wa(ind, "type", "dxa") == "dxa" else 0
+        if not width or width + off <= text_w + 30:
+            continue
+        f = (text_w - max(off, 0)) / float(width + 0)
+        for g in grid:
+            g.set(w("w"), str(int(int(wa(g, "w", "0")) * f)))
+        if tw is not None and wa(tw, "type") == "dxa":
+            tw.set(w("w"), str(int(width * f)))
+        for tcw in b.iter(w("tcW")):
+            if wa(tcw, "type", "dxa") == "dxa" and wa(tcw, "w"):
+                tcw.set(w("w"), str(int(int(wa(tcw, "w")) * f)))
+        if isinstance(i, str) and pkg is not None:
+            pkg.touch(i)
+        out.append({"block": i, "was_twips": width, "now_twips": int(width * f), "text_width_twips": text_w})
+    return out
+
+
+DEFINING_QUOTE = re.compile(r"[“\"]([A-Z][^“”\"\n]{0,70}?)[”\"](?=\s*(?:\)|,|;|and\b|or\b|means\b|shall\s+mean|shall\s+have|has\s+the\s+meaning|shall\s+bear))")
+
+
+def defined_terms_quoted(pkg, skip=()):
+    """"unquote_all": every quoted defined term in a defining formula
+    ((the “Term”) or “Term” means ...), for unquote_terms."""
+    found = collections.OrderedDict()
+    for part in [x for x in pkg.parts() if STORY.match(x)]:
+        for p in pkg.xml(part).iter(w("p")):
+            for m in DEFINING_QUOTE.finditer(para_text(p)):
+                t = m.group(1).strip()
+                if t and t not in skip and len(t.split()) <= 8:
+                    found[t] = True
+    return [{"term": t, "reason": "a quoted defined term made the firm's form"} for t in sorted(found, key=lambda x: -len(x))]
+
+
+def number_headings(pkg, body, spec):
+    """"heading_numbers": {"pattern": "^Article (\\d+)$", "numId": "13",
+    "lvlText": "Article %1"}: a heading number typed as its own line
+    ("Article 2" above the article's title) becomes level 1 of the clause
+    list the article's clauses are on, so "2.1" counts from the heading in
+    Word and LibreOffice alike. The list's first level, used by no other
+    paragraph, takes the typed line's look; every paragraph on another num
+    of the same list is moved onto `numId` (their start overrides are no
+    longer needed)."""
+    rx = re.compile(spec["pattern"])
+    nroot = pkg.xml("word/numbering.xml")
+    num_id = str(spec["numId"])
+    absid = None
+    for n in nroot.findall(w("num")):
+        if wa(n, "numId") == num_id:
+            absid = wa(n.find(w("abstractNumId")), "val")
+    if absid is None:
+        raise SystemExit("heading_numbers: no w:num %s" % num_id)
+    same = {wa(n, "numId") for n in nroot.findall(w("num")) if wa(n.find(w("abstractNumId")), "val") == absid}
+    absn = [a for a in nroot.findall(w("abstractNum")) if wa(a, "abstractNumId") == absid][0]
+    lvl0 = [l for l in absn.findall(w("lvl")) if wa(l, "ilvl") == "0"][0]
+    heads = [p for p in body_paragraphs(body) if rx.match(para_text(p).strip())]
+    if not heads:
+        return {"headings": 0}
+    for p in body_paragraphs(body):
+        ppr = p.find(w("pPr"))
+        np_ = ppr.find(w("numPr")) if ppr is not None else None
+        if np_ is not None and wa(np_.find(w("ilvl")), "val") == "0" and wa(np_.find(w("numId")), "val") in same:
+            raise SystemExit("heading_numbers: level 1 of list %s is already used" % absid)
+    first = heads[0]
+    tr = text_runs(first)
+    look = copy.deepcopy(tr[0].find(w("rPr"))) if tr and tr[0].find(w("rPr")) is not None else None
+    for tag, val in (("start", "1"), ("numFmt", "decimal"), ("lvlText", spec.get("lvlText", "Article %1"))):
+        el = lvl0.find(w(tag))
+        el.set(w("val"), val)
+    if lvl0.find(w("suff")) is None:
+        suff = etree.Element(w("suff"))
+        suff.set(w("val"), "nothing")
+        lvl0.find(w("lvlText")).addprevious(suff)
+    for tag in ("pPr", "rPr"):
+        old = lvl0.find(w(tag))
+        if old is not None:
+            lvl0.remove(old)
+    lp = etree.SubElement(lvl0, w("pPr"))
+    jc = etree.SubElement(lp, w("jc"))
+    jc.set(w("val"), spec.get("jc", "center"))
+    ind = etree.SubElement(lp, w("ind"))
+    ind.set(w("left"), "0")
+    ind.set(w("firstLine"), "0")
+    if look is not None:
+        lvl0.append(look)
+    pkg.touch("word/numbering.xml")
+    for p in heads:
+        ppr = p.find(w("pPr"))
+        for ch in list(p):
+            if ch is not ppr:
+                p.remove(ch)
+        set_numpr(p, num_id, 0)
+        old_ind = p.find("w:pPr/w:ind", NS)
+        if old_ind is not None:
+            old_ind.getparent().remove(old_ind)
+    moved = 0
+    for p in body_paragraphs(body):
+        ppr = p.find(w("pPr"))
+        np_ = ppr.find(w("numPr")) if ppr is not None else None
+        if np_ is not None and wa(np_.find(w("numId")), "val") in same - {num_id}:
+            np_.find(w("numId")).set(w("val"), num_id)
+            moved += 1
+    return {"headings": len(heads), "list": absid, "numId": num_id, "lvlText": spec.get("lvlText", "Article %1"), "clauses_moved_onto_it": moved}
+
+
+BOLD_MARK = re.compile(r"\*\*(.+?)\*\*")
+
+
+def compose_paragraph(model, text):
+    """A new paragraph in the look of `model` (a kind's example paragraph):
+    its pPr and its first text run's rPr, reading `text`. **Term** is
+    written bold (a defined term), a tab as Word's tab."""
+    p = etree.Element(w("p"))
+    ppr = model.find(w("pPr"))
+    if ppr is not None:
+        ppr = copy.deepcopy(ppr)
+        for x in ppr.findall(w("sectPr")) + ppr.findall(w("pPrChange")):
+            ppr.remove(x)
+        p.append(ppr)
+    tr = text_runs(model)
+    base = tr[0].find(w("rPr")) if tr else None
+    if base is not None and "**" in text:
+        # bold is marked: the rest of the text is not bold even where the
+        # model's first run (a definition's term) is
+        base = copy.deepcopy(base)
+        for x in base.findall(w("b")) + base.findall(w("bCs")):
+            base.remove(x)
+    pos = 0
+    pieces = []
+    for m in BOLD_MARK.finditer(text):
+        if m.start() > pos:
+            pieces.append((text[pos:m.start()], False))
+        pieces.append((m.group(1), True))
+        pos = m.end()
+    if pos < len(text):
+        pieces.append((text[pos:], False))
+    for chunk, bold in pieces:
+        for k, seg in enumerate(chunk.split("\t")):
+            if k:
+                r = etree.SubElement(p, w("r"))
+                if base is not None:
+                    r.append(copy.deepcopy(base))
+                etree.SubElement(r, w("tab"))
+            if not seg:
+                continue
+            r = etree.SubElement(p, w("r"))
+            rpr = copy.deepcopy(base) if base is not None else None
+            if bold:
+                if rpr is None:
+                    rpr = etree.Element(w("rPr"))
+                if rpr.find(w("b")) is None:
+                    b = etree.Element(w("b"))
+                    # w:b sits after rStyle/rFonts in the schema order
+                    at = 0
+                    for j, ch in enumerate(rpr):
+                        if ch.tag in (w("rStyle"), w("rFonts")):
+                            at = j + 1
+                    rpr.insert(at, b)
+                    rpr.insert(at + 1, etree.Element(w("bCs")))
+            if rpr is not None:
+                r.append(rpr)
+            set_text(etree.SubElement(r, w("t")), seg)
+    return p
+
+
+def restart_num(pkg, p):
+    """Put paragraph p (a list item) on a new w:num of the same list whose
+    level starts again at 1, as the engine's write op does for a new
+    (a)/(b) list."""
+    np_ = p.find("w:pPr/w:numPr", NS)
+    if np_ is None or not pkg.has("word/numbering.xml"):
+        return None
+    nid, ilvl = wa(np_.find(w("numId")), "val"), wa(np_.find(w("ilvl")), "val", "0")
+    nroot = pkg.xml("word/numbering.xml")
+    src = [n for n in nroot.findall(w("num")) if wa(n, "numId") == nid]
+    if not src:
+        return None
+    new_id = str(max(int(wa(n, "numId")) for n in nroot.findall(w("num"))) + 1)
+    num = etree.Element(w("num"))
+    num.set(w("numId"), new_id)
+    an = etree.SubElement(num, w("abstractNumId"))
+    an.set(w("val"), wa(src[0].find(w("abstractNumId")), "val"))
+    ov = etree.SubElement(num, w("lvlOverride"))
+    ov.set(w("ilvl"), ilvl)
+    so = etree.SubElement(ov, w("startOverride"))
+    so.set(w("val"), "1")
+    nroot.findall(w("num"))[-1].addnext(num)
+    pkg.touch("word/numbering.xml")
+    np_.find(w("numId")).set(w("val"), new_id)
+    return new_id
+
+
+def compose(anchors, held, log, spacer=None, pkg=None, restart=()):
+    """"compose": [{"after": <block>, "blocks": [{"kind", "text"}]}]: write
+    the firm's own text into the pack in its kinds, in order after the
+    anchor block (a fresh standard in the firm's layout). With
+    "compose_spacer" (a kind), an empty paragraph of that kind follows each
+    block, as the firm's files space paragraphs with empty ones."""
+    n = 0
+    for anchor, blocks in anchors:
+        at = anchor
+        prev = None
+        cur_num = {}
+        for blk in blocks:
+            model = held.get(blk["kind"])
+            if model is None:
+                raise SystemExit("compose: no kind %r in this pack" % blk["kind"])
+            p = compose_paragraph(model, blk.get("text", ""))
+            if blk["kind"] in restart and pkg is not None:
+                # "compose_restart": each run of these list kinds starts again at (a)
+                if prev != blk["kind"]:
+                    cur_num[blk["kind"]] = restart_num(pkg, p)
+                elif cur_num.get(blk["kind"]):
+                    p.find("w:pPr/w:numPr/w:numId", NS).set(w("val"), cur_num[blk["kind"]])
+            prev = blk["kind"]
+            at.addnext(p)
+            at = p
+            n += 1
+            if spacer is not None and not blk.get("no_space"):
+                sp = compose_paragraph(held[spacer], "")
+                at.addnext(sp)
+                at = sp
+    log.append(("word/document.xml", "", "%d paragraphs of the firm's own text written in the pack's kinds" % n, "composed"))
+    return n
+
+
 def prepare(pkg):
     """Accept revisions everywhere and remove comments."""
     acc = {}
@@ -2585,6 +2974,9 @@ def build(cfg, out_dir):
     doc = pkg.main_part()
     root = pkg.xml(doc)
     body = root.find(w("body"))
+    # "cut": "shell" cuts a form pack like a shell (a fresh standard: the
+    # firm's furniture and kinds, its text written by "compose")
+    shell_cut = cfg["mode"] == "shell" or cfg.get("cut") == "shell"
     # typed clause and limb numbers become Word's own numbering (before any
     # blanking, so the typed numbers are read as the base has them)
     if cfg.get("auto_number", cfg["mode"] == "form" or cfg["mode"] == "shell"):
@@ -2596,7 +2988,7 @@ def build(cfg, out_dir):
         for sel in cfg.get("replace_paragraphs", {}):
             skip.add(select(body, sel))
         only = None
-        if cfg["mode"] == "shell":
+        if shell_cut:
             # a shell keeps only its furniture and examples: convert those
             sh = cfg["shell"]
             only = set()
@@ -2606,6 +2998,8 @@ def build(cfg, out_dir):
         report["auto_number"] = auto_number(pkg, only=only, skip=skip)
     else:
         report["auto_number"] = None
+    if cfg.get("heading_numbers"):
+        report["heading_numbers"] = number_headings(pkg, body, cfg["heading_numbers"])
     styles = style_map(pkg)
     blanker = Blanker(cfg.get("literals", []), cfg.get("keep_literals", []),
                       detectors=cfg.get("detectors", True))
@@ -2620,8 +3014,9 @@ def build(cfg, out_dir):
         held[name] = select(body, sel)
     held_tables = {name: select(body, sel) for sel, name in tables_sel.items()}
     fn_para = select(body, fn_sel) if fn_sel is not None else None
+    comp_anchors = [(select(body, c["after"]), c["blocks"]) for c in cfg.get("compose", [])]
 
-    if cfg["mode"] == "shell":
+    if shell_cut:
         shell = cfg["shell"]
         keep = {int(k): v for k, v in shell.get("keep", {}).items()}       # furniture: mode
         examples = {int(k): v for k, v in shell.get("examples", {}).items()}  # block -> kind name
@@ -2641,7 +3036,14 @@ def build(cfg, out_dir):
                     blank_note(pkg, wa(fr.find(w("footnoteReference")), "id"))
                 continue
             if i in ex_tables:
-                strip_table_to_example(b)
+                kh = shell.get("table_headers_kept", [])
+                kh = kh.get(str(i), 0) if isinstance(kh, dict) else (1 if str(i) in kh else 0)
+                strip_table_to_example(b, keep_rows=shell.get("table_rows", {}).get(str(i), 2), keep_header=kh)
+                if isinstance(shell.get("table_headers_kept"), dict):
+                    # header rows kept as words: their facts are blanked like furniture
+                    for tr in b.findall(w("tr"))[:kh]:
+                        for p in tr.iter(w("p")):
+                            blanker.blank_paragraph(p, (doc, "block %d header" % i))
                 held_tables.setdefault(ex_tables[i], b)
                 continue
             ppr = b.find(w("pPr")) if b.tag == w("p") else None
@@ -2701,6 +3103,9 @@ def build(cfg, out_dir):
                 raise SystemExit("unknown furniture mode %r for block %d" % (mode, i))
         report["shell"] = {"blocks_before": len(blocks), "deleted": deleted, "section_paragraphs_emptied": emptied_sect,
                            "furniture_kept": len(keep), "examples": len(examples) + len(ex_tables), "toc": toc_notes}
+        if comp_anchors:
+            report["composed"] = compose(comp_anchors, held, blanker.log, spacer=cfg.get("compose_spacer"),
+                                         pkg=pkg, restart=cfg.get("compose_restart", ()))
         # headers/footers/footnotes kept: blank facts
         for part in [p for p in pkg.parts() if re.match(r"^word/(header|footer)\d+\.xml$", p)]:
             if cfg.get("letterhead_line"):
@@ -2717,12 +3122,14 @@ def build(cfg, out_dir):
                 n += blanker.blank_paragraph(p, (part, "paragraph %d" % k))
             if n:
                 pkg.touch(part)
+        # replaced paragraphs are found before any block is deleted, so both
+        # lists number the blocks as the listing does
+        replaced = [(sel, select(body, sel), text) for sel, text in cfg.get("replace_paragraphs", {}).items()]
         for i in sorted((int(x) for x in cfg.get("delete_blocks", [])), reverse=True):
             b = blocks[i]
             blanker.log.append((doc, "block %d" % i, para_text(b) if b.tag == w("p") else "(table)", "deal-specific paragraph removed"))
             drop(b)
-        for sel, text in cfg.get("replace_paragraphs", {}).items():
-            p = select(body, sel)
+        for sel, p, text in replaced:
             blanker.log.append((doc, "block " + sel, para_text(p), "paragraph replaced: " + text))
             example_paragraph(p, text)
     pkg.touch(doc)
@@ -2734,17 +3141,25 @@ def build(cfg, out_dir):
         look = tr[0].find(w("rPr")) if tr else None
         report["letterhead"] = letterhead_line(pkg, doc, cfg["letterhead_line"], look)
     # A4
-    report["page_changes"] = to_a4(root)
+    report["page_changes"] = to_a4(root, turn=cfg.get("turn_margins", True), keep_landscape=cfg.get("keep_landscape", False))
+    if cfg.get("margins_twips"):
+        report["page_changes"] += set_margins(root, cfg["margins_twips"])
+    if cfg.get("fit_tables"):
+        report["tables_fitted"] = fit_tables(root, pkg)
     # tidy
     report["notes_removed"] = prune_notes(pkg, doc)
-    if cfg["mode"] == "shell":
+    if shell_cut:
         for part in ("word/footnotes.xml", "word/endnotes.xml"):
             if pkg.has(part):
                 n = sum(blanker.blank_paragraph(p, (part, "kept note")) for p in pkg.xml(part).iter(w("p")))
                 if n:
                     pkg.touch(part)
     # a quoted defined term made the firm's form, then British spelling
-    report["terms_unquoted"] = unquote_terms(pkg, cfg.get("unquote_terms", []), blanker.log)
+    uq = list(cfg.get("unquote_terms", []))
+    if cfg.get("unquote_all"):
+        have = {t["term"] for t in uq}
+        uq += [t for t in defined_terms_quoted(pkg, skip=set(cfg.get("keep_quoted", []))) if t["term"] not in have]
+    report["terms_unquoted"] = unquote_terms(pkg, uq, blanker.log)
     sp = cfg.get("spelling", "british")
     if sp:
         if sp != "british":
@@ -2754,6 +3169,9 @@ def build(cfg, out_dir):
         report["spelling"] = speller.report()
     else:
         report["spelling"] = None
+    if cfg.get("font_map") or cfg.get("size_map"):
+        report["fonts_converted"] = convert_fonts(pkg, cfg.get("font_map", {}), cfg.get("size_map", {}),
+                                                  extra=list(held.values()))
     report["orphans_removed"] = fix_orphans(root)
     for part in [p for p in pkg.parts() if STORY.match(p)]:
         if part in pkg.dirty:
@@ -2796,6 +3214,16 @@ def build(cfg, out_dir):
         report["auto_number"]["base_ambiguous"] = [dict({"text": para_text(p)[:60]}, **{m: ms[m].get(p) for m in MODELS})
                                                    for p in body_paragraphs(body) if p in ms["own"] and len({ms[m].get(p) for m in MODELS}) > 1]
     kj = {"kinds": kinds, "tables": tables, "footnote": fn}
+    if cfg.get("drop_examples"):
+        # a composed pack: the example paragraphs gave the kinds their look;
+        # the firm's text written by "compose" replaces them
+        dropped = 0
+        ex_names = set(cfg.get("shell", {}).get("examples", {}).values())
+        for name, el in held.items():
+            if name in ex_names and el.getparent() is not None and para_text(el).strip() == BLANK and name not in cfg.get("keep_examples", []):
+                drop(el)
+                dropped += 1
+        report["examples_dropped"] = dropped
     base = cfg["kind"]
     pack = os.path.join(out_dir, "%s-pack.docx" % base)
     pkg.save(pack)

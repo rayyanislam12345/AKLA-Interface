@@ -409,5 +409,95 @@ class SpellingTests(unittest.TestCase):
         self.assertTrue(any("Concessionaire" in b["reason"] for b in report["blankings"]))
 
 
+class WaveTwoOptionTests(unittest.TestCase):
+    """The options wave 2 added; each runs only when its config key is set."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.join(self.tmp.name, "base.docx")
+        make_docx(self.base)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def build(self, cfg, parts=None):
+        if parts:
+            with zipfile.ZipFile(self.base, "w", zipfile.ZIP_DEFLATED) as z:
+                for name, xml in dict(PARTS, **parts).items():
+                    z.writestr(name, xml.encode("utf-8"))
+        out = os.path.join(self.tmp.name, "out")
+        cfg = dict(cfg, base=self.base, name="t", kind="test")
+        pack, report, kj = bp.build(cfg, out)
+        return report, kj, read(pack)
+
+    def test_font_and_size_map(self):
+        body = P("Times text", rpr='<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="25"/></w:rPr>')
+        doc = DECL + f'<w:document {W}><w:body>{body}{SECT}</w:body></w:document>'
+        report, kj, parts = self.build({"mode": "form", "detectors": False, "font_map": {"Times New Roman": "Arial"}, "size_map": {"25": "22"}},
+                                       {"word/document.xml": doc})
+        d = parts["word/document.xml"].decode()
+        self.assertNotIn("Times New Roman", d)
+        self.assertIn('w:ascii="Arial"', d)
+        self.assertIn('w:sz w:val="22"', d)
+        self.assertEqual(report["fonts_converted"]["Times New Roman -> Arial"], 2)
+
+    def test_margins_and_landscape(self):
+        land = SECT.replace('w:w="12240" w:h="20160" w:code="5"', 'w:w="20160" w:h="12240" w:orient="landscape"')
+        doc = DECL + f'<w:document {W}><w:body>{P("x", rpr="")}{land}</w:body></w:document>'
+        report, kj, parts = self.build({"mode": "form", "detectors": False, "keep_landscape": True}, {"word/document.xml": doc})
+        d = parts["word/document.xml"].decode()
+        self.assertIn('w:w="16838"', d)
+        self.assertIn('w:h="11906"', d)
+        report, kj, parts = self.build({"mode": "form", "detectors": False, "turn_margins": False,
+                                        "margins_twips": {"top": 1944, "left": 1152}}, {"word/document.xml": doc})
+        d = parts["word/document.xml"].decode()
+        self.assertIn('w:w="11906"', d)
+        self.assertIn('w:top="1944"', d)
+        self.assertIn('w:left="1152"', d)
+
+    def test_compose_writes_in_a_kind_and_drops_examples(self):
+        report, kj, parts = self.build({"mode": "form", "cut": "shell", "detectors": False,
+                                        "shell": {"keep": {"0": "keep", "8": "keep"}, "examples": {"3": "limb_a", "5": "body"}},
+                                        "compose": [{"after": "0", "blocks": [{"kind": "body", "text": "The **Company** shall pay."},
+                                                                             {"kind": "limb_a", "text": "first limb;"}]}],
+                                        "compose_spacer": None, "drop_examples": True})
+        root = bp.etree.fromstring(parts["word/document.xml"])
+        texts = [bp.para_text(p) for p in root.iter(bp.w("p")) if bp.para_text(p).strip()]
+        self.assertEqual(texts[1:3], ["The Company shall pay.", "first limb;"])
+        self.assertNotIn(bp.BLANK, texts)          # the examples are gone
+        bold = [r.find(bp.w("t")).text for r in root.iter(bp.w("r")) if r.find("w:rPr/w:b", bp.NS) is not None and r.find(bp.w("t")) is not None]
+        self.assertIn("Company", bold)
+        self.assertNotIn("The ", bold)
+        limb = [p for p in root.iter(bp.w("p")) if bp.para_text(p) == "first limb;"][0]
+        self.assertIsNotNone(limb.find("w:pPr/w:numPr", bp.NS))   # takes the kind's numbering
+        self.assertEqual(set(kj["kinds"]), {"limb_a", "body"})
+        self.assertEqual(report["composed"], 2)
+
+    def test_heading_numbers(self):
+        num = DECL + f'<w:numbering {W}><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl><w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl></w:abstractNum><w:num w:numId="5"><w:abstractNumId w:val="0"/></w:num></w:numbering>'
+        lvl1 = '<w:numPr><w:ilvl w:val="1"/><w:numId w:val="5"/></w:numPr>'
+        body = (P("Article 1", rpr="<w:rPr><w:b/></w:rPr>") + P("first clause", ppr=lvl1, rpr="") +
+                P("Article 2", rpr="<w:rPr><w:b/></w:rPr>") + P("2.1\tsecond clause", rpr=""))
+        doc = DECL + f'<w:document {W}><w:body>{body}{SECT}</w:body></w:document>'
+        report, kj, parts = self.build({"mode": "form", "detectors": False, "heading_numbers": {"pattern": "^Article \\d+$", "numId": "5"}},
+                                       {"word/document.xml": doc, "word/numbering.xml": num})
+        self.assertEqual(report["heading_numbers"]["headings"], 2)
+        root = bp.etree.fromstring(parts["word/document.xml"])
+        ps = [p for p in root.iter(bp.w("p"))]
+        nums = [(bp.wa(p.find("w:pPr/w:numPr/w:numId", bp.NS), "val"), bp.wa(p.find("w:pPr/w:numPr/w:ilvl", bp.NS), "val")) for p in ps[:4]]
+        self.assertEqual(nums, [("5", "0"), ("5", "1"), ("5", "0"), ("5", "1")])
+        self.assertEqual(bp.para_text(ps[0]), "")
+        self.assertIn('w:lvlText w:val="Article %1"', parts["word/numbering.xml"].decode())
+        nb = bp.Numbering(bp.Package(os.path.join(self.tmp.name, "out", "test-pack.docx")), {})
+        labels = bp.numbering_labels(root.find(bp.w("body")), {}, nb, "own")
+        self.assertEqual([labels.get(p) for p in ps[:4]], ["Article 1", "1.1", "Article 2", "2.1"])
+
+    def test_without_wave_two_keys_nothing_changes(self):
+        # the wave-1 path: no wave-2 report keys appear
+        report, kj, parts = self.build({"mode": "form"})
+        for key in ("fonts_converted", "tables_fitted", "composed", "heading_numbers", "examples_dropped"):
+            self.assertNotIn(key, report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

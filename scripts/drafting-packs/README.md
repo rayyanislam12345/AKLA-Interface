@@ -36,6 +36,17 @@ python3 -I scripts/drafting-packs/build_pack.py build "<packs-dir>/packs-config.
 fixed parts, examples and kinds from; `build` cuts the pack the config
 describes and writes the four files.
 
+Wave 2 (October 2026) added config keys for changing a base's look as the
+owner decided (fonts, A4 margins, landscape kept, wide tables fitted), for a
+fresh firm standard written in an existing pack's layout (`cut`, `compose`,
+`drop_examples`), for typed "Article N" heading lines, and for unquoting
+every defined term; they are listed at the top of `build_pack.py` and run only
+when present, so the wave-1 packs build byte for byte as before. The wave-2
+config, packs, draft clause lists (`skeleton.json`) and drafting questions
+(`decisions.json`) are in `~/Desktop/AKLA Drafting Decisions/5 Packs to
+check/wave 2/`; they move into `chat-service/skeletons/` and
+`chat-service/decisions/` only once Rayyan approves a pack.
+
 ## 2. Verify
 
 ```
