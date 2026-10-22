@@ -198,7 +198,7 @@ export default ({ supabase, hubUrl }) => {
     {
       name: "list_document_types",
       title: "List the firm's document types",
-      description: `The document types the Hub knows (Concession Agreement, Share Purchase Agreement, RFP Volume I, …) by category, with their ids, and for each whether the firm holds a Word standard for it (the file, when it was last replaced), whether it has a drafting questionnaire, and whether it has its own style sheet and clause list (the parts the firm always has, in order). Call it before read_standard or get_drafting_decisions, and before drafting a document of a type the firm may have a standard for: the standard, not general knowledge, is what a draft starts from. ${TYPES_PER_PAGE} types a page; the reply says when there is a next page.`,
+      description: `The document types the Hub knows (Concession Agreement, Share Purchase Agreement, RFP Volume I, …) by category, with their ids, and for each whether the firm holds a Word standard for it (the file, when it was last replaced), whether it has a drafting questionnaire, and whether it has its own style sheet and clause list (the parts the firm always has, in order). Call it before read_standard or get_drafting_decisions, and before drafting a document of a type the firm may have a standard for: the standard, not general knowledge, is what a draft starts from, and it decides how the draft is filed in the Hub: fill_standard_to_project for a type with a standard or pack, save_draft_to_project otherwise. ${TYPES_PER_PAGE} types a page; the reply says when there is a next page.`,
       inputSchema: {
         page: z.number().int().min(1).optional().describe("Which page of the list, from 1. Default 1."),
       },

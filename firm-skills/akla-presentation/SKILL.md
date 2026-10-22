@@ -30,6 +30,7 @@ Run every command from the skill's own directory.
    render again until the report is clean. **Do not hand over a deck whose
    report is not clean.**
 5. Name the file in house convention: `<Title> [AKLA][Month DD, YYYY].pptx`.
+6. **File it in the Hub** when the AKLA Hub connector is available (see Filing).
 
 ## The pattern
 
@@ -93,3 +94,13 @@ absent — the widths are identical).
 - `assets/base` is the firm's deck package (theme, master, logos); never
   edit it. Extra images go through `build(..., extra_media={src: "imageN.png"})`
   and a `picture(name, rId, x, y, w, h)` shape with the matching rel.
+
+## Filing
+
+When the AKLA Hub connector is available (its tools include `upload_file_to_project`), the finished deck (with a clean overflow report) is filed in the matter's project on the Hub, never handed over only as a file in the chat:
+
+1. Find the project with `list_projects` (or `find_document_by_title`); ask the user which one if it is not clear. For a new version of a deck already on the project, take its `documentId` from `list_project_documents`.
+2. Call `upload_file_to_project` with the project id and the file's name (and the `documentId`, for a new version). Run the `curl` line it returns from the sandbox, pointing at the file you built (under `/mnt/user-data/outputs/` in claude.ai). If curl cannot reach the network, give the user the upload address it returns, written out in full on its own line, to open and drop the file in.
+3. Call `get_upload` to confirm the file arrived, then give the user its "Open in Hub:" address, written out in full on its own line.
+
+Without the connector (Claude Code, or the Hub's own chat), hand the file over as before.

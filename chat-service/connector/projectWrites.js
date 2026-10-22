@@ -44,6 +44,8 @@ export const BUCKET = "matter-documents";
 export const HOURLY_CAP = 30;
 export const DAILY_CAP = 200;
 export const MAX_WRITE_BYTES = 25_000_000;
+/** Supabase Storage's per-file limit on this project (50 MiB): no save may pass it, whatever maxBytes says. */
+export const MAX_STORED_BYTES = 50 * 1024 * 1024;
 export const MAX_TITLE_CHARS = 200;
 export const MAX_LABEL_CHARS = 200;
 const HOUR_MS = 60 * 60 * 1000;
@@ -271,7 +273,7 @@ export function createProjectWrites({ supabase, hubUrl = DEFAULT_HUB_URL, now = 
    * Returns ids, the file name, the label and the Hub links. Does not
    * record the action: the tool does, after this returns or throws.
    */
-  async function saveVersion({ ctx, projectId, title, matterDocumentId = null, documentTypeId = null, expectedVersion = null, bytes, fileName, mime = null, label = null, labelVerbatim = null, isAiGenerated = false }) {
+  async function saveVersion({ ctx, projectId, title, matterDocumentId = null, documentTypeId = null, expectedVersion = null, bytes, fileName, mime = null, label = null, labelVerbatim = null, isAiGenerated = false, storageKeyId = null, maxBytes = MAX_WRITE_BYTES }) {
     const userId = uuid(ctx?.userId);
     if (!userId) throw new Error(SIGN_IN_ENDED_SENTENCE);
     const matterId = uuid(projectId);
@@ -280,7 +282,10 @@ export function createProjectWrites({ supabase, hubUrl = DEFAULT_HUB_URL, now = 
     if (!docTitle) throw new Error("A title for the document is needed.");
     const body = bytes instanceof Uint8Array ? bytes : typeof bytes === "string" ? Buffer.from(bytes, "utf8") : null;
     if (!body || !body.length) throw new Error("There is nothing to save: the file is empty.");
-    if (body.length > MAX_WRITE_BYTES) throw new Error(`The file is larger than the ${Math.round(MAX_WRITE_BYTES / 1_000_000)} MB a save may be.`);
+    // A file the lawyer uploads from claude.ai (connector/uploads.js) may be
+    // as large as Storage takes; a document a tool builds stays under 25 MB.
+    const limit = Math.min(Number(maxBytes) || MAX_WRITE_BYTES, MAX_STORED_BYTES);
+    if (body.length > limit) throw new Error(`The file is larger than the ${Math.round(limit / 1_000_000)} MB a save may be.`);
     const { stem, extension } = splitFileName(fileName);
     const contentType = typeof mime === "string" && mime.trim() ? mime.split(";")[0].trim() : MIME_BY_EXTENSION[extension] ?? "application/octet-stream";
     const docId = matterDocumentId == null ? randomUUID() : uuid(matterDocumentId);
@@ -306,8 +311,12 @@ export function createProjectWrites({ supabase, hubUrl = DEFAULT_HUB_URL, now = 
       expectedId = expected ?? latest?.id ?? null;
     }
 
+    // An upload names its own key id (its uploadId), so get_upload can find
+    // the version after a restart; everything else gets a fresh one.
+    const keyId = storageKeyId == null ? randomUUID() : uuid(storageKeyId);
+    if (!keyId) throw new Error("storageKeyId must be a UUID.");
     const at = now();
-    const storagePath = `${matterId}/${docId}/${randomUUID()}-${stem}.${extension}`;
+    const storagePath = `${matterId}/${docId}/${keyId}-${stem}.${extension}`;
     const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, body, { contentType, upsert: false });
     if (uploadError) throw new Error(`The file could not be stored${uploadError.message ? ` (${uploadError.message})` : ""}; try again.`);
 

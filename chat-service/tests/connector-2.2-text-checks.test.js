@@ -92,8 +92,9 @@ test('the two tools register from connector/tools/textChecks.js after the built-
   assert.deepEqual(names.slice(0, BUILT_IN_TOOL_NAMES.length), [...BUILT_IN_TOOL_NAMES]);
   assert.ok(names.includes('check_text') && names.includes('compare_text_with_version'));
   assert.equal(new Set(names).size, names.length, 'no name twice');
-  // File order: textChecks.js loads after standards.js, so its two come last.
-  assert.deepEqual(names.slice(-2), ['check_text', 'compare_text_with_version']);
+  // File order: textChecks.js loads after standards.js, so its two come
+  // after the standards' tools; only uploads.js follows.
+  assert.deepEqual(names.slice(-4), ['check_text', 'compare_text_with_version', 'upload_file_to_project', 'get_upload']);
   for (const name of ['check_text', 'compare_text_with_version']) {
     const t = list.find((x) => x.name === name);
     assert.ok(t.title && t.description.length > 120, `${name} tells a lawyer's Claude what it is for`);

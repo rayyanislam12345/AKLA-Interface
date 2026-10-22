@@ -1,10 +1,19 @@
 // The reviews the connector runs for claude.ai (slice 5, start_review in
 // connector/tools/reviews.js): the Hub's three-pass review (review.js
-// runReview, exactly as the Hub's own review route calls it, without the
-// online law lookup), run detached from the tool call, because a review of
-// a long agreement takes minutes and claude.ai waits at most 240 seconds for
+// runReview, exactly as the Hub's own review route calls it, the online law
+// lookup included: start_review passes research.js reviewLawLookup with the
+// server-side ingest, since the connector keeps no sign-in token for the
+// ingest function), run detached from the tool call, because a review of a
+// long agreement takes minutes and claude.ai waits at most 240 seconds for
 // a tool. The tool call returns as soon as the run row exists (runReview's
 // onStarted), with its run id; get_review reads the row afterwards.
+//
+// When the run completes, `onComplete` files it (reviewFiling.js: the
+// findings as tracked changes in the next version, decided in its Changes
+// list), still inside the slot, so the placement is one more step of the
+// same review and two never run at once. A stop asked for meanwhile files
+// nothing rather than half (the run stays complete, and
+// apply_review_to_version can file it).
 //
 // One review at a time in this process: a review makes several Voyage
 // calls per 30,000 characters, and on the free tier (three a minute) two at
@@ -98,9 +107,11 @@ export function claimReviewSlot() {
  * or takes longer than startTimeoutMs to begin. `run` is review.js
  * runReview (a test passes a stand-in with the same contract: it calls
  * onStarted(runId) once the row is in, honours the signal, and settles when
- * the review is complete or failed).
+ * the review is complete or failed). `lookUpLaw(signal)` makes the run's
+ * law lookup (null: none); `onComplete({ runId, signal })` runs after a
+ * complete run, before the slot is given back, and never fails the run.
  */
-function launch(free, { supabase, anthropicKey, voyageKey, versionId, userId, run = runReview, startTimeoutMs = START_TIMEOUT_MS, log = () => {}, now = () => Date.now() }) {
+function launch(free, { supabase, anthropicKey, voyageKey, versionId, userId, run = runReview, lookUpLaw = null, onComplete = null, startTimeoutMs = START_TIMEOUT_MS, log = () => {}, now = () => Date.now() }) {
   const controller = new AbortController();
   return new Promise((resolve, reject) => {
     let runId = null;
@@ -128,15 +139,21 @@ function launch(free, { supabase, anthropicKey, voyageKey, versionId, userId, ru
     setImmediate(() => {
       const running = Promise.resolve().then(() => run({
         supabase, anthropicKey, voyageKey, documentVersionId: versionId, userId,
-        // No online law lookup: the ingest function needs the person's own
-        // sign-in, which the connector does not keep (plan, Try later 1).
-        lookUpLaw: null,
+        lookUpLaw: typeof lookUpLaw === "function" ? lookUpLaw(controller.signal) : null,
         notice: (text) => log(`review ${runId ?? "(starting)"}: ${text}`),
         signal: controller.signal,
         onStarted,
       }));
       done = running.then(
-        (result) => { log(`review ${runId} complete: ${result?.suggestions?.length ?? 0} findings`); },
+        async (result) => {
+          log(`review ${runId} complete: ${result?.suggestions?.length ?? 0} findings`);
+          if (!onComplete || !runId) return;
+          try {
+            await onComplete({ runId, signal: controller.signal });
+          } catch (err) {
+            log(`review ${runId}: filing failed: ${err?.message ?? err}`);
+          }
+        },
         (err) => {
           log(`review ${runId ?? "(not started)"} on version ${versionId} failed: ${err?.message ?? err}`);
           answer(reject, err instanceof Error ? err : new Error(String(err)));

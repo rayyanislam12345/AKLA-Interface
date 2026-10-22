@@ -141,7 +141,7 @@ test('a read-only sign-in lists every read tool and no write tool; calling one a
     for (const x of tools) assert.equal(x.annotations?.readOnlyHint, true, `${x.name} is read-only`);
     for (const name of WRITE_TOOL_NAMES) {
       // Every write tool's required fields are here (zod drops the ones a tool does not take), so the refusal, not a schema error, is what comes back.
-      const refused = await client.callTool({ name, arguments: { projectId: P1, versionId: P1, runId: P1, documentId: P1, documentTypeId: P1, title: 'x', text: 'x', markdown: 'x', content: 'x', label: 'x', status: 'drafting', templateHash: 'a'.repeat(64), fileHash: 'a'.repeat(64), ops: [{ op: 'replace', p: 1, expected: 'x', text: 'y' }] } });
+      const refused = await client.callTool({ name, arguments: { projectId: P1, versionId: P1, runId: P1, documentId: P1, documentTypeId: P1, title: 'x', fileName: 'x.docx', text: 'x', markdown: 'x', content: 'x', label: 'x', status: 'drafting', templateHash: 'a'.repeat(64), fileHash: 'a'.repeat(64), ops: [{ op: 'replace', p: 1, expected: 'x', text: 'y' }] } });
       assert.equal(refused.isError, true, `${name} is refused`);
       assert.equal(refused.content[0].text, READ_ONLY_REFUSAL);
     }

@@ -225,8 +225,9 @@ edits; the four-line header strip with the emblem on every page; and a centered
 Arial 8pt "Page X of Y" footer. See `references/akla-format.md` for the full
 spec and the four places it deviates.
 
-Tell the user the output path when you are done, and paste the Short Version
-into chat - they should not have to open the file to learn what it says.
+Tell the user the output path when you are done (or file it in the Hub: see
+Filing), and paste the Short Version into chat - they should not have to open
+the file to learn what it says.
 
 
 ## Citing with verified excerpts
@@ -267,3 +268,15 @@ It normalises quotes, dashes and page furniture, splits each excerpt at `[…]`
 and clause punctuation, and names any piece it cannot find. **A note with an
 unmatched excerpt does not go out**: fix the quotation or drop the citation.
 The builder itself refuses to finish if a comment failed to attach.
+
+## Filing
+
+When the AKLA Hub connector is available (its tools include `upload_file_to_project`), the finished memo is filed in the matter's project on the Hub, never handed over only as a file in the chat:
+
+1. Find the project with `list_projects` (or `find_document_by_title`); ask the user which one if it is not clear. If the note is a new version of a memo already on the project, take its `documentId` from `list_project_documents`.
+2. Call `upload_file_to_project` with the project id and the file's name (and the `documentId`, for a new version). Run the `curl` line it returns from the sandbox, pointing at the file you built (under `/mnt/user-data/outputs/` in claude.ai). If curl cannot reach the network, give the user the upload address it returns, written out in full on its own line, to open and drop the file in.
+3. Call `get_upload` to confirm the file arrived, then give the user its "Open in Hub:" address, written out in full on its own line.
+
+A memo can go through the connector's own drafting route instead: if `list_document_types` shows the firm has a standard or pack for a memo and the user wants the note on it, draft it with `open_standard_for_filling` and `fill_standard_to_project` rather than building the file here. A note whose excerpts are attached as Word comments is built here and uploaded.
+
+Without the connector (Claude Code, or the Hub's own chat), hand the file over as before.

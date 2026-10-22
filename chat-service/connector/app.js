@@ -14,6 +14,8 @@
 //   GET  /oauth/about                              what this is
 //   POST /mcp                                      the MCP endpoint (bearer token)
 //   GET/DELETE /mcp                                405: stateless, one server per request
+//   GET  /mcp/upload/<token>                       the drop page for a one-time upload address (uploads.js)
+//   POST /mcp/upload/<token>                       the file itself (raw body or multipart), filed once
 //
 // Only Caddy reaches this process (it binds to 127.0.0.1), so the client's
 // address is X-Forwarded-For. The VM runs Node 20: nothing newer is used.
@@ -135,11 +137,13 @@ const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, typeof obj?.[
  * @param {Function} [deps.now]      () -> Date
  * @param {Function} [deps.log]
  * @param {Function} [deps.status]  () -> extra fields for GET /health (connector.js: reviewsRunning, read by deploy.sh)
+ * @param {object} [deps.uploads]   connector/uploads.js createUploads: the one-time upload addresses under /mcp/upload/
+ *                                   (Caddy already sends /mcp/* here); the token in the address is the authority
  * @param {boolean} [deps.apps]      the MCP Apps trial (CONNECTOR_APPS=on, apps.js): the extension declared, the
  *                                   panel served as a resource, tools with a `ui` linked to it and their
  *                                   structuredContent passed on. Off: nothing of it is listed or declared.
  */
-export function createApp({ store, signIn, tools, isMember, issuer, redirectHosts = DEFAULT_REDIRECT_HOSTS, allowLoopback = false, version = {}, now = () => new Date(), log = console.log, serverVersion = "1.0.0", apps = false, status = null }) {
+export function createApp({ store, signIn, tools, isMember, issuer, redirectHosts = DEFAULT_REDIRECT_HOSTS, allowLoopback = false, version = {}, now = () => new Date(), log = console.log, serverVersion = "1.0.0", apps = false, status = null, uploads = null }) {
   const base = String(issuer).replace(/\/+$/, "");
   const docs = metadata(base);
   const nowMs = () => now().getTime();
@@ -217,7 +221,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
       // The same sourcing rule the Hub's own assistant works under
       // (firmRules.js); get_firm_rules gives the full text.
       instructions: `Access to AKLA's Project Hub: the firm's projects and their documents, the precedent library and the law library (Pakistani statutes). Call get_firm_rules once at the start of a drafting or legal task and follow it. Before you draft or answer on a point that turns on what a law, a precedent or a project's documents say, look it up here first: search_precedents and search_law_library, and search_project_documents for a project; search before you say the firm lacks something, and never ask the lawyer to upload what the Hub may hold. Passages and sections are labelled [Source n], numbered from 1 in each result; cite them by number and the Act or document the label names, and quote statutory text only from a passage you have been shown (read_act_section gives the whole section). Every project, document and passage carries an "Open in Hub:" address; pass it on as it is given, the whole address written out on its own line ("Open in Hub: https://…"), never behind link text such as [Open the draft](…): the Claude desktop app opens a written-out address beside the chat and sends link text to the browser. When the lawyer wants a document beside the chat, that address is the way (the desktop app's side pane, or the AKLA Hub companion's drawer in Chrome); a panel under the reply cannot be moved there. Start with list_projects for project ids, then get_project_overview or list_project_documents for version ids (find_document_by_title finds one by name; search_everything finds a phrase across every project); list_acts and get_act_outline show what the law library holds; list_precedents, find_precedent_clauses and read_precedent are the precedent library whole; list_document_types, read_standard and get_drafting_decisions are the firm's standards, and open_standard_for_filling opens a type's Word standard with its blanks numbered for a fill. ${canWrite
-        ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version), fill the firm's Word standard with the facts gathered and file the result (fill_standard_to_project, after open_standard_for_filling and the drafting questions), or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); start_review runs the Hub's own review of a Word version on the server, get_review reads its findings, and apply_review_to_version places them as tracked changes in a new version; claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval."
+        ? "Saving: the tools marked as not read-only save a new version of a document into a project (never over an existing version), fill the firm's Word standard with the facts gathered and file the result (fill_standard_to_project, after open_standard_for_filling and the drafting questions), or change one field of a project or document (its standing instructions, a version's label, a document's title or status, an empty document record, a re-read of a version); start_review runs the Hub's own review of a Word version on the server (for a file attached in this chat, upload it first with upload_file_to_project and review the version that makes); a finished review files itself, its findings becoming AKLA AI tracked changes in the document's next version for the lawyer to accept or reject there, so get_review says where it was filed and nothing needs placing again (apply_review_to_version only re-places with exclusions); if you review a document yourself in the chat, file your suggested changes with apply_tracked_changes (show_document_paragraphs first), so the reviewed document is in the Hub; claude.ai asks the lawyer before each one, every one is recorded against the lawyer, and nothing here can delete anything. Saving is filing, not legal approval. Drafting goes through the Hub: every firm document the lawyer asks you to draft is filed there, never handed over only as a file or artifact in the chat: fill_standard_to_project when its type has a standard or pack (list_document_types says which), otherwise save_draft_to_project; a file you made in your code sandbox (with a skill), or one the lawyer attached to be filed, marked up or reviewed, goes in with upload_file_to_project. Then give its Open in Hub address."
         : "This sign-in is read-only: nothing here can change, fill or save a document. If the lawyer asks you to draft, fill, file or save anything, say first, in one sentence, that this sign-in predates saving and that removing and re-adding the AKLA Hub connector in claude.ai turns saving on; only then draft in the chat if they still want that."}`,
       // The MCP Apps trial: the extension named in the initialize result.
       ...(apps ? { capabilities: appsCapability() } : {}),
@@ -229,7 +233,7 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
     // "not found"; the tool is registered for that one request so the
     // listing stays clean (one server per request, so nothing persists).
     const called = body && !Array.isArray(body) && body.method === "tools/call" ? body.params?.name : null;
-    const ctx = { userId: auth.userId, clientId: auth.clientId, scope: auth.scope, tokenId: auth.tokenId, canWrite, apps, recheck: () => recheckBearer(bearer) };
+    const ctx = { userId: auth.userId, clientId: auth.clientId, scope: auth.scope, tokenId: auth.tokenId, familyId: auth.familyId, canWrite, apps, recheck: () => recheckBearer(bearer) };
     for (const t of tools) {
       const write = t.write === true;
       if (write && !canWrite && t.name !== called) continue;
@@ -365,6 +369,10 @@ export function createApp({ store, signIn, tools, isMember, issuer, redirectHost
           return oauthFail(res, err);
         }
       }
+
+      // A one-time upload address (upload_file_to_project): no bearer, the
+      // token in the path is the authority (the owner's decision, 22 Oct 2026).
+      if (uploads && path.startsWith("/mcp/upload/")) return await uploads.handle(req, res, path.slice("/mcp/upload/".length));
 
       if (path === "/mcp") {
         const auth = await bearerOf(req);

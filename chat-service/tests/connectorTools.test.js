@@ -122,7 +122,7 @@ test('the modules under connector/tools/ register after the built-in eight, in f
   // changesPanel.js and documentPanel.js load but add nothing unless the MCP
   // Apps trial is on (CONNECTOR_APPS=on, connector/apps.js); the tool list
   // above is unchanged.
-  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'changesPanel.js', 'clauses.js', 'documentInsight.js', 'documentPanel.js', 'fillStandard.js', 'fillStandardWrite.js', 'firmRules.js', 'housekeeping.js', 'markup.js', 'precedents.js', 'projects.js', 'reviews.js', 'saves.js', 'searchEverything.js', 'skills.js', 'standards.js', 'textChecks.js']);
+  assert.deepEqual(modules.map((m) => m.file), ['acts.js', 'changesPanel.js', 'clauses.js', 'documentInsight.js', 'documentPanel.js', 'fillStandard.js', 'fillStandardWrite.js', 'firmRules.js', 'housekeeping.js', 'markup.js', 'precedents.js', 'projects.js', 'reviews.js', 'saves.js', 'searchEverything.js', 'skills.js', 'standards.js', 'textChecks.js', 'uploads.js']);
   // The write tools, exactly as tools.js pins them: each marked write with
   // annotations that make claude.ai ask first; every other tool read-only.
   assert.deepEqual(list.filter((t) => t.write === true).map((t) => t.name), [...WRITE_TOOL_NAMES]);

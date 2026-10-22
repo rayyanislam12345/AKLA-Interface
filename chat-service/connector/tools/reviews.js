@@ -2,60 +2,67 @@
 //
 // "Review v3 of the SPA" runs the Hub's own three-pass review (review.js:
 // legal clauses and citations, formatting and structure, content and
-// conflicts, against the firm's precedents, the law library and the
-// project's other documents) on a Word version; "what did the review find?"
-// reads its findings; "put all but 4 and 9 into the file" writes the rest
-// into the lawyer's file as tracked changes, filed as the next version.
-// Three tools serve that:
+// conflicts, against the firm's precedents, the law library, the project's
+// other documents and the law looked up online) on a Word version. When it
+// is complete it is filed into the Hub on its own, exactly as a review
+// started in the Hub is (reviewFiling.js): its findings are placed as
+// tracked changes by "AKLA AI" in the next version of the same document,
+// one change row each on that version, and the lawyer only decides, in the
+// panel under the reply where Claude shows one (the MCP Apps trial), in the
+// Hub's Changes list, or in Word. Three tools serve that:
 //
-// start_review (write: it records a review run, and changes no document):
-// starts the review detached on the server (connector/reviewRuns.js) and
-// answers within seconds with the run id. One review on the box at a time,
-// the Hub chat's own included, because on the Voyage free tier (three calls
-// a minute) a review's searches hold up every other search; one per
-// process; a second review of a version already being reviewed is refused;
-// three a day per person, counted from connector_actions. No online law
-// lookup (it needs the person's own sign-in, which the connector does not
-// keep). The start_review record carries the run id in its label.
+// start_review (write: it records a review run, and later files its
+// findings as the next version): starts the review detached on the server
+// (connector/reviewRuns.js) and answers within seconds with the run id. One
+// review on the box at a time, the Hub chat's own included, because on the
+// Voyage free tier (three calls a minute) a review's searches hold up every
+// other search; one per process; a second review of a version already
+// being reviewed is refused; three a day per person, counted from
+// connector_actions. The law is looked up online as the Hub's review does
+// (research.js reviewLawLookup); a law it downloads is added to the library
+// from the server (indexing/statute.js), because the ingest function needs
+// a sign-in token the connector does not keep. The start_review record
+// carries the run id in its label; the filing has its own record
+// (apply_review_to_version, "saved").
 //
-// get_review (read): the run's status, passes, coverage and error, and its
-// findings by clause, each numbered, with its original wording, suggested
-// wording, reason and pass, paged under the result cap. The numbers are
-// what apply_review_to_version's `exclude` takes.
+// get_review (read): the run's status, passes, coverage and error; once
+// complete, where it was filed (the new version's id, its Hub page, its
+// Changes counts, the findings that could not be placed, and the changes
+// panel with the trial on) or why nothing was filed (a newer version came
+// in meanwhile: nothing is placed over it), then every finding by clause,
+// numbered, with its original and suggested wording, reason, pass and where
+// it went, paged under the result cap.
 //
-// apply_review_to_version (write): the findings, less any the lawyer left
-// out, as tracked changes by "AKLA AI" in the reviewed version's working
-// file (docxAgent applyReviewSuggestions, as the Hub chat's review writes
-// them, server.js writeReviewChanges), filed as the next version of the
-// same document. Refused unless the run is complete, and when the document
-// has a newer version than the one reviewed (the findings quote that
-// version's text). The placed changes are recorded on the new version as
-// its Changes list (versionChanges.js rows, review_type 'edit', the Word
-// revision ids each minted), so they are accepted or rejected in the panel
-// under the reply (the MCP Apps trial), in the Hub's document window or in
-// Word, exactly as a mark-up's are; the review's own rows on the reviewed
-// version say where each went: placed (carried to the new version, as
-// carryForward marks a carried change), could not be placed (with the
-// reason), or left out at the lawyer's word (rejected, by them).
+// apply_review_to_version (write): only to place a filed review's findings
+// again, less the ones the lawyer wants left out entirely, as a fresh next
+// version (before any change in the filed version is decided), or to file
+// a complete review the automatic filing could not (it failed, or the
+// connector stopped first). To leave a finding out of a filed review the
+// lawyer normally just rejects it in the Changes list.
 //
 // The write foundation's order holds (README.md): checkCaps first, the
 // work, recordAction last, release() in a finally. Node 20.
 
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { WRITE } from "../app.js";
 import { MAX_RESULT_CHARS, uuid, when } from "../tools.js";
 import { applyReviewSuggestions, suggestionParagraphs } from "../../docxAgent.js";
 import { checkFormat } from "../../formatFingerprint.js";
-import { reconcile, placementNote, codeFor } from "../../changes.js";
-import { workingFileOf, downloadFile, versionRows, highestRecordedVersionId, latestVersionOf, carryForward, isWordPath, VERSION_ROW_TYPE, DOCX_MIME } from "../../versionChanges.js";
+import { placementNote } from "../../changes.js";
+import { isWordPath, latestVersionOf, listVersionChanges } from "../../versionChanges.js";
+import {
+  fileReviewRun, findingsOf, readRun, filingOf, orderFindings, reviewLabel, passLabel, PASSES, FILED, NEWER_VERSION,
+} from "../../reviewFiling.js";
+import { anthropicCaller, reviewLawLookup } from "../../research.js";
+import { ingestStatute } from "../../indexing/statute.js";
 import { CHANGES_UI } from "../apps.js";
-import { panelForVersion } from "./changesPanel.js";
+import { panelData, countsLine } from "./changesPanel.js";
 import {
   claimReviewSlot, isActiveRun, connectorRunIds, runLabel, START_REVIEW_TOOL, RESTART_SENTENCE, STALE_RUN_MS, START_TIMEOUT_MS,
 } from "../reviewRuns.js";
 import { runReview } from "../../review.js";
 
+export { orderFindings, reviewLabel };
 export const START_TOOL = START_REVIEW_TOOL;
 export const GET_TOOL = "get_review";
 export const APPLY_TOOL = "apply_review_to_version";
@@ -63,7 +70,6 @@ export const APPLY_TOOL = "apply_review_to_version";
 export const DAILY_REVIEWS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_LABEL_CHARS = 200;
-const MAX_FINDINGS = 500;
 const MAX_EXCLUDE = 500;
 /** One original or suggested wording in get_review; the Hub has the whole of it. */
 export const MAX_FINDING_TEXT = 1_500;
@@ -76,13 +82,9 @@ export const BOX_BUSY_SENTENCE = "Another review is already running on the Hub, 
 export const APPLY_BUSY_SENTENCE = "Another review's findings are being placed on the Hub; nothing was saved. Try again in a minute.";
 export const UNRECORDED_LINE = "The step landed but could not be recorded in the Hub's log; tell the Hub's owner.";
 export const NOT_EXHAUSTIVE = "The review is not an exhaustive legal clearance, and filing is not legal approval.";
+/** What a finished review does on its own, said once in start_review's reply and description. */
+export const FILES_ITSELF = "When it is complete it files itself: the findings are placed as tracked changes by AKLA AI in the next version of the same document, one change each, and the lawyer accepts or rejects each one in that version's Changes list in the Hub, in the changes panel under a reply where Claude shows one, or in Word";
 
-/** The passes, in the order they are listed, and what the lawyer reads for each. */
-const PASSES = ["legal_clauses", "formatting", "content_conflicts", "chat"];
-const PASS_LABEL = { legal_clauses: "legal clauses and citations", formatting: "formatting and structure", content_conflicts: "content and conflicts", chat: "follow-up" };
-const passLabel = (t) => PASS_LABEL[t] ?? String(t ?? "review").replace(/_/g, " ");
-
-const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Karachi" });
 const n = (v) => Number(v ?? 0).toLocaleString("en");
 const plural = (k, one, many = `${one}s`) => (k === 1 ? one : many);
 const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -98,48 +100,13 @@ export function ago(ms) {
   return m < 120 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-/** "Review suggestions placed — 22 October 2026", the lawyer's label in front when given. */
-export function reviewLabel(label, at = new Date()) {
-  const base = `Review suggestions placed — ${dateFmt.format(at)}`;
-  const own = String(label ?? "").replace(/\s+/g, " ").trim();
-  if (!own) return base;
-  const room = MAX_LABEL_CHARS - base.length - 2;
-  return `${own.length > room ? `${own.slice(0, room - 1)}…` : own}: ${base}`;
-}
-
-// ---------------------------------------------------------------- the order of the findings
-
-// A clause reference's numbers ("Section 14.2" -> [14, 2]), or null.
-function clauseKey(ref) {
-  const m = /(\d+(?:\.\d+)*)/.exec(String(ref ?? ""));
-  return m ? m[1].split(".").map(Number) : null;
-}
-
-/**
- * The findings in the order get_review numbers them and apply's `exclude`
- * reads the numbers: by clause number (references without one after), then
- * by reference, by pass, and by id, so the numbering is the same on every
- * call. complete_ai_review inserts a run's rows in one statement, so their
- * times do not order them.
- */
-export function orderFindings(rows) {
-  const passAt = (t) => { const i = PASSES.indexOf(t); return i === -1 ? PASSES.length : i; };
-  return [...(rows ?? [])].sort((a, b) => {
-    const ka = clauseKey(a.clause_reference);
-    const kb = clauseKey(b.clause_reference);
-    if (ka && !kb) return -1;
-    if (!ka && kb) return 1;
-    if (ka && kb) {
-      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-        const d = (ka[i] ?? -1) - (kb[i] ?? -1);
-        if (d) return d;
-      }
-    }
-    return String(a.clause_reference ?? "").localeCompare(String(b.clause_reference ?? ""), "en", { numeric: true })
-      || passAt(a.review_type) - passAt(b.review_type)
-      || String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))
-      || String(a.id).localeCompare(String(b.id));
-  });
+/** The law lookup a review recorded (coverage.research), in one line, as the Hub's review panel says it. */
+export function lawLookupLine(research) {
+  if (!research || typeof research !== "object") return "not run for this review";
+  if (research.status === "not_run") return (research.unresolved ?? [])[0] ?? "not run for this review";
+  if (research.status === "failed") return `could not finish${research.unresolved?.length ? ` (${oneLine(research.unresolved[0])})` : ""}`;
+  const k = Number(research.sourcesChecked ?? 0);
+  return `${k} ${plural(k, "law")} read from the library or official sources (${research.status ?? "partial"})${research.unresolved?.length ? `; open: ${research.unresolved.slice(0, 3).map(oneLine).join("; ")}` : ""}`;
 }
 
 /** Where a finding stands, in a few words, or null when it is simply waiting to be placed. */
@@ -165,47 +132,51 @@ function findingText(row, number) {
   return lines.join("\n");
 }
 
+/** "Finding 3 — Clause 5", for the could-not-place lists. */
+const findingName = (row, numberOf) => `Finding ${numberOf.get(row.id) ?? "?"}${row?.clause_reference ? ` — ${oneLine(row.clause_reference)}` : ""}`;
+
 // ---------------------------------------------------------------- the tools
 
 /**
  * The tools, with the pieces a test swaps: `run` in place of review.js
  * runReview (the same contract: onStarted(runId) once the row is in, the
  * signal honoured), `apply` in place of applyReviewSuggestions, `format` in
- * place of checkFormat, `startTimeoutMs`. `deps` is what tools.js hands
- * every module; `deps.anthropicKey` is the review's AI key (null when the
- * server has none: start_review then says so).
+ * place of checkFormat, `lawLookup({ ctx, signal, log })` in place of the
+ * online law lookup (null: none), `startTimeoutMs`. `deps` is what tools.js
+ * hands every module; `deps.anthropicKey` is the review's AI key (null when
+ * the server has none: start_review then says so).
  */
-export function createReviewTools(deps, { run = runReview, apply = applyReviewSuggestions, format = checkFormat, startTimeoutMs = START_TIMEOUT_MS } = {}) {
+export function createReviewTools(deps, { run = runReview, apply = applyReviewSuggestions, format = checkFormat, startTimeoutMs = START_TIMEOUT_MS, lawLookup = undefined } = {}) {
   const { supabase, helpers, writes, log = () => {} } = deps;
   const { needVersion, versionById, versionName, open, link } = helpers;
   const now = () => { const t = typeof deps.now === "function" ? deps.now() : Date.now(); return t instanceof Date ? t.getTime() : Number(t); };
   const at = () => new Date(now());
   const COLUMNS = "id, version_number, storage_path, file_name, label, created_at, matter_document_id";
-  // One placement at a time in this process (a long agreement read whole and
-  // rewritten is a few hundred MB resident, as markup.js's lock says).
-  let applying = false;
+
+  // The Hub review's online law lookup, for the lawyer who started the
+  // review: the same research, with a downloaded law added to the library
+  // from the server under the lawyer's name.
+  const realLawLookup = ({ ctx, signal }) => reviewLawLookup({
+    supabase,
+    anthropicJson: anthropicCaller(deps.anthropicKey),
+    ingest: ({ content, metadata }) => ingestStatute({ supabase, voyageKey: deps.voyageKey, userId: ctx.userId, content, metadata, log }),
+    userId: ctx.userId,
+    signal,
+    notice: (text) => log(`review law lookup: ${text}`),
+  });
+  const makeLawLookup = lawLookup === undefined ? realLawLookup : lawLookup;
+
+  /** A filing as the lawyer: the next version saved through the write foundation. */
+  const saverFor = (ctx) => (args) => writes.saveVersion({ ctx, ...args });
 
   /** The run row, or a sentence saying there is none. */
   async function needRun(input) {
     const id = uuid(input.runId);
     if (!id) throw new Error(`runId must be a review's run id (a UUID), as ${START_TOOL} gave it.`);
-    const { data, error } = await supabase.from("ai_review_runs").select("id, document_version_id, artifact_id, status, passes, coverage, error, created_at, created_by").eq("id", id).maybeSingle();
-    if (error) throw new Error(`Could not read the review: ${error.message}`);
+    const data = await readRun(supabase, id);
     if (!data) throw new Error(`There is no review with that run id. ${START_TOOL} starts one and gives its runId.`);
     if (!data.document_version_id) throw new Error("That review ran inside a Hub chat on its working document; its findings are in that chat's Changes list in the Hub, not here.");
     return data;
-  }
-
-  /** The review's findings, in get_review's order. */
-  async function findingsOf(run) {
-    const { data, error } = await supabase
-      .from("redline_suggestions")
-      .select("id, clause_reference, original_text, suggested_text, rationale, review_type, status, placement, placement_reason, superseded_by, created_at")
-      .eq("review_run_id", run.id)
-      .eq("document_version_id", run.document_version_id)
-      .limit(MAX_FINDINGS);
-    if (error) throw new Error(`Could not read the review's findings: ${error.message}`);
-    return orderFindings(data ?? []);
   }
 
   /**
@@ -233,14 +204,41 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
     return ours.has(r.id) ? RESTART_SENTENCE : null;
   }
 
+  /**
+   * The automatic filing once a run started here completes (reviewRuns.js
+   * onComplete): the findings into the next version as the lawyer, then the
+   * record. A stop asked for meanwhile files nothing.
+   */
+  async function autoFile({ runId, ctx, signal }) {
+    const out = await fileReviewRun({
+      supabase, runId, userId: ctx.userId, save: saverFor(ctx), apply, format, log, now: at,
+      shouldStop: () => signal?.aborted === true,
+    });
+    const ids = { tool: APPLY_TOOL, projectId: out.doc?.matter_id ?? null, documentId: out.doc?.id ?? null };
+    const record = (fields) => writes.recordAction(ctx, { ...ids, ...fields }).catch((err) => log(`${APPLY_TOOL} (automatic): the record could not be written: ${err?.message ?? err}`));
+    if (out.status === FILED) await record({ versionId: out.saved.versionId, label: out.saved.label, outcome: "saved" });
+    else if (["failed", "format_refused", "none_placed", NEWER_VERSION].includes(out.status)) await record({ versionId: out.version?.id ?? null, outcome: out.status === "failed" ? "failed" : "refused" });
+    log(`review ${runId}: filing ${out.status}${out.saved ? ` as v${out.saved.versionNumber} (${out.placed.length} placed, ${out.notPlaced.length} not)` : ""}`);
+    return out;
+  }
+
+  /** The could-not-place lines of a filing record, finding numbers from the run's findings. */
+  function notPlacedLines(filing, rows) {
+    const byId = new Map(rows.map((r, i) => [r.id, { row: r, number: i + 1 }]));
+    const items = (filing?.notPlaced ?? []).map((x) => ({ hit: byId.get(x.suggestionId), reason: x.reason }));
+    const lines = items.slice(0, MAX_LISTED).map(({ hit, reason }) => `- ${hit ? `Finding ${hit.number}${hit.row.clause_reference ? ` — ${oneLine(hit.row.clause_reference)}` : ""}` : "A finding"}: ${placementNote(reason) ?? reason}`);
+    if (items.length > MAX_LISTED) lines.push(`- and ${items.length - MAX_LISTED} more`);
+    return lines;
+  }
+
   return [
     // ------------------------------------------------------------ start
     {
       name: START_TOOL,
       title: "Start the Hub's review of a Word document",
-      description: `Start the Hub's own three-pass review of one Word version of a project document: legal clauses and citations, formatting and structure, and content and conflicts, checked against the firm's precedents, its law library and the project's other documents (no online law lookup). Use it when the lawyer asks to review a Hub document ("review v3 of the SPA"). It answers within seconds with a runId while the review runs on the Hub's server; a short agreement takes a few minutes, a long one much longer. Then call ${GET_TOOL} with the runId for progress and, once it is complete, the findings by clause. Nothing in the document changes: ${APPLY_TOOL} later places the findings as tracked changes in a new version, when the lawyer asks. Word (.docx) versions only. One review runs on the Hub at a time (the Hub chat's included), a second review of the same version is refused while one runs, and each person may start ${DAILY_REVIEWS} a day; a refusal is one sentence, and nothing is started. claude.ai asks the lawyer first, and the start is recorded against them. The review's findings are suggestions, not legal approval.`,
+      description: `Start the Hub's own three-pass review of one Word version of a project document: legal clauses and citations, formatting and structure, and content and conflicts, checked against the firm's precedents, its law library (with the law that applies looked up online on official sources and added to the library, as the Hub's review does) and the project's other documents. Use it whenever the lawyer asks for a review of a document ("review v3 of the SPA"): on the Hub version (list_project_documents gives its versionId); for a file attached in this chat, upload it first with upload_file_to_project and review the version that makes. It answers within seconds with a runId while the review runs on the Hub's server; a short agreement takes a few minutes, a long one much longer. ${FILES_ITSELF}. Call ${GET_TOOL} with the runId for progress and, once it is complete, where it was filed and the findings by clause. Word (.docx) versions only. One review runs on the Hub at a time (the Hub chat's included), a second review of the same version is refused while one runs, and each person may start ${DAILY_REVIEWS} a day; a refusal is one sentence, and nothing is started. claude.ai asks the lawyer first, and the start and the filing are recorded against them. The review's findings are suggestions, not legal approval.`,
       inputSchema: {
-        versionId: z.string().describe("The Word version's id, from list_project_documents (or the \"versionId:\" line the lawyer pasted)."),
+        versionId: z.string().describe("The Word version's id, from list_project_documents (or the \"versionId:\" line the lawyer pasted, or the version upload_file_to_project made)."),
       },
       write: true,
       annotations: WRITE,
@@ -256,7 +254,7 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
           const refuse = async (sentence) => { await record({ outcome: "refused" }); throw new Error(sentence); };
           if (!isWordPath(version.storage_path)) {
             const kind = (/\.([a-z0-9]{1,10})$/i.exec(version.file_name ?? version.storage_path)?.[1] ?? "other").toUpperCase();
-            await refuse(`${versionName(version)} is a ${kind} file. The review is started from claude.ai on Word (.docx) versions only, because its findings are placed back as tracked changes; read_document reads this one, and you can review its text here in the chat, or run the Hub's review in the Hub.`);
+            await refuse(`${versionName(version)} is a ${kind} file. The review is started from claude.ai on Word (.docx) versions only, because its findings are filed back as tracked changes; read_document reads this one, and you can review its text here in the chat, or run the Hub's review in the Hub.`);
           }
 
           // The process's one slot first (taken before anything is awaited
@@ -278,7 +276,11 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
 
           let runId;
           try {
-            ({ runId } = await slot.start({ supabase, anthropicKey: deps.anthropicKey, voyageKey: deps.voyageKey, versionId: version.id, userId: ctx.userId, run, startTimeoutMs, log, now }));
+            ({ runId } = await slot.start({
+              supabase, anthropicKey: deps.anthropicKey, voyageKey: deps.voyageKey, versionId: version.id, userId: ctx.userId, run, startTimeoutMs, log, now,
+              lookUpLaw: makeLawLookup ? (signal) => makeLawLookup({ ctx, signal, log }) : null,
+              onComplete: ({ runId: id, signal }) => autoFile({ runId: id, ctx, signal }),
+            }));
           } catch (err) {
             await record({ outcome: "failed" });
             throw new Error(`The review could not be started: ${err?.message ?? err}`);
@@ -292,7 +294,7 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
             `versionId: ${version.id}`,
             open("version", version.id),
             ...(recorded ? [] : [UNRECORDED_LINE]),
-            `The three passes (legal clauses and citations, formatting and structure, content and conflicts) run on the Hub's server against the firm's precedents, its law library and the project's other documents; no online law lookup is run from claude.ai. A short agreement takes a few minutes, a long one much longer. Call ${GET_TOOL} with this runId in a minute or two for progress and, when it is complete, the findings by clause. Nothing in the document changes until ${APPLY_TOOL} places the findings as tracked changes in a new version.`,
+            `The three passes (legal clauses and citations, formatting and structure, content and conflicts) run on the Hub's server against the firm's precedents, its law library (the law that applies is looked up online first, as in the Hub) and the project's other documents. A short agreement takes a few minutes, a long one much longer. ${FILES_ITSELF}. Call ${GET_TOOL} with this runId in a minute or two for progress and, when it is complete, the new version and the findings by clause.`,
           ].join("\n");
         } finally {
           slot?.release();
@@ -304,22 +306,24 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
     // ------------------------------------------------------------ read
     {
       name: GET_TOOL,
-      title: "Read a review's progress and findings",
-      description: `A review started with ${START_TOOL}: while it runs, how far it has got; once complete, each pass's status and findings count, what it covered, and every finding by clause, numbered, with the original wording, the suggested wording, the reason and the pass (paged: from is the finding number to start at); if it failed, why. Use it when the lawyer asks what the review found. The finding numbers and suggestionIds are what ${APPLY_TOOL}'s exclude takes ("put all but 4 and 9 into the file"). Nothing is changed by this tool, and the findings are suggestions, not legal approval.`,
+      title: "Read a review's progress, filing and findings",
+      description: `A review started with ${START_TOOL}: while it runs, how far it has got; once complete, where it was filed (the next version of the document, with the review's findings in it as tracked changes: its versionId, its Hub page, how many changes are waiting or decided, and the findings that could not be placed), or why nothing was filed (a newer version was saved while the review ran, so nothing was placed over it), each pass's status and the law looked up, and every finding by clause, numbered, with the original wording, the suggested wording, the reason, the pass and where it went (paged: from is the finding number to start at); if it failed, why. Where Claude can show it, the filed version's changes panel comes with it. Use it when the lawyer asks what the review found or how it is going. The lawyer decides the filed changes in that panel, in the Hub's Changes list or with decide_changes on their word. Nothing is changed by this tool, and the findings are suggestions, not legal approval.`,
       inputSchema: {
         runId: z.string().describe(`The runId ${START_TOOL} gave.`),
         from: z.number().int().min(1).optional().describe("The finding number to start at, for a long list. Default 1."),
       },
-      async run(input) {
+      ui: CHANGES_UI,
+      async run(input, ctx) {
         const r = await needRun(input);
         const version = await versionById(r.document_version_id, COLUMNS);
         const name = version ? versionName(version) : "the reviewed version";
+        const title = version?.matter_document?.title ?? "the document";
         const project = version?.matter_document?.matter?.name;
         const age = now() - new Date(r.created_at).getTime();
         const head = [
           `Review of ${name}${project ? ` on ${project}` : ""}, started ${when(r.created_at)}.`,
           `runId: ${r.id}`,
-          `versionId: ${r.document_version_id}`,
+          `versionId: ${r.document_version_id} (the version reviewed)`,
           open("version", r.document_version_id),
         ];
         if (r.status === "running") {
@@ -327,15 +331,53 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
           if (stopped) return [...head, "", `Status: stopped without finishing. ${stopped}`].join("\n");
           const c = r.coverage ?? {};
           const sections = Number.isInteger(c.sectionsTotal) && c.sectionsTotal > 0 ? `; ${c.sectionsCompleted ?? 0} of ${c.sectionsTotal} ${plural(c.sectionsTotal, "section")} of the document checked` : "";
-          return [...head, "", `Status: still running (started ${ago(age)} ago${sections}). Call ${GET_TOOL} again with the same runId in a minute or two; the findings are listed once it is complete.`].join("\n");
+          return [...head, "", `Status: still running (started ${ago(age)} ago${sections}). Call ${GET_TOOL} again with the same runId in a minute or two; it is filed in the next version once it is complete.`].join("\n");
         }
         if (r.status === "failed") {
-          return [...head, "", `Status: failed. ${r.error ? oneLine(r.error) : "No reason was recorded."}${r.error === RESTART_SENTENCE ? "" : ` Nothing from it can be placed; start it again with ${START_TOOL}.`}`].join("\n");
+          return [...head, "", `Status: failed. ${r.error ? oneLine(r.error) : "No reason was recorded."}${r.error === RESTART_SENTENCE ? "" : ` Nothing from it was filed; start it again with ${START_TOOL}.`}`].join("\n");
         }
 
-        // Complete: the passes, the coverage, then the findings by clause.
-        const rows = await findingsOf(r);
-        const out = [...head, "", `Status: complete. ${rows.length} ${plural(rows.length, "finding")}.`, "", "PASSES"];
+        // Complete: where it was filed, the passes, the coverage, then the
+        // findings by clause.
+        const rows = await findingsOf(supabase, r);
+        const filing = filingOf(r);
+        const out = [...head, "", `Status: complete. ${rows.length} ${plural(rows.length, "finding")}.`, ""];
+        let panel = null;
+        let filedNumber = null;
+        if (filing?.status === FILED) {
+          filedNumber = filing.versionNumber;
+          out.push(`FILED: the findings were placed as tracked changes by AKLA AI in v${filing.versionNumber} of "${title}"${filing.fileName ? ` (${filing.fileName})` : ""}${filing.label ? `, labelled "${filing.label}"` : ""}.`);
+          out.push(`versionId: ${filing.versionId}`, open("version", filing.versionId));
+          const listed = await listVersionChanges(supabase, filing.versionId).catch((err) => { log(`${GET_TOOL}: the Changes list of ${filing.versionId} could not be read: ${err?.message ?? err}`); return null; });
+          if (listed?.status === 200) {
+            out.push(`Changes in v${filing.versionNumber}: ${countsLine(listed.body.counts)}.`);
+            if (ctx?.apps) panel = panelData({ versionId: filing.versionId, versionNumber: filing.versionNumber, title, projectName: project ?? null, hubUrl: link("version", filing.versionId), cards: listed.body.changes, counts: listed.body.counts, canDecide: ctx?.canWrite === true });
+          }
+          const notPlaced = notPlacedLines(filing, rows);
+          if (notPlaced.length) out.push("Could not be placed (nothing changed there; these are for reading):", ...notPlaced);
+          if (filing.rowsError) out.push(`The changes are in the file, but the Hub could not list them in v${filing.versionNumber}'s Changes list (${oneLine(filing.rowsError)}); decide them in Word, and tell the Hub's owner.`);
+          if (filing.formatNote) out.push(oneLine(filing.formatNote));
+          const latest = version ? await latestVersionOf(supabase, version.matter_document_id).catch(() => null) : null;
+          if (latest && latest.id !== filing.versionId && latest.version_number > filing.versionNumber) out.push(`A newer version exists (v${latest.version_number}, versionId ${latest.id}): changes still waiting in v${filing.versionNumber} were carried forward if it was made from it, so decide them in the newest version.`);
+          out.push(`Nothing needs placing: the lawyer accepts or rejects each change in v${filing.versionNumber}'s Changes list in the Hub, in the panel under this reply where Claude shows one (decide_changes on the lawyer's word), or in Word. To leave a finding out, reject its change.`);
+        } else if (filing?.status === NEWER_VERSION) {
+          out.push(`NOT FILED: v${filing.latestVersionNumber ?? "?"} of "${title}" was saved while the review ran${filing.latestVersionId ? ` (versionId ${filing.latestVersionId})` : ""}, and the findings quote v${filing.reviewedVersionNumber}'s words, so nothing was placed over it. The findings below are for reading; start a fresh review of the newest version with ${START_TOOL} if the lawyer wants it filed.`);
+          if (filing.latestVersionId) out.push(open("version", filing.latestVersionId));
+        } else if (filing?.status === "none_placed") {
+          out.push("NOT FILED: none of the findings' quoted wording could be found once in the file, so no version was made; each finding below says why.");
+        } else if (filing?.status === "format_refused") {
+          out.push(`NOT FILED: ${oneLine(filing.note ?? "the format check refused the marked-up file.")}`);
+        } else if (filing?.status === "failed") {
+          out.push(`NOT FILED: the findings could not be filed (${oneLine(filing.note ?? "no reason was recorded")}). ${APPLY_TOOL} with this runId tries again, when the lawyer asks.`);
+        } else if (filing?.status === "nothing_found") {
+          out.push("Nothing to file: the review found nothing to change.");
+        } else if (!filing && isActiveRun(r.id)) {
+          out.push("FILING: the findings are being placed as tracked changes in the next version now; call get_review again in a moment for the new version.");
+        } else if (!filing && rows.length) {
+          out.push(`NOT FILED YET: this review finished before it could be filed. ${APPLY_TOOL} with this runId files it now (the findings as tracked changes in the next version).`);
+        }
+
+        out.push("", "PASSES");
         const passes = r.passes && typeof r.passes === "object" ? r.passes : {};
         for (const key of PASSES.filter((k) => passes[k])) {
           const p = passes[key];
@@ -348,16 +390,16 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
         if (c.droppedUnlocated) covered.push(`${n(c.droppedUnlocated)} ${plural(c.droppedUnlocated, "suggestion")} left out because the quoted wording was not in the document`);
         if (c.failedPassSections) covered.push(`${n(c.failedPassSections)} pass ${plural(c.failedPassSections, "section")} could not be completed`);
         if (Array.isArray(c.placeholders) && c.placeholders.length) covered.push(`${n(c.placeholders.length)} ${plural(c.placeholders.length, "blank")} or placeholder${c.placeholders.length === 1 ? "" : "s"} in the file`);
-        out.push("", `COVERAGE: ${covered.length ? `${covered.join("; ")}.` : "not recorded."} No online law lookup was run: the law it compared against is the firm's law library. ${NOT_EXHAUSTIVE}`);
+        out.push("", `COVERAGE: ${covered.length ? `${covered.join("; ")}.` : "not recorded."} LAW LOOKUP: ${lawLookupLine(c.research)}. ${NOT_EXHAUSTIVE}`);
+        const answer = (text) => (panel ? { text, structuredContent: panel } : text);
         if (!rows.length) {
           out.push("", "The review found nothing to change. That is not a clearance: see each pass's status above.");
-          return out.join("\n");
+          return answer(out.join("\n"));
         }
 
-        const placedIn = rows.some((x) => x.placement === "superseded" && x.superseded_by);
         const from = Number.isInteger(input.from) && input.from > 0 ? input.from : 1;
-        if (from > rows.length) return [...out, "", `There is no finding ${from}: the review has ${rows.length}.`].join("\n");
-        out.push("", `FINDINGS BY CLAUSE (${rows.length}; the numbers and suggestionIds are what ${APPLY_TOOL}'s exclude takes):`);
+        if (from > rows.length) return answer([...out, "", `There is no finding ${from}: the review has ${rows.length}.`].join("\n"));
+        out.push("", `FINDINGS BY CLAUSE (${rows.length}; each says where it went):`);
         const headText = out.join("\n");
         const budget = Math.max(2_000, MAX_RESULT_CHARS - headText.length - PAGE_MARGIN);
         const shown = [];
@@ -372,21 +414,21 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
         }
         const tail = last < rows.length
           ? `[Findings ${from}–${last} of ${rows.length} shown: call ${GET_TOOL} again with from: ${last + 1}.]`
-          : placedIn
-            ? "[End of the findings. They have been placed in a later version: see each finding's note, and decide them there.]"
-            : `[End of the findings. To place them in the file as tracked changes in a new version, call ${APPLY_TOOL} with this runId, and exclude the numbers the lawyer wants left out; only when the lawyer asks.]`;
-        return `${headText}\n\n${shown.join("\n\n")}\n\n${tail}`;
+          : filedNumber
+            ? `[End of the findings. They are filed in v${filedNumber}: decide them there.]`
+            : "[End of the findings.]";
+        return answer(`${headText}\n\n${shown.join("\n\n")}\n\n${tail}`);
       },
     },
 
     // ------------------------------------------------------------ apply
     {
       name: APPLY_TOOL,
-      title: "Place a review's findings in the file as tracked changes",
-      description: `Write a complete review's findings into the reviewed Word version as real tracked changes by "AKLA AI", in the lawyer's own file, and file the result as the NEXT version of the same document; nothing is accepted, and the lawyer accepts or rejects each change in the panel under the reply where Claude shows one, in the Hub's Changes list, or in Word. Use it when the lawyer asks to put the review's suggestions into the document ("put all but 4 and 9 into the file"): exclude takes the finding numbers or suggestionIds ${GET_TOOL} printed, for the ones to leave out (recorded as rejected by the lawyer). Refused, with nothing saved, unless the review is complete, and when the document has a newer version than the one reviewed (the findings quote that version's words; start a fresh review of the newest). A finding whose quoted wording is not found once in the file is not placed, and is named with the reason. It always saves a NEW version, never over one, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. Returns how many were placed, left out and could not be placed, the new version's id and its Hub page. Filing is not legal approval.`,
+      title: "Place a review's findings again, leaving some out",
+      description: `Rarely needed: a complete review files itself (${START_TOOL}), with every finding as a tracked change in the next version, and the lawyer leaves a finding out by rejecting its change there. Use this only (a) when the lawyer wants a fresh copy of the reviewed document with some findings left out entirely ("put all but 4 and 9 into the file"): exclude takes the finding numbers or suggestionIds ${GET_TOOL} printed, and the rest are placed again, as tracked changes by AKLA AI, in a NEW next version after the filed one; refused once any change in the filed version has been decided (reject there instead), or when a newer version exists; or (b) when ${GET_TOOL} says the review was not filed because filing failed or never ran: it files it now, as the automatic filing would. Refused, with nothing saved, unless the review is complete, and when the document has a newer version than the one the findings were written for (the findings quote that version's words; start a fresh review of the newest). A finding whose quoted wording is not found once in the file is not placed, and is named with the reason. It always saves a NEW version, never over one, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. Returns how many were placed, left out and could not be placed, the new version's id and its Hub page. Filing is not legal approval.`,
       inputSchema: {
         runId: z.string().describe(`The runId ${START_TOOL} gave (the review must be complete).`),
-        exclude: z.array(z.union([z.number().int(), z.string()])).max(MAX_EXCLUDE).optional().describe(`Optional: the findings to leave out, as the numbers ${GET_TOOL} printed (e.g. [4, 9]) or their suggestionIds.`),
+        exclude: z.array(z.union([z.number().int(), z.string()])).max(MAX_EXCLUDE).optional().describe(`The findings to leave out entirely, as the numbers ${GET_TOOL} printed (e.g. [4, 9]) or their suggestionIds. Needed when the review is already filed.`),
         label: z.string().optional().describe("Optional: a short label for the new version, e.g. \"Review comments for the client\". \"Review suggestions placed\" and the date are added."),
       },
       write: true,
@@ -396,7 +438,6 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
       ui: CHANGES_UI,
       async run(input, ctx) {
         const caps = await writes.checkCaps(ctx);
-        let locked = false;
         try {
           const r = await needRun(input);
           const version = await needVersion({ versionId: r.document_version_id }, COLUMNS);
@@ -407,18 +448,15 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
 
           if (r.status === "running") {
             const stopped = await stoppedSentence(r);
-            await refuse(stopped ? `That review stopped without finishing, so it has nothing to place. ${stopped}` : `That review is still running (started ${ago(now() - new Date(r.created_at).getTime())} ago), so nothing was placed; call ${GET_TOOL} until it is complete.`);
+            await refuse(stopped ? `That review stopped without finishing, so it has nothing to place. ${stopped}` : `That review is still running (started ${ago(now() - new Date(r.created_at).getTime())} ago), so nothing was placed; it files itself once it is complete (call ${GET_TOOL} until it is).`);
           }
           if (r.status !== "complete") await refuse(`That review ${r.status === "failed" ? `failed${r.error ? ` (${oneLine(r.error)})` : ""}` : `is ${r.status}`}, so it has nothing to place; start it again with ${START_TOOL}.`);
           if (!isWordPath(version.storage_path)) await refuse(`${versionName(version)} is not a Word file, so the findings cannot be placed as tracked changes.`);
-          const latest = await latestVersionOf(supabase, version.matter_document_id);
-          if (latest && latest.id !== version.id) {
-            await refuse(`A newer version of ${doc.title} exists (v${latest.version_number}, versionId ${latest.id}), so nothing was placed: the review's findings quote v${version.version_number}'s words. Start a fresh review of v${latest.version_number} with ${START_TOOL}, or ask for the findings to be made as a mark-up of v${latest.version_number} (show_document_paragraphs, then apply_tracked_changes).\n${open("version", latest.id)}`);
-          }
+          if (isActiveRun(r.id)) await refuse(`That review is being filed right now; nothing more was placed. Call ${GET_TOOL} in a moment for the new version.`);
 
           // The findings, numbered as get_review printed them, and the ones
           // the lawyer left out.
-          const rows = await findingsOf(r);
+          const rows = await findingsOf(supabase, r);
           if (!rows.length) await refuse(`That review found nothing to place, so nothing was saved.\n${open("version", version.id)}`);
           const byId = new Map(rows.map((x) => [x.id, x]));
           const excluded = new Set();
@@ -431,81 +469,63 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
             else unknown.push(String(item));
           }
           if (unknown.length) await refuse(`${unknown.slice(0, 10).join(", ")} ${unknown.length === 1 ? "is not a finding" : "are not findings"} of this review (it has ${rows.length}, numbered 1–${rows.length}); nothing was placed. Use the finding numbers or suggestionIds ${GET_TOOL} printed.`);
-          const numberOf = new Map(rows.map((x, i) => [x.id, i + 1]));
-          const waiting = (x) => x.status === "pending" && (x.placement == null || x.placement === "placed");
-          const chosen = rows.filter((x) => !excluded.has(x.id) && waiting(x));
-          const decidedBefore = rows.filter((x) => !excluded.has(x.id) && !waiting(x));
-          if (!chosen.length) await refuse(`None of the review's findings is left to place (${excluded.size} left out, ${decidedBefore.length} already decided or placed), so nothing was saved.`);
+          const filed = filingOf(r)?.status === FILED ? filingOf(r) : null;
+          if (filed && !excluded.size) await refuse(`This review is already filed as v${filed.versionNumber}, with its findings waiting there as tracked changes; nothing more was placed. To leave findings out, reject them in v${filed.versionNumber}'s Changes list, or name them in exclude to place the rest again as a fresh version.\n${open("version", filed.versionId)}`);
 
-          if (applying) await refuse(APPLY_BUSY_SENTENCE);
-          applying = true; locked = true;
-
-          // The version's working file (its own, or the copy its decisions
-          // in the Hub were kept in), the findings written in with ids above
-          // every id this document has used, then the format gate against
-          // that file, as the Hub chat's review does.
-          const file = await workingFileOf(supabase, version);
-          const bytes = await downloadFile(supabase, file);
-          let out;
+          const label = reviewLabel(typeof input.label === "string" ? input.label.slice(0, MAX_LABEL_CHARS) : null, at());
+          let res;
           try {
-            const idFloor = Math.max(9000, await highestRecordedVersionId(supabase, doc.id));
-            out = apply(bytes, chosen.map((x, i) => ({ id: i, original: x.original_text, suggested: x.suggested_text, accepted: false, clause: x.clause_reference ?? null })), { idFloor });
-          } catch (err) {
-            await record({ versionId: version.id, outcome: "failed" });
-            throw new Error(`The findings could not be written into ${versionName(version)}: ${err?.message ?? err}. Nothing was saved.`);
-          } finally {
-            applying = false; locked = false;
-          }
-          const results = out.results;
-          const placed = results.filter((x) => x.status === "applied");
-          const notPlaced = results.filter((x) => x.status !== "applied");
-          const why = (x) => placementNote(codeFor(x.reason)) ?? x.reason ?? "no reason given";
-          const findingLine = (x) => { const s = chosen[x.id]; return `Finding ${numberOf.get(s.id)}${s.clause_reference ? ` — ${oneLine(s.clause_reference)}` : ""}`; };
-          if (!placed.length) {
-            await refuse(`None of the ${chosen.length} ${plural(chosen.length, "finding")} could be placed, so nothing was saved: ${notPlaced.slice(0, 8).map((x) => `${findingLine(x)}: ${why(x)}`).join("; ")}.`);
-          }
-          const gate = format(out.bytes, bytes, { base: file.fileName, subject: "the version it was made from" });
-          log(`${APPLY_TOOL}: format ${gate.result.status}${gate.refused ? " (refused)" : ""}`);
-          if (gate.refused) await refuse(`${gate.text} v${version.version_number} is unchanged.`);
-          // The file must still be the one written into: a decision in the
-          // Hub meanwhile moves the working file on.
-          const now2 = await workingFileOf(supabase, version);
-          if (now2.storagePath !== file.storagePath) await refuse(`A change in v${version.version_number} was decided in the Hub while the findings were being placed, so nothing was saved; call ${APPLY_TOOL} again.`);
-
-          let saved;
-          try {
-            saved = await writes.saveVersion({
-              ctx, projectId: matter.id, title: doc.title, matterDocumentId: doc.id, expectedVersion: version.id,
-              bytes: out.bytes, fileName: `${doc.title}.docx`, mime: DOCX_MIME,
-              labelVerbatim: reviewLabel(typeof input.label === "string" ? input.label.slice(0, MAX_LABEL_CHARS) : null, at()),
-            });
+            res = await fileReviewRun({ supabase, runId: r.id, userId: ctx.userId, save: saverFor(ctx), exclude: [...excluded], label, isAiGenerated: false, wait: false, apply, format, log, now: at });
           } catch (err) {
             await record({ versionId: version.id, outcome: "failed" });
             throw err;
           }
+          const name = (row) => findingName(row, res.numberOf ?? new Map());
+          const why = (x) => placementNote(x.reason) ?? x.reason ?? "no reason given";
+          switch (res.status) {
+            case FILED: break;
+            case "busy": await refuse(APPLY_BUSY_SENTENCE); break;
+            case NEWER_VERSION: {
+              const latest = res.latest;
+              if (filed) await refuse(`A newer version of ${doc.title} exists (v${latest?.version_number ?? "?"}${latest?.id ? `, versionId ${latest.id}` : ""}) than v${filed.versionNumber}, where the review was filed, so nothing was placed again. Decide the review's changes where they now wait, or start a fresh review of the newest version with ${START_TOOL}.${latest?.id ? `\n${open("version", latest.id)}` : ""}`);
+              await refuse(`A newer version of ${doc.title} exists (v${latest?.version_number ?? "?"}${latest?.id ? `, versionId ${latest.id}` : ""}), so nothing was placed: the review's findings quote v${version.version_number}'s words. Start a fresh review of v${latest?.version_number ?? "the newest version"} with ${START_TOOL}, or ask for the findings to be made as a mark-up of it (show_document_paragraphs, then apply_tracked_changes).${latest?.id ? `\n${open("version", latest.id)}` : ""}`);
+              break;
+            }
+            case "decided_in_filed": await refuse(`Changes in v${filed?.versionNumber ?? "?"}, where the review was filed, have already been decided (or a follow-up placed more there), so the findings were not placed again: to leave findings out now, reject them in v${filed?.versionNumber ?? "?"}'s Changes list (the panel, decide_changes on the lawyer's word, or the Hub).${filed ? `\n${open("version", filed.versionId)}` : ""}`); break;
+            case "nothing_left": await refuse(`None of the review's findings is left to place (${excluded.size} left out, ${res.decidedBefore ?? 0} already decided), so nothing was saved.`); break;
+            case "none_placed": await refuse(`None of the ${rows.length - excluded.size} ${plural(rows.length - excluded.size, "finding")} could be placed, so nothing was saved: ${res.notPlaced.slice(0, 8).map((x) => `${name(x.finding)}: ${why(x)}`).join("; ")}.`); break;
+            case "format_refused": await refuse(`${res.format.text} v${version.version_number} is unchanged.`); break;
+            case "moved": await refuse(`A change was decided in the Hub while the findings were being placed, so nothing was saved; call ${APPLY_TOOL} again.`); break;
+            case "nothing_found": await refuse(`That review found nothing to place, so nothing was saved.`); break;
+            default: {
+              await record({ versionId: version.id, outcome: "failed" });
+              throw new Error(`The findings could not be placed: ${res.error ?? res.status}. Nothing was saved.`);
+            }
+          }
 
-          const rowsLine = await recordRows({ supabase, version, saved, bytes: out.bytes, chosen, results, userId: ctx.userId, log });
-          const leftOutLine = await markExcluded({ supabase, ids: [...excluded], userId: ctx.userId, at: at(), log });
+          const saved = res.saved;
           const recorded = await record({ versionId: saved.versionId, label: saved.label, outcome: "saved" });
-          log(`${APPLY_TOOL}: run ${r.id}, v${version.version_number} → v${saved.versionNumber} of ${doc.id}: ${placed.length} placed, ${notPlaced.length} not, ${excluded.size} left out`);
-
-          const excludedNumbers = [...excluded].map((id) => numberOf.get(id)).sort((a, b) => a - b);
+          log(`${APPLY_TOOL}: run ${r.id}, v${version.version_number} → v${saved.versionNumber} of ${doc.id}: ${res.placed.length} placed, ${res.notPlaced.length} not, ${excluded.size} left out`);
+          const excludedNumbers = [...excluded].map((id) => res.numberOf.get(id)).sort((a, b) => a - b);
           const lines = [
-            `Placed the review's findings in "${doc.title}" v${version.version_number} and filed the result as v${saved.versionNumber} (${saved.fileName}), the next version of the document on ${matter.name}, labelled "${saved.label}".`,
-            `Findings: ${placed.length} of ${rows.length} placed as tracked changes by AKLA AI; ${excluded.size} left out at the lawyer's word${excludedNumbers.length ? ` (${excludedNumbers.slice(0, 40).join(", ")}${excludedNumbers.length > 40 ? ", …" : ""})` : ""}; ${notPlaced.length} could not be placed${decidedBefore.length ? `; ${decidedBefore.length} already decided or placed before, left as they were` : ""}.`,
+            filed
+              ? `Placed the review's findings again from "${doc.title}" v${version.version_number}, less the ones left out, and filed the result as v${saved.versionNumber} (${saved.fileName}), the next version after v${filed.versionNumber} on ${matter.name}, labelled "${saved.label}". The review's changes in v${filed.versionNumber} no longer wait there.`
+              : `Placed the review's findings in "${doc.title}" v${version.version_number} and filed the result as v${saved.versionNumber} (${saved.fileName}), the next version of the document on ${matter.name}, labelled "${saved.label}".`,
+            `Findings: ${res.placed.length} of ${rows.length} placed as tracked changes by AKLA AI; ${excluded.size} left out at the lawyer's word${excludedNumbers.length ? ` (${excludedNumbers.slice(0, 40).join(", ")}${excludedNumbers.length > 40 ? ", …" : ""})` : ""}; ${res.notPlaced.length} could not be placed${res.decidedBefore ? `; ${res.decidedBefore} already decided before, left as they were` : ""}.`,
             "Placed:",
-            ...placed.slice(0, MAX_LISTED).map((x) => `- ${findingLine(x)}: ${clip(oneLine(x.original ?? ""), 90)}`),
-            ...(placed.length > MAX_LISTED ? [`- and ${placed.length - MAX_LISTED} more`] : []),
+            ...res.placed.slice(0, MAX_LISTED).map((p) => `- ${name(p.finding)}: ${clip(oneLine(p.original ?? ""), 90)}`),
+            ...(res.placed.length > MAX_LISTED ? [`- and ${res.placed.length - MAX_LISTED} more`] : []),
           ];
-          if (notPlaced.length) {
+          if (res.notPlaced.length) {
             lines.push("Could not be placed (nothing changed there):");
-            for (const x of notPlaced.slice(0, MAX_LISTED)) lines.push(`- ${findingLine(x)}: ${why(x)}`);
-            if (notPlaced.length > MAX_LISTED) lines.push(`- and ${notPlaced.length - MAX_LISTED} more`);
+            for (const x of res.notPlaced.slice(0, MAX_LISTED)) lines.push(`- ${name(x.finding)}: ${why(x)}`);
+            if (res.notPlaced.length > MAX_LISTED) lines.push(`- and ${res.notPlaced.length - MAX_LISTED} more`);
           }
           lines.push(
-            gate.text,
-            rowsLine,
-            ...(leftOutLine ? [leftOutLine] : []),
+            res.format.text,
+            res.rowsError
+              ? `The findings are in the file as tracked changes, but the Hub could not list them in v${saved.versionNumber}'s Changes list (${res.rowsError}); accept or reject them in Word, and tell the Hub's owner.`
+              : `${res.waiting} ${plural(res.waiting, "change is", "changes are")} waiting in v${saved.versionNumber}'s Changes list in the Hub: accept or reject each there (the document window beside the chat), in the panel under this reply where Claude shows one, or in Word.${res.carriedCount ? ` ${res.carriedCount} AKLA AI ${plural(res.carriedCount, "change")} still waiting before ${res.carriedCount === 1 ? "was" : "were"} carried forward to this version${res.overtakenCount ? `, ${res.overtakenCount} of them overtaken by a finding` : ""}.` : ""}`,
             `documentId: ${doc.id}`,
             `versionId: ${saved.versionId}`,
             open("version", saved.versionId),
@@ -517,85 +537,15 @@ export function createReviewTools(deps, { run = runReview, apply = applyReviewSu
           // With the trial on, the panel's data too; a panel that cannot be
           // built never costs the lawyer the filing's reply.
           if (!ctx?.apps) return text;
-          const structuredContent = await panelForVersion(supabase, {
-            versionId: saved.versionId, versionNumber: saved.versionNumber, title: doc.title, projectName: matter.name,
-            hubUrl: link("version", saved.versionId), bytes: out.bytes, canDecide: true,
-          }).catch((err) => { log(`${APPLY_TOOL}: the changes panel for ${saved.versionId} could not be built: ${err?.message ?? err}`); return null; });
-          return structuredContent ? { text, structuredContent } : text;
+          const listed = await listVersionChanges(supabase, saved.versionId).catch((err) => { log(`${APPLY_TOOL}: the changes panel for ${saved.versionId} could not be built: ${err?.message ?? err}`); return null; });
+          if (listed?.status !== 200) return text;
+          return { text, structuredContent: panelData({ versionId: saved.versionId, versionNumber: saved.versionNumber, title: doc.title, projectName: matter.name, hubUrl: link("version", saved.versionId), cards: listed.body.changes, counts: listed.body.counts, canDecide: true }) };
         } finally {
-          if (locked) applying = false;
           caps.release();
         }
       },
     },
   ];
-}
-
-/**
- * The new version's Changes list, written after the save (the rows need its
- * id): the reviewed version's own waiting AKLA AI changes carried forward
- * (their revisions are in this file too), then one row per finding placed,
- * as versionChanges.js rows (review_type 'edit', anchored to the new
- * version, the Word revision ids it minted; the pass and reason in its
- * "why"), then what this placement did to the carried ones. The review's
- * own rows on the reviewed version then say where each went: placed (moved
- * to the new version's row, as a carried change is) or could not be placed
- * (with the reason). Returns the reply's line; a failure is said, never
- * thrown: the version is filed and its changes are in the file, decidable
- * in Word.
- */
-async function recordRows({ supabase, version, saved, bytes, chosen, results, userId, log }) {
-  try {
-    const earlier = await versionRows(supabase, version.id);
-    const { clones, carried } = carryForward(earlier, { toVersionId: saved.versionId, toVersionNumber: saved.versionNumber });
-    const rows = [];
-    const moved = [];
-    const unplaced = [];
-    for (const res of results) {
-      const finding = chosen[res.id];
-      if (!finding) continue;
-      if (res.status !== "applied") { unplaced.push({ id: finding.id, patch: { placement: "unplaced", placement_reason: codeFor(res.reason) ?? "not_found" } }); continue; }
-      const id = randomUUID();
-      rows.push({
-        id, document_version_id: saved.versionId, artifact_id: null, thread_id: null, message_id: null, review_run_id: null,
-        review_type: VERSION_ROW_TYPE, op: "replace", part: res.part ?? "word/document.xml", paragraph_index: res.paragraphIndex ?? null,
-        clause_reference: finding.clause_reference ?? res.clause ?? null,
-        original_text: res.original ?? "", suggested_text: res.suggested ?? "",
-        rationale: `Review (${passLabel(finding.review_type)}): ${oneLine(finding.rationale ?? "")}`.slice(0, 4000),
-        status: "pending", revision_ids: res.revisionIds ?? [], placement: "placed", placement_reason: null, created_by: userId,
-      });
-      res.rowId = id;
-      moved.push({ id: finding.id, patch: { placement: "superseded", placement_reason: `Placed in v${saved.versionNumber} as a tracked change; decide it there.`, superseded_by: id } });
-    }
-    const all = [...clones, ...rows];
-    if (all.length) {
-      const { error } = await supabase.from("redline_suggestions").insert(all).select("id");
-      if (error) throw new Error(error.message);
-    }
-    for (const { id, patch } of carried) await supabase.from("redline_suggestions").update(patch).eq("id", id);
-    // A carried change a finding rewrote is "Replaced by change N" in the
-    // new version's list (applyReviewSuggestions' takesOver).
-    const overtaken = clones.length ? reconcile(bytes, clones, results) : [];
-    for (const { id, patch } of overtaken) await supabase.from("redline_suggestions").update(patch).eq("id", id);
-    for (const { id, patch } of [...moved, ...unplaced]) await supabase.from("redline_suggestions").update(patch).eq("id", id);
-    const gone = new Set(overtaken.filter((p) => p.patch.placement).map((p) => p.id));
-    const waiting = rows.length + clones.filter((c) => !gone.has(c.id)).length;
-    const parts = [`${waiting} ${plural(waiting, "change is", "changes are")} waiting in v${saved.versionNumber}'s Changes list in the Hub: accept or reject each there (the document window beside the chat), in the panel under this reply where Claude shows one, or in Word.`];
-    if (clones.length) parts.push(`${clones.length} AKLA AI ${plural(clones.length, "change")} still waiting on v${version.version_number} ${clones.length === 1 ? "was" : "were"} carried forward to this version${gone.size ? `, ${gone.size} of them overtaken by a finding` : ""}.`);
-    return parts.join(" ");
-  } catch (err) {
-    log(`${APPLY_TOOL}: the change rows for ${saved.versionId} could not be written: ${err?.message ?? err}`);
-    return `The findings are in the file as tracked changes, but the Hub could not list them in v${saved.versionNumber}'s Changes list (${err?.message ?? err}); accept or reject them in Word, and tell the Hub's owner.`;
-  }
-}
-
-/** The findings the lawyer left out, recorded as rejected by them. Returns a line only when that failed. */
-async function markExcluded({ supabase, ids, userId, at, log }) {
-  if (!ids.length) return null;
-  const { error } = await supabase.from("redline_suggestions").update({ status: "rejected", decided_by: userId, decided_at: at.toISOString() }).in("id", ids);
-  if (!error) return null;
-  log(`${APPLY_TOOL}: the left-out findings could not be marked rejected: ${error.message}`);
-  return `The ${ids.length} ${plural(ids.length, "finding")} left out could not be marked as rejected in the review (${error.message}); they are not in the file either way.`;
 }
 
 export default (deps) => createReviewTools(deps);

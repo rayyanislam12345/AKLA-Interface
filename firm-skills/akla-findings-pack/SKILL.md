@@ -72,6 +72,18 @@ open the file and look, or keep items short.
 Write the covering memo with the **legal-summary** skill, citing each finding's
 clause; the same findings list is the source for all three.
 
+## 5. Filing
+
+When the AKLA Hub connector is available (its tools include `upload_file_to_project`), the finished register and deck is filed in the matter's project on the Hub, never handed over only as a file in the chat:
+
+1. Find the project with `list_projects` (or `find_document_by_title`); ask the user which one if it is not clear. For a new version of a register or deck already on the project, take its `documentId` from `list_project_documents`.
+2. Call `upload_file_to_project` with the project id and the file's name (and the `documentId`, for a new version). Run the `curl` line it returns from the sandbox, pointing at the file you built (under `/mnt/user-data/outputs/` in claude.ai). If curl cannot reach the network, give the user the upload address it returns, written out in full on its own line, to open and drop the file in.
+3. Call `get_upload` to confirm the file arrived, then give the user its "Open in Hub:" address, written out in full on its own line.
+
+File the register and the deck as two uploads, one address each. The memo is filed as the **legal-summary** skill says.
+
+Without the connector (Claude Code, or the Hub's own chat), hand the file over as before.
+
 ## What this skill will not do
 
 Invent a finding, a clause number or a status. Reorder or renumber IDs. Judge

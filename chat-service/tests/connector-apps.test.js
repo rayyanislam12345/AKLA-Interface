@@ -202,7 +202,7 @@ async function serve(s, { apps }) {
 }
 
 const markupInput = () => ({ versionId: V1, fileHash: HASH, ops: [{ op: 'replace', p: at(P_CAP), expected: P_CAP, text: CAPPED, why: 'Cap at fees paid, as instructed.' }] });
-const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL, 'fill_standard_to_project', 'apply_review_to_version'];
+const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL, 'fill_standard_to_project', 'apply_review_to_version', 'get_review'];
 // The tools whose result is drawn by the document panel; the rest use the changes panel.
 const DOCUMENT_UI_TOOLS = [OPEN_TOOL, 'fill_standard_to_project'];
 

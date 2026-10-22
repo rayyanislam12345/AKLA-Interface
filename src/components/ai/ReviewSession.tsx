@@ -23,13 +23,28 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { saveBlobToProject } from "@/lib/documentSave";
 import { formatSaveDate } from "@/lib/documentSaveRules";
+import { filingHeadline, filingOf, reviewView } from "@/lib/reviewFilingRules";
 import { cn, sanitizeStorageFilename } from "@/lib/utils";
+import { useDocumentVersion } from "@/hooks/useDocumentVersion";
+import { DocumentViewer } from "@/components/documents/DocumentViewer";
+import { downloadStoredVersion } from "@/components/documents/downloadVersion";
+import { versionDownloadName } from "@/components/documents/zipDownload";
 
-// The three-pass AI review of one matter document — suggestions grouped by
-// pass, accept/reject, a tracked-changes preview of the real .docx, download
-// and save-as-version. It used to be the body of the Verify tab; it is now
-// what the AI Workspace's artifact panel opens for a "review" artifact, and
-// what a Revise link lands on. Everything here is unchanged from that page.
+// The three-pass AI review of one matter document. It used to be the body
+// of the Verify tab; it is now what the AI Workspace's artifact panel opens
+// for a "review" artifact, and what a Revise link lands on.
+//
+// A review of a Word version is filed into the Hub as soon as it finishes
+// (chat-service/reviewFiling.js): its findings become AKLA AI tracked
+// changes in the document's next version, decided in that version's Changes
+// list, the same wherever the review was started (here, the Hub chat or
+// claude.ai). So for a filed review this panel shows that version, opened
+// on its Changes list, and lists only the findings that could not be placed,
+// for reading: no finding waits here and there at once. A review the
+// document moved past while it ran is listed for reading only. A PDF's
+// review, a review from before filing, or one whose filing failed keeps the
+// list it always had: suggestions grouped by pass, accept/reject, a
+// tracked-changes preview of the real .docx, download and save-as-version.
 
 function statusBadgeVariant(status: RedlineSuggestion["status"]) {
   if (status === "accepted") return "default" as const;
@@ -64,6 +79,7 @@ const REVIEW_TYPE_DESCRIPTIONS: Record<RedlineReviewType, string> = {
 // Why a suggestion is on the list but not marked in the document, in the
 // lawyer's terms. Keys are the reasons the redline builder reports.
 const NOT_IN_DOCUMENT: Record<string, string> = {
+  ambiguous: "Not marked in the document: its quoted wording appears more than once.",
   overlaps_another_suggestion: "Not marked in the document: another suggestion changes the same words.",
   formatting_only: "Not marked in the document: it changes formatting, not wording.",
   paragraph_structure: "Not marked in the document: it restructures paragraphs or table cells.",
@@ -82,6 +98,7 @@ function SuggestionListItem({
   selected,
   onSelect,
   notInDocument,
+  readOnly = false,
 }: {
   suggestion: RedlineSuggestion;
   onAccept: () => void;
@@ -91,8 +108,10 @@ function SuggestionListItem({
   selected: boolean;
   onSelect?: () => void;
   notInDocument?: string;
+  /** For reading only: a filed review's leftovers, or a review the document moved past. */
+  readOnly?: boolean;
 }) {
-  const isPending = suggestion.status === "pending";
+  const isPending = suggestion.status === "pending" && !readOnly;
 
   return (
     <div
@@ -147,7 +166,7 @@ function SuggestionListItem({
             Reject
           </Button>
         </div>
-      ) : (
+      ) : readOnly && suggestion.status === "pending" ? null : (
         <Badge variant={statusBadgeVariant(suggestion.status)} className="capitalize mt-1.5">
           {suggestion.status}
         </Badge>
@@ -199,11 +218,18 @@ export default function ReviewSession({
   const setStatus = useSetSuggestionStatus();
   const applyPreview = useApplyRedlinesPreview();
 
+  // Where the review went (reviewFilingRules.ts): filed as the next version,
+  // listed for reading, or the review's own list as before.
+  const filing = filingOf(reviewRun?.coverage);
+  const view = reviewView(filing);
+  const headline = filingHeadline(filing);
+
   // apply-redlines-to-docx patches the real uploaded .docx with OOXML
   // revision marks — it refuses anything else, so for a PDF/Excel/PowerPoint
   // version the review still runs but there's no preview, download or
-  // save-as-version, only the suggestion list.
-  const canPreview = !!version && version.storage_path.toLowerCase().endsWith(".docx");
+  // save-as-version, only the suggestion list. A filed review's preview is
+  // the filed version itself.
+  const canPreview = view === "interactive" && !!version && version.storage_path.toLowerCase().endsWith(".docx");
 
   const [previewStoragePath, setPreviewStoragePath] = useState<string | undefined>();
   const [applySummary, setApplySummary] = useState<{ appliedCount: number; skippedCount: number; skipped: Map<string, string> } | null>(null);
@@ -344,6 +370,11 @@ export default function ReviewSession({
       const result = await runReview.mutateAsync(version.id);
       setSelectedRunId(result.reviewRunId);
       setPreviewStoragePath(undefined);
+      if (result.filed?.status === "filed") {
+        toast({ title: `Filed as v${result.filed.versionNumber}`, description: `${result.filed.waiting} change${result.filed.waiting === 1 ? "" : "s"} waiting in its Changes list.` });
+        return;
+      }
+      if (result.filed?.status === "newer_version") return;
       await regeneratePreview(version.id, result.reviewRunId);
     } catch (err: any) {
       toast({ title: "Review failed", description: err.message, variant: "destructive" });
@@ -530,6 +561,11 @@ export default function ReviewSession({
             <p key={key}>{REVIEW_TYPE_LABELS[key as RedlineReviewType] ?? key}: {pass.status.replace(/_/g, " ")}{pass.note ? ` — ${pass.note}` : ""}</p>
           ))}
           <p className="text-muted-foreground">Results apply to this file and the retrieved evidence. An empty list is not a legal clearance.</p>
+          {headline && (
+            <p className={cn("font-medium", view === "filed" ? "text-foreground" : "text-amber-800 dark:text-amber-300")} data-testid="review-filing">
+              {headline}
+            </p>
+          )}
         </div>
       )}
       {lawUpdate && (
@@ -563,7 +599,34 @@ export default function ReviewSession({
         </Card>
       )}
 
-      {versionLoading ? (
+      {view !== "interactive" ? (
+        <>
+          {view === "filed" && filing?.versionId && <FiledVersion versionId={filing.versionId} />}
+          {(suggestions ?? []).length > 0 && (
+            <div className="max-w-3xl space-y-2" data-testid="review-for-reading">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {view === "filed" ? "Not in the filed version — for reading" : "Findings — for reading"}
+              </p>
+              {(suggestions ?? []).map((s) => (
+                <SuggestionListItem
+                  key={s.id}
+                  suggestion={s}
+                  readOnly
+                  showText
+                  selected={false}
+                  notInDocument={s.placement === "unplaced" ? NOT_IN_DOCUMENT[s.placement_reason ?? ""] ?? "Not marked in the document." : undefined}
+                  disabled
+                  onAccept={() => undefined}
+                  onReject={() => undefined}
+                />
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Ask about a finding or request another check in the chat beside this panel.
+          </p>
+        </>
+      ) : versionLoading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : !version ? (
         <p className="text-muted-foreground">No document version to review yet — upload one first.</p>
@@ -655,5 +718,44 @@ export default function ReviewSession({
         </>
       )}
     </div>
+  );
+}
+
+// The version a review was filed as, opened on its Changes list (the
+// viewer opens there while any change waits): the same place a review
+// started from claude.ai leads to.
+function FiledVersion({ versionId }: { versionId: string }) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [shown, setShown] = useState(versionId);
+  useEffect(() => setShown(versionId), [versionId]);
+  const { data: detail, isLoading } = useDocumentVersion(versionId);
+  if (isLoading) return <p className="text-sm text-muted-foreground">Opening the filed version…</p>;
+  if (!detail) return <p className="text-sm text-muted-foreground">The version this review was filed as couldn't be opened. It may have been deleted.</p>;
+  return (
+    <Card data-testid="review-filed-version">
+      <CardContent className="p-0">
+        <DocumentViewer
+          document={detail.document}
+          versions={detail.versions}
+          versionId={shown}
+          onVersionChange={setShown}
+          onDownload={async (v) => {
+            try {
+              await downloadStoredVersion(v.storage_path, versionDownloadName(detail.document.title, v));
+            } catch (err) {
+              toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+            }
+          }}
+          headerClassName="px-3 py-2.5"
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => navigate(`/ai/d/${shown}`)}>
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              Full page
+            </Button>
+          }
+        />
+      </CardContent>
+    </Card>
   );
 }

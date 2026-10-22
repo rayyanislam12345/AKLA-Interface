@@ -14,6 +14,9 @@ export interface RedlineSuggestion {
   rationale: string | null;
   status: RedlineStatus;
   review_type: RedlineReviewType;
+  /** Where a finding went once the review was filed: "superseded" (in the next version), "unplaced" (with the reason), or null. */
+  placement?: string | null;
+  placement_reason?: string | null;
 }
 
 // The document's type as stored right now, read at save time. A new version
@@ -63,8 +66,9 @@ export function useRedlineSuggestions(documentVersionId: string | undefined, rev
         .select("*")
         .eq("document_version_id", documentVersionId!)
         .in("review_type", [...REVIEW_TYPES])
-        // A finding placed into a later version from claude.ai (apply_review_to_version)
-        // has moved on: it is decided in that version's Changes list, not here.
+        // A finding placed into a later version (a filed review, wherever it
+        // was started) has moved on: it is decided in that version's Changes
+        // list, not here.
         .or("placement.is.null,placement.neq.superseded");
       if (reviewRunId) query = query.eq("review_run_id", reviewRunId);
       else query = query.is("review_run_id", null);
@@ -94,6 +98,18 @@ export interface ReviewResult {
   passes: Record<string, { status: string; note?: string; findings?: number }>;
   coverage?: Record<string, unknown>;
   suggestions: RedlineSuggestion[];
+  /** Where the chat service filed it (chat-service/reviewFiling.js filingSummary); absent from the edge function. */
+  filed?: {
+    status: string;
+    versionId: string | null;
+    versionNumber: number | null;
+    placed: number;
+    waiting: number;
+    notPlaced: number;
+    latestVersionId: string | null;
+    latestVersionNumber: number | null;
+    note: string | null;
+  } | null;
 }
 
 // A full review does not fit in a Supabase edge function: on a 58,000
@@ -125,9 +141,14 @@ export function useRunRedlineReview() {
       if (error) throw error;
       return data as ReviewResult;
     },
-    onSuccess: (_data, documentVersionId) => {
+    onSuccess: (data, documentVersionId) => {
       queryClient.invalidateQueries({ queryKey: ["redline-suggestions", documentVersionId] });
       queryClient.invalidateQueries({ queryKey: ["review-run", documentVersionId] });
+      // A filed review added a version to the document.
+      if (data.filed?.versionId) {
+        queryClient.invalidateQueries({ queryKey: ["latest-document-version"] });
+        queryClient.invalidateQueries({ queryKey: ["document-version"] });
+      }
     },
   });
 }

@@ -60,6 +60,41 @@ a re-read of a version). What to expect:
   filing, not legal approval.
 - A connection made before saving existed is read-only until you remove
   the connector and add it again.
+- **Drafting goes through the Hub** (the owner's decision, 22 October
+  2026): every firm document Claude drafts in claude.ai is filed in a
+  project, never left only as a file in the chat:
+  `fill_standard_to_project` when the type has a standard or pack,
+  otherwise `save_draft_to_project`, and `upload_file_to_project` for a
+  file Claude built in its code sandbox (with a skill). The firm skills
+  that make documents (legal-summary, akla-dd-format, akla-findings-pack,
+  akla-presentation) say the same in their "Filing" section.
+
+## Files from the chat into a project
+
+Attach a Word draft (or a PDF, a spreadsheet, a deck, an image, a text
+file) to a claude.ai chat and ask Claude to file it, mark it up or review
+it. Claude calls `upload_file_to_project`, which gives it a one-time upload
+address on the connector (`https://aklachat.duckdns.org/mcp/upload/…`) and
+the `curl` line to send the file from its code sandbox. If the sandbox
+cannot reach the network, Claude gives you the address instead: open it,
+drop the file on the page (it works on a phone too), and the page says
+when it is filed. Either way the file becomes a new document, or the next
+version of the one Claude named, under your name, labelled "Uploaded from
+claude.ai" with the date; `get_upload` then gives Claude the version's id
+and "Open in Hub" address so it can go straight on.
+
+- The address is yours alone, for that project, document and file name;
+  it works once, for half an hour. No sign-in on the page: the address is
+  the key (the owner's decision, 22 October 2026). A file of another kind
+  than the name says is refused and the address stays usable.
+- Up to 50 MB (Supabase Storage's limit). Word, PDF, Excel, PowerPoint,
+  images and text; anything else is refused. Images and old .doc/.ppt
+  files are stored but not read for search, as on the Hub.
+- A small file (up to 1 MB) can also be sent inside the tool call itself
+  (`contentBase64`), filed at once.
+- Uploads count toward the same caps and are recorded like every other
+  save. A connector restart (every deploy) voids an address not yet used;
+  a file that already arrived is still found by `get_upload`.
 
 ## Drafting from the firm's standard
 
@@ -216,13 +251,15 @@ so Claude can cite what it relied on.
 | `compare_text_with_version` (versionId, text, from?, includeFormatting?) | What Claude's redraft changes against one stored version, clause by clause, before it is filed; the version's file is read on the spot when it is not already in memory (one such read at a time, kept for the next page); no model, nothing saved |
 | `save_note_to_project` (projectId, text, title?, matterDocumentId?, expectedVersionId?, label?) — saves | Text written in the chat (a note, memo, summary) filed on a project as a Markdown version, as a new document or the next version of one; always a new version number, a stale `expectedVersionId` refused with "A newer version exists"; up to 600,000 characters; the Hub reads it within a minute |
 | `save_draft_to_project` (projectId, markdown, title?, documentTypeId?, matterDocumentId?, expectedVersionId?, label?) — saves | The same, rendered first to a Word file in the house format (A4, Arial 11, navy banner, numbered outline, AKLA comments in the margin; up to a minute) with the format check's notes in the reply; if the renderer fails nothing is saved and the reply offers `save_note_to_project`; a document of a type with a firm pack is not saved: the reply is one sentence pointing to `open_standard_for_filling` and `fill_standard_to_project` |
+| `upload_file_to_project` (projectId, fileName, title?, documentId?, label?, contentBase64?) — saves | A whole file from the chat (an attachment, or one Claude built in its sandbox with a skill) filed as a new document or the next version of `documentId`: with `contentBase64` (up to 1 MB) at once; otherwise a one-time upload address for 30 minutes, bound to the lawyer, project, document and file name, with the `curl` line for Claude's sandbox and a drop page for the lawyer; Word, PDF, Excel, PowerPoint, images and text up to 50 MB; the lawyer's own version, labelled "Uploaded from claude.ai — <date>" |
+| `get_upload` (uploadId) | Whether the file for an upload address has arrived: waiting (until when), arriving, expired, or filed with its documentId, versionId and Open in Hub address; only the lawyer who asked can see it |
 | `fill_standard_to_project` (documentTypeId, projectId, title, ops, templateHash, matterDocumentId?, label?, confirmedOmissions?) — saves | Fills the firm's real Word standard for a type with the facts gathered (changes against the ¶n numbers from `open_standard_for_filling`, each quoting the paragraph's current text), accepts the fills, leaves every value not given as `[●]`, puts open questions in the margin as "AKLA Comments", keeps numbering, styles and the contents page, and files the result as a new version in the project; refused if the standard was replaced since it was opened (`templateHash`); refused, with a list of what differs, if the filled file's format differs from the standard's (`FORMAT_GATE=report` saves it with the list as a warning); for a firm pack also `write`, `repeat_block`, `add_row` and `remove_block` in the pack's kinds; up to 300 changes a call, one fill at a time on the Hub (a second is told to try again in a minute); the reply lists what could not be filled and why, the blanks left in the body, and that the standard's footnote drafting notes remain; refused, naming the ids, when a part the type's clause list always has is missing (every such part for a shell pack, one the fill took out for a form) until `confirmedOmissions` names them; new clauses and wording points in what was written get AKLA comments, with a clause-list line and a wording line in the reply |
 | `show_document_paragraphs` (versionId, query?, from?, to?) | A Word version's paragraphs numbered ¶n with their exact text, found by the words the lawyer highlighted (whitespace, curly quotes, dashes and list numbers forgiven; a passage over several paragraphs finds each one) with two paragraphs either side and the heading above, or a range of at most 200; with the operations protocol and a `fileHash` the mark-up must echo; says when changes are still waiting and when a newer version exists; Word versions only |
 | `apply_tracked_changes` (versionId, ops, fileHash, label?, instruction?, confirmedOmissions?) — saves | Writes the changes into the lawyer's own Word file as tracked changes by "AKLA AI" and remarks as "AKLA Comments" margin comments, nothing accepted, and files it as the next version of the same document ("Marked up in claude.ai — <date>"); one change row per tracked change anchored to the new version, so its Changes list in the Hub accepts or rejects each in the file; waiting changes of the version marked up travel with it; refused with nothing saved if the file changed since it was listed, if a newer version exists, or if the result's format differs from the version it was made from; for a document of a type with a clause list, refused when a change takes out a part the firm always has, until `confirmedOmissions` names it; wording points in what was written (the type's style sheet, or the firm-wide one) and new headings get AKLA comments; up to 300 changes a call, one mark-up at a time |
 | `make_clean_copy` (versionId, acceptAll?, label?) — saves | Files a further version with AKLA AI's changes accepted as the lawyer decided them in the Hub, other people's tracked changes and the margin comments left; refused while a change is waiting unless `acceptAll` (the lawyer's word, recorded as their decision); format-checked against the version |
-| `start_review` (versionId) — saves (a record) | Starts the Hub's three-pass review (legal and citations, formatting and structure, content and conflicts; no online law lookup) of one Word version on the server and answers within seconds with a runId; nothing in the document changes; one review on the server at a time (the Hub chat's included), a second review of the same version refused while one runs, three a day per person; a review cut off by a restart is marked failed with a sentence saying to start again |
-| `get_review` (runId, from?) | The run's progress ("still running, started N s ago"), then its passes, coverage and the findings by clause, numbered, with original, suggested wording, reason and pass, paged |
-| `apply_review_to_version` (runId, exclude?, label?) — saves | Places the complete run's findings, less those the lawyer excluded (by number or id), as tracked changes by "AKLA AI" in the next version ("Review suggestions placed — <date>"), with one change row each so the Hub's Changes list (and, with the panel trial on, the panel under the reply) accepts or rejects them; excluded findings are recorded as rejected; refused if the run is not complete or the document has a newer version than the one reviewed; lists the findings that could not be placed and why; format-checked |
+| `start_review` (versionId) — saves (a record, then the filed version) | Starts the Hub's three-pass review (legal and citations, formatting and structure, content and conflicts; the law that applies looked up online first, as in the Hub, a downloaded law added to the library from the server under the lawyer's name) of one Word version on the server and answers within seconds with a runId; when complete the review files itself: its findings as tracked changes by "AKLA AI" in the next version ("Review suggestions placed — <date>", marked AI-generated), one change row each, decided in that version's Changes list or the panel, nothing placed if a newer version was saved meanwhile; one review on the server at a time (the Hub chat's included), a second review of the same version refused while one runs, three a day per person; a review cut off by a restart is marked failed with a sentence saying to start again |
+| `get_review` (runId, from?) | The run's progress ("still running, started N s ago"), then where it was filed (the new version's id and Hub page, its Changes counts, the findings that could not be placed; with the panel trial on, the changes panel) or why nothing was filed, its passes, coverage and law lookup, and the findings by clause, numbered, with original, suggested wording, reason, pass and where each went, paged |
+| `apply_review_to_version` (runId, exclude?, label?) — saves | Rarely needed now that a review files itself: places a filed review's findings again, less those the lawyer excluded (by number or id), as a fresh next version after the filed one (refused once a change there is decided: reject it there instead), or files a complete review the automatic filing could not; one change row each for the Hub's Changes list and the panel; excluded findings are recorded as rejected; refused if the run is not complete or the document has a newer version; lists the findings that could not be placed and why; format-checked |
 | `set_project_instructions` (projectId, content) — saves | Writes the project's standing instructions (the Project Context every Hub chat and overview sees), replacing the whole text; recorded with who wrote it and when |
 | `label_version` (versionId, label) — saves | Gives one version a short label (up to 120 characters), replacing any it had |
 | `rename_document` (documentId or versionId, title) — saves | Changes a document's title only; its type, status and versions are untouched (the type is changed on the Hub) |

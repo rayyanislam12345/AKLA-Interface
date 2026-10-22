@@ -164,7 +164,14 @@ export function readPlan(text) {
 
 // Each turn's research is durable and independently auditable. A partial run
 // remains partial; finding a source never establishes its applicability.
-export async function researchLaw({ supabase, authHeader, userId = null, anthropicJson, matter, message, documentExcerpt = '', signal, notice }) {
+//
+// A law downloaded here is added to the law library, so the review that
+// asked for it can search it. From the Hub that is the ingest-documents edge
+// function under the lawyer's own token (`authHeader`). A caller that holds
+// no token (the claude.ai connector's review) passes `ingest` instead:
+// indexing/statute.js ingestStatute, the same passages and rows written from
+// the server for the same lawyer.
+export async function researchLaw({ supabase, authHeader, userId = null, anthropicJson, matter, message, documentExcerpt = '', signal, notice, ingest = null }) {
   const { data: run, error } = await supabase.from('ai_research_runs').insert({ matter_id: matter.id, question: message, status: 'running', created_by: userId }).select('id').single();
   if (error) throw new Error(`Could not start legal research: ${error.message}`);
   const sources = []; const unresolved = []; const failures = []; const fromLibrary = []; const downloaded = [];
@@ -218,18 +225,29 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
         }
         if (!candidate.url) throw new Error('Not in the law library, and no official copy was located');
         notice(`Downloading ${candidate.title} from its official source…`);
-        const downloaded = await downloadOfficial(candidate.url, { signal });
-        const bytes = new Uint8Array(await downloaded.blob.arrayBuffer());
+        // Named apart from the list of laws downloaded: the same name here
+        // made every law fetched read as a failure ("downloaded.push is not
+        // a function") once its passages were in.
+        const fetched = await downloadOfficial(candidate.url, { signal });
+        const bytes = new Uint8Array(await fetched.blob.arrayBuffer());
         if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') throw new Error('Source is not a PDF');
-        const extracted = await extractTextFromFile(downloaded.blob, 'authority.pdf');
+        const extracted = await extractTextFromFile(fetched.blob, 'authority.pdf');
         if (!sourceIdentityMatches(candidate.title, extracted.text)) throw new Error('Source title/year could not be confirmed in its text');
         const hash = createHash('sha256').update(bytes).digest('hex');
-        const metadata = { act_name: candidate.title, source_url: downloaded.url, source_hash: hash, fetched_at: new Date().toISOString(), research_run_id: run.id, source: 'official-web-research', applicability: 'candidate', ...(candidate.kind === 'amendment' && candidate.amendsAct ? { amends_act: candidate.amendsAct } : {}) };
+        const metadata = { act_name: candidate.title, source_url: fetched.url, source_hash: hash, fetched_at: new Date().toISOString(), research_run_id: run.id, source: 'official-web-research', applicability: 'candidate', ...(candidate.kind === 'amendment' && candidate.amendsAct ? { amends_act: candidate.amendsAct } : {}) };
         const { data: existing, error: lookupError } = await supabase.from('documents').select('id').eq('is_statute', true).eq('metadata->>source_hash', hash).limit(1);
         if (lookupError) throw lookupError;
         if (!existing?.length) {
-          const { error: ingestError } = await supabase.functions.invoke('ingest-documents', { body: { content: extracted.text, metadata, isStatute: true }, headers: authHeader ? { Authorization: authHeader } : undefined });
-          if (ingestError) throw new Error(`Source found but indexing failed: ${ingestError.message}`);
+          if (ingest) {
+            try {
+              await ingest({ content: extracted.text, metadata });
+            } catch (ingestError) {
+              throw new Error(`Source found but indexing failed: ${ingestError?.message ?? ingestError}`);
+            }
+          } else {
+            const { error: ingestError } = await supabase.functions.invoke('ingest-documents', { body: { content: extracted.text, metadata, isStatute: true }, headers: authHeader ? { Authorization: authHeader } : undefined });
+            if (ingestError) throw new Error(`Source found but indexing failed: ${ingestError.message}`);
+          }
         }
         sources.push({ id: hash, scope: 'statute', similarity: 1, content: extracted.text, metadata, reason: String(candidate.reason ?? '') });
         downloaded.push(candidate.title);
@@ -250,4 +268,54 @@ export async function researchLaw({ supabase, authHeader, userId = null, anthrop
     await supabase.from('ai_research_runs').update({ status: 'failed', unresolved: [err.message], completed_at: new Date().toISOString() }).eq('id', run.id);
     throw err;
   }
+}
+
+/**
+ * The quick model call the lookup makes (server.js anthropicJson's shape),
+ * for a caller that has only the key: the claude.ai connector. Two minutes,
+ * as the Hub allows, because a lookup with web search takes longer than the
+ * connector's own one-minute calls.
+ */
+export function anthropicCaller(apiKey, { timeoutMs = 120_000, fetchImpl = fetch } = {}) {
+  if (!apiKey) return null;
+  return async (body, signal) => {
+    const resp = await fetchImpl('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) throw new Error(`The AI service didn't respond properly (${resp.status}). Try again in a moment.`);
+    return resp.json();
+  };
+}
+
+/**
+ * The review's online law lookup (review.js runReview's `lookUpLaw`): once
+ * the document's text is known, researchLaw for the document's project,
+ * the law it raises looked up in the library first and then on official
+ * sources. It never throws for a lookup that could not finish (the review
+ * records that as a limitation), only for a stop. The Hub passes the
+ * lawyer's `authHeader`; the connector passes `ingest` (see researchLaw).
+ * One function for both, so a review looks the law up the same way
+ * wherever it was started.
+ */
+export function reviewLawLookup({ supabase, anthropicJson, authHeader = null, ingest = null, userId, message = '', signal, notice = () => {} }) {
+  return async ({ fullText, matterId }) => {
+    try {
+      const { data: matter } = await supabase.from('matters').select('id, name, sector, description').eq('id', matterId).single();
+      if (!matter) throw new Error('the project could not be found');
+      const research = await researchLaw({
+        supabase, authHeader, ingest, userId, anthropicJson, matter, signal, notice,
+        message: message || 'Identify the law that may apply to this document, for its legal review.',
+        documentExcerpt: String(fullText ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '),
+      });
+      notice(describeLookup(research));
+      return research;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      notice(`The law lookup could not finish: ${err instanceof Error ? err.message : String(err)}. The review goes ahead and records this.`);
+      return { status: 'failed', unresolved: [err instanceof Error ? err.message : String(err)] };
+    }
+  };
 }

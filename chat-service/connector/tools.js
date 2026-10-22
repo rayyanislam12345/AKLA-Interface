@@ -80,6 +80,7 @@ export const MODULE_TOOL_NAMES = Object.freeze([
   "list_skills", "read_skill", // skills.js
   "list_document_types", "read_standard", "get_drafting_decisions", // standards.js
   "check_text", "compare_text_with_version", // textChecks.js
+  "upload_file_to_project", "get_upload", // uploads.js (the first writes)
   // changesPanel.js adds list_changes and decide_changes only when the MCP
   // Apps trial is on (CONNECTOR_APPS=on); they are pinned in apps.js
   // APP_TOOL_NAMES, not here, so the list with the switch off is unchanged.
@@ -98,6 +99,7 @@ export const WRITE_TOOL_NAMES = Object.freeze([
   "apply_tracked_changes", "make_clean_copy", // markup.js
   "start_review", "apply_review_to_version", // reviews.js
   "save_note_to_project", "save_draft_to_project", // saves.js
+  "upload_file_to_project", // uploads.js
 ]);
 /** Every tool the connector offers, in registration order. */
 export const ALL_TOOL_NAMES = Object.freeze([...BUILT_IN_TOOL_NAMES, ...MODULE_TOOL_NAMES]);
@@ -221,10 +223,11 @@ export function stitchPassages(rows) {
  * @param {string} [deps.hubUrl]   the site's address for "Open in Hub" lines (CONNECTOR_HUB_URL)
  * @param {Array} [deps.modules]   from loadToolModules(): [{ file, tools }], or bare default exports
  * @param {object} [deps.writes]   { saveVersion, recordAction, checkCaps } (projectWrites.js; tests pass stubs)
+ * @param {object} [deps.uploads] the one-time upload addresses (connector/uploads.js createUploads; the same instance app.js serves), for upload_file_to_project
  * @param {boolean} [deps.apps]    the MCP Apps trial (CONNECTOR_APPS=on, connector/apps.js): the changes panel's tools are added
  * @returns {Array<{ name, title, description, inputSchema, run: (input, ctx) => Promise<string>, write?: boolean, annotations?: object }>}
  */
-export function createHubTools({ supabase, voyageKey, anthropicJson = null, anthropicKey = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null, apps = false }) {
+export function createHubTools({ supabase, voyageKey, anthropicJson = null, anthropicKey = null, library = defaultLibrary, readFile = extractForIndex, log = () => {}, now = () => Date.now(), hubUrl = DEFAULT_HUB_URL, modules = [], writes = null, apps = false, uploads = null }) {
   const lib = { ...defaultLibrary, ...library };
   const textCache = new Map();
   const site = hubBase(hubUrl);
@@ -550,6 +553,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, anth
     supabase, voyageKey, anthropicJson, anthropicKey: anthropicKey || null, library: lib, readFile, log, now, hubUrl: site,
     helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, textOfBytes, link, open, showPassages: passagesText },
     writes: projectWrites,
+    uploads,
     apps: apps === true,
   };
   const seen = new Set(tools.map((t) => t.name));

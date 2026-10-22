@@ -21,7 +21,9 @@
 // Claude can look up, plus every module under tools/), projectWrites.js
 // (the one way a tool saves, the record and the caps), hubLinks.js (the
 // links back to the site), reviewRuns.js (the reviews start_review runs
-// detached), app.js (the routes). See docs/claude-ai-connector.md.
+// detached), uploads.js (the one-time upload addresses for files from a
+// claude.ai chat, served at /mcp/upload/<token>), app.js (the routes). See
+// docs/claude-ai-connector.md.
 
 import "dotenv/config";
 import { createServer } from "node:http";
@@ -33,6 +35,8 @@ import { createSignIn } from "./signIn.js";
 import { createHubTools, loadToolModules } from "./tools.js";
 import { appsOn } from "./apps.js";
 import { DEFAULT_HUB_URL } from "./hubLinks.js";
+import { createProjectWrites } from "./projectWrites.js";
+import { createUploads } from "./uploads.js";
 import { activeReviewRuns, failOrphanedRuns, stopReviewRuns } from "./reviewRuns.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -84,15 +88,23 @@ const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
 // will not load stops the start, which systemd reports.
 const modules = await loadToolModules();
 
+const store = createSupabaseStore(db);
+const isMember = async (userId) => {
+  const { data, error } = await db.rpc("is_firm_member", { _user_id: userId });
+  if (error) throw new Error(`is_firm_member: ${error.message}`);
+  return data === true;
+};
+// One write foundation for the tools and the upload addresses, so a file
+// arriving at an address counts toward the same in-flight caps as a save.
+const writes = createProjectWrites({ supabase: db, hubUrl: HUB_URL, log });
+const uploads = createUploads({ writes, issuer: ISSUER, isMember, store, hubUrl: HUB_URL, log });
+
 const app = createApp({
-  store: createSupabaseStore(db),
+  store,
   signIn: createSignIn({ supabaseUrl: SUPABASE_URL, publishableKey: PUBLISHABLE_KEY, serviceClient: db, log }),
-  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, anthropicKey: ANTHROPIC_KEY ?? null, log, hubUrl: HUB_URL, modules, apps: APPS }),
-  isMember: async (userId) => {
-    const { data, error } = await db.rpc("is_firm_member", { _user_id: userId });
-    if (error) throw new Error(`is_firm_member: ${error.message}`);
-    return data === true;
-  },
+  tools: createHubTools({ supabase: db, voyageKey: VOYAGE_KEY, anthropicJson, anthropicKey: ANTHROPIC_KEY ?? null, log, hubUrl: HUB_URL, modules, apps: APPS, writes, uploads }),
+  isMember,
+  uploads,
   issuer: ISSUER,
   ...(REDIRECT_HOSTS.length ? { redirectHosts: REDIRECT_HOSTS } : {}),
   allowLoopback: ALLOW_LOOPBACK,

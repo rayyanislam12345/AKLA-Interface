@@ -36,7 +36,13 @@ export const CONNECTOR_SOURCING = lookingUpRules({ toolNames: TOOL_NAMES, matter
 // tool result, so a citation names the source as well as the number.
 export const CONNECTOR_CITING = "CITING: every passage a tool returns is labelled [Source n], numbered from 1 within that result; the numbers are not chat-wide, so a later call starts again at 1. Cite a passage as [Source n] with its number and the Act or document its label names (e.g. [Source 2] Companies Act, 2017, s. 199), and only numbers you have been shown. Quote statutory text only from a passage in front of you, word for word; to quote a provision you have not been shown in full, read it with read_act_section first. In a document itself (its text and AKLA comments) name the Act and section or the document instead, never \"[Source n]\". Pass on the \"Open in Hub:\" address of what you relied on, so the lawyer can open it.";
 
-export const CONNECTOR_SHAPE_NOTE = "The Hub turns Markdown in this shape into the firm's Word file when the document is saved there. In claude.ai, give the document as Markdown in exactly this shape, on its own (in claude.ai's own document panel if it offers one); do not wrap it in the Hub's <artifact> tag.";
+export const CONNECTOR_SHAPE_NOTE = "The Hub turns Markdown in this shape into the firm's Word file when the document is saved there. In claude.ai, write the document as Markdown in exactly this shape and file it as FILING says; do not wrap it in the Hub's <artifact> tag.";
+
+// The owner's decision of 22 Oct 2026, "force connector drafting wherever
+// possible": a firm document made in claude.ai ends up filed in the Hub,
+// never left as a file in the chat. The server instructions (app.js) say
+// the same in one sentence for a sign-in that may save.
+export const CONNECTOR_FILING = "FILING: every firm document the lawyer asks you to draft is filed in the Hub, never handed over only as a file or artifact in the chat. Use fill_standard_to_project when its type has a standard or pack (list_document_types says which; open_standard_for_filling first), otherwise save_draft_to_project; a file you produced in your code sandbox (with a skill) goes in with upload_file_to_project. Ask which project if that is not clear. Then give the \"Open in Hub:\" address, written out in full on its own line.";
 
 const REVIEWING = "REVIEWING: read the document with get_document_summary and then read_document in slices before you say anything about it. Every point you raise names the clause it concerns, and, where it turns on a law or a precedent, cites the passage as above; keep what the document says apart from what you recommend.";
 
@@ -48,7 +54,7 @@ const REVIEWING = "REVIEWING: read the document with get_document_summary and th
  */
 export function firmRulesText(task, { typeName = null } = {}) {
   const parts = [`AKLA's rules for ${task === "draft" ? "drafting" : task === "review" ? "reviewing" : "answering"} from the Hub. Follow them for the whole task.`, "", CONNECTOR_GROUNDING, "", CONNECTOR_SOURCING, "", CONNECTOR_CITING];
-  if (task === "draft") parts.push("", COMPLETENESS_RULES, "", FIRM_MARKDOWN_RULES, "", CONNECTOR_SHAPE_NOTE, "", typeName ? styleSheetText(typeName) : FIRM_STYLE_CORE);
+  if (task === "draft") parts.push("", COMPLETENESS_RULES, "", FIRM_MARKDOWN_RULES, "", CONNECTOR_SHAPE_NOTE, "", CONNECTOR_FILING, "", typeName ? styleSheetText(typeName) : FIRM_STYLE_CORE);
   if (task === "review") parts.push("", REVIEWING);
   return parts.join("\n");
 }
@@ -57,7 +63,7 @@ export default ({ supabase } = {}) => [
   {
     name: "get_firm_rules",
     title: "The firm's rules",
-    description: "AKLA's rules for working from the Hub: search the firm's precedents and law library before drafting or answering, cite every passage as [Source n], quote a statute only from a passage in front of you, and (for a draft) the house Markdown shape, the rule that a document is written in full, and how the firm writes (its style sheet: defined terms, numbers, money, dates, cross-references, spelling, voice). Call it once at the start of a drafting, answering or review task and follow what it returns. Takes `task`: draft (the full drafting rules), answer (sourcing and citing) or review; for a draft of a kind of document the firm has a standard for, pass its documentTypeId (list_document_types) for that kind's own style sheet.",
+    description: "AKLA's rules for working from the Hub: search the firm's precedents and law library before drafting or answering, cite every passage as [Source n], quote a statute only from a passage in front of you, and (for a draft) the house Markdown shape, the rule that a document is written in full, the rule that every firm document is filed in the Hub (fill_standard_to_project, save_draft_to_project or upload_file_to_project) rather than left as a file in the chat, and how the firm writes (its style sheet: defined terms, numbers, money, dates, cross-references, spelling, voice). Call it once at the start of a drafting, answering or review task and follow what it returns. Takes `task`: draft (the full drafting rules), answer (sourcing and citing) or review; for a draft of a kind of document the firm has a standard for, pass its documentTypeId (list_document_types) for that kind's own style sheet.",
     inputSchema: {
       task: z.enum(TASKS).optional().describe("What the rules are for: draft, answer or review. Default draft."),
       documentTypeId: z.string().optional().describe("Optional, for a draft: the document type's id from list_document_types, for how the firm writes that kind of document in particular."),

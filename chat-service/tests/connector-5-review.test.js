@@ -1,21 +1,25 @@
 // Slice 5 of the connector: the Hub's review from claude.ai
-// (connector/tools/reviews.js, connector/reviewRuns.js). start_review
-// answers within moments with a run id while the review runs detached;
-// it refuses, in one sentence and on the record, a second review on the
-// box (the Hub chat's own included, an abandoned or orphaned "running" row
-// not), a second review of the same version, a second in this process, a
-// fourth in a day, a PDF, and a server with no AI key. get_review reads a
-// running review's progress and a complete one's passes, coverage and
-// findings by clause, numbered and paged. apply_review_to_version places
-// the findings, less the ones left out, as tracked changes in the next
-// version, through the real projectWrites (caps, save, record), records the
-// new version's Changes list and where each finding went, names the ones
-// that could not be placed, refuses a review not complete or a document
-// with a newer version, and shows the changes panel when the MCP Apps trial
-// is on. On SIGTERM a running review is aborted and marked failed with the
-// restart sentence; at startup the ones an earlier process left are swept.
-// review.js runReview calls onStarted once its row exists. Against a stub
-// database and bucket holding a small real Word file. No network.
+// (connector/tools/reviews.js, connector/reviewRuns.js, reviewFiling.js).
+// start_review answers within moments with a run id while the review runs
+// detached, with the online law lookup the Hub's review makes; it refuses,
+// in one sentence and on the record, a second review on the box (the Hub
+// chat's own included, an abandoned or orphaned "running" row not), a
+// second review of the same version, a second in this process, a fourth in
+// a day, a PDF, and a server with no AI key. A run that completes files
+// itself: its findings as tracked changes in the next version, through the
+// real projectWrites (save, record), one change row each on that version,
+// the reviewed rows saying where each went; nothing is placed over a
+// version saved meanwhile. get_review reads a running review's progress and
+// a complete one's filing (the new version, its counts, what could not be
+// placed, the changes panel with the trial on), passes, coverage, law
+// lookup and findings by clause, numbered and paged.
+// apply_review_to_version files a complete review that was not filed, and
+// places a filed one's findings again less the ones left out, as a fresh
+// version, until a change in the filed one is decided. On SIGTERM a running
+// review is aborted and marked failed with the restart sentence; at startup
+// the ones an earlier process left are swept. review.js runReview calls
+// onStarted once its row exists. Against a stub database and bucket holding
+// a small real Word file. No network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,6 +39,7 @@ import {
   stopReviewRuns, failOrphanedRuns, activeReviewRuns, resetReviewRuns, runLabel, runIdOfLabel, RESTART_SENTENCE, STALE_RUN_MS,
 } from '../connector/reviewRuns.js';
 import { runReview } from '../review.js';
+import { fileReviewRun, fileFollowUp, filingOf, filingReplyText } from '../reviewFiling.js';
 import { PLACEMENT_TEXT } from '../changes.js';
 import { HEADS_TABLE } from '../versionChanges.js';
 
@@ -141,13 +146,15 @@ function saveFunction(tables, files, args) {
   const versions = tables.document_versions.filter((v) => v.matter_document_id === args.p_document_id).sort((a, b) => b.version_number - a.version_number);
   if ((versions[0]?.id ?? null) !== args.p_expected_version_id) return { data: null, error: { message: 'A newer document version exists.' } };
   const number = (versions[0]?.version_number ?? 0) + 1;
+  // The first version saved in a test is NEW_V; any after it a fresh id.
+  const id = tables.document_versions.some((v) => v.id === NEW_V) ? randomUUID() : NEW_V;
   const row = {
-    id: NEW_V, matter_document_id: args.p_document_id, version_number: number, storage_path: args.p_storage_path, file_name: `${args.p_file_stem}-v${number}.${args.p_extension}`,
+    id, matter_document_id: args.p_document_id, version_number: number, storage_path: args.p_storage_path, file_name: `${args.p_file_stem}-v${number}.${args.p_extension}`,
     is_ai_generated: args.p_is_ai_generated, uploaded_by: args.p_user_id, label: args.p_label, created_at: new Date(CLOCK + number).toISOString(),
     matter_document: versions[0].matter_document,
   };
   tables.document_versions.push(row);
-  return { data: { matterDocumentId: args.p_document_id, versionId: NEW_V, versionNumber: number, fileName: row.file_name }, error: null };
+  return { data: { matterDocumentId: args.p_document_id, versionId: id, versionNumber: number, fileName: row.file_name }, error: null };
 }
 
 const docJoin = { id: D1, title: 'Supply Agreement', matter_id: P1, document_type_id: null, document_type: null, matter: { id: P1, name: 'Karachi Port Supply' } };
@@ -219,6 +226,7 @@ function complete(db, runId, findings = FINDINGS, versionId = V1) {
 }
 
 function setup({ runner = fakeRunner(), anthropicKey = 'sk-test', apps = false } = {}) {
+  const lookups = [];
   resetReviewRuns();
   clearMarkupCache();
   const tables = fixtures();
@@ -226,11 +234,13 @@ function setup({ runner = fakeRunner(), anthropicKey = 'sk-test', apps = false }
   const real = createProjectWrites({ supabase: db, hubUrl: HUB, now: () => new Date(CLOCK), log: () => {} });
   const caps = { checked: 0, released: 0 };
   const writes = { ...real, checkCaps: async (ctx) => { caps.checked += 1; const h = await real.checkCaps(ctx); return { ...h, release: () => { caps.released += 1; h.release(); } }; } };
-  const module = (deps) => createReviewTools(deps, { run: runner.run ?? runner, startTimeoutMs: 2_000 });
+  // The online law lookup, made per review for the lawyer who started it.
+  const lawLookup = ({ ctx, signal }) => { lookups.push({ userId: ctx.userId, signal }); return async () => ({ status: 'not_run', unresolved: ['stub'] }); };
+  const module = (deps) => createReviewTools(deps, { run: runner.run ?? runner, startTimeoutMs: 2_000, lawLookup });
   const list = createHubTools({ supabase: db, voyageKey: 'v', anthropicKey, library, readFile: async () => ({ blocks: [] }), log: () => {}, hubUrl: `${HUB}/`, modules: [{ file: 'reviews.js', tools: module }], writes, now: () => CLOCK, apps });
   const tool = (name) => list.find((x) => x.name === name);
   const run = (name, input, ctx = ctxOf({ apps })) => tool(name).run(input, ctx);
-  return { db, tables, caps, list, tool, run, runner };
+  return { db, tables, caps, list, tool, run, runner, lookups };
 }
 
 /** Lets the detached run's settling (and the slot's release) happen. */
@@ -283,10 +293,13 @@ test('start_review answers at once with the run id while the review runs detache
   assert.match(out, /Started the Hub's review of Supply Agreement v1/);
   assert.match(out, new RegExp(`versionId: ${V1}`));
   assert.match(out, new RegExp(`Open in Hub: ${HUB}/`));
-  assert.match(out, /no online law lookup/);
+  assert.match(out, /looked up online first, as in the Hub/);
+  assert.match(out, /When it is complete it files itself/);
   assert.match(out, /get_review/);
   assert.deepEqual(activeReviewRuns().map((r) => r.runId), [runId], 'running in this process');
-  assert.equal(s.runner.runs[0].lookUpLaw, null, 'no online law lookup');
+  assert.equal(typeof s.runner.runs[0].lookUpLaw, 'function', 'the online law lookup, as the Hub review makes it');
+  assert.deepEqual(s.lookups.map((l) => l.userId), [USER], 'made for the lawyer who started the review');
+  assert.equal(s.lookups[0].signal, s.runner.runs[0].signal, 'stopped with the review');
   const [rec] = actions(s, START_TOOL);
   assert.equal(rec.outcome, 'done');
   assert.equal(rec.label, runLabel(runId));
@@ -407,12 +420,18 @@ test('get_review while running: how long and how far; when complete: passes, cov
   assert.match(done, /- legal clauses and citations: reviewed, 2 findings/);
   assert.match(done, /- content and conflicts: partial, 1 finding\. Compared retrieved excerpts/);
   assert.match(done, /COVERAGE: 4,000 characters in 1 section; evidence: 3 law, 2 precedent and 0 project excerpts/);
-  assert.match(done, /No online law lookup was run/);
+  assert.match(done, /LAW LOOKUP: not run for this review/);
   assert.match(done, /not an exhaustive legal clearance/);
+  // Filed on its own when it completed.
+  assert.match(done, /FILED: the findings were placed as tracked changes by AKLA AI in v2 of "Supply Agreement"/);
+  assert.match(done, new RegExp(`versionId: ${NEW_V}\nOpen in Hub: ${HUB}/ai/d/${NEW_V}`));
+  assert.match(done, /Changes in v2: 3 waiting, 0 accepted, 0 rejected\./);
+  assert.match(done, /Could not be placed \(nothing changed there; these are for reading\):\n- Finding 3 — Clause 5: The quoted wording was not found/);
+  assert.match(done, /Nothing needs placing/);
   const order = [...done.matchAll(/^Finding (\d+) — ([^(]+) \(/gm)].map((m) => [Number(m[1]), m[2].trim()]);
   assert.deepEqual(order, [[1, 'Clause 2'], [2, 'Clause 3'], [3, 'Clause 5'], [4, 'Governing law']]);
-  assert.match(done, /Finding 1 — Clause 2 \(legal clauses and citations\)\n {2}Original: shall not exceed the Contract Price\n {2}Suggested: shall not exceed the fees paid in the twelve months before the claim\n {2}Why: Market practice caps at fees paid\.\n {2}suggestionId: [0-9a-f-]{36}/);
-  assert.match(done, /apply_review_to_version with this runId/);
+  assert.match(done, /Finding 1 — Clause 2 \(legal clauses and citations\) — Placed in v2 as a tracked change; decide it there\.\n {2}Original: shall not exceed the Contract Price\n {2}Suggested: shall not exceed the fees paid in the twelve months before the claim\n {2}Why: Market practice caps at fees paid\.\n {2}suggestionId: [0-9a-f-]{36}/);
+  assert.match(done, /\[End of the findings\. They are filed in v2: decide them there\.\]/);
   resetReviewRuns();
 });
 
@@ -454,7 +473,7 @@ async function completedRun(s) {
   return runId;
 }
 
-test('apply places all but the excluded findings as tracked changes in the next version, names the ones it could not place, and records where each went', async () => {
+test('apply files a review that was not filed: all but the excluded findings as tracked changes in the next version, the ones it could not place named, and where each went recorded', async () => {
   const s = setup();
   const runId = await completedRun(s);
   const out = await s.run(APPLY_TOOL, { runId, exclude: [2] });
@@ -503,9 +522,9 @@ test('apply places all but the excluded findings as tracked changes in the next 
   assert.equal(rec.version_id, NEW_V);
   assert.equal(s.caps.released, s.caps.checked);
 
-  // get_review now says where they went; a second apply is refused (v2 is newer).
+  // get_review now says where they went; a second apply with nothing left out is refused (it is filed).
   assert.match(await s.run(GET_TOOL, { runId }), /Finding 1 — Clause 2 \(legal clauses and citations\) — Placed in v2/);
-  await assert.rejects(s.run(APPLY_TOOL, { runId }), /A newer version of Supply Agreement exists \(v2/);
+  await assert.rejects(s.run(APPLY_TOOL, { runId }), /This review is already filed as v2, with its findings waiting there/);
   resetReviewRuns();
 });
 
@@ -575,6 +594,177 @@ test('with the MCP Apps trial on, apply answers its full text and the new versio
 });
 
 // ---------------------------------------------------------------------------
+// Filing on its own
+
+/** Waits (a little) for something the detached run does after it settles. */
+async function until(cond, ms = 3_000) {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error('timed out waiting');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+const runRow = (s, id) => s.tables.ai_review_runs.find((r) => r.id === id);
+
+test('a complete review files itself: the findings as tracked changes in the next version, one change row each, the reviewed rows saying where each went, on the record', async () => {
+  const s = setup();
+  const runId = runIdOf(await s.run(START_TOOL, { versionId: V1 }));
+  complete(s.db, runId);
+  s.runner.runs[0].finish();
+  await until(() => filingOf(runRow(s, runId)));
+  await until(() => activeReviewRuns().length === 0);
+
+  const filing = filingOf(runRow(s, runId));
+  assert.equal(filing.status, 'filed');
+  assert.equal(filing.versionId, NEW_V);
+  assert.equal(filing.versionNumber, 2);
+  assert.equal(filing.placed, 3);
+  assert.deepEqual(filing.notPlaced.map((x) => x.reason), ['not_found']);
+  assert.equal(filing.reviewedVersionId, V1);
+  assert.equal(filing.by, USER);
+  // The coverage the review recorded is kept beside the filing.
+  assert.equal(runRow(s, runId).coverage.documentCharacters, 4000);
+
+  const v2 = s.tables.document_versions.find((v) => v.id === NEW_V);
+  assert.equal(v2.label, 'Review suggestions placed — 21 October 2026');
+  assert.equal(v2.is_ai_generated, true, 'filed automatically: an AI version until the lawyer decides it');
+  assert.equal(v2.uploaded_by, USER);
+  const stored = new TextDecoder().decode((await import('fflate')).unzipSync(s.db.files[`${BUCKET}/${v2.storage_path}`])['word/document.xml']);
+  assert.match(stored, /<w:ins [^>]*w:author="AKLA AI"/);
+  assert.match(stored, /special/);
+
+  const newRows = s.tables.redline_suggestions.filter((r) => r.document_version_id === NEW_V);
+  assert.equal(newRows.length, 3);
+  assert.ok(newRows.every((r) => r.review_type === 'edit' && r.status === 'pending' && r.revision_ids.length > 0 && r.review_run_id === null));
+  const own = s.tables.redline_suggestions.filter((r) => r.review_run_id === runId);
+  assert.equal(own.filter((r) => r.placement === 'superseded').length, 3);
+  assert.ok(own.filter((r) => r.placement === 'superseded').every((r) => newRows.some((n) => n.id === r.superseded_by)));
+  assert.equal(own.find((r) => r.clause_reference === 'Clause 5').placement, 'unplaced');
+  assert.ok(own.every((r) => r.status === 'pending'), 'nothing decided for the lawyer');
+
+  const [rec] = actions(s, APPLY_TOOL);
+  assert.equal(rec.outcome, 'saved');
+  assert.equal(rec.version_id, NEW_V);
+  assert.equal(rec.label, 'Review suggestions placed — 21 October 2026');
+  resetReviewRuns();
+});
+
+test('with the MCP Apps trial on, get_review of a filed review carries the filed version\'s changes panel; while running, text only', async () => {
+  const s = setup({ apps: true });
+  const runId = runIdOf(await s.run(START_TOOL, { versionId: V1 }));
+  assert.equal(s.tool(GET_TOOL).ui, CHANGES_UI);
+  assert.equal(typeof (await s.run(GET_TOOL, { runId })), 'string', 'still running: no panel');
+  complete(s.db, runId);
+  s.runner.runs[0].finish();
+  await until(() => filingOf(runRow(s, runId)));
+  await until(() => activeReviewRuns().length === 0);
+  const out = await s.run(GET_TOOL, { runId });
+  assert.equal(typeof out, 'object');
+  assert.match(out.text, /FILED: .* in v2/);
+  assert.equal(out.structuredContent.kind, PANEL_KIND);
+  assert.equal(out.structuredContent.versionId, NEW_V);
+  assert.equal(out.structuredContent.changes.length, 3);
+  assert.equal(out.structuredContent.counts.waiting, 3);
+  assert.equal(out.structuredContent.canDecide, true);
+  resetReviewRuns();
+});
+
+test('a version saved while the review ran: nothing is placed over it, and get_review says so plainly', async () => {
+  const s = setup();
+  const runId = runIdOf(await s.run(START_TOOL, { versionId: V1 }));
+  const theirs = randomUUID();
+  s.tables.document_versions.push({ id: theirs, matter_document_id: D1, version_number: 2, storage_path: `${P1}/${D1}/v2.docx`, file_name: 'Supply-Agreement-v2.docx', created_at: iso(CLOCK), matter_document: docJoin });
+  complete(s.db, runId);
+  s.runner.runs[0].finish();
+  await until(() => filingOf(runRow(s, runId)));
+  await until(() => activeReviewRuns().length === 0);
+  const filing = filingOf(runRow(s, runId));
+  assert.equal(filing.status, 'newer_version');
+  assert.equal(filing.latestVersionId, theirs);
+  assert.ok(!s.tables.document_versions.some((v) => v.id === NEW_V), 'nothing saved');
+  assert.ok(s.tables.redline_suggestions.filter((r) => r.review_run_id === runId).every((r) => r.placement === 'placed' && r.status === 'pending'), 'the findings are as the review left them');
+  assert.equal(actions(s, APPLY_TOOL)[0].outcome, 'refused');
+  const read = await s.run(GET_TOOL, { runId });
+  assert.match(read, new RegExp(`NOT FILED: v2 of "Supply Agreement" was saved while the review ran \\(versionId ${theirs}\\), and the findings quote v1's words, so nothing was placed over it`));
+  assert.match(read, /\[End of the findings\.\]/);
+  await assert.rejects(s.run(APPLY_TOOL, { runId }), /A newer version of Supply Agreement exists \(v2/);
+  resetReviewRuns();
+});
+
+test('apply places a filed review again less the ones left out, as a fresh version; the filed version\'s changes from it stop waiting; refused once one is decided', async () => {
+  const s = setup();
+  const runId = runIdOf(await s.run(START_TOOL, { versionId: V1 }));
+  complete(s.db, runId);
+  s.runner.runs[0].finish();
+  await until(() => filingOf(runRow(s, runId))?.status === 'filed');
+  await until(() => activeReviewRuns().length === 0);
+  const v2Rows = () => s.tables.redline_suggestions.filter((r) => r.document_version_id === NEW_V);
+
+  const out = await s.run(APPLY_TOOL, { runId, exclude: [2] });
+  assert.match(out, /Placed the review's findings again from "Supply Agreement" v1, less the ones left out, and filed the result as v3/);
+  assert.match(out, /The review's changes in v2 no longer wait there/);
+  assert.match(out, /Findings: 2 of 4 placed .* 1 left out at the lawyer's word \(2\); 1 could not be placed/);
+  const v3 = s.tables.document_versions.find((v) => v.version_number === 3);
+  assert.equal(v3.is_ai_generated, false, 'placed again at the lawyer\'s word: their filing');
+  const v3Rows = s.tables.redline_suggestions.filter((r) => r.document_version_id === v3.id);
+  assert.equal(v3Rows.length, 2);
+  assert.ok(v2Rows().every((r) => r.placement === 'superseded'), 'nothing of this review waits in v2');
+  assert.equal(v2Rows().filter((r) => /Placed again in v3/.test(r.placement_reason)).length, 2);
+  assert.equal(v2Rows().filter((r) => /Left out when the review was placed again in v3/.test(r.placement_reason)).length, 1);
+  const own = Object.fromEntries(s.tables.redline_suggestions.filter((r) => r.review_run_id === runId).map((r) => [r.clause_reference, r]));
+  assert.equal(own['Clause 3'].status, 'rejected');
+  assert.ok(v3Rows.some((r) => r.id === own['Clause 2'].superseded_by));
+  assert.equal(filingOf(runRow(s, runId)).versionId, v3.id);
+  assert.equal(filingOf(runRow(s, runId)).replacedVersionNumber, 2);
+  assert.match(await s.run(GET_TOOL, { runId }), /FILED: .* in v3/);
+
+  // Once a change in the filed version is decided, it is not placed again.
+  const t = setup();
+  const second = runIdOf(await t.run(START_TOOL, { versionId: V1 }));
+  complete(t.db, second);
+  t.runner.runs[0].finish();
+  await until(() => filingOf(runRow(t, second))?.status === 'filed');
+  await until(() => activeReviewRuns().length === 0);
+  t.tables.redline_suggestions.find((r) => r.document_version_id === NEW_V).status = 'accepted';
+  await assert.rejects(t.run(APPLY_TOOL, { runId: second, exclude: [1] }), /Changes in v2, where the review was filed, have already been decided/);
+  assert.equal(t.tables.document_versions.length, 4, 'nothing saved');
+  resetReviewRuns();
+});
+
+test('the filing: a stop asked for before the save files nothing; a follow-up\'s corrections go into a further version carrying what still waits', async () => {
+  const s = setup();
+  const runId = await completedRun(s);
+  const save = (args) => s.db && createProjectWrites({ supabase: s.db, hubUrl: HUB, now: () => new Date(CLOCK) }).saveVersion({ ctx: { userId: USER }, ...args });
+  const stopped = await fileReviewRun({ supabase: s.db, runId, userId: USER, save, shouldStop: () => true, now: () => new Date(CLOCK) });
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(filingOf(runRow(s, runId)), null, 'nothing recorded: it can be filed later');
+  assert.ok(!s.tables.document_versions.some((v) => v.id === NEW_V));
+
+  const filed = await fileReviewRun({ supabase: s.db, runId, userId: USER, save, now: () => new Date(CLOCK) });
+  assert.equal(filed.status, 'filed');
+  assert.match(filingReplyText(filed, { title: 'Supply Agreement' }), /^Filed as v2 of "Supply Agreement": 3 changes are waiting for you in its Changes list, open beside this reply\. Accept or reject each there; nothing else needs doing\.\n\nCould not be placed \(1\):\n- Clause 5 — The quoted wording was not found/);
+
+  // A follow-up correction, recorded against the version reviewed, as every finding is.
+  s.tables.redline_suggestions.push({ id: randomUUID(), document_version_id: V1, review_run_id: runId, artifact_id: null, clause_reference: 'Heading', review_type: 'chat', original_text: 'LIMITATION OF LIABILITY', suggested_text: 'LIMITATION OF THE PARTIES’ LIABILITY', rationale: 'The term sheet names both parties.', status: 'pending', placement: null, created_at: iso(CLOCK) });
+  const row = s.tables.redline_suggestions.at(-1);
+  const more = await fileFollowUp({ supabase: s.db, runId, rows: [row], userId: USER, save, now: () => new Date(CLOCK) });
+  assert.equal(more.status, 'filed');
+  assert.equal(more.saved.versionNumber, 3);
+  const v3Rows = s.tables.redline_suggestions.filter((r) => r.document_version_id === more.saved.versionId);
+  assert.equal(v3Rows.length, 4, 'the three still waiting carried forward, and the correction');
+  assert.ok(s.tables.redline_suggestions.filter((r) => r.document_version_id === NEW_V).every((r) => r.placement === 'superseded'));
+  assert.equal(row.placement, 'superseded');
+  const filing = filingOf(runRow(s, runId));
+  assert.equal(filing.versionId, more.saved.versionId);
+  assert.equal(filing.followUps, 1);
+  assert.equal(filing.placed, 4);
+  // After a follow-up, leaving findings out is done by rejecting them.
+  const again = await fileReviewRun({ supabase: s.db, runId, userId: USER, save, exclude: [row.id], now: () => new Date(CLOCK) });
+  assert.equal(again.status, 'decided_in_filed');
+  resetReviewRuns();
+});
+
+// ---------------------------------------------------------------------------
 // Stopping
 
 test('on SIGTERM a running review is aborted and marked failed with the restart sentence, inside the window', async () => {
@@ -638,4 +828,15 @@ test('connector.js stops reviews on SIGTERM before exiting, sweeps at startup, a
   assert.doesNotMatch(src, /ANTHROPIC_API_KEY[^\n]*process\.exit/, 'a missing AI key never stops the start');
   const deploy = readFileSync(new URL('../deploy.sh', import.meta.url), 'utf8');
   assert.ok(deploy.indexOf('reviewsRunning') < deploy.indexOf('sudo systemctl restart hub-connector'), 'the warning comes before the restart');
+});
+
+test('the Hub files its own reviews the same way: the Review button, the Hub chat\'s review of a project version and its legacy branch all go through reviewFiling.js as the lawyer', () => {
+  const src = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(src, /return await fileReviewRun\(\{ supabase: db, runId, userId, save: \(args\) => hubWrites\.saveVersion\(\{ ctx: \{ userId \}, \.\.\.args \}\)/);
+  assert.match(src, /const filing = await fileHubReview\(result\.reviewRunId, user\.id\);[\s\S]{0,300}json\(200, \{ \.\.\.result, filed: filingSummary\(filing\) \}\);/);
+  assert.equal([...src.matchAll(/await fileHubReview\(review\.reviewRunId, user\.id\)/g)].length, 2, 'the chat\'s version review and its legacy branch');
+  assert.match(src, /const out = await fileFollowUp\(\{ supabase, runId: filedData\.reviewRunId/);
+  assert.match(src, /REVIEW_FILES_TO_PROJECT = process\.env\.REVIEW_FILES_TO_PROJECT !== "0"/);
+  const deploy = readFileSync(new URL('../deploy.sh', import.meta.url), 'utf8');
+  assert.equal([...deploy.matchAll(/reviewFiling\.js/g)].length, 3, 'shipped, moved into place and owned like every root module');
 });

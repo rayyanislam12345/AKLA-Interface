@@ -99,10 +99,20 @@ does real damage here.
 
 ### 6. Report
 
-Tell the user the output path, what the audit found, what you changed, and — in one
+File the volume in the Hub when you can (see Filing below). Tell the user the output path, what the audit found, what you changed, and — in one
 line — that the content check passed. Flag separately anything needing their
 judgment: missing front matter, house-style deviations you did not touch, thin
 analysis.
+
+## Filing
+
+When the AKLA Hub connector is available (its tools include `upload_file_to_project`), the finished volume is filed in the matter's project on the Hub, never handed over only as a file in the chat:
+
+1. Find the project with `list_projects` (or `find_document_by_title`); ask the user which one if it is not clear. A reformatted volume is normally the next version of the draft already on the project: take that document's `documentId` from `list_project_documents`.
+2. Call `upload_file_to_project` with the project id and the file's name (and the `documentId`, for a new version). Run the `curl` line it returns from the sandbox, pointing at the file you built (under `/mnt/user-data/outputs/` in claude.ai). If curl cannot reach the network, give the user the upload address it returns, written out in full on its own line, to open and drop the file in.
+3. Call `get_upload` to confirm the file arrived, then give the user its "Open in Hub:" address, written out in full on its own line.
+
+Without the connector (Claude Code, or the Hub's own chat), hand the file over as before.
 
 ## What "gold standard" means
 

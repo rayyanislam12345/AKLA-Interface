@@ -9,6 +9,7 @@
 //   rotateToken(tokenHash, now) -> row | null (marks a refresh token rotated, once)
 //   revokeFamily(familyId, now)
 //   touchClient(id, now)           touchToken(id, now)
+//   familyLive(familyId, now) -> boolean (a sign-in not withdrawn; asked when an upload address is used, uploads.js)
 //
 // A token row has two end states: rotated_at (a refresh token superseded by
 // the pair minted from it; oauth.js allows a short grace window for a retry)
@@ -66,6 +67,13 @@ export function createSupabaseStore(supabase) {
     async touchToken(id, now) {
       await supabase.from("connector_tokens").update({ last_used_at: now.toISOString() }).eq("id", id);
     },
+    async familyLive(familyId, now) {
+      // A family stands while one of its tokens is neither revoked nor
+      // expired (its refresh token lasts 30 days); revokeFamily ends them all.
+      const { data, error } = await supabase.from("connector_tokens").select("id").eq("family_id", familyId).is("revoked_at", null).gt("expires_at", now.toISOString()).limit(1);
+      if (error) throw fail("Could not check the sign-in", error);
+      return (data ?? []).length > 0;
+    },
   };
 }
 
@@ -96,5 +104,6 @@ export function createMemoryStore() {
     },
     async revokeFamily(familyId, now) { for (const t of tokens.values()) if (t.family_id === familyId && !t.revoked_at) t.revoked_at = now.toISOString(); },
     async touchToken(id, now) { for (const t of tokens.values()) if (t.id === id) t.last_used_at = now.toISOString(); },
+    async familyLive(familyId, now) { for (const t of tokens.values()) if (t.family_id === familyId && !t.revoked_at && new Date(t.expires_at) > now) return true; return false; },
   };
 }
