@@ -81,3 +81,6 @@ law-monitor/.env
 
 # Pre-cut table exports (scripts/export-before-cuts.mjs): firm data, never source
 exports/
+
+scripts/precedent_backlog/sharepoint/data/
+scripts/precedent_backlog/sharepoint/evict
