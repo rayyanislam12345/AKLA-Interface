@@ -1611,6 +1611,15 @@ def gather_library_candidates(hub: Hub, config: dict, args, counts: dict) -> tup
     return out, last_act, acts
 
 
+def parse_timestamp(value: str) -> datetime:
+    """A timestamp as the database returns it. Postgres drops trailing zeros
+    from the fraction (".88185") and the VM's Python 3.9 reads only three or
+    six fractional digits, so the fraction is padded to six."""
+    value = value.replace("Z", "+00:00")
+    value = re.sub(r"\.(\d{1,6})(?=[+-]\d\d:\d\d$|$)", lambda m: "." + m.group(1).ljust(6, "0"), value)
+    return datetime.fromisoformat(value)
+
+
 def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict]:
     """Candidates whose document failed to download on an earlier morning.
     No search is spent: the stored url is simply tried again."""
@@ -1630,7 +1639,7 @@ def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict
         # It passed the age gate when first seen; waiting for the site to
         # answer must not age it out.
         first_seen = row.get("first_seen_at") or datetime.now(timezone.utc).isoformat()
-        waited = (datetime.now(timezone.utc) - datetime.fromisoformat(first_seen.replace("Z", "+00:00"))).days
+        waited = (datetime.now(timezone.utc) - parse_timestamp(first_seen)).days
         window = 366 * int(config.get("library_lookback_years", 2)) if row.get("found_by", "").startswith("library") else config["max_published_age_days"]
         out.append(
             {
