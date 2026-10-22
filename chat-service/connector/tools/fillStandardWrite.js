@@ -58,6 +58,8 @@ import { standardRows, isWordFile } from "./fillStandard.js";
 import { checkFormat, variableLinesFor } from "../../formatFingerprint.js";
 import { packOf } from "../../draftingPacks.js";
 import { draftingOf, autoCommentOps, skeletonGate, connectorConfirmSentence } from "../../draftChecks.js";
+import { DOCUMENT_UI } from "../apps.js";
+import { documentPanelContent } from "./documentPanel.js";
 
 export const FILL_TOOL = "fill_standard_to_project";
 /** The bucket the firm's standards live in (server.js guideStart, the same download). */
@@ -256,7 +258,7 @@ export function changesLines(results) {
  */
 export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeoutMs = APPLY_TIMEOUT_MS } = {}) {
   const { supabase, helpers, writes, log = () => {} } = deps;
-  const { needProject, open, link } = helpers;
+  const { needProject, open, link, textOfBytes } = helpers;
   const at = () => { const n = typeof deps.now === "function" ? deps.now() : Date.now(); return n instanceof Date ? n : new Date(n); };
 
   const needTypeId = (input) => {
@@ -321,6 +323,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
       name: FILL_TOOL,
       title: "Fill the firm's Word standard and file it in a project",
       description: `Draft a document by filling the firm's real Word standard for a document type and filing the result as a NEW version in a project: the facts you gathered go into the standard's placeholder paragraphs as changes against the ¶n numbers from open_standard_for_filling, the fills are accepted so the draft reads clean, every value you were not given stays [●], and open questions go in as "AKLA Comments" margin comments. Numbering, styles, headers and the contents page stay as the firm set them. Use it after open_standard_for_filling and after asking the firm's drafting questions (get_drafting_decisions) one at a time; say which project and title you will file under and wait for the lawyer's yes. It always saves a NEW version, never over one that exists, and claude.ai asks the lawyer before it runs; every save is recorded against the lawyer. templateHash is the fingerprint open_standard_for_filling printed: if the standard was replaced since, the fill is refused and nothing is saved. At most ${MAX_OPS} changes a call (file the rest as the next version); each must quote the paragraph's exact current text in expected, as open_standard_for_filling listed it or read it with paragraphs: "from-to", so a stale or unseen paragraph changes nothing. When the standard is one of the firm's packs, write, repeat_block, add_row and remove_block are taken too, as open_standard_for_filling describes: the body of a letter, memo or opinion, or a new clause, is written in the pack's own paragraph kinds. One fill runs on the Hub at a time; a second is refused in one sentence and can be sent again a minute later. The standard in the library is never changed. Before filing, the draft is checked against the firm's clause list for the type: a part the firm always has that the draft lacks refuses the filing and names its id; send the same changes again with confirmedOmissions only once the lawyer confirms it may be left out. A heading not on the list gets the AKLA comment "New clause — not in the firm's precedents", and each wording point in what you wrote (not the standard's own words) an AKLA comment; neither stops the filing. Returns every change that could not be made and why, the format, clause-list and wording lines, the blanks still in the file, the new version's id and its Hub page. Filing is not legal approval.`,
+      ui: DOCUMENT_UI,
       inputSchema: {
         documentTypeId: z.string().describe("The document type's id, from list_document_types or open_standard_for_filling."),
         projectId: z.string().describe("The project's id, from list_projects or find_document_by_title."),
@@ -468,7 +471,7 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
           const recorded = await record({ documentId: saved.matterDocumentId, versionId: saved.versionId, label: saved.label, outcome: "saved" });
           const shown = saved.created ? fileTitle : str(existing?.title, MAX_TITLE_CHARS) ?? fileTitle;
           const where = saved.created ? `a new document on ${matter.name}` : `its next version on ${matter.name}`;
-          return [
+          const text = [
             `Drafted "${shown}" from the firm's ${standard.type.name} standard (${standard.fileName}) and filed it as v${saved.versionNumber} (${saved.fileName}), ${where}, labelled "${saved.label}".`,
             ...account,
             format.text,
@@ -483,6 +486,20 @@ export function createFillStandardTools(deps, { apply = applyDocxOps, applyTimeo
             ...(recorded ? [] : [UNRECORDED_LINE]),
             "The fills are accepted in the file; the AKLA Comments are margin comments for the lawyer. The standard in the library is unchanged. Filed as the lawyer's own version (not marked AI-generated), with the label saying it came from claude.ai; filing is not legal approval.",
           ].join("\n");
+          // With the MCP Apps trial on, the new draft shows in the document
+          // panel under the reply (documentPanel.js); a panel that cannot be
+          // built never costs the lawyer the filing's reply.
+          if (!ctx?.apps || !textOfBytes) return text;
+          try {
+            const structuredContent = documentPanelContent({
+              versionId: saved.versionId, versionNumber: saved.versionNumber, title: shown, fileName: saved.fileName,
+              projectName: matter.name, hubUrl: link("version", saved.versionId), text: await textOfBytes(fileBytes, saved.fileName), source: "read from the file",
+            });
+            return structuredContent.total ? { text, structuredContent } : text;
+          } catch (err) {
+            log(`${FILL_TOOL}: the document panel for ${saved.versionId} could not be built: ${err?.message ?? err}`);
+            return text;
+          }
         } finally {
           if (locked) filling = false;
           caps.release();

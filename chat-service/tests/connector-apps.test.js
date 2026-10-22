@@ -201,7 +201,9 @@ async function serve(s, { apps }) {
 }
 
 const markupInput = () => ({ versionId: V1, fileHash: HASH, ops: [{ op: 'replace', p: at(P_CAP), expected: P_CAP, text: CAPPED, why: 'Cap at fees paid, as instructed.' }] });
-const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL];
+const UI_TOOLS = [LIST_TOOL, DECIDE_TOOL, MARKUP_TOOL, OPEN_TOOL, 'fill_standard_to_project'];
+// The tools whose result is drawn by the document panel; the rest use the changes panel.
+const DOCUMENT_UI_TOOLS = [OPEN_TOOL, 'fill_standard_to_project'];
 
 // ---------------------------------------------------------------------------
 // The switch
@@ -280,7 +282,7 @@ test('with the switch on: the trial tools are listed in module order, linked to 
     assert.deepEqual(names.filter((n) => !APP_TOOL_NAMES.includes(n)), [...ALL_TOOL_NAMES], 'every tool of before, in its order');
     assert.ok(names.indexOf(LIST_TOOL) < names.indexOf('get_clause_examples'), 'changesPanel.js loads in file order');
     for (const t of tools) {
-      const uri = t.name === OPEN_TOOL ? DOCUMENT_UI : CHANGES_UI;
+      const uri = DOCUMENT_UI_TOOLS.includes(t.name) ? DOCUMENT_UI : CHANGES_UI;
       if (UI_TOOLS.includes(t.name)) assert.deepEqual(t._meta, { ui: { resourceUri: uri }, 'ui/resourceUri': uri }, `${t.name} points at its page`);
       else assert.equal(t._meta, undefined, `${t.name} has no page`);
     }

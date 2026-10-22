@@ -276,13 +276,17 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
     return rows;
   }
 
+  /** A Word, PDF or text file's text, from its bytes. */
+  async function textOfBytes(bytes, fileName) {
+    const read = await readFile(bytes, fileName);
+    const blocks = Array.isArray(read?.blocks) ? read.blocks : [];
+    return blocks.map((b) => String(b?.text ?? "")).filter(Boolean).join("\n\n");
+  }
+
   async function readFromFile(v) {
     const { data: blob, error } = await supabase.storage.from("matter-documents").download(v.storage_path);
     if (error || !blob) throw new Error(`The file for ${versionName(v)} could not be downloaded${error?.message ? ` (${error.message})` : ""}.`);
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const read = await readFile(bytes, v.file_name || v.storage_path);
-    const blocks = Array.isArray(read?.blocks) ? read.blocks : [];
-    const text = blocks.map((b) => String(b?.text ?? "")).filter(Boolean).join("\n\n");
+    const text = await textOfBytes(new Uint8Array(await blob.arrayBuffer()), v.file_name || v.storage_path);
     if (!text.trim()) throw new Error(`No text could be read from ${versionName(v)}.`);
     return text;
   }
@@ -541,7 +545,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, libr
   // a mistake two builders made at once, and stops the process at startup.
   const deps = {
     supabase, voyageKey, anthropicJson, library: lib, readFile, log, now, hubUrl: site,
-    helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, link, open, showPassages: passagesText },
+    helpers: { matterById, needProject, versionById, needVersion, versionName, passagesOf, textOf, textOfBytes, link, open, showPassages: passagesText },
     writes: projectWrites,
     apps: apps === true,
   };

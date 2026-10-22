@@ -55,6 +55,26 @@ export function pageOf(paragraphs, from = 1, budget = DOCUMENT_PAGE_CHARS) {
   return { paragraphs: page, next: null };
 }
 
+/** The panel's data for a version: its first page of paragraphs and where the next starts. */
+export function documentPanelContent({ versionId, versionNumber, title, fileName, projectName, hubUrl, text, source, from = 1 }) {
+  const all = paragraphsOf(text);
+  const page = pageOf(all, from);
+  return {
+    kind: DOCUMENT_KIND,
+    versionId,
+    versionNumber,
+    title: title ?? null,
+    fileName: fileName ?? null,
+    projectName: projectName ?? null,
+    hubUrl,
+    source,
+    total: all.length,
+    from: page.paragraphs[0]?.n ?? from,
+    next: page.next,
+    paragraphs: page.paragraphs,
+  };
+}
+
 export function createDocumentPanelTools(deps) {
   const { helpers } = deps;
   const { needVersion, versionName, textOf, open, link } = helpers;
@@ -71,33 +91,19 @@ export function createDocumentPanelTools(deps) {
       async run(input) {
         const v = await needVersion(input, "id, version_number, file_name, storage_path, is_ai_generated, created_at, indexing_status");
         const { text, source } = await textOf(v);
-        const all = paragraphsOf(text);
         const from = Number.isInteger(input.from) && input.from > 0 ? input.from : 1;
-        const page = pageOf(all, from);
+        const structuredContent = documentPanelContent({
+          versionId: v.id, versionNumber: v.version_number, title: v.matter_document?.title, fileName: v.file_name,
+          projectName: v.matter_document?.matter?.name, hubUrl: link("version", v.id), text, source, from,
+        });
         const name = versionName(v);
         const lines = [
-          `Opened ${name} on ${v.matter_document.matter.name} in the document panel (${all.length.toLocaleString("en")} paragraphs, ${source}). Where Claude shows the panel, the lawyer can select a passage there and send it to the chat; it arrives as a quoted passage with this versionId.`,
+          `Opened ${name} on ${v.matter_document.matter.name} in the document panel (${structuredContent.total.toLocaleString("en")} paragraphs, ${source}). Where Claude shows the panel, the lawyer can select a passage there and send it to the chat; it arrives as a quoted passage with this versionId.`,
           `versionId: ${v.id}`,
           open("version", v.id),
           "Where no panel shows, read_document reads the text and the lawyer can highlight a passage in the Hub.",
         ];
-        return {
-          text: lines.join("\n"),
-          structuredContent: {
-            kind: DOCUMENT_KIND,
-            versionId: v.id,
-            versionNumber: v.version_number,
-            title: v.matter_document?.title ?? null,
-            fileName: v.file_name ?? null,
-            projectName: v.matter_document?.matter?.name ?? null,
-            hubUrl: link("version", v.id),
-            source,
-            total: all.length,
-            from: page.paragraphs[0]?.n ?? from,
-            next: page.next,
-            paragraphs: page.paragraphs,
-          },
-        };
+        return { text: lines.join("\n"), structuredContent };
       },
     },
   ];

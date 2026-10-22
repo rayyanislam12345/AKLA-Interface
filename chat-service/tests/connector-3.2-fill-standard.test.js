@@ -144,7 +144,7 @@ const fixtures = () => ({
 const ctxOf = (extra = {}) => ({ userId: USER, clientId: 'akh_c_test', scope: DEFAULT_SCOPE, tokenId: 't1', canWrite: true, recheck: async () => ({ userId: USER, scope: DEFAULT_SCOPE, tokenId: 't1' }), ...extra });
 
 /** The tool through the registry, with the real foundation over the stub database; checkCaps is wrapped to count releases. */
-function setup({ tables = fixtures(), standard = STANDARD, saveFails = null, options = {} } = {}) {
+function setup({ tables = fixtures(), standard = STANDARD, saveFails = null, options = {}, readFile = async () => ({ blocks: [] }) } = {}) {
   const t = { tables };
   const supabase = fakeSupabase({ tables, rpc: scriptedSave(t, { fail: saveFails }), files: { [`${STANDARDS_BUCKET}/${CA_PATH}`]: standard, [`${STANDARDS_BUCKET}/${NDA_PATH}`]: strToU8('<p>NDA</p>') } });
   const lines = [];
@@ -156,7 +156,7 @@ function setup({ tables = fixtures(), standard = STANDARD, saveFails = null, opt
     checkCaps: async (ctx) => { caps.checked += 1; const h = await real.checkCaps(ctx); return { ...h, release: () => { caps.released += 1; h.release(); } }; },
   };
   const modules = [{ file: 'fillStandardWrite.js', tools: (deps) => createFillStandardTools(deps, options) }];
-  const list = createHubTools({ supabase, voyageKey: 'v', library: { searchLaw: async () => [], readActSection: async () => { throw new Error('no'); }, searchPrecedentsTool: async () => [], searchProject: async () => [] }, readFile: async () => ({ blocks: [] }), log, hubUrl: `${HUB}/`, modules, writes, now: () => CLOCK });
+  const list = createHubTools({ supabase, voyageKey: 'v', library: { searchLaw: async () => [], readActSection: async () => { throw new Error('no'); }, searchPrecedentsTool: async () => [], searchProject: async () => [] }, readFile, log, hubUrl: `${HUB}/`, modules, writes, now: () => CLOCK });
   const tool = list.find((x) => x.name === FILL_TOOL);
   const run = (input, ctx = ctxOf()) => tool.run(input, ctx);
   return { supabase, tables, lines, caps, list, tool, run };
@@ -308,6 +308,30 @@ test('the facts go into the standard and land accepted, the comment stays in the
   assert.ok(!out.includes(UNRECORDED_LINE));
   assert.match(out, /The fills are accepted in the file; the AKLA Comments are margin comments for the lawyer\. The standard in the library is unchanged\. Filed as the lawyer's own version \(not marked AI-generated\).*not legal approval\.$/);
   assert.ok(!/https?:\/\/[^\s]*supabase/.test(out), 'no storage links');
+});
+
+test('with the MCP Apps trial on, the filed draft comes back with the document panel\'s data (its text read from the new file); off, or unreadable, the reply is the text alone', async () => {
+  const read = [];
+  const s = setup({ readFile: async (bytes, name) => { read.push(name); return { blocks: [{ text: 'CONCESSION AGREEMENT' }, { text: 'The Concession Period is thirty (30) years.' }] }; } });
+  const off = await s.run(usualInput());
+  assert.equal(typeof off, 'string', 'without the trial: text only');
+  assert.deepEqual(read, [], 'and the file is not read again');
+  const on = await s.run(usualInput({ title: 'Concession Agreement — second' }), ctxOf({ apps: true }));
+  assert.equal(typeof on.text, 'string');
+  assert.match(on.text, /^Drafted "Concession Agreement — second"/);
+  const versionId = on.text.match(/versionId: ([0-9a-f-]{36})/)[1];
+  assert.equal(on.structuredContent.kind, 'akla.document');
+  assert.equal(on.structuredContent.versionId, versionId);
+  assert.equal(on.structuredContent.title, 'Concession Agreement — second');
+  assert.equal(on.structuredContent.projectName, 'Hyderabad Bypass');
+  assert.equal(on.structuredContent.hubUrl, `${HUB}/ai/d/${versionId}?embed=1&host=pane`);
+  assert.deepEqual(on.structuredContent.paragraphs, [{ n: 1, text: 'CONCESSION AGREEMENT' }, { n: 2, text: 'The Concession Period is thirty (30) years.' }]);
+  assert.equal(on.structuredContent.next, null);
+  assert.equal(read.length, 1, 'the new file, read once from its bytes');
+  const broken = setup({ readFile: async () => { throw new Error('unreadable'); } });
+  const plain = await broken.run(usualInput(), ctxOf({ apps: true }));
+  assert.equal(typeof plain, 'string', 'a panel that cannot be built never costs the filing its reply');
+  assert.ok(broken.lines.some((l) => /document panel .* could not be built: unreadable/.test(l)));
 });
 
 test('a comment quoting the paragraph\'s new wording after a replace on the same paragraph survives (alignCommentExpectations), and the lawyer\'s own label goes in front', async () => {

@@ -47,7 +47,7 @@ test('a module\'s tools follow the built-in eight, get the deps, and answer thro
     assert.deepEqual(list.map((t) => t.name), [...BUILT_IN_TOOL_NAMES, 'say_hello', 'show_deps', 'too_long']);
     const byName = Object.fromEntries(list.map((t) => [t.name, t]));
     assert.equal(await byName.say_hello.run({}, { userId: 'u1' }), 'hello u1');
-    assert.equal(await byName.show_deps.run({}, { userId: 'u1' }), 'object|v|https://hub.test|link,matterById,needProject,needVersion,open,passagesOf,showPassages,textOf,versionById,versionName|Open in Hub: https://hub.test/ai/p/p1?embed=1&host=pane|function');
+    assert.equal(await byName.show_deps.run({}, { userId: 'u1' }), 'object|v|https://hub.test|link,matterById,needProject,needVersion,open,passagesOf,showPassages,textOf,textOfBytes,versionById,versionName|Open in Hub: https://hub.test/ai/p/p1?embed=1&host=pane|function');
     const clipped = await byName.too_long.run({}, { userId: 'u1' });
     assert.equal(clipped.length, MAX_RESULT_CHARS);
     assert.match(clipped, /\[Cut here:/);
