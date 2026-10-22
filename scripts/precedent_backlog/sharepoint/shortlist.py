@@ -3,7 +3,8 @@
 The files are cloud-only, so nothing is opened here: only names, sizes and
 dates. Each document's many copies across people's backups collapse to one,
 anything already in the library or already judged from the Passport drive is
-dropped, and only executed / final / circulated versions are queued.
+dropped, and only executed versions are queued (never drafts, and on an open
+matter only signed copies).
 
     ./export_library.sh && python3 shortlist.py
 Writes data/shortlist.json (every distinct document) and data/queue.json.
@@ -75,6 +76,32 @@ EMPLOYEE = re.compile(r".* - backup$|^tayyaba hyder$|^moiz ali khan$|^fateh khan
 
 STATUS_RANK = [(r"execution|\bexe\b|signed|executed", 6), (r"pre-?exe", 5), (r"final", 4), (r"cir(culated)? ?ver|\bcir\b", 3), (r"clean", 2)]
 
+# Only closed, executed instruments go into the library (Rayyan, 22 Oct 2026):
+# no earlier drafts, and nothing still being negotiated on an open matter.
+SIGNED = re.compile(r"\bsigned\b|\bexecuted\b|fully executed", re.I)
+EXECUTION_VERSION = re.compile(r"execution version|\bexe(cution)? ver\b|\[exe\]|\bexecution\b", re.I)
+STILL_A_DRAFT = re.compile(r"draft|pre-?exe|\bwd\b|working|rough|\bcir\b|circulated|for review|proposed|unsigned", re.I)
+# The Hub's active matters (matters.status = 'active'), as their SharePoint
+# folders and file prefixes name them, plus anything filed as an active transaction.
+OPEN_MATTER = re.compile(
+    r"/active transactions/|qayyumabad|qayumabad|\bptq\d*\b|\bm6\b|pakistan railways|\bpr\d+\b|zorlu|sapphire|\bsadb\b|"
+    r"manora|gas pipeline|discos?\b|\bosler\b|privati[sz]ation commission",
+    re.I,
+)
+
+
+def executed_stage(rel, stem):
+    """'signed' or 'execution' for a closed instrument, else None."""
+    if STILL_A_DRAFT.search(stem):
+        return None
+    if SIGNED.search(stem):
+        return "signed"
+    if EXECUTION_VERSION.search(stem) and not OPEN_MATTER.search("/" + rel.lower()):
+        # An execution version on an open matter may still change before it
+        # is signed, so there only a signed copy counts.
+        return "execution"
+    return None
+
 
 def type_of(stem):
     s = stem.lower()
@@ -139,7 +166,7 @@ def main():
             "path": path, "rel": rel, "filename": fn, "ext": ext.lower().lstrip("."), "size": st.st_size, "mtime": st.st_mtime,
             "matter": matter_of(rel), "key": norm_key(stem),
             "type": dt["name"] if dt else None, "type_id": dt["id"] if dt else None,
-            "date": str(filenames.extract_date(stem) or ""), "status": status_rank(stem),
+            "date": str(filenames.extract_date(stem) or ""), "status": status_rank(stem), "executed": executed_stage(rel, stem),
         })
     print("name-matched files:", len(rows))
 
@@ -149,19 +176,19 @@ def main():
 
     out = []
     for (_matter, key), g in groups.items():
-        # A signed PDF is usually a scan with no text; a Word copy at any
-        # final stage is the better precedent, so it wins whenever one exists.
-        g.sort(key=lambda r: (r["status"] >= 3, r["ext"] == "docx", r["status"], r["date"], r["mtime"]), reverse=True)
+        # Only an executed copy can win. Among those a Word file beats a PDF,
+        # because a signed PDF is usually a scan with no text.
+        g.sort(key=lambda r: (r["executed"] is not None, r["ext"] == "docx", r["executed"] == "signed", r["date"], r["mtime"]), reverse=True)
         best = dict(g[0], copies=len(g))
         best["known"] = "in_library" if key in lib_keys else ("passport_" + judged[key] if key in judged else None)
         out.append(best)
     json.dump(out, open(f"{DATA}/shortlist.json", "w"), indent=1)
 
-    queue = [r for r in out if not r["known"] and r["status"] >= 3 and r["size"] > 0]
+    queue = [r for r in out if not r["known"] and r["executed"] and r["size"] > 0]
     # Word files first: smaller, quicker to fetch, and the better precedents.
     queue.sort(key=lambda r: (r["ext"] != "docx", r["size"]))
     json.dump(queue, open(f"{DATA}/queue.json", "w"), indent=1)
-    print(f"distinct documents: {len(out)}; queued (executed/final/circulated, not yet known): {len(queue)}")
+    print(f"distinct documents: {len(out)}; queued (executed, not yet known): {len(queue)}")
 
 
 if __name__ == "__main__":
