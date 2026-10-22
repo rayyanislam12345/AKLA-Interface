@@ -32,7 +32,9 @@ def main():
     )
     manifest = ingest.load_manifest()
     done = {r["source_path"] for r in manifest.values() if r.get("outcome") == "ingested" and r.get("source_path")}
-    todo = [a for a in approved if a["path"] not in done][:limit]
+    # A compressed copy carries the SharePoint location it was made from.
+    source = lambda a: a.get("source_path", a["path"])
+    todo = [a for a in approved if source(a) not in done][:limit]
     print(f"{len(todo)} to ingest ({len(done)} SharePoint files already in)", flush=True)
     os.makedirs(STAGE, exist_ok=True)
     for n, a in enumerate(todo, 1):
@@ -44,9 +46,9 @@ def main():
             time.sleep(60)
         shutil.copyfile(a["path"], staged)
         subprocess.run([EVICT, a["path"]], capture_output=True)
-        key = ingest.manifest_key(a["path"], os.stat(staged).st_mtime)
+        key = ingest.manifest_key(source(a), os.stat(staged).st_mtime)
         row = {
-            "path": staged, "source_path": a["path"], "filename": a["filename"], "folder": "SharePoint",
+            "path": staged, "source_path": source(a), "filename": a["filename"], "folder": "SharePoint",
             "tier": "sharepoint", "reasoning": a.get("reason", ""),
         }
         if a.get("document_type_id"):
@@ -60,7 +62,7 @@ def main():
         finally:
             # From here on the row points at its SharePoint home; the staged
             # copy was only ever a transit file.
-            manifest[key]["path"] = a["path"]
+            manifest[key]["path"] = source(a)
             ingest.save_manifest(manifest)
             os.remove(staged)
         print(f"  -> {manifest[key]['outcome']}", flush=True)
