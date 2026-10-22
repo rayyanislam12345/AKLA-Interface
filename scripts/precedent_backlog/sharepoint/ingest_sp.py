@@ -31,7 +31,7 @@ def main():
         ocr_service_url=os.environ.get("OCR_SERVICE_URL"), ocr_service_secret=os.environ.get("OCR_SERVICE_SECRET"),
     )
     manifest = ingest.load_manifest()
-    done = {r.get("source_path") for r in manifest.values() if r.get("outcome") == "ingested"}
+    done = {r["source_path"] for r in manifest.values() if r.get("outcome") == "ingested" and r.get("source_path")}
     todo = [a for a in approved if a["path"] not in done][:limit]
     print(f"{len(todo)} to ingest ({len(done)} SharePoint files already in)", flush=True)
     os.makedirs(STAGE, exist_ok=True)
