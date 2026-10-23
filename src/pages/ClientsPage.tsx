@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
@@ -36,7 +37,7 @@ export default function ClientsPage() {
       setName("");
       setDescription("");
     } catch (e: any) {
-      toast({ title: "Failed to create client", description: e.message, variant: "destructive" });
+      toast({ title: "Failed to create client", description: friendlyError(e), variant: "destructive" });
     }
   };
 

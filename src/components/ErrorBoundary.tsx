@@ -53,13 +53,14 @@ export class ErrorBoundary extends Component<Props, State> {
                 <h2 className="font-semibold">This page couldn't be displayed</h2>
                 <p className="text-sm text-muted-foreground">
                   Something went wrong rendering this screen. Nothing you were working on has been deleted — reloading
-                  usually clears it. If it keeps happening, send this message to whoever maintains the app.
+                  usually clears it. If it keeps happening, tell an administrator and copy them the details below.
                 </p>
               </div>
             </div>
-            <pre className="max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
-              {error.message}
-            </pre>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Details for an administrator</summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3">{error.message}</pre>
+            </details>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => window.location.reload()}>
                 <RefreshCw className="mr-2 h-4 w-4" />

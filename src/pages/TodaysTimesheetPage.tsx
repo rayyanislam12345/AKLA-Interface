@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Clock, Download, GripVertical, Loader2, Plus, Trash2 } from "lucide-react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -85,6 +86,22 @@ interface AddEntryDialogProps {
   }) => Promise<boolean>;
 }
 
+const LAST_PROJECT_KEY = "akla.timesheet.last-project";
+function lastTimesheetProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+function rememberTimesheetProject(id: string) {
+  try {
+    localStorage.setItem(LAST_PROJECT_KEY, id);
+  } catch {
+    /* not remembered */
+  }
+}
+
 // "Add entry": the same fields a row already has (project, description,
 // hours, billable, AK billable), for time not uploaded from Timekeeper — a
 // hearing, a client meeting, work done on a Mac or a phone.
@@ -97,17 +114,19 @@ function AddEntryDialog({ open, onOpenChange, workDate, matters, onAdd }: AddEnt
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Every project not closed (on hold too), the last one used here first chosen.
   const activeMatters = useMemo(
     () =>
       (matters ?? [])
-        .filter((m) => (m.status ?? "").trim().toLowerCase() === "active")
+        .filter((m) => (m.status ?? "").trim().toLowerCase() !== "closed")
         .sort((a, b) => a.name.localeCompare(b.name)),
     [matters]
   );
 
   useEffect(() => {
     if (open) {
-      setMatterId("");
+      const last = lastTimesheetProject();
+      setMatterId(last && activeMatters.some((m) => m.id === last) ? last : "");
       setHours("");
       setNarrative("");
       setBillableHours("");
@@ -121,6 +140,7 @@ function AddEntryDialog({ open, onOpenChange, workDate, matters, onAdd }: AddEnt
     const billable = optionalHours(billableHours);
     const akBillable = optionalHours(akBillableHours);
     if (!matterId) return setProblem("Choose the project this time was spent on.");
+    rememberTimesheetProject(matterId);
     if (!hours.trim() || !Number.isFinite(h) || h <= 0) return setProblem("Enter the hours worked, more than 0.");
     if (h > 24) return setProblem("One entry can't be more than 24 hours.");
     if (!narrative.trim()) return setProblem("Describe the work in a few words.");
@@ -463,7 +483,7 @@ export default function TodaysTimesheetPage() {
     try {
       await updateTimeslip.mutateAsync({ id, edits });
     } catch (err) {
-      toast({ title: "Failed to save change", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to save change", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -504,7 +524,7 @@ export default function TodaysTimesheetPage() {
         onError: (err) =>
           toast({
             title: "The new order wasn't saved",
-            description: (err as Error).message,
+            description: friendlyError(err),
             variant: "destructive",
           }),
       }
@@ -527,7 +547,7 @@ export default function TodaysTimesheetPage() {
       toast({ title: "Entry added", description: `${entry.hours} h on ${matterName(entry.matterId)}.` });
       return true;
     } catch (err) {
-      toast({ title: "Could not add the entry", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Could not add the entry", description: friendlyError(err), variant: "destructive" });
       return false;
     }
   };
@@ -540,7 +560,7 @@ export default function TodaysTimesheetPage() {
       await deleteTimeslip.mutateAsync(row.id);
       toast({ title: "Entry deleted" });
     } catch (err) {
-      toast({ title: "Could not delete the entry", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Could not delete the entry", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -567,7 +587,7 @@ export default function TodaysTimesheetPage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast({ title: "Failed to generate timesheet", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to generate timesheet", description: friendlyError(err), variant: "destructive" });
     } finally {
       setDownloading(false);
     }
@@ -577,7 +597,7 @@ export default function TodaysTimesheetPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold">Today's Timesheet</h1>
+          <h1 className="text-2xl font-semibold">Timesheet</h1>
           <p className="text-muted-foreground">
             Your own daily timesheet. Add an entry for any day, edit anything below, or drag a row's grip handle to
             reorder it, before downloading.

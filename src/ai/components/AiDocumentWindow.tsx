@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ExternalLink, FileText, Loader2, MessageSquare, PencilLine, X } from "lucide-react";
@@ -149,7 +150,7 @@ function VersionWindow({ versionId, onClose, onVersionChange, onAsk, onEdit }: E
     try {
       await downloadStoredVersion(v.storage_path, versionDownloadName(detail.document.title, v));
     } catch (err) {
-      toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't download the file", description: friendlyError(err), variant: "destructive" });
     }
   };
 

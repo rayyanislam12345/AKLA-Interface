@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookMarked, FileSignature, FileText, FolderOpen, Loader2, Paperclip, PencilLine, Plus, ScanSearch, Settings2, Sparkles, Square, StickyNote, Wand2, X } from "lucide-react";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
@@ -179,7 +180,7 @@ export default function Composer({
           setAttachments((prev) => prev.map((a) => (a.path === placeholders[i].path ? uploaded : a)));
         } catch (err: any) {
           setAttachments((prev) => prev.filter((a) => a.path !== placeholders[i].path));
-          toast({ title: `Couldn't attach ${file.name}`, description: err.message, variant: "destructive" });
+          toast({ title: `Couldn't attach ${file.name}`, description: friendlyError(err), variant: "destructive" });
         }
       }),
     );

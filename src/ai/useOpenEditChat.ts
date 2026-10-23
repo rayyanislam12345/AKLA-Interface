@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ export function useOpenEditChat() {
         queryClient.invalidateQueries({ queryKey: ["chat-threads", matterId] });
         navigate(`/ai/c/${threadId}?open=${openParam({ kind: "artifact", id: artifact.id })}`);
       } catch (err) {
-        toast({ title: "Couldn't open that document", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+        toast({ title: "Couldn't open that document", description: friendlyError(err), variant: "destructive" });
       }
     },
     [navigate, queryClient, me?.id, toast],

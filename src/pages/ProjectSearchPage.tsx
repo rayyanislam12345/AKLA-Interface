@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -55,7 +56,7 @@ export default function ProjectSearchPage({ embedded = false }: { embedded?: boo
       const { data, error } = await supabase.storage.from("matter-documents").download(row.storage_path);
       if (error || !data) throw error ?? new Error("File unavailable");
       const url = URL.createObjectURL(data); const a = document.createElement("a"); a.href=url; a.download=row.file_name ?? `document-v${row.version_number}.docx`; a.click(); URL.revokeObjectURL(url);
-    } catch (err) { toast({ title: "Download failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" }); }
+    } catch (err) { toast({ title: "Download failed", description: friendlyError(err), variant: "destructive" }); }
     finally { setDownloading(null); }
   };
   return <div className="mx-auto max-w-5xl space-y-6">

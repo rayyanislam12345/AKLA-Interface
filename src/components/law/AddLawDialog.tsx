@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useRef, useState } from "react";
 import { Globe, Loader2, Upload } from "lucide-react";
 import { useFindLawOnline, useUploadLawToLibrary } from "@/hooks/useLawLibrary";
@@ -54,7 +55,7 @@ export default function AddLawDialog({ open, onOpenChange, initialName = "", onA
         setNotFound(result.reason);
       }
     } catch (err: any) {
-      toast({ title: "Couldn't find the law", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't find the law", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -69,7 +70,7 @@ export default function AddLawDialog({ open, onOpenChange, initialName = "", onA
       onAdded?.(trimmed);
       onOpenChange(false);
     } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      toast({ title: "Upload failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 

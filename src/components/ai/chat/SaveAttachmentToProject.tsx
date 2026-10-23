@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -41,7 +42,7 @@ export default function SaveAttachmentToProject({ attachment, className, canOpen
         if (note) toast({ title: "Saved, with a note", description: note });
       });
     } catch (err) {
-      toast({ title: `Could not save "${attachment.name}"`, description: (err as Error).message, variant: "destructive" });
+      toast({ title: `Could not save "${attachment.name}"`, description: friendlyError(err), variant: "destructive" });
     }
   };
 

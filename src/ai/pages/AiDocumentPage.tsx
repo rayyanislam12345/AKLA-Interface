@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink, MessageSquare, PencilLine } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -93,7 +94,7 @@ export default function AiDocumentPage() {
     try {
       await downloadStoredVersion(v.storage_path, versionDownloadName(detail.document.title, v));
     } catch (err) {
-      toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't download the file", description: friendlyError(err), variant: "destructive" });
     }
   };
 

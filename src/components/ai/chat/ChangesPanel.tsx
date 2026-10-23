@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2, RotateCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -212,7 +213,7 @@ export default function ChangesPanel({
         toast({ title: what });
       }
     } catch (err) {
-      toast({ title: "Couldn't record the decision", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't record the decision", description: friendlyError(err), variant: "destructive" });
     }
   };
 

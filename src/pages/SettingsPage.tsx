@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -83,7 +84,7 @@ function NameCard() {
     const { error } = await supabase.from("profiles").update({ full_name: name }).eq("id", user.id);
     setSaving(false);
     if (error) {
-      toast({ title: "Your name was not saved", description: error.message, variant: "destructive" });
+      toast({ title: "Your name was not saved", description: friendlyError(error), variant: "destructive" });
       return;
     }
     queryClient.invalidateQueries({ queryKey: ["my-profile"] });
@@ -284,7 +285,7 @@ function TwoStepCard() {
     const { error } = await supabase.auth.mfa.unenroll({ factorId: verified.id });
     if (error) {
       setBusy(false);
-      toast({ title: "Two-step sign-in was not turned off", description: error.message, variant: "destructive" });
+      toast({ title: "Two-step sign-in was not turned off", description: friendlyError(error), variant: "destructive" });
       return;
     }
     await refresh();
@@ -373,7 +374,7 @@ function SignOutEverywhereCard() {
     const { error } = await supabase.auth.signOut({ scope: "global" });
     setBusy(false);
     if (error) {
-      toast({ title: "Could not sign out everywhere", description: error.message, variant: "destructive" });
+      toast({ title: "Could not sign out everywhere", description: friendlyError(error), variant: "destructive" });
       return;
     }
     queryClient.clear();

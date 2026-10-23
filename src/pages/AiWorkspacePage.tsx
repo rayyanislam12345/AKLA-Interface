@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -134,7 +135,7 @@ function AiWorkspace({ matterId }: { matterId?: string }) {
       queryClient.invalidateQueries({ queryKey: ["chat-threads", chatScopeKey(scope)] });
       queryClient.invalidateQueries({ queryKey: ["chat-artifacts", threadId] });
     } catch (err: any) {
-      toast({ title: "Couldn't open that document", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't open that document", description: friendlyError(err), variant: "destructive" });
     }
   };
 

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -55,7 +56,7 @@ export const MFAEnrollment = ({ open, onOpenChange, onSuccess }: MFAEnrollmentPr
     } catch (error: any) {
       toast({
         title: 'Error setting up MFA',
-        description: error.message,
+        description: friendlyError(error),
         variant: 'destructive',
       });
       onOpenChange(false);
@@ -100,7 +101,7 @@ export const MFAEnrollment = ({ open, onOpenChange, onSuccess }: MFAEnrollmentPr
     } catch (error: any) {
       toast({
         title: 'Verification failed',
-        description: error.message || 'Invalid code. Please try again.',
+        description: friendlyError(error, 'Invalid code. Please try again.'),
         variant: 'destructive',
       });
     } finally {

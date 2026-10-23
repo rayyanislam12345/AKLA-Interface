@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { indexViaEdgeFunction, requestIndexing } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
@@ -140,7 +141,7 @@ const NO_DOCUMENTS: IntakeDocument[] = [];
 // add, tick, status change or dismiss simply did nothing, and the lawyer was
 // left wondering whether it had worked. Each call now names what failed.
 const onFail = (toast: ReturnType<typeof useToast>["toast"], title: string) => ({
-  onError: (err: any) => toast({ title, description: err?.message ?? "Please try again.", variant: "destructive" as const }),
+  onError: (err: unknown) => toast({ title, description: friendlyError(err), variant: "destructive" as const }),
 });
 
 function StageIcon({ status }: { status: string }) {
@@ -157,7 +158,7 @@ function WhatsAppMatterDocuments({ whatsappMatterId }: { whatsappMatterId: strin
     try {
       await openWhatsAppDocument(path);
     } catch (err: any) {
-      toast({ title: "Failed to open document", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to open document", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -165,7 +166,7 @@ function WhatsAppMatterDocuments({ whatsappMatterId }: { whatsappMatterId: strin
     try {
       await downloadWhatsAppDocument(path, fileName);
     } catch (err: any) {
-      toast({ title: "Failed to download document", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to download document", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -310,7 +311,7 @@ function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matte
       await addSelected.mutateAsync({ matterId, actName: selectedAct });
       setSelectedAct("");
     } catch (err: any) {
-      toast({ title: "Failed to add", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to add", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -326,7 +327,7 @@ function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matte
         toast({ title: "Not found online", description: `${result.actName} — upload it manually.` });
       }
     } catch (err: any) {
-      toast({ title: "Failed to add", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to add", description: friendlyError(err), variant: "destructive" });
     } finally {
       await queryClient.refetchQueries({ queryKey: ["matter-relevant-laws", matterId] });
       setPendingSearches((prev) => prev.filter((n) => n !== actName));
@@ -344,7 +345,7 @@ function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matte
         toast({ title: "Found and added" });
       }
     } catch (err: any) {
-      toast({ title: "Failed to search", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to search", description: friendlyError(err), variant: "destructive" });
     } finally {
       setResolvingRowId(null);
     }
@@ -364,7 +365,7 @@ function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matte
       await uploadLawFile.mutateAsync({ matterId, lawId: target.lawId, actName: target.actName, file });
       toast({ title: "Uploaded" });
     } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      toast({ title: "Upload failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -373,7 +374,7 @@ function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matte
     try {
       await deleteLaw.mutateAsync({ id, matterId });
     } catch (err: any) {
-      toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to remove", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -591,7 +592,7 @@ function DeleteMatterDialog({ matterId, matterName }: { matterId: string; matter
       toast({ title: "Project deleted" });
       navigate("/matters");
     } catch (err: any) {
-      toast({ title: "Failed to delete project", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to delete project", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -953,7 +954,7 @@ export default function MatterWorkspacePage() {
       await deleteTask.mutateAsync({ taskId, matterId });
       toast({ title: "Task deleted" });
     } catch (err: any) {
-      toast({ title: "Failed to delete task", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to delete task", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -973,7 +974,7 @@ export default function MatterWorkspacePage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      toast({ title: "Failed to download file", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to download file", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -1005,7 +1006,7 @@ export default function MatterWorkspacePage() {
     try {
       await updateVersionLabel.mutateAsync({ versionId, label: editingLabelDraft, matterId });
     } catch (err: any) {
-      toast({ title: "Failed to save tag", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to save tag", description: friendlyError(err), variant: "destructive" });
     } finally {
       setEditingVersionId(null);
       setEditingLabelDraft("");
@@ -1024,7 +1025,7 @@ export default function MatterWorkspacePage() {
       { matterId, content: contextDraft },
       {
         onSuccess: () => toast({ title: "Project context saved" }),
-        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+        onError: (err: any) => toast({ title: "Failed to save", description: friendlyError(err), variant: "destructive" }),
       }
     );
   };
@@ -1047,7 +1048,7 @@ export default function MatterWorkspacePage() {
         description: `Pulled from ${data.documentCount} document${data.documentCount === 1 ? "" : "s"} and ${data.messageCount} past AI message${data.messageCount === 1 ? "" : "s"}.`,
       });
     } catch (err: any) {
-      toast({ title: "Failed to summarize", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to summarize", description: friendlyError(err), variant: "destructive" });
     } finally {
       setSummarizing(false);
     }

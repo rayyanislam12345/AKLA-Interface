@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useState } from "react";
 import { Wand2 } from "lucide-react";
 import { useMatterContext, useUpsertMatterContext } from "@/hooks/useMatterContext";
@@ -32,7 +33,7 @@ export default function ProjectInstructions({ matterId }: { matterId: string }) 
       { matterId, content: draft },
       {
         onSuccess: () => toast({ title: "Instructions saved" }),
-        onError: (err) => toast({ title: "Couldn't save", description: err instanceof Error ? err.message : String(err), variant: "destructive" }),
+        onError: (err) => toast({ title: "Couldn't save", description: friendlyError(err), variant: "destructive" }),
       },
     );
 
@@ -51,7 +52,7 @@ export default function ProjectInstructions({ matterId }: { matterId: string }) 
         description: `Drawn from ${data.documentCount} document${data.documentCount === 1 ? "" : "s"} and ${data.messageCount} past AI message${data.messageCount === 1 ? "" : "s"}.`,
       });
     } catch (err) {
-      toast({ title: "Couldn't summarise", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't summarise", description: friendlyError(err), variant: "destructive" });
     } finally {
       setSummarizing(false);
     }

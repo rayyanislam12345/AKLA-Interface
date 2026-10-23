@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Pencil, Search, X } from "lucide-react";
@@ -102,7 +103,7 @@ export function EditProjectDialog({ matter, onClose }: { matter: EditableProject
       toast({ title: "Project updated" });
       onClose();
     } catch (e) {
-      toast({ title: "Couldn't save the project", description: errorText(e), variant: "destructive" });
+      toast({ title: "Couldn't save the project", description: friendlyError(e), variant: "destructive" });
     }
   };
 
@@ -292,7 +293,7 @@ export default function MattersPage() {
       setShowMore(false);
       if (created?.id) navigate(`/matters/${created.id}`);
     } catch (e) {
-      toast({ title: "Couldn't create the project", description: errorText(e), variant: "destructive" });
+      toast({ title: "Couldn't create the project", description: friendlyError(e), variant: "destructive" });
     }
   };
 

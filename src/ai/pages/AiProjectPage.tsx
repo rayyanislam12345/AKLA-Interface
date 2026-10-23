@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ExternalLink, Star } from "lucide-react";
@@ -192,7 +193,7 @@ function ProjectView({ matterId }: { matterId: string }) {
   const star = () =>
     toggleStar.mutate(
       { matterId, starred: !isStarred },
-      { onError: (err) => toast({ title: "Couldn't change the star", description: err instanceof Error ? err.message : String(err), variant: "destructive" }) },
+      { onError: (err) => toast({ title: "Couldn't change the star", description: friendlyError(err), variant: "destructive" }) },
     );
 
   // ---- states that replace the page ----

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -58,7 +59,7 @@ export default function HomePrompt({
       return;
     }
     chat.send({ matterId, general: matterId ? undefined : me?.id, threadId: null, ...input }).catch((err: Error) => {
-      toast({ title: "Couldn't send", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't send", description: friendlyError(err), variant: "destructive" });
     });
     navigate(matterId ? `${NEW_CHAT_PATH}?matter=${matterId}` : NEW_CHAT_PATH);
   };

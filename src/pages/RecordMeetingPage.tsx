@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { plainSaveError, saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
@@ -318,7 +319,7 @@ export default function RecordMeetingPage() {
       setProposalDraft(result.draft);
       await fileAutomatically("proposal", result.draft);
     } catch (err: any) {
-      toast({ title: "Proposal generation failed", description: err.message, variant: "destructive" });
+      toast({ title: "Proposal generation failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -331,7 +332,7 @@ export default function RecordMeetingPage() {
       setMinutesDraft({ format: "minutes-akla", text: result.draft });
       await fileAutomatically("minutes-akla", result.draft);
     } catch (err: any) {
-      toast({ title: "Minutes generation failed", description: err.message, variant: "destructive" });
+      toast({ title: "Minutes generation failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -344,7 +345,7 @@ export default function RecordMeetingPage() {
       setMinutesDraft({ format: "concept-note", text: result.draft });
       await fileAutomatically("concept-note", result.draft);
     } catch (err: any) {
-      toast({ title: "Concept note generation failed", description: err.message, variant: "destructive" });
+      toast({ title: "Concept note generation failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -249,7 +250,7 @@ export default function ReviewSession({
         skipped: new Map((result.skipped ?? []).map((item) => [item.suggestionId, item.reason])),
       });
     } catch (err: any) {
-      toast({ title: "Failed to build tracked-changes preview", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to build tracked-changes preview", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -377,7 +378,7 @@ export default function ReviewSession({
       if (result.filed?.status === "newer_version") return;
       await regeneratePreview(version.id, result.reviewRunId);
     } catch (err: any) {
-      toast({ title: "Review failed", description: err.message, variant: "destructive" });
+      toast({ title: "Review failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -387,7 +388,7 @@ export default function ReviewSession({
       await setStatus.mutateAsync({ suggestionId, status, documentVersionId: version.id });
       await regeneratePreview(version.id);
     } catch (err: any) {
-      toast({ title: "Failed to update suggestion", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to update suggestion", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -433,7 +434,7 @@ export default function ReviewSession({
         });
       }
     } catch (err: any) {
-      toast({ title: "Download failed", description: err.message, variant: "destructive" });
+      toast({ title: "Download failed", description: friendlyError(err), variant: "destructive" });
     } finally {
       setDownloading(false);
     }
@@ -460,7 +461,7 @@ export default function ReviewSession({
       toast({ title: result.message, description: result.note ?? result.fileName });
       navigate(`/matters/${matterId}`);
     } catch (err) {
-      toast({ title: "Couldn't save the version", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't save the version", description: friendlyError(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -744,7 +745,7 @@ function FiledVersion({ versionId }: { versionId: string }) {
             try {
               await downloadStoredVersion(v.storage_path, versionDownloadName(detail.document.title, v));
             } catch (err) {
-              toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+              toast({ title: "Couldn't download the file", description: friendlyError(err), variant: "destructive" });
             }
           }}
           headerClassName="px-3 py-2.5"

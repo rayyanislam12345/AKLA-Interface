@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useMemo, useState } from "react";
 import { Clock, Download, Loader2, Pencil } from "lucide-react";
 import {
@@ -122,7 +123,7 @@ function EditTimeslipDialog({
       toast({ title: "Timeslip updated" });
       onClose();
     } catch (err) {
-      toast({ title: "Failed to update timeslip", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to update timeslip", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -323,7 +324,7 @@ export function MatterTimeslips({
         ) : !slips?.length ? (
           <p className="py-6 text-sm text-muted-foreground">
             No time recorded against this project in this period. Time is added
-            on Today's Timesheet (in the sidebar), or uploaded from Timekeeper.
+            on the Timesheet page (in the sidebar), or uploaded from Timekeeper.
           </p>
         ) : view === "entries" ? (
           <>

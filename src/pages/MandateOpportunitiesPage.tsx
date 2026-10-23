@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { Fragment, useMemo, useState } from "react";
 import { format, isPast } from "date-fns";
 import { ChevronDown, ChevronRight, ExternalLink, FileText, Megaphone } from "lucide-react";
@@ -56,7 +57,7 @@ function OpportunityDetail({ opportunity }: { opportunity: MandateOpportunity })
     try {
       await openMandateDocument(path);
     } catch (err: any) {
-      toast({ title: "Failed to open document", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to open document", description: friendlyError(err), variant: "destructive" });
     }
   };
 

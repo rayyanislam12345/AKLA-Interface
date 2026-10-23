@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
@@ -56,7 +57,7 @@ export default function DocumentTypesPage() {
       setNewName("");
       setNewCategory("");
     } catch (e: any) {
-      toast({ title: "Failed to create", description: e.message, variant: "destructive" });
+      toast({ title: "Failed to create", description: friendlyError(e), variant: "destructive" });
     }
   };
 
@@ -73,7 +74,7 @@ export default function DocumentTypesPage() {
       toast({ title: "Document type updated" });
       setEditId(null);
     } catch (e: any) {
-      toast({ title: "Failed to update", description: e.message, variant: "destructive" });
+      toast({ title: "Failed to update", description: friendlyError(e), variant: "destructive" });
     }
   };
 

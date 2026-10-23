@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { Fragment, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { marked } from "marked";
@@ -52,7 +53,7 @@ function LinkToMatterSelect({ whatsappMatter }: { whatsappMatter: WhatsAppMatter
     try {
       await linkMatter.mutateAsync({ id: whatsappMatter.id, matterId: value === "unlinked" ? null : value });
     } catch (err) {
-      toast({ title: "Failed to update link", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to update link", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -113,7 +114,7 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
         if (note) toast({ title: "Added, with a note", description: note });
       });
     } catch (err) {
-      toast({ title: `Could not add "${file.filename}"`, description: (err as Error).message, variant: "destructive" });
+      toast({ title: `Could not add "${file.filename}"`, description: friendlyError(err), variant: "destructive" });
     } finally {
       setAdding((prev) => {
         const next = new Set(prev);
@@ -147,7 +148,7 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
         }
       });
     } catch (err) {
-      toast({ title: "Could not add the documents", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Could not add the documents", description: friendlyError(err), variant: "destructive" });
     } finally {
       setAddingAll(false);
     }
@@ -164,7 +165,7 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
     try {
       await openWhatsAppDocument(path);
     } catch (err) {
-      toast({ title: "Failed to open document", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to open document", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -172,7 +173,7 @@ function WhatsAppMatterDetail({ whatsappMatter }: { whatsappMatter: WhatsAppMatt
     try {
       await downloadWhatsAppDocument(path, fileName);
     } catch (err) {
-      toast({ title: "Failed to download document", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to download document", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -437,7 +438,7 @@ function BackfillControl() {
     try {
       await triggerBackfill.mutateAsync(parseInt(days, 10) || 20);
     } catch (err) {
-      toast({ title: "Failed to start backfill", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to start backfill", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -483,7 +484,7 @@ function LinkWhatsAppButton() {
     try {
       await linkMyWhatsApp.mutateAsync();
     } catch (err) {
-      toast({ title: "Failed to link WhatsApp", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Failed to link WhatsApp", description: friendlyError(err), variant: "destructive" });
     }
   };
 

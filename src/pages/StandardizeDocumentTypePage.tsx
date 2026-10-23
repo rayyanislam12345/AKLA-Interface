@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Download, FileText, Gavel, History, Mail, Sparkles, Trash2, Upload } from "lucide-react";
@@ -89,7 +90,7 @@ export default function StandardizeDocumentTypePage() {
           await uploadTemplate.mutateAsync({ documentTypeId, file });
           toast({ title: "Standard updated", description: file.name });
         } catch (err) {
-          toast({ title: "Couldn't set the standard", description: errorMessage(err), variant: "destructive" });
+          toast({ title: "Couldn't set the standard", description: friendlyError(err), variant: "destructive" });
         } finally {
           setUploading(false);
         }
@@ -108,7 +109,7 @@ export default function StandardizeDocumentTypePage() {
           await deleteTemplate.mutateAsync({ documentTypeId, storagePath: existingTemplate?.storage_path ?? null });
           toast({ title: "Standard removed" });
         } catch (err) {
-          toast({ title: "Couldn't remove the standard", description: errorMessage(err), variant: "destructive" });
+          toast({ title: "Couldn't remove the standard", description: friendlyError(err), variant: "destructive" });
         }
       },
     });
@@ -128,7 +129,7 @@ export default function StandardizeDocumentTypePage() {
           await restoreVersion.mutateAsync({ documentTypeId, versionId: v.id });
           toast({ title: "Standard restored", description: name });
         } catch (err) {
-          toast({ title: "Couldn't restore", description: errorMessage(err), variant: "destructive" });
+          toast({ title: "Couldn't restore", description: friendlyError(err), variant: "destructive" });
         }
       },
     });
@@ -156,7 +157,7 @@ export default function StandardizeDocumentTypePage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast({ title: "Download failed", description: errorMessage(err), variant: "destructive" });
+      toast({ title: "Download failed", description: friendlyError(err), variant: "destructive" });
     }
   };
 

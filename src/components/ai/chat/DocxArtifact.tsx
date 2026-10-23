@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -193,7 +194,7 @@ export default function DocxArtifact({
       if (err instanceof CleanCopyRefused) {
         toast({
           title: "The clean copy isn't ready",
-          description: err.message,
+          description: friendlyError(err),
           action: err.onlyOthers ? (
             <ToastAction altText="Download a clean copy with their changes accepted too" onClick={() => void handleDownload("clean", true)}>
               Accept theirs too

@@ -120,7 +120,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return (
       <StatusScreen
         title="Awaiting approval"
-        description="Your account has been created and is waiting on an admin to approve it. You'll be able to sign in once that's done — no need to sign up again."
+        description="Your account has been created and is waiting for an administrator to approve it; they see your request in the Hub. Once approved, reload this page or sign in again — no need to sign up again."
       />
     );
   }

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PrecedentSearchTab from "@/components/precedents/PrecedentSearchTab";
@@ -63,7 +64,7 @@ function LawLibraryTab() {
       await deleteStatute.mutateAsync(actName);
       toast({ title: "Removed from law library" });
     } catch (err) {
-      toast({ title: "Failed to remove", description: errorMessage(err), variant: "destructive" });
+      toast({ title: "Failed to remove", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -438,7 +439,7 @@ export default function PrecedentLibraryPage() {
       await deleteSource.mutateAsync(storagePath);
       toast({ title: "Removed from precedent library" });
     } catch (err) {
-      toast({ title: "Failed to remove", description: errorMessage(err), variant: "destructive" });
+      toast({ title: "Failed to remove", description: friendlyError(err), variant: "destructive" });
     }
   };
 

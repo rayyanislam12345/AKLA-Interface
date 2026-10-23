@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Pencil, Plus, Trash2, Upload } from "lucide-react";
@@ -84,7 +85,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
           (renames.length ? ` ${renames.length} file name${renames.length === 1 ? " was" : "s were"} simplified for upload (${renames.map((r) => r.to.split("/").pop()).join(", ")}), and the skill's references to ${renames.length === 1 ? "it" : "them"} updated.` : ""),
       });
     } catch (err: any) {
-      toast({ title: "Couldn't upload the skill", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't upload the skill", description: friendlyError(err), variant: "destructive" });
     } finally {
       setUploading(false);
       if (fileInput.current) fileInput.current.value = "";
@@ -106,7 +107,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
       }
       toast({ title: `Deleted /${skill.name}` });
     } catch (err: any) {
-      toast({ title: "Couldn't remove the skill", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't remove the skill", description: friendlyError(err), variant: "destructive" });
     } finally {
       setDeletingId(null);
     }
@@ -132,7 +133,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
       setEditing(null);
       toast({ title: editing.id ? "Skill updated" : "Skill created" });
     } catch (err: any) {
-      toast({ title: "Couldn't save the skill", description: err.message, variant: "destructive" });
+      toast({ title: "Couldn't save the skill", description: friendlyError(err), variant: "destructive" });
     }
   };
 

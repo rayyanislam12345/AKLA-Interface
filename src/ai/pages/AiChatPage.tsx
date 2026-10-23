@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink, FileText, PanelRightOpen } from "lucide-react";
@@ -172,7 +173,7 @@ function ChatView({ threadId }: { threadId: string | null }) {
     try {
       await chat.send({ ...scopeArgs, threadId, ...input, clearSkill, workingArtifactId: working });
     } catch (err) {
-      toast({ title: "Couldn't send", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't send", description: friendlyError(err), variant: "destructive" });
     }
   };
 

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -120,7 +121,7 @@ function SupportRequestsForAdmins() {
   const setStatus = async (id: string, status: "open" | "answered") => {
     const { error } = await supabase.from("support_requests").update({ status }).eq("id", id);
     if (error) {
-      toast({ title: "Could not update the request", description: error.message, variant: "destructive" });
+      toast({ title: "Could not update the request", description: friendlyError(error), variant: "destructive" });
       return;
     }
     queryClient.invalidateQueries({ queryKey: ["support-requests"] });

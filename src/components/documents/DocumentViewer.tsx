@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Download, FileQuestion, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -192,7 +193,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
       if (err instanceof CleanCopyRefused) {
         toast({
           title: "The clean copy isn't ready",
-          description: err.message,
+          description: friendlyError(err),
           action: err.onlyOthers ? (
             <ToastAction altText="Download a clean copy with their changes accepted too" onClick={() => void downloadMarked("clean", true)}>
               Accept theirs too
@@ -201,7 +202,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
         });
         return;
       }
-      toast({ title: "Couldn't download the file", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't download the file", description: friendlyError(err), variant: "destructive" });
     }
   };
 

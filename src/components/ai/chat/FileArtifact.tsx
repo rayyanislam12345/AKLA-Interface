@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -62,7 +63,7 @@ export default function FileArtifact({ artifact, matterId }: { artifact: ChatArt
       setSaved({ matterId: result.matterId, versionNumber: result.versionNumber });
       toast({ title: result.message, description: result.note ?? result.fileName });
     } catch (err) {
-      toast({ title: "Couldn't save to the project", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't save to the project", description: friendlyError(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }

@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -211,7 +212,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
         await renderAsync(blob, previewRef.current, previewRef.current, { inWrapper: true });
       }
     } catch (err: any) {
-      toast({ title: "Failed to build preview", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to build preview", description: friendlyError(err), variant: "destructive" });
     } finally {
       setBuildingPreview(false);
     }
@@ -287,7 +288,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
       setSaveMode("version");
       toast({ title: result.message, description: result.note ?? result.fileName });
     } catch (err) {
-      toast({ title: "Couldn't save to the project", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Couldn't save to the project", description: friendlyError(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }

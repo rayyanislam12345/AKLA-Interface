@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import { useState } from "react";
 import { useProfiles, useSetUserRole, usePendingProfiles, useDecideProfileApproval, type AppRole } from "@/hooks/useProfiles";
 import {
@@ -66,7 +67,7 @@ function WhatsAppAccountsSection() {
       setProfileId("");
       toast({ title: "WhatsApp account linked" });
     } catch (err: any) {
-      toast({ title: "Failed to link account", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to link account", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -75,7 +76,7 @@ function WhatsAppAccountsSection() {
       await unlinkAccount.mutateAsync(id);
       toast({ title: "WhatsApp account unlinked" });
     } catch (err: any) {
-      toast({ title: "Failed to unlink account", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to unlink account", description: friendlyError(err), variant: "destructive" });
     }
   };
 
@@ -181,7 +182,7 @@ function PendingApprovalsSection() {
       await decide.mutateAsync({ userId, status });
       toast({ title: status === "approved" ? "Account approved" : "Account rejected" });
     } catch (err: any) {
-      toast({ title: "Failed to update account", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to update account", description: friendlyError(err), variant: "destructive" });
     }
   };
 

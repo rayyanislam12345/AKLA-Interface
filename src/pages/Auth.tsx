@@ -1,3 +1,4 @@
+import { friendlyError } from "@/lib/friendlyError";
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EMBED_PARAM, HOST_PARAM, postToCompanion, resolveCompanionHost, resolveEmbedMode, resolvePaneHost } from '@/lib/embedMode';
@@ -154,10 +155,10 @@ export default function Auth() {
     const { error } = await signIn(email, password);
     
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error));
       toast({
         title: "Sign in failed",
-        description: error.message,
+        description: friendlyError(error),
         variant: "destructive"
       });
       setIsLoading(false);
@@ -173,10 +174,8 @@ export default function Auth() {
       setMfaFactorId(verifiedFactors[0].id);
       setAuthStep('mfa-verify');
     } else {
-      toast({
-        title: "Welcome back!",
-        description: "You have successfully signed in."
-      });
+      // No "signed in" toast: an account still awaiting approval lands on
+      // the approval screen, which such a toast contradicted.
       navigate(destination, { replace: true });
     }
 
@@ -200,8 +199,8 @@ export default function Auth() {
     const { data, error } = await signUp(signupEmail, signupPassword, signupFullName.trim());
 
     if (error) {
-      setError(error.message);
-      toast({ title: 'Sign up failed', description: error.message, variant: 'destructive' });
+      setError(friendlyError(error));
+      toast({ title: 'Sign up failed', description: friendlyError(error), variant: 'destructive' });
       setIsLoading(false);
       return;
     }
@@ -250,10 +249,10 @@ export default function Auth() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error));
       toast({
-        title: "Error",
-        description: error.message,
+        title: "The reset email was not sent",
+        description: friendlyError(error),
         variant: "destructive"
       });
     } else {
@@ -287,7 +286,7 @@ export default function Auth() {
 
     const { error } = await supabase.auth.updateUser(updates);
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error));
       setIsLoading(false);
       return;
     }
@@ -532,8 +531,8 @@ export default function Auth() {
               <CardTitle>Account created</CardTitle>
               <CardDescription>
                 {signupEmailConfirmRequired
-                  ? "Check your email to confirm your address. Once confirmed, an admin still needs to approve your account before you can sign in."
-                  : "An admin needs to approve your account before you can sign in. You'll be notified once that's done — no need to sign up again."}
+                  ? "Check your email to confirm your address. Once confirmed, an administrator still needs to approve your account before you can sign in."
+                  : "An administrator needs to approve your account before you can sign in; they see your request in the Hub. Once approved, sign in with the email and password you just chose — no need to sign up again."}
               </CardDescription>
             </CardHeader>
             <CardContent>
