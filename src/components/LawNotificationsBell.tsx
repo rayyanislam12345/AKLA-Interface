@@ -71,7 +71,7 @@ export function LawNotificationsBell() {
     if (!item.read_at) markRead.mutate([item.id]);
     setOpen(false);
     if (item.matter_id) navigate(`/matters/${item.matter_id}`);
-    else navigate("/dashboard");
+    else navigate("/matters#legal-updates");
   };
 
   return (

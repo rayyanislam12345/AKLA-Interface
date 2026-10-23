@@ -437,7 +437,7 @@ export default function SettingsPage() {
 // Pages that left the sidebar stay one click away here.
 const OTHER_PAGES = [
   { to: "/clients", label: "Clients", note: "the clients projects are attached to" },
-  { to: "/dashboard", label: "Firm overview", note: "project counts and today's legal updates" },
+  { to: "/dashboard", label: "Firm overview", note: "project counts by status" },
   { to: "/whatsapp-activity", label: "WhatsApp Activity", note: "documents picked up from a linked WhatsApp account" },
   { to: "/team", label: "Team", note: "everyone at the firm" },
   { to: "/document-types", label: "Document types", note: "the firm's list of kinds of document" },

@@ -33,6 +33,7 @@ try {
   await page.waitForURL(/\/matters/, { timeout: 30_000 }).catch(() => {});
   check(new URL(page.url()).pathname === '/matters', 'signing in lands on Projects');
 
+  check(await page.getByText('Legal Updates').first().isVisible({ timeout: 15_000 }).catch(() => false), 'Projects shows the legal updates');
   const sidebar = page.locator('[data-sidebar="sidebar"]').first();
   await sidebar.waitFor();
   const text = await sidebar.innerText();
