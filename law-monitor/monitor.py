@@ -545,7 +545,9 @@ def verify_finding(finding: dict, config: dict, *, max_age_days: int) -> tuple[b
             return False, f"published {age} days ago (window {max_age_days})", None, None
         if (date.today() - first_day).days < -1:
             return False, f"published_date is in the future ({published})", None, None
-        finding["published_date"] = first_day.isoformat()
+        # A year or a month alone is not a date: storing "2026-01-01" for
+        # "2026" would read as a precise day that never happened.
+        finding["published_date"] = first_day.isoformat() if first_day == latest_possible else None
 
     text, tier, reason = fetch_document(url, config)
     if text is None:
@@ -562,12 +564,65 @@ def verify_finding(finding: dict, config: dict, *, max_age_days: int) -> tuple[b
     if ref and normalise(ref) and normalise(ref) not in normalise(text):
         return False, f"reference {ref!r} not found in the document", None, None
     if not ref:
-        words = [w for w in re.findall(r"[A-Za-z]{4,}", finding["title"])][:6]
+        # Words every legal page contains ("draft", "amendment", "companies",
+        # "regulations") prove nothing: SECP's regulations index matched a
+        # "Draft Amendment to Companies Regulations" that was not on it. The
+        # title has to be found through its distinctive words.
+        words = [w for w in re.findall(r"[A-Za-z]{4,}", finding["title"]) if w.lower() not in GENERIC_WORDS][:6]
         hits = sum(1 for w in words if w.lower() in text.lower())
-        if len(words) >= 3 and hits < 3:
+        if len(words) >= 2 and hits < min(2, len(words)):
             return False, "document does not match the reported title", None, None
+        if len(words) < 2 and not finding.get("document_url"):
+            return False, "document does not match the reported title (title too generic to confirm)", None, None
+    # A listing page is not a document: when the only evidence is an index
+    # that mentions the words, the finding stays but may not ring the bell.
+    if not ref and not finding.get("document_url") and len(extract_entries(text if "<" in text[:500] else "", url)) == 0 and looks_like_index(text):
+        finding["confidence"] = "low"
+        finding["summary"] = ((finding.get("summary") or "").rstrip(". ") + ". Evidence is an index page, not the instrument itself.").lstrip(". ")
+
+    # The model's date is a guess; the document's own date is evidence. When
+    # the model offers nothing, or offers the day of the search itself (its
+    # habit for anything it has just read about), the latest date printed in
+    # the document wins.
+    doc_date = latest_date_in(text)
+    stored = finding.get("published_date")
+    if doc_date and (not stored or (date.today() - date.fromisoformat(stored)).days <= 1):
+        finding["published_date"] = doc_date
 
     return True, "ok", text, tier
+
+
+GENERIC_WORDS = {
+    "draft", "drafts", "amendment", "amendments", "amending", "amend", "companies", "company", "regulations", "regulation",
+    "rules", "notification", "ordinance", "bill", "bills", "government", "pakistan", "federal", "provincial", "securities",
+    "exchange", "commission", "authority", "national", "assembly", "senate", "section", "schedule", "updated", "consolidated",
+    "version", "proposed", "public", "private", "partnership", "under", "with", "from", "that", "this", "being", "review",
+}
+
+
+def looks_like_index(text: str) -> bool:
+    """A page that lists many instruments rather than being one: dozens of
+    SRO numbers or year-suffixed titles."""
+    return len(re.findall(r"S\.?\s?R\.?\s?O\.?\s*\d+|\b(?:Act|Ordinance|Rules|Regulations|Bill),?\s+(?:19|20)\d\d\b", text)) >= 25
+
+
+def latest_date_in(text: str) -> str | None:
+    """The most recent full date printed in a document that is not in the
+    future, as ISO; None when the document carries no full date."""
+    best: date | None = None
+    months = MONTHS.split("|")
+    for pattern, order in DATE_PATTERNS:
+        for m in pattern.finditer(text[:20000]):
+            parts = dict(zip(order, m.groups()))
+            try:
+                year = int(parts["year"])
+                month = months.index(parts["month"].lower()) + 1 if "month" in parts else int(parts["monthnum"])
+                d = date(year, month, int(parts["day"]))
+            except (ValueError, KeyError):
+                continue
+            if d <= date.today() and (best is None or d > best):
+                best = d
+    return best.isoformat() if best else None
 
 
 def dedupe_key_for(finding: dict, source_name: str) -> str:
@@ -576,7 +631,9 @@ def dedupe_key_for(finding: dict, source_name: str) -> str:
     instrument; the url is the fallback."""
     ref = normalise(finding.get("authority_ref") or "")
     if ref:
-        return f"{normalise(source_name)}:{ref}"
+        # Not prefixed with the source: SECP lists the same SRO on five
+        # pages, and the search finds it too.
+        return f"ref:{ref}"
     # The document's own address identifies it. A listing page's address does
     # not — every unlinked entry on a bills page shares it — so an entry with
     # no document of its own is keyed on its title.
@@ -1102,6 +1159,7 @@ LAWISH = re.compile(
     r"\b(bill|act|ordinance|rules?|regulations?|s\.?\s?r\.?\s?o\.?|notification|draft|policy|amendment|circular|order)\b",
     re.I,
 )
+NEWSY = re.compile(r"\b(holds?|held|session|workshop|training|seminar|inaugurat\w*|ceremony|meeting|conference|celebrat\w*|visit\w*|signs?|signed|launch\w*)\b", re.I)
 SPECIFIC = re.compile(r"(19|20)\d{2}|\(amendment\)|\bs\.?\s?r\.?\s?o\.?\b|\bno\.?\s*\d", re.I)
 SRO_REF = re.compile(r"S\.?\s?R\.?\s?O\.?\s*(?:No\.?)?\s*(\d+)\s*\(?\s*([IVX1]+)\s*\)?\s*/\s*((?:19|20)\d{2})", re.I)
 MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
@@ -1143,6 +1201,10 @@ def extract_entries(page_html: str, base_url: str) -> list[dict]:
             return
         if not LAWISH.search(text) or not SPECIFIC.search(text):
             return
+        # "PPRA holds awareness session on the Rules, 2026" names a law but
+        # is not one.
+        if NEWSY.search(text):
+            return
         key = entry_key(text)
         if any(key == s or key.startswith(s) for s in seen):
             return
@@ -1152,11 +1214,10 @@ def extract_entries(page_html: str, base_url: str) -> list[dict]:
             href = None if href.startswith(("#", "javascript:", "mailto:")) else urljoin(base_url, href)
         out.append({"text": text, "href": href})
 
-    for href, inner in re.findall(r'<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)</a>', body, re.I):
-        add(inner, href)
     # A table row is one entry: its title is the first cell that reads like
-    # a law, not the whole row with its serial number and dates. The dates
-    # are still useful — they travel with the entry.
+    # a law, not the whole row with its serial number and dates. Rows go
+    # first so the row's date travels with the entry; the anchor pass after
+    # it would otherwise claim the title and lose the date.
     for row in re.findall(r"<tr\b[^>]*>([\s\S]*?)</tr>", body, re.I):
         cells = re.findall(r"<t[dh]\b[^>]*>([\s\S]*?)</t[dh]>", row, re.I)
         m = re.search(r'href="([^"]*)"', row)
@@ -1168,6 +1229,8 @@ def extract_entries(page_html: str, base_url: str) -> list[dict]:
             if len(out) > before:
                 out[-1]["date"] = find_date(row_text)
                 break
+    for href, inner in re.findall(r'<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)</a>', body, re.I):
+        add(inner, href)
     for block in re.findall(r"<(?:li|h[1-6]|p)\b[^>]*>([\s\S]*?)</(?:li|h[1-6]|p)>", body, re.I):
         m = re.search(r'href="([^"]*)"', block)
         add(block, m.group(1) if m else None)
@@ -1336,7 +1399,7 @@ def recheck_library_sources(hub: Hub, config: dict, counts: dict, acts: list[str
     sources = {r["act_name"]: r for r in hub.statute_sources() if r.get("act_name")}
     for act in acts:
         src = sources.get(act) or {}
-        url = src.get("source_url")
+        url = re.sub(r"^http://", "https://", src.get("source_url") or "")
         if not url or domain_tier(url, config) != "verified":
             continue
         log(f"library source: {act}")
@@ -1426,6 +1489,8 @@ def notify(hub: Hub, stored: list[dict], counts: dict) -> list[dict]:
         if not update_id or update.get("tier") != "verified":
             continue
         if update.get("incorporation") == "incorporated":
+            continue
+        if update.get("confidence") == "low":
             continue
         kind = update["update_type"]
         told: set[str] = set()
@@ -1657,6 +1722,39 @@ def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict
     return out
 
 
+# The library's Act names, set once per run, so a finding's Act can be
+# checked against what the firm actually holds.
+LIBRARY_ACTS: list[str] = []
+SUBORDINATE = re.compile(r"\b(regulations?|rules|policy|guidelines|code|directive|circular)\b", re.I)
+PRIMARY = re.compile(r"\b(act|ordinance)\b", re.I)
+
+
+def settle_act_and_kind(finding: dict, found_by: str) -> None:
+    """Two corrections before a finding is recorded.
+
+    The Act named must be one in the library. The search model names
+    whatever law a page mentions ("Passports Act, 1974", "Securities
+    Brokers Regulations, 2016"); the card would then say "affects …" and the
+    bell would ring for a law the firm does not hold. A name that matches
+    nothing in the library moves into the summary and the Act is cleared.
+    Library-sweep findings keep their Act: it is the one being checked.
+
+    An instrument whose title amends regulations, rules or a policy is not
+    an amendment to the Act they are made under, even when the model says
+    so; it is recorded as a notice and never ingested beside the Act."""
+    act = finding.get("act_name")
+    if act and found_by != "library_sweep" and LIBRARY_ACTS:
+        matched = act if act in LIBRARY_ACTS else match_library_act(act, LIBRARY_ACTS)
+        if matched:
+            finding["act_name"] = matched
+        else:
+            finding["act_name"] = None
+            finding["summary"] = ((finding.get("summary") or "").rstrip(". ") + f". Concerns {act}, which is not in the firm's library.").lstrip(". ")
+    title = str(finding.get("title") or "")
+    if finding.get("update_type") == "amending_instrument" and SUBORDINATE.search(title) and not PRIMARY.search(title):
+        finding["update_type"] = "notice"
+
+
 def process_candidate(hub: Hub, config: dict, run_id: str | None, cand: dict, counts: dict, seen_keys: set[str]) -> dict | None:
     """Verify one candidate and, if it clears the bar, record it. Returns the
     stored row (for the digest) or None."""
@@ -1695,6 +1793,8 @@ def process_candidate(hub: Hub, config: dict, run_id: str | None, cand: dict, co
         log(f"  {'REJECTED' if final else 'PENDING (will retry)'} ({reason}): {title}")
         hub.record_candidate(key, finding, source_name, found_by, status=status, reason=reason, final=final, run_id=run_id, previous=previous)
         return None
+
+    settle_act_and_kind(finding, found_by)
 
     row = {
         "dedupe_key": key,
@@ -1806,6 +1906,7 @@ def main() -> int:
         if not args.no_retry:
             candidates += gather_pending_candidates(hub, config, counts)
         library_acts = sorted(hub.library_acts())
+        LIBRARY_ACTS[:] = library_acts
         if not args.no_watch and not args.acts_only:
             candidates += watch_pages(hub, config, counts, library_acts)
         candidates += gather_search_candidates(hub, config, args, counts)

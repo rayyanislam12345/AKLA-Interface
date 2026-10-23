@@ -64,3 +64,14 @@ All three phases are built, deployed to the VM and committed. Found on the way:
 - The Gazette of Pakistan is not online in a form that can be watched. SROs that only appear in the Gazette will surface via press or a regulator page, labelled accordingly.
 - The incorporation check is a wording check. It is reliable when an amendment substitutes words; it says "not checkable" when the amendment only inserts numbers or whole new sections without quotable wording.
 - The library source re-check hashes text with digits removed, so a change that only alters numbers in an Act is not detected by that route (it is still caught by the amendment sweep).
+
+## Review, 23 October 2026
+
+Four mornings of real runs were checked against the web and the documents themselves. The developments it reported were real: the Companies (Amendment) Bill, Industrial Relations (Amendment) Bill and Emigration (Amendment) Bill introduced in the National Assembly on 19 October, the Privatisation Commission (Amendment) Bill on 22 October, SECP's draft SRO 1863(I)/2026 on broker licensing, the SECP concept paper on the Companies Act, the Senate's private member's bill on the SECP Act, the PPP Authority (Amendment) Bill, and three press-reported bills. What it got wrong, now fixed:
+
+- Dates from the National Assembly page were lost (the table pass ran after the anchor pass), so bills were stored as "2026-01-01". Rows now go first; a year or month alone is stored as no date; a document's own latest date overrides a search model's guess, which it had set to the day of the search for the telecom bill.
+- Two findings were linked to laws not in the library (Passports Act, Securities Brokers Regulations) and one rang the bell for everyone. An Act must now be one the library holds; otherwise the name goes into the summary.
+- SRO 601(I)/2025, which amends the Companies Regulations, was filed as an amendment to the Companies Act and ingested beside it. Instruments amending rules or regulations are recorded as notices; the misfiled entry was removed.
+- One SECP SRO was recorded six times, once per page it appeared on. Keys are now the reference alone.
+- A low-confidence "Banking Companies Ordinance (being updated)" and an unsupported "Draft Amendment to Companies Regulations" each told 14 people. Low-confidence findings ring no bell; a title has to be found by its distinctive words, and an index page as sole evidence is marked low confidence.
+- Six library Acts' source pages were recorded with http:// and the relay refused them; they are fetched as https now.
