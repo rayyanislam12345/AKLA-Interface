@@ -1,6 +1,6 @@
 import { friendlyError } from "@/lib/friendlyError";
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Pencil, Search, X } from "lucide-react";
 import {
   useMatters,
@@ -17,7 +17,6 @@ import { useClients, useCreateClient } from "@/hooks/useClients";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
 import { LoadState } from "@/components/LoadState";
-import LegalUpdatesCard from "@/components/dashboard/LegalUpdatesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -231,11 +230,6 @@ export default function MattersPage() {
 
   const [editMatter, setEditMatter] = useState<EditableProject | null>(null);
 
-  // The bell opens a firm-wide legal update at #legal-updates.
-  const { hash } = useLocation();
-  useEffect(() => {
-    if (hash === "#legal-updates") document.getElementById("legal-updates")?.scrollIntoView({ behavior: "smooth" });
-  }, [hash]);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("any");
@@ -439,11 +433,6 @@ export default function MattersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* The morning legal briefing, here since Projects became the home page. */}
-      <div id="legal-updates" className="scroll-mt-20">
-        <LegalUpdatesCard />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

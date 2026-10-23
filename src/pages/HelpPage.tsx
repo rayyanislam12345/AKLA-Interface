@@ -63,7 +63,8 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   "/assistant":
     "the AI. Ask a question, drop in a document, or type / to draft, review or summarise. Works with or without a project.",
   "/dashboard": "a firm-wide view: project counts, today's legal updates and the project list.",
-  "/matters": "every project, with the day's legal updates at the top. Open one for its documents, tasks and time.",
+  "/matters": "every project. Open one for its documents, tasks and time.",
+  "/legal-updates": "the morning briefing on new and amended laws, and what is awaiting its official text.",
   "/claude": "how to connect your own Claude to the Hub, so you can ask, draft and review there with the firm's projects, precedents and laws.",
   "/clients": "the clients that projects are attached to.",
   "/team": "everyone at the firm and their role. Admins approve new accounts here.",
@@ -269,7 +270,7 @@ const HelpPage = () => {
         {
           question: "Where are the legal updates?",
           answer:
-            "At the top of Projects: the morning briefing on new and amended laws, what was found, and what is still awaiting its official text. The bell at the top right tells you when a law one of your projects relies on changes.",
+            "On Legal Updates in the sidebar: the morning briefing on new and amended laws, what was found, and what is still awaiting its official text. The bell at the top right tells you when a law one of your projects relies on changes.",
         },
         {
           question: "Where are Clients?",

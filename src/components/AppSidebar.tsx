@@ -1,4 +1,4 @@
-import { FolderKanban, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles, Settings, type LucideIcon } from "lucide-react";
+import { FolderKanban, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles, Settings, Newspaper, type LucideIcon } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMyProfile, usePendingProfiles, type AppRole } from "@/hooks/useProfiles";
@@ -28,6 +28,7 @@ export const NAV_ITEMS: { title: string; url: string; icon: LucideIcon }[] = [
   { title: "Record Meeting", url: "/record-meeting", icon: Mic },
   { title: "Timesheet", url: "/timesheet", icon: Clock },
   { title: "Firm Library", url: "/precedent-library", icon: BookMarked },
+  { title: "Legal Updates", url: "/legal-updates", icon: Newspaper },
   { title: "Case-Law Research", url: "/caselaw-research", icon: Scale },
   { title: "Use with Claude", url: "/claude", icon: Sparkles },
   { title: "Help", url: "/help", icon: HelpCircle },

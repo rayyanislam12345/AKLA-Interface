@@ -29,6 +29,7 @@ import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
 import SettingsPage from "./pages/SettingsPage";
 import ClaudePage from "./pages/ClaudePage";
+import LegalUpdatesPage from "./pages/LegalUpdatesPage";
 import NotFound from "./pages/NotFound";
 import AiLayout from "./ai/layout/AiLayout";
 import AiHomePage from "./ai/pages/AiHomePage";
@@ -105,6 +106,7 @@ const App = () => {
                     }
                   />
                   <Route path="/claude" element={<ProtectedRoute><AppLayout><ClaudePage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/legal-updates" element={<ProtectedRoute><AppLayout><LegalUpdatesPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/assistant" element={<ProtectedRoute><AppLayout><AiWorkspacePage /></AppLayout></ProtectedRoute>} />
                   {/* The new AI workspace: its own shell, no AppLayout. Pages
                       not built yet (the library) land on Home. */}

@@ -33,11 +33,10 @@ try {
   await page.waitForURL(/\/matters/, { timeout: 30_000 }).catch(() => {});
   check(new URL(page.url()).pathname === '/matters', 'signing in lands on Projects');
 
-  check(await page.getByText('Legal Updates').first().isVisible({ timeout: 15_000 }).catch(() => false), 'Projects shows the legal updates');
   const sidebar = page.locator('[data-sidebar="sidebar"]').first();
   await sidebar.waitFor();
   const text = await sidebar.innerText();
-  for (const item of ['Projects', 'Record Meeting', 'Timesheet', 'Firm Library', 'Use with Claude', 'Help']) {
+  for (const item of ['Projects', 'Record Meeting', 'Timesheet', 'Firm Library', 'Legal Updates', 'Use with Claude', 'Help']) {
     check(text.includes(item), `sidebar shows ${item}`);
   }
   for (const gone of ['Dashboard', 'Clients', 'AI Assistant', "Today's Timesheet"]) {
@@ -73,6 +72,10 @@ try {
   } else {
     console.log('SKIP: no projects to open');
   }
+
+  await page.goto(`${base}/legal-updates`);
+  check(await page.getByRole('heading', { name: 'Legal Updates' }).first().isVisible({ timeout: 15_000 }).catch(() => false), 'Legal Updates has its own page');
+  await page.screenshot({ path: '.smoke-tmp/wave1-legal-updates.png', fullPage: true });
 
   await page.goto(`${base}/help`);
   await page.getByText('Using Claude').first().waitFor();
