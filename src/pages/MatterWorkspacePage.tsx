@@ -2,7 +2,8 @@ import { indexViaEdgeFunction, requestIndexing } from "@/lib/saveDraftToMatter";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileArchive, FileText, FolderUp, Gavel, Loader2, MessageCircle, MessageSquare, MoreHorizontal, Pencil, Plus, ScanSearch, Search, Sparkles, Tag, Trash2, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Circle, CircleDot, Download, FileArchive, FileText, FolderUp, Gavel, Loader2, MessageCircle, MessageSquare, Mic, MoreHorizontal, Pencil, Plus, ScanSearch, Search, Sparkles, Tag, Trash2, Upload, Wand2, X } from "lucide-react";
+import { claudeOpenedNotice, documentPrompt, openInClaude, projectPrompt, REVIEW_ASK } from "@/lib/openInClaude";
 import {
   useMatter,
   useMatterStages,
@@ -206,10 +207,11 @@ function WhatsAppMatterDocuments({ whatsappMatterId }: { whatsappMatterId: strin
 // they have SELECT visibility into (their own capture, or already linked) —
 // surfacing a cross-user picker here would need an endpoint that leaks the
 // existence of other lawyers' private, unlinked data.
-function WhatsAppActivityCard({ matterId }: { matterId: string | undefined }) {
+function WhatsAppActivityCard({ matterId, hideWhenEmpty }: { matterId: string | undefined; hideWhenEmpty?: boolean }) {
   const navigate = useNavigate();
   const { data: whatsappMatters, isLoading } = useWhatsAppMattersForMatter(matterId);
 
+  if (hideWhenEmpty && !whatsappMatters?.length) return null;
   return (
     <Card className="md:col-span-2">
       <CardHeader>
@@ -265,7 +267,7 @@ function relevantLawSourceLabel(source: string) {
 // _shared/retrieval.ts. Rows arrive two ways: an associate adds one
 // directly (dropdown or typed, resolved via resolve-statute), or
 // process-document auto-detects a mention on upload and adds it itself.
-function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) {
+function MatterRelevantLawsCard({ matterId, matterName, hideWhenEmpty }: { matterId: string | undefined; matterName: string; hideWhenEmpty?: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: laws, isLoading } = useMatterRelevantLaws(matterId);
@@ -374,6 +376,9 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
     }
   };
 
+  // A law update on the project always shows; an empty card waits behind
+  // "More sections".
+  if (hideWhenEmpty && !laws?.length && pendingSearches.length === 0) return null;
   return (
     <Card>
       <CardHeader>
@@ -467,12 +472,16 @@ function MatterRelevantLawsCard({ matterId }: { matterId: string | undefined }) 
                       <Button
                         size="sm"
                         className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
-                        onClick={() =>
-                          navigate(`/matters/${matterId}/ai?mode=review&update=${update.id}`)
+                        title="Open in Claude to revise the documents that rely on this law"
+                        onClick={async () =>
+                          toast(claudeOpenedNotice(await openInClaude(projectPrompt(
+                            matterName,
+                            `${update.act_name ?? "a law this project relies on"} has changed (${update.title}). Find the project's documents that rely on it and mark up what needs revising as tracked changes.`,
+                          ))))
                         }
                       >
                         <Wand2 className="h-4 w-4 mr-1.5" />
-                        Revise
+                        Revise in Claude
                       </Button>
                       <Button
                         size="sm"
@@ -658,6 +667,9 @@ export default function MatterWorkspacePage() {
   const upsertMatterContext = useUpsertMatterContext();
   const [contextDraft, setContextDraft] = useState("");
   const [contextLoaded, setContextLoaded] = useState(false);
+  // Stages, parties, notes, project context, laws and WhatsApp are empty on
+  // most projects; an empty one waits behind "More sections".
+  const [showAllSections, setShowAllSections] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
 
   const { toast } = useToast();
@@ -1071,6 +1083,19 @@ export default function MatterWorkspacePage() {
         }
       : null;
 
+  const askClaude = async (prompt: string) => toast(claudeOpenedNotice(await openInClaude(prompt)));
+
+  const hasStages = !!stages?.some((stage) => stage.status !== "not_started");
+  const hasParties = !!parties?.length;
+  const hasNotes = !!notes?.length;
+  const hasContext = !!matterContext?.content?.trim();
+  const hiddenSections = [
+    !hasStages && "stages",
+    !hasParties && "parties",
+    !hasNotes && "notes",
+    !hasContext && "project context",
+  ].filter(Boolean) as string[];
+
   const cycleStage = (stageId: string, current: string) => {
     const next = STAGE_CYCLE[(STAGE_CYCLE.indexOf(current as any) + 1) % STAGE_CYCLE.length];
     setStageStatus.mutate({ stageId, status: next, matterId: matterId! }, onFail(toast, "Couldn't update the stage"));
@@ -1102,9 +1127,17 @@ export default function MatterWorkspacePage() {
             </Button>
           )}
           <Button variant="outline" onClick={() => navigate(`/search?matter=${matterId}`)}><Search className="mr-2 h-4 w-4"/>Search project</Button>
-          <Button variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=ask`)}>
+          <Button variant="outline" onClick={() => navigate(`/record-meeting?matter=${matterId}`)}>
+            <Mic className="h-4 w-4 mr-2" />
+            Record meeting
+          </Button>
+          <Button
+            variant="outline"
+            title="A new Claude chat about this project, with your question to add"
+            onClick={() => void askClaude(projectPrompt(matter.name, ""))}
+          >
             <MessageSquare className="h-4 w-4 mr-2" />
-            Ask AI
+            Open in Claude
           </Button>
           {/* Deleting a project removes it for everyone; any approved member
               could do it. Admins only until the partners decide otherwise. */}
@@ -1117,27 +1150,6 @@ export default function MatterWorkspacePage() {
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Stages</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {stages?.map((stage) => (
-              <button
-                key={stage.id}
-                onClick={() => cycleStage(stage.id, stage.status)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left hover:bg-muted transition-colors",
-                  stage.status === "complete" && "text-muted-foreground line-through"
-                )}
-              >
-                <StageIcon status={stage.status} />
-                <span>{stage.name}</span>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
-
         <DocumentDropZone className="md:col-span-2" onDrop={intake.addDrop} disabled={!matterId}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap space-y-0">
@@ -1161,9 +1173,14 @@ export default function MatterWorkspacePage() {
                 <FileArchive className="h-4 w-4 mr-2" />
                 Download all
               </Button>
-              <Button size="sm" variant="outline" onClick={() => navigate(`/matters/${matterId}/ai?mode=draft`)}>
+              <Button
+                size="sm"
+                variant="outline"
+                title="Draft in Claude; the draft is filed in this project"
+                onClick={() => void askClaude(projectPrompt(matter.name, "draft the following and file it in the project: "))}
+              >
                 <Sparkles className="h-4 w-4 mr-2" />
-                Draft with AI
+                Draft in Claude
               </Button>
             </div>
           </CardHeader>
@@ -1348,10 +1365,10 @@ export default function MatterWorkspacePage() {
                       <Button
                         size="icon"
                         variant="outline"
-                        title="Review with AI"
-                        aria-label="Review with AI"
+                        title="Review in Claude"
+                        aria-label="Review in Claude"
                         disabled={!versions.length}
-                        onClick={() => navigate(`/matters/${matterId}/ai?mode=review&doc=${doc.id}`)}
+                        onClick={() => void askClaude(documentPrompt(matter.name, doc.title, REVIEW_ASK))}
                       >
                         <ScanSearch className="h-4 w-4" />
                       </Button>
@@ -1614,8 +1631,14 @@ export default function MatterWorkspacePage() {
           target={previewTarget}
           onClose={() => setPreview(null)}
           onDownload={(v) => handleDownloadVersion(v.storage_path, v.file_name || `${previewTarget?.document.title ?? "Document"}-v${v.version_number}`)}
-          onOpenInAi={(docId, versionId) => navigate(`/matters/${matterId}/ai?mode=ask&doc=${docId}&version=${versionId}`)}
-          onReview={(docId, versionId) => navigate(`/matters/${matterId}/ai?mode=review&doc=${docId}&version=${versionId}`)}
+          onOpenInAi={(_docId, versionId) => {
+            const v = previewTarget?.versions.find((x) => x.id === versionId);
+            void askClaude(documentPrompt(matter.name, previewTarget?.document.title ?? "", "", v?.version_number));
+          }}
+          onReview={(_docId, versionId) => {
+            const v = previewTarget?.versions.find((x) => x.id === versionId);
+            void askClaude(documentPrompt(matter.name, previewTarget?.document.title ?? "", REVIEW_ASK, v?.version_number));
+          }}
         />
 
         <AlertDialog open={!!confirmDelete} onOpenChange={(next) => { if (!next) setConfirmDelete(null); }}>
@@ -1697,6 +1720,30 @@ export default function MatterWorkspacePage() {
           </DialogContent>
         </Dialog>
 
+        {(hasStages || showAllSections) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Stages</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {stages?.map((stage) => (
+              <button
+                key={stage.id}
+                onClick={() => cycleStage(stage.id, stage.status)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left hover:bg-muted transition-colors",
+                  stage.status === "complete" && "text-muted-foreground line-through"
+                )}
+              >
+                <StageIcon status={stage.status} />
+                <span>{stage.name}</span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+        )}
+
+        {(hasParties || showAllSections) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Parties</CardTitle>
@@ -1726,6 +1773,7 @@ export default function MatterWorkspacePage() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -1802,6 +1850,7 @@ export default function MatterWorkspacePage() {
           <MatterTimeslips matterId={matterId} matterName={matter?.name ?? "matter"} />
         )}
 
+        {(hasNotes || showAllSections) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Notes</CardTitle>
@@ -1848,7 +1897,9 @@ export default function MatterWorkspacePage() {
             </LoadState>
           </CardContent>
         </Card>
+        )}
 
+        {(hasContext || showAllSections) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Project Context</CardTitle>
@@ -1883,10 +1934,21 @@ export default function MatterWorkspacePage() {
             </div>
           </CardContent>
         </Card>
+        )}
 
-        <MatterRelevantLawsCard matterId={matterId} />
+        <MatterRelevantLawsCard matterId={matterId} matterName={matter.name} hideWhenEmpty={!showAllSections} />
 
-        <WhatsAppActivityCard matterId={matterId} />
+        <WhatsAppActivityCard matterId={matterId} hideWhenEmpty={!showAllSections} />
+
+        <div className="md:col-span-2">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowAllSections((v) => !v)}>
+            {showAllSections ? (
+              <><ChevronDown className="mr-2 h-4 w-4" />Hide empty sections</>
+            ) : (
+              <><ChevronRight className="mr-2 h-4 w-4" />Show empty sections ({[...hiddenSections, "laws", "WhatsApp"].join(", ")})</>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

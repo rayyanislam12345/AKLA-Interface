@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CLAUDE_NEW_CHAT, openInClaude } from "@/lib/openInClaude";
+import { CLAUDE_NEW_CHAT, claudeOpenedNotice, openInClaude } from "@/lib/openInClaude";
 
 // The address claude.ai is given for the firm's connector
 // (chat-service/connector/, docs/claude-ai-connector.md).
@@ -123,13 +123,7 @@ export default function ClaudePage() {
 
   const tryExample = async (prompt: string) => {
     setTried(prompt);
-    const copied = await openInClaude(prompt);
-    toast({
-      title: "Opened in Claude",
-      description: copied
-        ? "The request is in Claude's message box. If the box is empty, paste it (Ctrl+V or ⌘V)."
-        : "The request is in Claude's message box. Press Enter to send it.",
-    });
+    toast(claudeOpenedNotice(await openInClaude(prompt)));
   };
 
   return (

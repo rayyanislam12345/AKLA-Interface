@@ -26,12 +26,26 @@ export async function openInClaude(prompt: string): Promise<boolean> {
   }
 }
 
+/** What to tell the lawyer once the chat has opened. */
+export function claudeOpenedNotice(copied: boolean): { title: string; description: string } {
+  return {
+    title: "Opened in Claude",
+    description: copied
+      ? "Your request is in Claude's message box; add to it and press Enter. If the box is empty, paste (Ctrl+V or ⌘V)."
+      : "Your request is in Claude's message box; add to it and press Enter.",
+  };
+}
+
 /** A request about one project, naming it as the connector's tools find it. */
 export function projectPrompt(projectName: string, ask: string): string {
   return `In the AKLA Hub project "${projectName}": ${ask}`;
 }
 
-/** A request about one document of a project. */
-export function documentPrompt(projectName: string, documentTitle: string, ask: string): string {
-  return `In the AKLA Hub project "${projectName}", the document "${documentTitle}" (latest version): ${ask}`;
+/** A request about one document of a project; its latest version unless one is named. */
+export function documentPrompt(projectName: string, documentTitle: string, ask: string, versionNumber?: number): string {
+  const which = versionNumber ? `version ${versionNumber}` : "latest version";
+  return `In the AKLA Hub project "${projectName}", the document "${documentTitle}" (${which}): ${ask}`;
 }
+
+export const REVIEW_ASK =
+  "review it with the Hub's review and file the suggested changes as tracked changes in its next version.";
