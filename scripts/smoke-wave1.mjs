@@ -65,7 +65,9 @@ try {
     await page.screenshot({ path: '.smoke-tmp/wave1-project.png', fullPage: true });
     const projectId = page.url().match(/matters\/([0-9a-f-]{36})/)[1];
     await page.goto(`${base}/record-meeting?matter=${projectId}`);
-    await page.getByRole('button', { name: 'Start' }).waitFor();
+    await page.getByRole('button', { name: /Start recording/ }).waitFor();
+    check(await page.getByText(/Recorder ready|recorder isn't answering|isn't set up/).first().isVisible({ timeout: 10_000 }).catch(() => false), 'Record Meeting says whether the recorder is ready');
+    check(await page.getByText('Before the meeting').isVisible(), 'Record Meeting is laid out before / during / after');
     const chosen = await page.getByRole('combobox').first().innerText();
     check(!/Choose the project/.test(chosen), `Record Meeting starts on the project it came from (${chosen.trim()})`);
     await page.screenshot({ path: '.smoke-tmp/wave1-meeting.png' });

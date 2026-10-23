@@ -12,7 +12,11 @@ interface SegmentListProps {
   onMergeSpeaker: (fromId: number, intoId: number) => void;
   onRenameSpeaker: (speakerId: number, name: string) => void;
   onSetManualSpeakerName: (segmentId: number, name: string) => void;
+  /** Names offered when renaming a speaker, e.g. the meeting's attendees. */
+  nameSuggestions?: string[];
 }
+
+const NAME_LIST_ID = "meeting-speaker-names";
 
 // How often, in recording time, to drop a timestamp marker into the
 // transcript pane — mainly useful for an uploaded recording (or a long live
@@ -42,6 +46,7 @@ export default function SegmentList({
   onMergeSpeaker,
   onRenameSpeaker,
   onSetManualSpeakerName,
+  nameSuggestions = [],
 }: SegmentListProps) {
   const [menuFor, setMenuFor] = useState<number | null>(null); // speakerId with the rename/merge popover open
   const [editingManualFor, setEditingManualFor] = useState<number | null>(null); // segment id being named
@@ -58,6 +63,11 @@ export default function SegmentList({
 
   return (
     <div className="space-y-3">
+      {nameSuggestions.length > 0 && (
+        <datalist id={NAME_LIST_ID}>
+          {nameSuggestions.map((name) => <option key={name} value={name} />)}
+        </datalist>
+      )}
       {segments.map((seg) => {
         let marker: JSX.Element | null = null;
         if (
@@ -89,6 +99,7 @@ export default function SegmentList({
                     <Input
                       key={seg.speakerId}
                       className="h-6 w-32 text-xs"
+                      list={nameSuggestions.length ? NAME_LIST_ID : undefined}
                       defaultValue={speakerLabel(seg.speakerId)}
                       autoFocus
                       onKeyDown={(e) => {
@@ -129,6 +140,7 @@ export default function SegmentList({
                   (editingManualFor === seg.id ? (
                     <Input
                       className="h-6 w-32 text-xs"
+                      list={nameSuggestions.length ? NAME_LIST_ID : undefined}
                       defaultValue={seg.manualSpeaker ?? ""}
                       autoFocus
                       onKeyDown={(e) => {
