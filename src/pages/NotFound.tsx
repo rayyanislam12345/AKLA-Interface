@@ -26,9 +26,9 @@ const NotFound = () => {
             </p>
           </div>
           <Button asChild>
-            <Link to="/dashboard">
+            <Link to="/matters">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to the dashboard
+              Back to your projects
             </Link>
           </Button>
         </div>

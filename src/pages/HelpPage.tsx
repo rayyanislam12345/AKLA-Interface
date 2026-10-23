@@ -62,7 +62,8 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   "/assistant":
     "the AI. Ask a question, drop in a document, or type / to draft, review or summarise. Works with or without a project.",
   "/dashboard": "a firm-wide view: project counts, today's legal updates and the project list.",
-  "/matters": "every transaction. Open one for its stages, documents, parties, tasks, notes and time.",
+  "/matters": "every project. Open one for its documents, tasks and time.",
+  "/claude": "how to connect your own Claude to the Hub, so you can ask, draft and review there with the firm's projects, precedents and laws.",
   "/clients": "the clients that projects are attached to.",
   "/team": "everyone at the firm and their role. Admins approve new accounts here.",
   "/timesheet": "your own time for any day. Add, edit or delete entries and download the firm's timesheet file.",
@@ -79,7 +80,7 @@ const navigationBullets = [
   ...NAV_ITEMS.map((item) =>
     NAV_DESCRIPTIONS[item.url] ? `${item.title}: ${NAV_DESCRIPTIONS[item.url]}` : item.title
   ),
-  "Settings (at the bottom, under your email): your name, password, two-step sign-in and signing out of all devices.",
+  "Settings (at the bottom, under your email): your name, password, two-step sign-in, signing out of all devices, and links to the less-used pages (Clients, the firm overview, WhatsApp Activity).",
 ];
 
 interface SupportRequestRow {

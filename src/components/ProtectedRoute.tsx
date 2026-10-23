@@ -70,7 +70,7 @@ function pendingSecondFactor(session: Session | null): string | null {
 function signInPath(location: { pathname: string; search: string; hash: string }): string {
   let next = `${location.pathname}${location.search}${location.hash}`;
   if (resolveEmbedMode(location.search)) next = withEmbed(next, resolvePaneHost(location.search) ? 'pane' : undefined);
-  if (next === '/' || next === '/dashboard') return '/auth';
+  if (next === '/' || next === '/dashboard' || next === '/matters') return '/auth';
   return `/auth?next=${encodeURIComponent(next)}`;
 }
 

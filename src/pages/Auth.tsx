@@ -31,12 +31,12 @@ function initialStep(): AuthStep {
 
 // Where to go once signed in: the page that sent us here (?next=, written
 // by ProtectedRoute), when it is one of this site's own paths; the
-// dashboard otherwise. A full address, or a protocol-relative one, is never
+// projects list otherwise. A full address, or a protocol-relative one, is never
 // followed, so a crafted link cannot send someone elsewhere after signing in.
 function afterSignIn(): string {
   const next = new URLSearchParams(window.location.search).get('next');
   if (next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')) return next;
-  return '/dashboard';
+  return '/matters';
 }
 
 // On the pane page (the Claude desktop app's browser pane, ?embed=1&host=pane)
@@ -401,7 +401,7 @@ export default function Auth() {
                 className="w-full"
                 onClick={() => {
                   toast({ title: 'Welcome to AKLA Project Hub!', description: 'You can turn on two-step sign-in any time from Settings, at the bottom of the sidebar.' });
-                  navigate('/dashboard', { replace: true });
+                  navigate('/matters', { replace: true });
                 }}
               >
                 Skip for now
@@ -414,7 +414,7 @@ export default function Auth() {
             onSuccess={() => {
               setEnrollDialogOpen(false);
               toast({ title: 'Two-factor authentication enabled!', description: 'Your account is now secured.' });
-              navigate('/dashboard', { replace: true });
+              navigate('/matters', { replace: true });
             }}
           />
         </div>

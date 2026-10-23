@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@supabase/supabase-js";
 import { KeyRound, Loader2, LogOut, Shield, User } from "lucide-react";
@@ -428,6 +428,40 @@ export default function SettingsPage() {
       <PasswordCard />
       <TwoStepCard />
       <SignOutEverywhereCard />
+      <OtherPagesCard />
     </div>
+  );
+}
+
+// Pages that left the sidebar stay one click away here.
+const OTHER_PAGES = [
+  { to: "/clients", label: "Clients", note: "the clients projects are attached to" },
+  { to: "/dashboard", label: "Firm overview", note: "project counts and today's legal updates" },
+  { to: "/whatsapp-activity", label: "WhatsApp Activity", note: "documents picked up from a linked WhatsApp account" },
+  { to: "/team", label: "Team", note: "everyone at the firm" },
+  { to: "/document-types", label: "Document types", note: "the firm's list of kinds of document" },
+  { to: "/assistant", label: "The Hub's own assistant", note: "being retired in favour of Claude" },
+];
+
+function OtherPagesCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Other pages</CardTitle>
+        <CardDescription>Less-used pages that are not in the sidebar.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-1.5 text-sm">
+          {OTHER_PAGES.map((p) => (
+            <li key={p.to}>
+              <Link to={p.to} className="font-medium underline underline-offset-2">
+                {p.label}
+              </Link>
+              <span className="text-muted-foreground"> — {p.note}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }

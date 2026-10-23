@@ -11,7 +11,7 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   useActivityTracking();
 
-  // The sidebar opens by default so its 13 entries carry their labels;
+  // The sidebar is open and stays open so its entries carry their labels;
   // collapsed to bare icons, associates had to memorise which icon was which.
   return (
     <SidebarProvider defaultOpen={true}>

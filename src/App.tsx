@@ -28,6 +28,7 @@ import TodaysTimesheetPage from "./pages/TodaysTimesheetPage";
 import TeamPage from "./pages/TeamPage";
 import HelpPage from "./pages/HelpPage";
 import SettingsPage from "./pages/SettingsPage";
+import ClaudePage from "./pages/ClaudePage";
 import NotFound from "./pages/NotFound";
 import AiLayout from "./ai/layout/AiLayout";
 import AiHomePage from "./ai/pages/AiHomePage";
@@ -67,7 +68,7 @@ const App = () => {
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <RouteErrorBoundary>
                 <Routes>
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/" element={<Navigate to="/matters" replace />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   <Route
@@ -103,6 +104,7 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route path="/claude" element={<ProtectedRoute><AppLayout><ClaudePage /></AppLayout></ProtectedRoute>} />
                   <Route path="/assistant" element={<ProtectedRoute><AppLayout><AiWorkspacePage /></AppLayout></ProtectedRoute>} />
                   {/* The new AI workspace: its own shell, no AppLayout. Pages
                       not built yet (the library) land on Home. */}

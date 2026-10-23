@@ -72,7 +72,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   this.props.onReset?.();
                 }}
               >
-                Back to dashboard
+                Back to your projects
               </Button>
             </div>
           </CardContent>
@@ -88,7 +88,7 @@ export function RouteErrorBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   return (
-    <ErrorBoundary resetKey={location.pathname + location.search} onReset={() => navigate("/dashboard")}>
+    <ErrorBoundary resetKey={location.pathname + location.search} onReset={() => navigate("/matters")}>
       {children}
     </ErrorBoundary>
   );
