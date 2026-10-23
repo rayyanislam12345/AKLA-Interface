@@ -1722,6 +1722,33 @@ def gather_pending_candidates(hub: Hub, config: dict, counts: dict) -> list[dict
     return out
 
 
+def summarise_document(finding: dict, text: str) -> str | None:
+    """One plain sentence about a watched-page entry, written from the
+    document itself: what it is, what it does to which law, and the date it
+    carries. "New entry on National Assembly — government bills" told an
+    associate nothing. The model sees only the fetched text and may not add
+    to it; the sentence is marked as a summary of the document."""
+    reply = ai_call(
+        CLASSIFY_MODEL,
+        system=(
+            "You summarise one Pakistani legal document for a corporate lawyer in ONE sentence of "
+            "at most 45 words, plain English, no preamble. Say what the document is (a bill "
+            "introduced where, an SRO, a circular, an Act), what it does and to which law, and "
+            "the date it carries if the text shows one. Use ONLY what is in the text; if the text "
+            "is a scanned or garbled extract, say what can be read with certainty and no more. "
+            "Do not speculate about status, passage or effect beyond the text."
+        ),
+        user=f"Title as listed: {finding.get('title')}\n\nStart of the document:\n{text[:4000]}",
+        max_tokens=160,
+    )
+    if not reply:
+        return None
+    sentence = re.sub(r"\s+", " ", reply).strip().strip('"')
+    if len(sentence) < 20 or len(sentence) > 400:
+        return None
+    return sentence
+
+
 # The library's Act names, set once per run, so a finding's Act can be
 # checked against what the firm actually holds.
 LIBRARY_ACTS: list[str] = []
@@ -1795,6 +1822,8 @@ def process_candidate(hub: Hub, config: dict, run_id: str | None, cand: dict, co
         return None
 
     settle_act_and_kind(finding, found_by)
+    if found_by == "watch_page" and doc_text:
+        finding["summary"] = summarise_document(finding, doc_text) or finding.get("summary")
 
     row = {
         "dedupe_key": key,
