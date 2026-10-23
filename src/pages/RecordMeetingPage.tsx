@@ -16,10 +16,8 @@ import SegmentList, {
   segmentsToEnglishTranscriptText,
   segmentsToTranscriptText,
 } from "@/components/meeting/SegmentList";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
-import { openTextInAssistant } from "@/hooks/useChat";
+import { useSearchParams } from "react-router-dom";
+import { claudeOpenedNotice, documentPrompt, openInClaude } from "@/lib/openInClaude";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -34,6 +32,25 @@ const OUTPUT_LABELS: Record<MeetingOutputFormat, string> = {
   "minutes-akla": "Meeting Minutes (AKLA Format)",
   "concept-note": "Concept Note (AKLA Format)",
 };
+
+// What this page remembers between meetings, per browser: the project, the
+// language and the audio source. Storage can be refused (a private window);
+// the page then starts from its defaults.
+const REMEMBER_KEY = "akla.record-meeting";
+function remembered(): { matterId?: string; language?: MeetingLanguage; captureMeetingAudio?: boolean } {
+  try {
+    return JSON.parse(localStorage.getItem(REMEMBER_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function remember(patch: Partial<ReturnType<typeof remembered>>) {
+  try {
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify({ ...remembered(), ...patch }));
+  } catch {
+    /* not remembered; nothing else depends on it */
+  }
+}
 
 const UPLOAD_DOCUMENT_TYPE_NAME: Record<MeetingOutputFormat, string> = {
   proposal: "Client Proposal Letter",
@@ -60,7 +77,11 @@ export default function RecordMeetingPage() {
   const [translating, setTranslating] = useState(false);
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
-  const [captureMeetingAudio, setCaptureMeetingAudio] = useState(false);
+  const [captureMeetingAudio, setCaptureMeetingAudioState] = useState(() => remembered().captureMeetingAudio ?? false);
+  const setCaptureMeetingAudio = (on: boolean) => {
+    setCaptureMeetingAudioState(on);
+    remember({ captureMeetingAudio: on });
+  };
   const [detectSpeakers, setDetectSpeakers] = useState(false);
   const [calibratorOpen, setCalibratorOpen] = useState(false);
   const [calibrationFrame, setCalibrationFrame] = useState<string | null>(null);
@@ -68,8 +89,26 @@ export default function RecordMeetingPage() {
   const [testResult, setTestResult] = useState<(NameReadResult & { error?: string }) | null>(null);
   const [testing, setTesting] = useState(false);
 
-  const [uploadMatterId, setUploadMatterId] = useState<string>("");
+  // The project: the one this page was opened from (?matter=), else the last
+  // one used here.
+  const [params] = useSearchParams();
+  const [uploadMatterId, setUploadMatterIdState] = useState<string>(() => params.get("matter") ?? remembered().matterId ?? "");
+  const setUploadMatterId = (id: string) => {
+    setUploadMatterIdState(id);
+    remember({ matterId: id });
+  };
   const [uploadingFormat, setUploadingFormat] = useState<MeetingOutputFormat | null>(null);
+  // What has been filed, by output: the document and version it became.
+  const [saved, setSaved] = useState<Partial<Record<MeetingOutputFormat, { title: string; versionNumber: number; matterId: string }>>>({});
+  const [showExamples, setShowExamples] = useState(false);
+  const projectName = matters?.find((m) => m.id === uploadMatterId)?.name;
+
+  // The language last used, once on arrival.
+  const switchLanguage = relay.switchLanguage;
+  useEffect(() => {
+    const language = remembered().language;
+    if (language && language !== relay.language) switchLanguage(language);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const proposalPreviewRef = useRef<HTMLDivElement>(null);
   const minutesPreviewRef = useRef<HTMLDivElement>(null);
@@ -114,20 +153,6 @@ export default function RecordMeetingPage() {
     return (format: MeetingOutputFormat) => documentTypes?.find((t) => t.name === UPLOAD_DOCUMENT_TYPE_NAME[format])?.id;
   }, [documentTypes]);
 
-  // Hand a generated output to the AI Assistant as a document in a new chat:
-  // refine it there, save it to a project, or turn the meeting into an
-  // agreement — without downloading and re-uploading.
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const handleOpenInAssistant = async (format: MeetingOutputFormat, text: string) => {
-    try {
-      const { threadId } = await openTextInAssistant({ userId: user?.id, title: OUTPUT_LABELS[format], markdown: text, documentTypeId: documentTypeIdFor(format) ?? null });
-      navigate(`/assistant?chat=${threadId}`);
-    } catch (err: any) {
-      toast({ title: "Couldn't open the assistant", description: err.message, variant: "destructive" });
-    }
-  };
-
   const wantsSpeakerDetection = captureMeetingAudio && detectSpeakers;
 
   // Deepgram's segment timestamps are relative to when audio started
@@ -147,6 +172,8 @@ export default function RecordMeetingPage() {
   };
 
   const handleStart = async () => {
+    // Starting clears the transcript on screen.
+    if (relay.segments.length > 0 && !window.confirm("Starting a new meeting clears the transcript on screen. Download it or generate its documents first if you need them. Start anyway?")) return;
     const ok = await relay.startMeeting(relay.language, {
       captureMeetingAudio,
       detectSpeakers: wantsSpeakerDetection,
@@ -289,6 +316,7 @@ export default function RecordMeetingPage() {
     try {
       const result = await proposalMutation.mutateAsync({ transcriptText, format: "proposal", exampleProposals });
       setProposalDraft(result.draft);
+      await fileAutomatically("proposal", result.draft);
     } catch (err: any) {
       toast({ title: "Proposal generation failed", description: err.message, variant: "destructive" });
     }
@@ -301,6 +329,7 @@ export default function RecordMeetingPage() {
     try {
       const result = await minutesMutation.mutateAsync({ transcriptText, format: "minutes-akla" });
       setMinutesDraft({ format: "minutes-akla", text: result.draft });
+      await fileAutomatically("minutes-akla", result.draft);
     } catch (err: any) {
       toast({ title: "Minutes generation failed", description: err.message, variant: "destructive" });
     }
@@ -313,6 +342,7 @@ export default function RecordMeetingPage() {
     try {
       const result = await minutesMutation.mutateAsync({ transcriptText, format: "concept-note" });
       setMinutesDraft({ format: "concept-note", text: result.draft });
+      await fileAutomatically("concept-note", result.draft);
     } catch (err: any) {
       toast({ title: "Concept note generation failed", description: err.message, variant: "destructive" });
     }
@@ -415,11 +445,13 @@ export default function RecordMeetingPage() {
     if (!uploadMatterId) return;
     setUploadingFormat(format);
     try {
-      const title = OUTPUT_LABELS[format];
-      const blob = await buildAklaDocxBlob(text, title);
+      // Dated, so a project's meetings are told apart in its list.
+      const title = `${UPLOAD_DOCUMENT_TYPE_NAME[format]} — ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`;
+      const blob = await buildAklaDocxBlob(text, OUTPUT_LABELS[format]);
       const result = await saveDraftToMatter({ matterId: uploadMatterId, documentTypeId, documentTypeName: title, title, blob });
+      setSaved((prev) => ({ ...prev, [format]: { title, versionNumber: result.versionNumber, matterId: uploadMatterId } }));
       toast({
-        title: `${title} saved to project`,
+        title: `${title} saved to ${projectName ?? "the project"}`,
         description: [result.indexed ? "Ready for search." : "Saved; it will be searchable shortly.", documentTypeId ? null : `Filed without a document type — the "${UPLOAD_DOCUMENT_TYPE_NAME[format]}" type isn't set up; an administrator can add it.`].filter(Boolean).join(" "),
       });
     } catch (err) {
@@ -430,7 +462,42 @@ export default function RecordMeetingPage() {
     }
   };
 
+  // A generated document goes straight into the chosen project; with no
+  // project chosen it waits on the page with its Save button.
+  const fileAutomatically = async (format: MeetingOutputFormat, text: string) => {
+    // A new draft is not the one saved before.
+    setSaved((prev) => {
+      const next = { ...prev };
+      delete next[format];
+      return next;
+    });
+    if (uploadMatterId) await handleUploadToMatter(format, text);
+    else toast({ title: "Choose a project to save it", description: "Pick the project at the top of the page, then press Save to project." });
+  };
+
+  const openSavedInClaude = async (format: MeetingOutputFormat) => {
+    const entry = saved[format];
+    const name = matters?.find((m) => m.id === entry?.matterId)?.name;
+    if (!entry || !name) return;
+    toast(claudeOpenedNotice(await openInClaude(documentPrompt(name, entry.title, "", entry.versionNumber))));
+  };
+
   const hasContent = relay.segments.length > 0;
+  const proposalUnsaved = !!proposalDraft && !saved.proposal;
+  const minutesUnsaved = !!minutesDraft && !saved[minutesDraft.format];
+
+  // Leaving or reloading loses a live recording, the transcript on screen and
+  // any document not yet saved, so the browser asks first.
+  const atRisk = relay.recording || proposalUnsaved || minutesUnsaved || (hasContent && !proposalDraft && !minutesDraft);
+  useEffect(() => {
+    if (!atRisk) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [atRisk]);
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -440,7 +507,8 @@ export default function RecordMeetingPage() {
           Record Meeting
         </h1>
         <p className="text-muted-foreground">
-          Live transcription with speaker diarization — draft a proposal or meeting minutes when you're done.
+          Choose the project, press Start, and Stop when the meeting ends. The transcript tells speakers apart; the
+          minutes, proposal or concept note you generate is saved into the project.
         </p>
       </div>
 
@@ -448,8 +516,29 @@ export default function RecordMeetingPage() {
         <CardContent className="pt-6 space-y-4">
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-2">
+              <label className="text-sm font-medium">Project</label>
+              <Select value={uploadMatterId} onValueChange={setUploadMatterId}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="Choose the project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {matters?.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">Language</label>
-              <Select value={relay.language} onValueChange={(v) => relay.switchLanguage(v as MeetingLanguage)}>
+              <Select
+                value={relay.language}
+                onValueChange={(v) => {
+                  relay.switchLanguage(v as MeetingLanguage);
+                  remember({ language: v as MeetingLanguage });
+                }}
+              >
                 <SelectTrigger className="w-48">
                   <Languages className="h-4 w-4 mr-2" />
                   <SelectValue />
@@ -481,11 +570,11 @@ export default function RecordMeetingPage() {
 
             <Button onClick={handleStart} disabled={relay.recording}>
               <Mic className="h-4 w-4 mr-2" />
-              Start Meeting
+              Start
             </Button>
             <Button variant="destructive" onClick={handleStop} disabled={!relay.recording}>
               <Square className="h-4 w-4 mr-2" />
-              Stop Meeting
+              Stop
             </Button>
 
             <input
@@ -497,7 +586,7 @@ export default function RecordMeetingPage() {
             />
             <Button variant="outline" onClick={handleUploadTranscriptClick} disabled={relay.recording}>
               <FileUp className="h-4 w-4 mr-2" />
-              Upload Transcript…
+              Upload transcript…
             </Button>
 
             <input
@@ -509,24 +598,24 @@ export default function RecordMeetingPage() {
             />
             <Button variant="outline" onClick={handleUploadRecordingClick} disabled={relay.recording || transcribingRecording}>
               <FileAudio className="h-4 w-4 mr-2" />
-              {transcribingRecording ? "Transcribing…" : "Upload Recording…"}
+              {transcribingRecording ? "Transcribing…" : "Upload recording…"}
             </Button>
 
             <Button variant="outline" onClick={handleImproveDiarization} disabled={!hasContent || improving}>
               <Wand2 className="h-4 w-4 mr-2" />
-              {improving ? "Improving…" : "Improve Speaker Labels"}
+              {improving ? "Tidying…" : "Tidy up who said what"}
             </Button>
             <Button variant="outline" onClick={handleSaveTranscript} disabled={!hasContent}>
               <Save className="h-4 w-4 mr-2" />
-              Save Transcript
+              Download transcript
             </Button>
             <Button variant="outline" onClick={handleDownloadRecording} disabled={!relay.hasRecording}>
               <Download className="h-4 w-4 mr-2" />
-              Download Recording
+              Download recording
             </Button>
 
             <span className="text-xs text-muted-foreground ml-auto">
-              {relay.recording ? "recording" : relay.connected ? "connected" : "idle"}
+              {relay.recording ? "Recording…" : ""}
             </span>
           </div>
 
@@ -542,23 +631,27 @@ export default function RecordMeetingPage() {
                 Name speakers from Zoom's screen
               </label>
 
-              <Button size="sm" variant="outline" onClick={handleOpenCalibrator}>
-                <ScanSearch className="h-4 w-4 mr-2" />
-                {vision.region ? "Recalibrate name label" : "Calibrate name label"}
-              </Button>
+              {detectSpeakers && (
+                <>
+                  <Button size="sm" variant="outline" onClick={handleOpenCalibrator}>
+                    <ScanSearch className="h-4 w-4 mr-2" />
+                    {vision.region ? "Change where the name is" : "Show where Zoom puts the name"}
+                  </Button>
 
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleTestRead}
-                disabled={!vision.region || testing}
-                title="Read the calibrated region once and show exactly what was seen"
-              >
-                {testing ? "Reading…" : "Test read"}
-              </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleTestRead}
+                    disabled={!vision.region || testing}
+                    title="Read the name once and show exactly what was seen"
+                  >
+                    {testing ? "Reading…" : "Check it reads the name"}
+                  </Button>
+                </>
+              )}
 
               {detectSpeakers && !vision.region && (
-                <span className="text-xs text-destructive">Calibrate once before starting.</span>
+                <span className="text-xs text-destructive">Show where Zoom puts the name once before starting.</span>
               )}
               {vision.sampling && (
                 <span className="text-xs text-muted-foreground">
@@ -583,7 +676,7 @@ export default function RecordMeetingPage() {
                   {testResult.cropDataUrl && (
                     <img
                       src={testResult.cropDataUrl}
-                      alt="What OCR sees"
+                      alt="What the Hub reads"
                       className="border rounded bg-white max-h-16"
                     />
                   )}
@@ -624,17 +717,23 @@ export default function RecordMeetingPage() {
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">
-              Example proposals <span className="text-muted-foreground font-normal">(optional — paste the firm's own template/samples to match its style)</span>
-            </label>
-            <Textarea
-              value={exampleProposals}
-              onChange={(e) => setExampleProposals(e.target.value)}
-              placeholder="Paste one or more example proposal letters here…"
-              className="min-h-20"
-            />
-          </div>
+          {showExamples || exampleProposals ? (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Example proposals <span className="text-muted-foreground font-normal">(optional — paste the firm's own letters for the proposal to follow their style)</span>
+              </label>
+              <Textarea
+                value={exampleProposals}
+                onChange={(e) => setExampleProposals(e.target.value)}
+                placeholder="Paste one or more example proposal letters here…"
+                className="min-h-20"
+              />
+            </div>
+          ) : (
+            <button type="button" className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setShowExamples(true)}>
+              Add example proposal letters for the proposal to follow (optional)
+            </button>
+          )}
 
           <div className="flex gap-2 flex-wrap">
             <Button
@@ -672,26 +771,6 @@ export default function RecordMeetingPage() {
       </Card>
 
       <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-2 max-w-xs">
-            <label className="text-sm font-medium">Project to upload generated documents to</label>
-            <Select value={uploadMatterId} onValueChange={setUploadMatterId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a project" />
-              </SelectTrigger>
-              <SelectContent>
-                {matters?.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardContent className="pt-6 space-y-4">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             {OUTPUT_LABELS.proposal} — Draft
@@ -705,19 +784,26 @@ export default function RecordMeetingPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={() => proposalDraft && handleDownload("proposal", proposalDraft)} disabled={!proposalDraft}>
               <Download className="h-4 w-4 mr-2" />
-              Save Proposal (.docx)
+              Download (.docx)
             </Button>
-            <Button variant="outline" onClick={() => proposalDraft && handleOpenInAssistant("proposal", proposalDraft)} disabled={!proposalDraft}>
-              <Sparkles className="h-4 w-4 mr-2" />
-              Open in the assistant
-            </Button>
-            <Button
-              onClick={() => proposalDraft && handleUploadToMatter("proposal", proposalDraft)}
-              disabled={!proposalDraft || !uploadMatterId || uploadingFormat === "proposal"}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              {uploadingFormat === "proposal" ? "Uploading…" : "Upload to Project"}
-            </Button>
+            {saved.proposal ? (
+              <>
+                <span className="text-sm text-muted-foreground">Saved to the project as “{saved.proposal.title}”.</span>
+                <Button variant="outline" onClick={() => void openSavedInClaude("proposal")}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Open in Claude
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={() => proposalDraft && handleUploadToMatter("proposal", proposalDraft)}
+                disabled={!proposalDraft || !uploadMatterId || uploadingFormat === "proposal"}
+                title={uploadMatterId ? undefined : "Choose the project at the top of the page first"}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {uploadingFormat === "proposal" ? "Saving…" : "Save to project"}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -740,23 +826,26 @@ export default function RecordMeetingPage() {
               disabled={!minutesDraft}
             >
               <Download className="h-4 w-4 mr-2" />
-              Save Minutes (.docx)
+              Download (.docx)
             </Button>
-            <Button variant="outline" onClick={() => minutesDraft && handleOpenInAssistant(minutesDraft.format, minutesDraft.text)} disabled={!minutesDraft}>
-              <Sparkles className="h-4 w-4 mr-2" />
-              Open in the assistant
-            </Button>
-            <Button
-              onClick={() => minutesDraft && handleUploadToMatter(minutesDraft.format, minutesDraft.text)}
-              disabled={
-                !minutesDraft ||
-                !uploadMatterId ||
-                uploadingFormat === minutesDraft?.format
-              }
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              {minutesDraft && uploadingFormat === minutesDraft.format ? "Uploading…" : "Upload to Project"}
-            </Button>
+            {minutesDraft && saved[minutesDraft.format] ? (
+              <>
+                <span className="text-sm text-muted-foreground">Saved to the project as “{saved[minutesDraft.format]!.title}”.</span>
+                <Button variant="outline" onClick={() => void openSavedInClaude(minutesDraft.format)}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Open in Claude
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={() => minutesDraft && handleUploadToMatter(minutesDraft.format, minutesDraft.text)}
+                disabled={!minutesDraft || !uploadMatterId || uploadingFormat === minutesDraft?.format}
+                title={uploadMatterId ? undefined : "Choose the project at the top of the page first"}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {minutesDraft && uploadingFormat === minutesDraft.format ? "Saving…" : "Save to project"}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
