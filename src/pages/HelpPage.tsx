@@ -68,8 +68,8 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   "/clients": "the clients that projects are attached to.",
   "/team": "everyone at the firm and their role. Admins approve new accounts here.",
   "/timesheet": "your own time for any day. Add, edit or delete entries and download the firm's timesheet file.",
-  "/record-meeting": "live transcription of a meeting, then proposal letters, minutes or a concept note from it.",
-  "/precedent-library": "the firm's own agreements and the laws the AI draws on, with clause search and firm standards.",
+  "/record-meeting": "record a meeting; its minutes, proposal or concept note are saved into the project.",
+  "/precedent-library": "the firm's own agreements and the laws Claude draws on, with clause search and firm standards.",
   "/caselaw-research": "ask a question of Pakistani case law and get judgments with links.",
   "/mandate-opportunities": "new tenders and PPP opportunities found on public procurement sites.",
   "/whatsapp-activity": "client matters and documents picked up from a linked WhatsApp account.",
@@ -210,39 +210,33 @@ const HelpPage = () => {
       id: "getting-started",
       title: "Getting Started",
       icon: BookOpen,
-      description: "What AKLA Project Hub is and how it's organized",
+      description: "What the Hub is and where things are",
       content: [
         {
           question: "What is AKLA Project Hub?",
           answer:
-            "The firm's own workspace: every PPP transaction and due-diligence engagement with its documents, an AI assistant that works from the firm's agreements and the law, your daily timesheet, meeting transcription, and the firm's library of past agreements and laws.",
+            "The firm's own workspace: every transaction with its documents, the firm's library of past agreements and laws, meeting recording, and your timesheet. You ask, draft and review in Claude, which reads and files into the Hub once it is connected (see Using Claude).",
         },
         {
-          question: "How do I navigate the platform?",
+          question: "How do I find my way around?",
           answer: "Everything is in the sidebar on the left, top to bottom:",
           bullets: navigationBullets,
         },
         {
-          question: "How is data organized?",
+          question: "How is the work organised?",
           answer:
-            "Client → Project → Documents, Stages, Parties, Tasks, Notes and Time. Access is firm-wide by design: every lawyer can see and work on every project.",
+            "Client → Project → Documents, each document with its versions. Every lawyer at the firm can see and work on every project.",
         },
         {
-          question: "How do the AI features work?",
+          question: "What should I do first?",
           answer:
-            "Open AI Assistant (first item in the sidebar). You can use it without choosing a project: ask a question, drop in a document, or type / to pick Draft, Review, Summarise or one of the firm's own skills. To work on a particular transaction, open the project and press Ask AI (or Draft with AI on its Documents card); the assistant then also reads that project's documents. Answers come from the firm's agreements, the law library and, inside a project, its documents, with the sources listed under each reply. Drafts leave unknown commercial terms as marked placeholders such as [CONCESSION PERIOD — TO BE CONFIRMED] instead of inventing figures.",
+            "Connect your Claude to the Hub once (Use with Claude in the sidebar; about two minutes). Then open Projects, open or create your project, and drop its files onto the Documents card.",
         },
       ],
       faqs: [
         {
-          question: "Do I need to set anything up before using AI features?",
-          answer:
-            "No. If an AI feature says it isn't available, tell an administrator — it is a server setting, not something you configure. Project tracking, document upload and everything else work regardless.",
-        },
-        {
-          question: "Can multiple lawyers work on the same project?",
-          answer:
-            "Yes. Firm-wide access means every lawyer can view and edit every project — there's no per-matter permission to configure.",
+          question: "Can several lawyers work on the same project?",
+          answer: "Yes. There is no per-project permission to set: every lawyer can view and edit every project.",
         },
       ],
     },
@@ -250,286 +244,176 @@ const HelpPage = () => {
       id: "matters",
       title: "Projects",
       icon: FolderKanban,
-      description: "Track a transaction from origination through closing",
+      description: "A transaction and everything filed on it",
       content: [
         {
           question: "How do I create a project?",
           answer:
-            "Go to Projects and click New Project. Give it a name, and optionally a client, sector, and project lead. A default stage checklist is seeded automatically for you.",
+            "Open Projects and press New Project. Type its name and, if you like, its client: an existing client by name, or a new one, which is added for you. You are its lead unless you choose someone else under More details. The new project opens straight away.",
         },
         {
-          question: "What are the default stages?",
+          question: "What is on a project's page?",
           answer:
-            "A standard PPP transaction pipeline: Origination, Due Diligence, Drafting, Negotiation, Financial Close, and Post-Closing. Click a stage in the project workspace to cycle it through not started → in progress → complete.",
-        },
-        {
-          question: "What's in a project workspace?",
-          answer:
-            "Stages (the checklist), Documents (every document on the project with its status), Parties (counterparties like the Grantor, Concessionaire, or EPC Contractor), Tasks (simple to-dos with a checkbox), and Notes (a running activity log).",
+            "Its documents first, then its tasks and time. Stages, parties, notes, project context, the laws it relies on and WhatsApp activity show once they hold something; Show empty sections at the bottom brings them all up.",
           bullets: [
-            "Stages — click to advance not started → in progress → complete.",
-            "Documents — create a document, upload versions, change status, or open it in the AI Assistant to draft or review it.",
-            "Parties — add a name and role for each counterparty on the deal.",
-            "Tasks — add a task; check it off when done.",
-            "Notes — free-text notes, newest first.",
+            "Open in Claude starts a Claude chat about the project with its name already typed; add your question and press Enter.",
+            "Record meeting opens Record Meeting with this project already chosen.",
+            "Search project finds a phrase in every document on the project.",
           ],
         },
         {
-          question: "What do document statuses mean?",
+          question: "What do the document statuses mean?",
           answer:
-            "Not started → Drafting → Internal Review → With Counterparty → Negotiation → Finalized → Executed. Change a document's status from the dropdown next to it in the Documents card — nothing advances automatically.",
+            "Not started → Drafting → Internal review → With counterparty → Negotiation → Finalized → Executed. The status is set from the file's name when you upload it (see Documents); change it from the drop-down on the document's row.",
         },
         {
-          question: "What are Clients?",
-          answer:
-            "Client entities that projects are attached to, managed from the Clients page. A project doesn't require a client, but linking one lets you filter and gives AI drafting more context.",
-        },
-      ],
-      faqs: [
-        {
-          question: "Can I restrict a project to specific lawyers?",
-          answer:
-            "Not currently — the firm uses firm-wide visibility by design, so there's no per-matter access control to set.",
-        },
-        {
-          question: "Can I edit the stage checklist after a project is created?",
-          answer:
-            "Stages seed automatically on creation; there's no UI yet to add or remove stages after the fact.",
-        },
-      ],
-    },
-    {
-      id: "documents",
-      title: "Documents",
-      icon: FileText,
-      description: "Upload, version, and track documents on a project",
-      content: [
-        {
-          question: "How do I upload a document?",
-          answer:
-            "Open the project and go to its Documents card. Type the document's title, pick its type and press +. The document appears in the list; press the upload icon on its row and choose the file. Uploading again to the same document adds a new version; nothing is overwritten. Files you drop into an AI Assistant chat are read by the assistant for that conversation but are not saved to the project. To keep something the assistant produced, press \"Save to project\" under it.",
-        },
-        {
-          question: "What happens to a file after I upload it?",
-          answer:
-            "Its text is extracted (PDF, Word, Excel, or PowerPoint) and embedded into the document knowledge base, so it becomes searchable and usable by Ask, Draft, and Review on that project.",
-        },
-        {
-          question: "What document types are available?",
-          answer:
-            "The firm's contract taxonomy — Concession Agreement, EPC Contract, financing agreements, and more. See Document Types for the full list, or to add a new one.",
-        },
-      ],
-      faqs: [
-        {
-          question: "What file formats are supported?",
-          answer: "PDF, DOCX, XLSX/XLS, and PPTX.",
-        },
-        {
-          question: "Why didn't my document show up in AI answers?",
-          answer:
-            "Extraction can fail on scanned or image-only PDFs with no real text layer underneath. The upload itself still succeeds, but there's nothing for AI features to read.",
-        },
-      ],
-    },
-    {
-      id: "draft-with-ai",
-      title: "Draft with AI",
-      icon: Sparkles,
-      description: "Generate a first draft from precedent or a guided interview",
-      content: [
-        {
-          question: "How do I generate a draft?",
-          answer:
-            "Two ways. Without a project: open AI Assistant, type / and choose Draft, then say what you need. For a project: open it and press Draft with AI on its Documents card. Either way the assistant asks a few short questions (say \"just draft it\" to skip them) and the draft opens in the panel on the right, where you can edit it, download it as a Word file, or save it to a project as a new version.",
-        },
-        {
-          question: "What does the assistant ask before drafting?",
-          answer:
-            "One short question at a time about the key commercial terms: parties, term, payment, security, governing law and so on. Say \"just draft it\" at any point and it drafts from what it has, using the firm's standard and past agreements for that document type.",
-        },
-        {
-          question: "What happens to the draft once it's generated?",
-          answer:
-            "It opens in the panel on the right of the chat, where you can edit it and see it as the firm-formatted Word file. Read and edit it before sending it anywhere.",
-        },
-        {
-          question: "How do I save a draft?",
-          answer:
-            "Press \"Save new version\" in the draft panel and choose the project (if the chat isn't already in one). It is saved as a new Word version of that project's document. \"Download .docx\" gives you the file without saving it to a project.",
-        },
-        {
-          question: "Will the AI invent commercial terms I never gave it?",
-          answer:
-            "No. Where a specific term wasn't provided, the draft inserts a clearly marked placeholder like [CONCESSION PERIOD — TO BE CONFIRMED] instead of guessing a figure.",
-        },
-      ],
-      faqs: [
-        {
-          question: "What if there's no precedent or standard template for a document type yet?",
-          answer:
-            "It drafts from standard market practice instead, and the note above the draft will say so.",
-        },
-        {
-          question: "Will I lose the conversation if I leave the page?",
-          answer:
-            "No. Every chat is kept in the list on the left of the AI Assistant, where you can pick it up again, pin it, rename it or archive it.",
-        },
-      ],
-    },
-    {
-      id: "review-with-ai",
-      title: "Review with AI",
-      icon: ScanSearch,
-      description: "Get clause-level redline suggestions against precedent",
-      content: [
-        {
-          question: "How do I get redline suggestions on a draft?",
-          answer:
-            "Click the review icon next to a document in the project's Documents card (it needs at least one uploaded version) — that opens the AI Assistant with Review in force and the document attached; press send. Or in any chat, type / and choose Review, then use the + menu → Add from project to attach the document. A review first looks up the law that may apply on official sources, then runs its three passes. Follow-up messages in the same chat are checked against that review rather than starting a new one; attach a different document or say “re-run the review” for a fresh one. The review opens in the panel on the right with the suggestions, tracked-changes preview, download and save-as-version.",
-        },
-        {
-          question: "What does the review actually check?",
-          answer:
-            "Three separate passes: Legal Clauses & Citations (clause correctness against statute and precedent, and assertions made without citation), Formatting (structure against the firm's template and precedent), and Content & Conflicts (content against precedent, and against this project's other documents). Suggestions are grouped by pass.",
-        },
-        {
-          question: "How do I act on a suggestion?",
-          answer:
-            "Accept or Reject each one individually. Nothing is applied to the document automatically — every change is a deliberate choice.",
-        },
-        {
-          question: "Where do I see the changes?",
-          answer:
-            "For a Word document, the real uploaded file is shown alongside the list with every accepted or pending suggestion applied as genuine tracked changes (insertions underlined, deletions struck through). Download .docx gives you that file to open in Word; Save as Document Version keeps it on the project as a new version.",
-        },
-        {
-          question: "Can I review a PDF, Excel file, or PowerPoint?",
-          answer:
-            "Yes — the review runs the same way, and each suggestion shows its original and proposed text in the list. Only the tracked-changes preview, download and save-as-version are Word-only, because they patch the actual .docx.",
-        },
-      ],
-      faqs: [
-        {
-          question: "Can I re-run the review on the same document?",
-          answer:
-            "Yes. Re-running clears out the old pending suggestions before generating fresh ones, but any suggestions you already accepted or rejected are left alone.",
-        },
-        {
-          question: "Some suggestions say they couldn't be located in the file — why?",
-          answer:
-            "A suggestion is applied as a tracked change only where its original wording can be matched exactly in the document. If the AI paraphrased or the passage spans odd formatting, it's still listed for you to act on by hand — it just isn't drawn into the preview.",
-        },
-      ],
-    },
-    {
-      id: "ai-assistant",
-      title: "AI Assistant",
-      icon: MessageCircle,
-      description: "Ask, draft, review and summarise, with or without a project",
-      content: [
-        {
-          question: "Where is it?",
-          answer:
-            "AI Assistant is the first item in the sidebar. It works like claude.ai: your conversations are listed on the left (pin, rename, archive), you type at the bottom, and drafts and reviews open in a panel on the right.",
-        },
-        {
-          question: "Do I have to choose a project first?",
-          answer:
-            "No. Without a project the assistant answers from the firm's agreements and the law library, and from any file you drop into the chat. Open a project and press Ask AI when you want it to read that project's documents too; those chats are listed under the project.",
-        },
-        {
-          question: "How do I give it a document?",
-          answer:
-            "Drop the file into the chat, or press + and choose Add from project (or Add from a project) to attach one of a project's documents. A dropped file is read for that conversation only; to keep it on a project, upload it on the project's Documents card.",
-        },
-        {
-          question: "What are skills?",
-          answer:
-            "Type / in the message box to pick one: Draft, Review, Summarise, or one of the firm's own (for example the daily agenda or a concession agreement in the firm's format). The skill stays in force for the conversation.",
-        },
-        {
-          question: "Does it remember earlier questions in the same conversation?",
-          answer:
-            "Yes. Follow-up questions like \"what about the dispute resolution clause\" carry the context of what was already discussed, and the sources it found stay available for the whole chat.",
-        },
-        {
-          question: "What happens if it doesn't know the answer?",
-          answer:
-            "It says so rather than guessing, and lists the sources it did use under the reply so you can check them.",
+          question: "Where are Clients?",
+          answer: "Linked from the top of the Projects page, and from Settings › Other pages.",
         },
       ],
       faqs: [],
     },
     {
-      id: "firm-library",
-      title: "Firm Library",
-      icon: BookMarked,
-      description: "The firm's own agreements and the laws the AI draws on",
+      id: "documents",
+      title: "Documents",
+      icon: FileText,
+      description: "Upload, version, read and download a project's documents",
       content: [
         {
-          question: "What is the Firm Library?",
+          question: "How do I upload documents?",
           answer:
-            "The firm's past agreements and the laws they rely on, independent of any single project. The AI Assistant draws on it when it drafts, reviews and answers. It has four tabs: Agreements, Find a clause, Laws and Standards.",
+            "Open the project and drag the files, a folder or a .zip onto the Documents card, or press Upload files. Each file becomes a document named from its file name; a file whose name matches a document already there is offered as its next version. Check the list and press Start. Don't leave the page until it finishes.",
         },
         {
-          question: "How do I add agreements to it?",
+          question: "Do I have to set each document's type and status?",
           answer:
-            "Open Firm Library, stay on the Agreements tab, and in Bulk Upload pick a document type, add one or more files, then upload. Every file in a batch is tagged with the same type; upload again for a different type.",
+            "No. The type comes from the file's name when it names one of the firm's types (\"Concession Agreement\", \"(CTA)\", \"SHA\"), and the status from a tag in square brackets: [Executed], [Circulated] or [Received], [For Partner Review], [Final]; a new file with no tag is Drafting. A few minutes after upload the Hub reads the file and, where it still has no type, offers \"Set type: …\" on the row, or \"Set all\" for several.",
         },
         {
-          question: "How do I find a clause?",
+          question: "How do I see what a document is about without opening it?",
           answer:
-            "Use the Find a clause tab: type what you're looking for (for example liquidated damages, step-in rights or change in law) and, if you like, limit it to one document type. It searches every agreement in the library.",
+            "The line under its title is the Hub's summary of the latest version. Open it and choose the Summary tab for the parties, key dates and the laws it mentions. The summary is written from the text; check it against the document.",
         },
         {
-          question: "What are Laws and Standards?",
+          question: "How do I add a new version?",
           answer:
-            "Laws lists the Acts and rules the AI can quote, with a link to each source. Standards holds the firm's standard form for a document type, which the AI can build from the firm's agreements and the relevant law.",
+            "Drop the file on the Documents card (it is matched by name), or press the upload icon on the document's row to add it to that document. Nothing is ever overwritten; every version is kept.",
         },
         {
-          question: "Can I remove something from the library?",
+          question: "How do I download?",
           answer:
-            "Yes — deleting a source removes both the underlying file and everything indexed from it.",
+            "The download icon on a row gives the latest version. Tick several rows and press Download selected, or Download all, for one .zip. In a document's preview, Download offers a clean copy or one with tracked changes when it has them.",
         },
       ],
       faqs: [
         {
-          question: "Is the library tied to a specific project?",
-          answer: "No. It's firm-wide and every project and conversation can use it.",
+          question: "What file types can I upload?",
+          answer: "Any. Word, PDF, Excel and PowerPoint files are read so Claude and search can use them; other files are kept and can be downloaded.",
+        },
+        {
+          question: "Why doesn't Claude find something in my document?",
+          answer:
+            "A scanned PDF with no text in it can't be read; the row then says it couldn't be read. Upload a Word copy, or a PDF with selectable text.",
         },
       ],
     },
     {
+      id: "claude",
+      title: "Using Claude",
+      icon: Sparkles,
+      description: "Ask, draft and review in Claude with the firm's documents",
+      content: [
+        {
+          question: "How do I connect Claude to the Hub?",
+          answer:
+            "Once, on Use with Claude in the sidebar: in Claude, add a custom connector called AKLA Hub with the address that page gives you, then press Connect and sign in with your Hub email and password. The page then shows that your Claude is connected.",
+        },
+        {
+          question: "What can Claude do with the Hub?",
+          answer:
+            "Find and read any project's documents, the firm's precedents and the law library, and answer with sources you can open. It drafts in the firm's own format and files the draft in the project, marks up a document with tracked changes as its next version, and runs the Hub's review. It asks before it saves anything, and it never deletes.",
+        },
+        {
+          question: "What is the quickest way to start?",
+          answer:
+            "Use the Open in Claude, Draft in Claude and Review in Claude buttons on a project and its documents: each opens a new Claude chat with the project and document already named. Add your request and press Enter. If the message box comes up empty, paste: the request is copied for you.",
+        },
+        {
+          question: "How do I see the document beside the chat?",
+          answer:
+            "In the Claude desktop app, a Hub link Claude gives you opens beside the chat. In Chrome, the AKLA Hub companion does the same; ask an administrator to install it.",
+        },
+        {
+          question: "Where do drafts and reviews end up?",
+          answer:
+            "In the project, as a new version of the document, so the whole team sees them. A review's suggestions are tracked changes in that version: open it and accept or reject each one in its Changes tab.",
+        },
+      ],
+      faqs: [
+        {
+          question: "Claude says it can't find the Hub.",
+          answer:
+            "In the chat, open the tools button under the message box and turn AKLA Hub on. If Use with Claude says you are not connected, follow its steps again; a connection lasts thirty days of use.",
+        },
+        {
+          question: "What about the Hub's own assistant?",
+          answer:
+            "It is being retired in favour of Claude. Until it is switched off it is still linked from Use with Claude and Settings › Other pages, and your earlier chats are there.",
+        },
+      ],
+    },
+    {
+      id: "firm-library",
+      title: "Firm Library",
+      icon: BookMarked,
+      description: "The firm's own agreements and the laws",
+      content: [
+        {
+          question: "What is the Firm Library?",
+          answer:
+            "The firm's past agreements and the laws they rely on, independent of any project. Claude draws on it when it drafts, reviews and answers. Its tabs are Agreements, Find a clause, Laws and Standards.",
+        },
+        {
+          question: "How do I add agreements?",
+          answer:
+            "On the Agreements tab, under Bulk Upload, pick the document type, add the files and press Upload. Every file in a batch gets the same type; upload again for another type.",
+        },
+        {
+          question: "How do I find a clause?",
+          answer:
+            "On the Find a clause tab type what you are looking for (liquidated damages, step-in rights, change in law) and, if you like, limit it to one type of document.",
+        },
+        {
+          question: "Can I remove something from the library?",
+          answer: "An administrator can. Ask one if a file was added by mistake.",
+        },
+      ],
+      faqs: [],
+    },
+    {
       id: "timesheet",
-      title: "Today's Timesheet",
+      title: "Timesheet",
       icon: Clock,
       description: "Record your time and download the daily timesheet",
       content: [
         {
           question: "How do I record time?",
           answer:
-            "Open Today's Timesheet in the sidebar and press Add entry. Choose the project, describe the work, and enter the hours. Billable hours and AK billable hours are optional and can't be more than the hours worked. It works the same on a phone.",
+            "Open Timesheet and press Add entry. The project you used last is already chosen; describe the work and enter the hours. Billable and AK billable hours are optional and can't be more than the hours worked.",
         },
         {
           question: "Can I fill in or fix another day?",
           answer:
-            "Yes. Use Previous day and Next day, or pick a date in the date box. Dates follow your own clock, so work done after midnight counts for the new day.",
-        },
-        {
-          question: "How do I change or remove an entry?",
-          answer:
-            "Click into any box on a row and type; it saves when you click away. The bin icon at the end of a row deletes that entry after you confirm. Drag a row by its grip handle to change the order.",
+            "Yes. Use Previous day and Next day, or pick a date. Click into any box on a row to change it; it saves when you click away. The bin icon deletes an entry after you confirm.",
         },
         {
           question: "How do I get the timesheet file?",
-          answer:
-            "Press Download Timesheet (.docx). It builds the firm's daily timesheet for the day shown, with your name and role.",
+          answer: "Press Download Timesheet (.docx) for the firm's daily timesheet for the day shown, with your name and role.",
         },
         {
           question: "What is Timekeeper?",
           answer:
-            "An optional Windows app some of the firm uses to track time in the background. Entries it uploads appear on this page like any other. You do not need it: everything can be entered here.",
+            "An optional Windows app that tracks time in the background. What it uploads appears here like any other entry; you don't need it.",
         },
       ],
       faqs: [],
@@ -538,73 +422,79 @@ const HelpPage = () => {
       id: "record-meeting",
       title: "Record Meeting",
       icon: Mic,
-      description: "Transcribe a meeting and turn it into a letter, minutes or a concept note",
+      description: "Record a meeting and file its minutes, proposal or concept note",
       content: [
         {
           question: "How do I record a meeting?",
           answer:
-            "Open Record Meeting, choose the language (English, or Urdu which is translated when you generate a document) and the audio source (your microphone, or microphone plus the meeting's audio for an online call), then press Start Meeting. The transcript appears as people speak. Press Stop Meeting when you're done.",
+            "Open Record Meeting (or press Record meeting on the project). Choose the project, the language and the audio source; the page remembers them next time. Press Start, and Stop when the meeting ends. The transcript appears as people speak and tells the speakers apart; click a speaker's name to rename them.",
         },
         {
-          question: "I already have a recording or transcript.",
-          answer: "Use Upload Recording… or Upload Transcript… instead of starting a live meeting.",
-        },
-        {
-          question: "What can it produce?",
+          question: "How do I get the minutes?",
           answer:
-            "Generate Proposal (AKLA Format), Generate Minutes (AKLA Format) or Generate Concept Note. Each draft can be saved as a Word file, uploaded to a project, or opened in the AI Assistant to refine.",
+            "Press Generate Minutes, Generate Proposal or Generate Concept Note. The document is saved into the chosen project straight away, dated, and Open in Claude lets you refine it there. Download (.docx) gives you the file as well.",
+        },
+        {
+          question: "I already have a recording or a transcript.",
+          answer: "Use Upload recording… or Upload transcript… instead of starting a live meeting.",
+        },
+        {
+          question: "Can it name the speakers from Zoom?",
+          answer:
+            "Yes, for an online call: choose Microphone + meeting audio, tick Name speakers from Zoom's screen, and press Show where Zoom puts the name once.",
         },
       ],
-      faqs: [],
+      faqs: [
+        {
+          question: "What if I leave the page by mistake?",
+          answer:
+            "The browser asks first while a recording, a transcript or an unsaved document would be lost. Starting a new meeting over a transcript asks too.",
+        },
+      ],
     },
     {
       id: "settings",
       title: "Settings",
       icon: Settings,
-      description: "Your name, password and sign-in security",
+      description: "Your name, password, sign-in security and less-used pages",
       content: [
         {
           question: "Where are my settings?",
           answer:
-            "Press Settings at the bottom of the sidebar, under your email. There you can correct your name, change your password, turn two-step sign-in on or off, and sign out of every device.",
+            "Press Settings at the bottom of the sidebar. There you can correct your name, change your password, turn two-step sign-in on or off, sign out of every device, and open the less-used pages: Clients, the firm overview, WhatsApp Activity, Team and Document Types.",
         },
         {
           question: "What is two-step sign-in?",
           answer:
-            "Also called two-factor authentication. Once it's on, signing in needs your password and a 6-digit code from an authenticator app on your phone, so someone who learns your password still can't get in.",
+            "Signing in with your password and a 6-digit code from an authenticator app on your phone, so someone who learns your password still can't get in.",
         },
         {
           question: "I forgot my password.",
           answer:
-            "On the sign-in page press Forgot your password?, enter your email and use the link in the email you receive. Links expire; if one has, the page offers to send a new one.",
+            "On the sign-in page press Forgot your password?, enter your email and use the link in the email you receive. If the link has expired, the page offers to send a new one.",
         },
       ],
       faqs: [],
     },
     {
       id: "team-and-types",
-      title: "Team & Document Types",
+      title: "For administrators",
       icon: Users,
-      description: "Roles, permissions, and the firm's contract taxonomy",
+      description: "Approvals, roles and the firm's list of document types",
       content: [
         {
-          question: "What roles exist?",
-          answer: "Founder, Admin, Partner, Senior Counsel, Associate, and Paralegal. Founders have the same permissions as admins.",
+          question: "Where are the administrator pages?",
+          answer:
+            "Under Firm in the sidebar, shown only to administrators: Team, Document Types, Mandate Opportunities (also shown to partners and senior counsel) and WhatsApp Activity. Team shows a number when sign-ups are waiting for approval.",
         },
         {
-          question: "How do I change someone's role?",
-          answer:
-            "On the Team page, admins can pick a new role from the dropdown next to a lawyer's name. Everyone can view the Team page; only admins can change roles.",
+          question: "How do I approve someone or change a role?",
+          answer: "On Team: approve or reject waiting sign-ups at the top, and pick a role from the drop-down next to a name.",
         },
         {
-          question: "How do I manage the document taxonomy?",
+          question: "How do I manage document types?",
           answer:
-            "On the Document Types page, admins can add, rename, or delete contract types, grouped by category. Everyone can view the list — it drives the type picker for drafting, the Firm Library and document uploads.",
-        },
-        {
-          question: "Can I delete a document type that's in use?",
-          answer:
-            "No — the firm's own records (documents already tagged with that type) block the deletion, and you'll see a message explaining why rather than a silent failure.",
+            "On Document Types, add, rename or delete types, grouped by category. The list drives the types the Hub sets on uploads and the standard Claude drafts from, so rename with care.",
         },
       ],
       faqs: [],
