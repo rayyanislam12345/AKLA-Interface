@@ -18,6 +18,7 @@ import { sortVersions, versionOptionLabel, type PreviewVersion } from "./preview
 import { VersionChecksPanel } from "./VersionChecksPanel";
 import { VersionChangesPanel } from "./VersionChangesPanel";
 import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
+import { VersionSummaryPanel } from "./VersionSummaryPanel";
 import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutSelection";
 import { fitScale, useFitSize } from "./fitWidth";
 
@@ -53,7 +54,7 @@ import { fitScale, useFitSize } from "./fitWidth";
 // shown only for a version with change rows, and first while any wait.
 
 // "changes" is What changed (the comparison); "tracked" is the Changes list.
-type Tab = "document" | "tracked" | "checks" | "changes";
+type Tab = "document" | "summary" | "tracked" | "checks" | "changes";
 const CHECKABLE_EXTENSIONS = ["docx", "pdf", "txt", "md"];
 
 export type { PreviewVersion } from "./previewVersions";
@@ -247,6 +248,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
     <Tabs value={showing} onValueChange={(v) => chooseTab(v as Tab)}>
       <TabsList className={cn("justify-start overflow-x-auto", compact ? "h-8" : "h-9 w-full sm:w-auto")}>
         <TabsTrigger value="document" className="text-xs">Document</TabsTrigger>
+        <TabsTrigger value="summary" className="text-xs" data-testid="version-summary-tab">Summary</TabsTrigger>
         {hasChanges && (
           <TabsTrigger value="tracked" className="text-xs" data-testid="version-changes-tab">
             {changesTabLabel(changes.counts?.waiting)}
@@ -361,6 +363,11 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
         </div>
       )}
 
+      {showing === "summary" && (
+        <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
+          <VersionSummaryPanel card={insights.data?.card ?? null} loading={insights.loading} />
+        </div>
+      )}
       {checkable && showing === "checks" && (
         <div className="flex-1 min-h-0 overflow-auto bg-muted/40">
           <VersionChecksPanel
@@ -390,7 +397,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
 
       {/* Kept mounted on the other tabs so the drawn Word file survives a tab switch. */}
       {/* A fitted page keeps the scrollbar's room reserved, so its showing up does not change the width and the scale with it. */}
-      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${fitToWidth ? " [scrollbar-gutter:stable]" : ""}${showing === "document" || !checkable ? "" : " hidden"}`}>
+      <div ref={previewRef} className={`relative flex-1 min-h-0 overflow-auto bg-muted/40${fitToWidth ? " [scrollbar-gutter:stable]" : ""}${showing === "document" || (!checkable && showing !== "summary") ? "" : " hidden"}`}>
         {state.loading && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />Opening…

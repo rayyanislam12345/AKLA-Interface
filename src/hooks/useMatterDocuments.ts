@@ -397,3 +397,24 @@ export async function fetchStoredFileSizes(matterId: string, matterDocumentId: s
   }
   return sizes;
 }
+
+/**
+ * The summary card of each listed version (document_versions.card, written by
+ * the index worker): a line under a document's title, and the type it
+ * suggests. The column is not in the generated types; a database without it
+ * answers with nothing.
+ */
+export function useVersionCards(versionIds: string[]) {
+  const ids = [...versionIds].sort();
+  return useQuery({
+    queryKey: ["version-cards", ids],
+    enabled: ids.length > 0,
+    staleTime: 60_000,
+    queryFn: async (): Promise<Map<string, { summary?: string | null; suggested_document_type_id?: string | null }>> => {
+      const { data, error } = await supabase.from("document_versions").select("id, card" as "id").in("id", ids);
+      if (error) return new Map();
+      const rows = (data ?? []) as unknown as Array<{ id: string; card: { summary?: string | null; suggested_document_type_id?: string | null } | null }>;
+      return new Map(rows.filter((r) => r.card).map((r) => [r.id, r.card!]));
+    },
+  });
+}

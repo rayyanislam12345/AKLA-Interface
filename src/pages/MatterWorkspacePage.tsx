@@ -52,6 +52,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useProfiles } from "@/hooks/useProfiles";
 import {
   useDocumentTypes,
+  useVersionCards,
   useMatterDocuments,
   useCreateMatterDocument,
   useSetMatterDocumentStatus,
@@ -675,6 +676,12 @@ export default function MatterWorkspacePage() {
   const { toast } = useToast();
   const { data: documentTypes } = useDocumentTypes();
   const { data: matterDocuments, isLoading: documentsLoading, error: documentsError, refetch: refetchDocuments } = useMatterDocuments(matterId);
+  const latestVersionIds = (matterDocuments ?? []).flatMap((d) => {
+    const vs = (d.versions ?? []) as Array<{ id: string; version_number: number }>;
+    const latest = vs.reduce<(typeof vs)[number] | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
+    return latest ? [latest.id] : [];
+  });
+  const { data: versionCards } = useVersionCards(latestVersionIds);
   const updateMatterDocument = useUpdateMatterDocument();
   const createMatterDocument = useCreateMatterDocument();
   const setDocumentStatus = useSetMatterDocumentStatus();
@@ -1084,6 +1091,31 @@ export default function MatterWorkspacePage() {
       : null;
 
   const askClaude = async (prompt: string) => toast(claudeOpenedNotice(await openInClaude(prompt)));
+  const suggestedTypeName_ = (id: string | null | undefined) => (id ? documentTypes?.find((t) => t.id === id)?.name : undefined);
+  const acceptSuggestedType = (docId: string, documentTypeId: string) =>
+    updateMatterDocument.mutate(
+      { matterDocumentId: docId, matterId: matterId!, documentTypeId },
+      { onError: (err) => toast({ title: "Couldn't set the type", description: plainUploadError(err), variant: "destructive" }) },
+    );
+  // Documents with no type whose latest version the Hub has a type for.
+  const typeSuggestions = (matterDocuments ?? []).flatMap((d) => {
+    if (d.document_type_id) return [];
+    const vs = (d.versions ?? []) as Array<{ id: string; version_number: number }>;
+    const latest = vs.reduce<(typeof vs)[number] | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
+    const id = latest ? versionCards?.get(latest.id)?.suggested_document_type_id : null;
+    return id && suggestedTypeName_(id) ? [{ docId: d.id, documentTypeId: id }] : [];
+  });
+  const acceptAllSuggestedTypes = async () => {
+    let failed = 0;
+    for (const s of typeSuggestions) {
+      await updateMatterDocument
+        .mutateAsync({ matterDocumentId: s.docId, matterId: matterId!, documentTypeId: s.documentTypeId })
+        .catch(() => { failed += 1; });
+    }
+    toast(failed
+      ? { title: `${typeSuggestions.length - failed} of ${typeSuggestions.length} types set`, description: "Try the rest again, or set them from each document's menu.", variant: "destructive" }
+      : { title: `Set the type of ${typeSuggestions.length} documents` });
+  };
 
   const hasStages = !!stages?.some((stage) => stage.status !== "not_started");
   const hasParties = !!parties?.length;
@@ -1210,6 +1242,15 @@ export default function MatterWorkspacePage() {
               next version. Nothing is uploaded until you press Start.
             </p>
             <DocumentIntakePanel intake={intake} />
+            {typeSuggestions.length >= 2 && (
+              <div className="flex items-center gap-2 flex-wrap rounded-md bg-muted/50 px-3 py-2">
+                <span className="text-xs">The Hub has read {typeSuggestions.length} documents with no type and suggests one for each.</span>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={updateMatterDocument.isPending} onClick={() => void acceptAllSuggestedTypes()}>
+                  <Tag className="h-3.5 w-3.5 mr-1.5" />
+                  Set all {typeSuggestions.length}
+                </Button>
+              </div>
+            )}
             {zipProgress && (
               <div className="rounded-md border px-3 py-2 space-y-1.5" aria-live="polite">
                 <p className="text-xs">
@@ -1272,6 +1313,9 @@ export default function MatterWorkspacePage() {
                   const latest = versions.reduce<(typeof versions)[number] | null>((a, b) => (!a || b.version_number > a.version_number ? b : a), null);
                   const latestState = latest ? readState(latest) : null;
                   const typeName = (doc as { document_type?: { name: string } | null }).document_type?.name;
+                  const latestCard = latest ? versionCards?.get(latest.id) : undefined;
+                  const suggestedTypeId = !doc.document_type_id ? latestCard?.suggested_document_type_id ?? null : null;
+                  const suggestedTypeName = suggestedTypeName_(suggestedTypeId);
                   const canRemove = canRemoveDocument(doc, versions);
                   return (
                   <div
@@ -1305,6 +1349,9 @@ export default function MatterWorkspacePage() {
                       onClick={() => (latest ? openPreview(doc.id, latest.id) : setExpandedDocId(isExpanded ? null : doc.id))}
                     >
                       <p className="text-sm font-medium truncate group-hover:underline">{doc.title}</p>
+                      {latestCard?.summary && (
+                        <p className="text-xs text-muted-foreground line-clamp-1" title={latestCard.summary}>{latestCard.summary}</p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         {typeName || "No type"} ·{" "}
                         {versions.length || 0} version
@@ -1316,6 +1363,19 @@ export default function MatterWorkspacePage() {
                             : ""}
                       </p>
                     </button>
+                    {suggestedTypeId && suggestedTypeName && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 shrink-0 text-xs"
+                        title="The Hub read this file and thinks it is this type"
+                        disabled={updateMatterDocument.isPending}
+                        onClick={() => acceptSuggestedType(doc.id, suggestedTypeId)}
+                      >
+                        <Tag className="mr-1.5 h-3.5 w-3.5" />
+                        Set type: {suggestedTypeName}
+                      </Button>
+                    )}
                     <Select
                       value={doc.status}
                       onValueChange={(value) =>

@@ -64,6 +64,19 @@ export interface VersionInsights {
   proofCheck: ProofCheck | null;
   changes: VersionChanges | null;
   comparedWithId: string | null;
+  /** The summary the index worker wrote for this version, once it has read it. */
+  card: VersionCard | null;
+}
+
+/** document_versions.card, as chat-service/indexing/card.js writes it. */
+export interface VersionCard {
+  summary?: string | null;
+  document_kind?: string | null;
+  parties?: Array<{ name: string; role?: string | null }>;
+  key_dates?: Array<{ date: string; what?: string | null }>;
+  defined_terms?: string[];
+  statutes_mentioned?: string[];
+  suggested_document_type_id?: string | null;
 }
 
 export const CATEGORY_ORDER = ["broken_references", "number_words", "placeholders", "undefined_terms", "numbering", "unused_definitions"];
@@ -123,6 +136,7 @@ export function useVersionInsights(versionId: string | undefined) {
           proofCheck: isObject(row.proof_check) ? (row.proof_check as ProofCheck) : null,
           changes: isObject(row.changes_from_previous) ? (row.changes_from_previous as VersionChanges) : null,
           comparedWithId: typeof row.compared_with_version_id === "string" ? row.compared_with_version_id : null,
+          card: isObject(row.card) ? (row.card as VersionCard) : null,
         },
       });
     })();

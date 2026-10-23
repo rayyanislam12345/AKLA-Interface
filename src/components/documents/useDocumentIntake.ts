@@ -14,6 +14,7 @@ import {
   saveVersionDetails,
 } from "@/hooks/useMatterDocuments";
 import { useCompanionBusy } from "@/lib/companionBusy";
+import { guessDocumentType, statusFromStage } from "@/lib/documentDefaults";
 import { collectFromDrop, collectFromFileList, extensionOf, sha256, type Collected } from "./collectFiles";
 import { plainUploadError } from "./uploadErrors";
 
@@ -342,6 +343,14 @@ export function useDocumentIntake({
     }
   };
 
+  // The firm's document types, read once per batch for the type a file's
+  // name implies.
+  const documentTypes = useRef<Promise<Array<{ id: string; name: string }>> | null>(null);
+  const loadDocumentTypes = () =>
+    (documentTypes.current ??= Promise.resolve(supabase.from("document_types").select("id, name"))
+      .then(({ data }) => data ?? [])
+      .catch(() => []));
+
   const upload = async (item: IntakeItem) => {
     const chain = chains.current.get(item.chainKey!)!;
     update(item.id, { status: "uploading", note: undefined });
@@ -368,8 +377,9 @@ export function useDocumentIntake({
           isAiGenerated: false, extension, skipIndex: true,
         });
       } else {
+        documentTypeId = guessDocumentType(item.parsed.title, await loadDocumentTypes())?.id ?? null;
         result = await saveDraftToMatter({
-          matterId: matterId!, documentTypeId: null, documentTypeName: item.file.name,
+          matterId: matterId!, documentTypeId, documentTypeName: item.file.name,
           title: item.parsed.title, fileStem, blob: item.file, isAiGenerated: false, extension, skipIndex: true,
         });
         chain.docId = result.matterDocumentId;
@@ -379,6 +389,12 @@ export function useDocumentIntake({
       return;
     }
     await saveVersionDetails(result.versionId, { label: item.label || null, contentHash: item.hash }).catch(() => undefined);
+    // A new document starts as "drafting" unless its name says more; a new
+    // version moves the status only when its name carries a stage tag.
+    const status = statusFromStage(item.parsed.stage) ?? (result.versionNumber === 1 ? "drafting" : null);
+    if (status) {
+      await Promise.resolve(supabase.from("matter_documents").update({ status }).eq("id", result.matterDocumentId)).catch(() => undefined);
+    }
     if (item.hash) projectHashes.current.set(item.hash, documentTitle);
     const saved = { matterDocumentId: result.matterDocumentId, versionId: result.versionId, versionNumber: result.versionNumber };
     callbacks.current.onSaved();
