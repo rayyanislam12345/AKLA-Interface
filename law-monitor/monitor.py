@@ -1011,6 +1011,30 @@ def apply_library_action(
     if not existing:
         return "none", "Act is not in the library", None, None
 
+    # A re-issued schedule (SECP republishes the Companies Act's fee table
+    # and classification schedule on their own) is a fraction of the Act and
+    # must never replace it; it goes in beside the Act like an amending
+    # instrument, so retrieval for that Act finds the current schedule.
+    if re.search(r"\bschedule\b", title, re.I) and len(doc_text) < 0.3 * len("\n\n".join(c["content"] for c in existing)):
+        if hub.act_chunks(title):
+            return "skipped", "schedule already in the library", "not_incorporated", "the Act's own text predates this schedule"
+        log(f"    ingesting re-issued schedule as its own entry beside {act_name}: {title}")
+        if not hub.dry_run:
+            hub.client.ingest_document_text(
+                doc_text,
+                is_statute=True,
+                metadata={
+                    "act_name": title,
+                    "amends_act": act_name,
+                    "replaces_schedule_of": act_name,
+                    "source": "law-monitor",
+                    "source_url": source_url,
+                    "pdf_url": finding.get("document_url"),
+                    "scraped_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        return "ingested_amendment", f"added as its own entry beside {act_name}, as the current schedule", "not_incorporated", "the Act's own text predates this schedule"
+
     if looks_like_amendment(title):
         return "skipped", f"title reads as an amending instrument, not a consolidation: {title}", None, None
 
