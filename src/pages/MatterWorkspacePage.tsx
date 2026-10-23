@@ -1117,7 +1117,10 @@ export default function MatterWorkspacePage() {
       : { title: `Set the type of ${typeSuggestions.length} documents` });
   };
 
-  const hasStages = !!stages?.some((stage) => stage.status !== "not_started");
+  // A new project's first stage starts in progress, so only a move past that counts.
+  const hasStages = !!stages?.some((stage) =>
+    stage.sort_order === 0 ? stage.status === "complete" : stage.status !== "not_started",
+  );
   const hasParties = !!parties?.length;
   const hasNotes = !!notes?.length;
   const hasContext = !!matterContext?.content?.trim();

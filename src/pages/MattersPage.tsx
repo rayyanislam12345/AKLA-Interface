@@ -12,8 +12,9 @@ import {
   MATTER_STATUS_LABELS,
   type MatterStatus,
 } from "@/hooks/useMatters";
-import { useClients } from "@/hooks/useClients";
+import { useClients, useCreateClient } from "@/hooks/useClients";
 import { useProfiles } from "@/hooks/useProfiles";
+import { useAuth } from "@/hooks/useAuth";
 import { LoadState } from "@/components/LoadState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -211,12 +212,17 @@ export default function MattersPage() {
   const { data: clients } = useClients();
   const { data: profiles } = useProfiles();
   const createMatter = useCreateMatter();
+  const createClient = useCreateClient();
+  const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [clientId, setClientId] = useState<string>("");
+  // The client is typed: an existing client by name, or a new one created
+  // with the project.
+  const [clientName, setClientName] = useState("");
+  const [showMore, setShowMore] = useState(false);
   const [sector, setSector] = useState("");
   const [leadPartnerId, setLeadPartnerId] = useState<string>("");
   const [targetClose, setTargetClose] = useState("");
@@ -256,27 +262,35 @@ export default function MattersPage() {
 
   const openNewProject = (next: boolean) => {
     setOpen(next);
+    if (!next) return;
     // Arriving from a client: the new project is most likely for them.
-    if (next && clientFilter && !clientId) setClientId(clientFilter);
+    if (clientFilter && !clientName) setClientName(clients?.find((c) => c.id === clientFilter)?.name ?? "");
+    // The person creating it leads it unless they say otherwise.
+    if (!leadPartnerId && user?.id) setLeadPartnerId(user.id);
   };
 
   const handleCreate = async () => {
     if (!name.trim()) return;
     try {
-      await createMatter.mutateAsync({
+      const typed = clientName.trim();
+      let clientId = typed ? clients?.find((c) => c.name.trim().toLowerCase() === typed.toLowerCase())?.id : undefined;
+      if (typed && !clientId) clientId = (await createClient.mutateAsync({ name: typed })).id;
+      const created = await createMatter.mutateAsync({
         name: name.trim(),
         client_id: clientId || undefined,
         sector: sector.trim() || undefined,
         lead_partner_id: leadPartnerId || undefined,
         target_close_date: targetClose || undefined,
       });
-      toast({ title: "Project created" });
+      toast({ title: "Project created", description: "Add its documents with Upload files, or drag them onto the Documents card." });
       setOpen(false);
       setName("");
-      setClientId("");
+      setClientName("");
       setSector("");
       setLeadPartnerId("");
       setTargetClose("");
+      setShowMore(false);
+      if (created?.id) navigate(`/matters/${created.id}`);
     } catch (e) {
       toast({ title: "Couldn't create the project", description: errorText(e), variant: "destructive" });
     }
@@ -288,7 +302,17 @@ export default function MattersPage() {
   };
 
   const emptyState = (() => {
-    if (!matters?.length) return <p className="text-muted-foreground">No projects yet.</p>;
+    if (!matters?.length) {
+      return (
+        <div className="space-y-2 text-muted-foreground">
+          <p>No projects yet.</p>
+          <Button size="sm" onClick={() => openNewProject(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create the first project
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className="space-y-2 text-muted-foreground">
         <p>
@@ -321,7 +345,10 @@ export default function MattersPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Projects</h1>
-          <p className="text-muted-foreground">Transactions and engagements the firm is working on.</p>
+          <p className="text-muted-foreground">
+            Transactions and engagements the firm is working on.{" "}
+            <button type="button" className="underline underline-offset-2" onClick={() => navigate("/clients")}>Clients</button>
+          </p>
         </div>
         <Dialog open={open} onOpenChange={openNewProject}>
           <DialogTrigger asChild>
@@ -340,20 +367,27 @@ export default function MattersPage() {
                 <Input id="matter-name" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Client</Label>
-                <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clients?.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="matter-client">Client (optional)</Label>
+                <Input
+                  id="matter-client"
+                  list="matter-client-names"
+                  placeholder="Type a client's name"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                />
+                <datalist id="matter-client-names">
+                  {clients?.map((c) => <option key={c.id} value={c.name} />)}
+                </datalist>
+                {clientName.trim() && !clients?.some((c) => c.name.trim().toLowerCase() === clientName.trim().toLowerCase()) && (
+                  <p className="text-xs text-muted-foreground">A new client, “{clientName.trim()}”, is added with the project.</p>
+                )}
               </div>
+              {!showMore ? (
+                <button type="button" className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setShowMore(true)}>
+                  More details: sector, project lead, target close date
+                </button>
+              ) : (
+              <>
               <div className="space-y-2">
                 <Label htmlFor="matter-sector">Sector</Label>
                 <Input
@@ -387,9 +421,11 @@ export default function MattersPage() {
                   onChange={(e) => setTargetClose(e.target.value)}
                 />
               </div>
+              </>
+              )}
             </div>
             <DialogFooter>
-              <Button onClick={handleCreate} disabled={!name.trim() || createMatter.isPending}>
+              <Button onClick={handleCreate} disabled={!name.trim() || createMatter.isPending || createClient.isPending}>
                 Create
               </Button>
             </DialogFooter>
