@@ -217,6 +217,7 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
                 </li>
               ))}
             </ul>
+            {isAdmin ? (
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={startNew} data-testid="new-skill">
                 <Plus className="mr-2 h-4 w-4" />
@@ -228,9 +229,11 @@ export default function SkillsDialog({ open, onOpenChange }: SkillsDialogProps) 
               </Button>
               <input ref={fileInput} type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => uploadZip(e.target.files?.[0])} />
             </div>
+            ) : null}
             <p className="text-xs text-muted-foreground">
-              Uploading a skill with the same name as one already here replaces it with the new version. A skill can be
-              deleted by an administrator or by the person who added it.
+              {isAdmin
+                ? "Uploading a skill with the same name as one already here replaces it with the new version. A skill can be deleted by an administrator or by the person who added it."
+                : "Firm skills are added and changed by an administrator."}
             </p>
           </div>
         )}

@@ -3974,6 +3974,15 @@ async function handleSkillUpload(req, res) {
   if (!authHeader) return json(401, { error: "Authorization header required" });
   const { user, error: authError } = await authorize(authHeader);
   if (authError) return json(authError.status, authError.body);
+  // A firm skill is used by everyone and an upload with an existing name
+  // replaces it, so adding or replacing one is for an administrator.
+  let admin;
+  try {
+    admin = await isFirmAdmin(user.id);
+  } catch (err) {
+    return json(500, { error: err.message });
+  }
+  if (!admin) return json(403, { error: "Only an administrator can add or replace a firm skill." });
 
   let bytes;
   try {

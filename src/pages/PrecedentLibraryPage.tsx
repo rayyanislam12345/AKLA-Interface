@@ -52,6 +52,8 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
 function LawLibraryTab() {
   const { data: statutes, isLoading } = useStatuteSources();
   const deleteStatute = useDeleteStatuteSource();
+  const { data: me } = useMyProfile();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
   const { toast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
 
@@ -95,7 +97,7 @@ function LawLibraryTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Act</TableHead>
-                  <TableHead>Indexed passages</TableHead>
+                  <TableHead>Searchable sections</TableHead>
                   <TableHead>Added</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
@@ -117,9 +119,11 @@ function LawLibraryTab() {
                             </a>
                           </Button>
                         )}
-                        <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isAdmin && (
+                          <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -134,7 +138,7 @@ function LawLibraryTab() {
                 <div className="min-w-0">
                   <p className="text-sm truncate">{s.act_name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {s.chunk_count} chunks · {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
+                    {s.chunk_count} sections · {s.scraped_at ? new Date(s.scraped_at).toLocaleDateString() : "—"}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -145,9 +149,11 @@ function LawLibraryTab() {
                       </a>
                     </Button>
                   )}
-                  <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {isAdmin && (
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(s.act_name)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -282,6 +288,8 @@ export default function PrecedentLibraryPage() {
   const { data: sources, isLoading } = usePrecedentSources();
   const uploadDoc = useUploadPrecedentDocument();
   const deleteSource = useDeletePrecedentSource();
+  const { data: me } = useMyProfile();
+  const isAdmin = me?.role === "admin" || me?.role === "founder";
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") ?? "precedents";
@@ -592,7 +600,7 @@ export default function PrecedentLibraryPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>File</TableHead>
-                          <TableHead>Indexed passages</TableHead>
+                          <TableHead>Searchable sections</TableHead>
                           <TableHead>Added</TableHead>
                           <TableHead className="w-12"></TableHead>
                         </TableRow>
@@ -606,13 +614,15 @@ export default function PrecedentLibraryPage() {
                               {new Date(s.created_at).toLocaleDateString()}
                             </TableCell>
                             <TableCell>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => handleDelete(s.storage_path, s.filename)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {isAdmin && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleDelete(s.storage_path, s.filename)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -626,17 +636,19 @@ export default function PrecedentLibraryPage() {
                         <div className="min-w-0">
                           <p className="text-sm truncate">{s.filename}</p>
                           <p className="text-xs text-muted-foreground">
-                            {s.chunk_count} chunks · {new Date(s.created_at).toLocaleDateString()}
+                            {s.chunk_count} sections · {new Date(s.created_at).toLocaleDateString()}
                           </p>
                         </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="shrink-0"
-                          onClick={() => handleDelete(s.storage_path, s.filename)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isAdmin && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="shrink-0"
+                            onClick={() => handleDelete(s.storage_path, s.filename)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>

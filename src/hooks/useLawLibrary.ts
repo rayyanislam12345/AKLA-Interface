@@ -32,12 +32,15 @@ export function useDeleteStatuteSource() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (actName: string) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("documents")
         .delete()
         .eq("is_statute", true)
-        .eq("metadata->>act_name", actName);
+        .eq("metadata->>act_name", actName)
+        .select("id");
       if (error) throw error;
+      // The database refuses a non-administrator's delete without an error.
+      if (!data?.length) throw new Error("Only an administrator can remove an Act from the library.");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["statute-sources"] });

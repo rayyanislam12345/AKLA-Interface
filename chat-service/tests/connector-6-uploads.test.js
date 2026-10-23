@@ -171,7 +171,7 @@ test('a small file sent as base64 is filed at once as the lawyer\'s own version,
   const s = await setup();
   try {
     const out = await s.run(UPLOAD_TOOL, { projectId: P1, fileName: 'Board resolution.docx', contentBase64: DOCX.toString('base64') });
-    assert.match(out, /^Filed "Board resolution" as v1 \(Board-resolution-v1\.docx\), a new document on M6 Motorway, labelled "Uploaded from claude\.ai — 22 October 2026"\./);
+    assert.match(out, /^Filed "Board resolution" as v1 \(Board-resolution-v1\.docx\), a new document on M6 Motorway, labelled "Uploaded from claude\.ai — \d{1,2} [A-Z][a-z]+ \d{4}"\./);
     assert.match(out, /^versionId: [0-9a-f-]{36}$/m);
     assert.match(out, /^Open in Hub: https:\/\/hub\.test\/ai\/d\/[0-9a-f-]{36}\?embed=1&host=pane$/m);
     assert.match(out, /mark(ed)? up|start_review/);
@@ -355,7 +355,7 @@ test('get_upload finds a filed upload after a restart by its storage key; an unk
     const fresh = createHubTools({ supabase: s.supabase, voyageKey: 'v', log: () => {}, hubUrl: HUB, modules: [{ file: 'uploads.js', tools: uploadsModule }], writes: s.writes, uploads: createUploads({ writes: s.writes, issuer: s.origin, isMember: async () => true }) });
     const status = fresh.find((t) => t.name === STATUS_TOOL);
     const found = await status.run({ uploadId: uploadIdIn(out) }, ctxOf());
-    assert.match(found, /^Arrived and filed as v1 \(Survives-v1\.docx\), labelled "Uploaded from claude\.ai — 22 October 2026"\./);
+    assert.match(found, /^Arrived and filed as v1 \(Survives-v1\.docx\), labelled "Uploaded from claude\.ai — \d{1,2} [A-Z][a-z]+ \d{4}"\./);
     assert.match(found, /^Project — Open in Hub: https:\/\/hub\.test\/ai\/p\/aaaaaaaa/m);
     assert.match(await status.run({ uploadId: uploadIdIn(out) }, ctxOf(OTHER)), /^No upload with that id is waiting for you/, 'another lawyer\'s upload is not shown');
     assert.match(await status.run({ uploadId: randomUUID() }, ctxOf()), /the connector restarted before the file was sent, which voids an unused address/);

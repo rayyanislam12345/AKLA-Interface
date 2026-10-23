@@ -117,12 +117,17 @@ export function useDeletePrecedentSource() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (storagePath: string) => {
-      await supabase.storage.from("precedent-library").remove([storagePath]);
-      const { error } = await supabase
+      // The row first: the database lets only an administrator delete a
+      // library row and says nothing when it refuses, so an empty answer
+      // means nothing was removed and the file is left where it is.
+      const { data, error } = await supabase
         .from("documents")
         .delete()
-        .eq("metadata->>storage_path", storagePath);
+        .eq("metadata->>storage_path", storagePath)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) throw new Error("Only an administrator can remove a file from the library.");
+      await supabase.storage.from("precedent-library").remove([storagePath]);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["precedent-sources"] });
