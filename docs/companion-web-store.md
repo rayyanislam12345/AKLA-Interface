@@ -19,7 +19,7 @@ Everything for the first upload is in `~/Desktop/AKLA Companion for the Web Stor
 ## 2. First upload (Rayyan, about 20 minutes)
 
 1. In the developer console: **New item** → upload
-   `FOR THE WEB STORE ONLY - do not send to staff - 0.6.0.zip`.
+   `FOR THE WEB STORE ONLY - do not send to staff - 0.6.1.zip`.
 2. **Store listing** tab:
    - Description: paste the text in section 5 below.
    - Category: *Productivity* (Workflow & Planning). Language: English.
