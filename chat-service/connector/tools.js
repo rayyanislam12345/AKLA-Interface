@@ -314,7 +314,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, anth
     {
       name: "search_law_library",
       title: "Search the law library",
-      description: "Search the firm's law library — the Pakistani Acts, Ordinances, Rules and Regulations the firm holds — for passages on a legal question. Name the law in `act` when you know it (e.g. \"Companies Act, 2017\") to search only that law; leave it out to search every law held. Matches both the words of the query and its meaning. Returns up to 6 passages, each numbered [Source n] for citation and labelled with the Act and the section it sits in where that can be told; a query naming a section of the Act returns that section whole, first.",
+      description: "Search the firm's law library — the Pakistani Acts, Ordinances, Rules and Regulations the firm holds — for passages on a legal question. Name the law in `act` when you know it (e.g. \"Companies Act, 2017\") to search only that law; leave it out to search every law held. Matches both the words of the query and its meaning. Returns up to 6 passages, each numbered [Source n] for citation and labelled with the Act and the section it sits in where that can be told; a query naming a section of the Act returns that section whole, first. Use it for any question that turns on Pakistani law, a statute, rule or regulation.",
       inputSchema: {
         query: z.string().describe("What to look for, in the words a statute would use, e.g. \"related party transactions arm's length\"."),
         act: z.string().optional().describe("Optional: the law to search within, e.g. \"Companies Act, 2017\"."),
@@ -347,7 +347,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, anth
     {
       name: "search_precedents",
       title: "Search the precedent library",
-      description: "Search the firm's precedent library — agreements and documents the firm has drafted before — for clauses or passages on a point (e.g. \"liquidated damages for delay\"). Optionally limit to one document type by name (e.g. \"Concession Agreement\"). Returns up to 6 clause-level passages, at most 3 from one document, each numbered [Source n] and labelled with the file and clause.",
+      description: "Search the firm's precedent library — agreements and documents the firm has drafted before — for clauses or passages on a point (e.g. \"liquidated damages for delay\"). Optionally limit to one document type by name (e.g. \"Concession Agreement\"). Returns up to 6 clause-level passages, at most 3 from one document, each numbered [Source n] and labelled with the file and clause. Use it before drafting or reviewing any agreement, contract or clause.",
       inputSchema: {
         query: z.string().describe("The clause or point to find."),
         document_type: z.string().optional().describe("Optional: a document type name to limit the search to."),
@@ -363,7 +363,7 @@ export function createHubTools({ supabase, voyageKey, anthropicJson = null, anth
     {
       name: "list_projects",
       title: "List projects",
-      description: "The firm's projects (matters) on the Hub, with their ids; the ones you have starred on the Hub come first. Open projects only unless includeClosed is true. Use a project's id with list_project_documents, search_project_documents and get_project_overview.",
+      description: "The firm's projects (matters) on the Hub, with their ids; the ones you have starred on the Hub come first. Open projects only unless includeClosed is true. Use a project's id with list_project_documents, search_project_documents and get_project_overview. Use it whenever the lawyer names a client, deal, matter or project.",
       inputSchema: {
         includeClosed: z.boolean().optional().describe("Also list closed projects. Default false."),
       },

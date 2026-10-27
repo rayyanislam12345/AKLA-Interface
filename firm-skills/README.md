@@ -16,6 +16,7 @@ execute in a sandbox and the files they build come back as artifacts.
 | `akla-dd-format` | Brings a due-diligence volume to the house format | `~/.claude/skills/akla-dd-format` |
 | `akla-findings-pack` | Findings register (Excel) and a numbered-items deck from one findings list | KP Carbon Credits / MEW / PTQ `build_findings_register.py`, `build_deck.py` |
 | `akla-presentation` | House-style decks from a short script over the firm's layout engine, with an overflow check | Presentation KPT BOT `tools/` (`akla_deck.py`, `arial.py`, `render.py`, base deck) |
+| `akla-hub-first` | claude.ai only, not registered in the Hub: claude.ai shows every skill's description at the start of a chat but loads a connector's tools only when Claude looks for them, so this skill sends any legal task to the AKLA Hub connector first (firm rules, search, file every draft) | written for the connector, 27 Oct 2026 |
 
 ## Packaging and registering
 
