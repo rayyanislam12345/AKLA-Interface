@@ -1,5 +1,6 @@
 // Every document the AI Workspace writes is delivered as a Word file in the
-// firm's house format. The model writes Markdown; akla/build_docx.py turns it
+// firm's house format, in one of two layouts: an agreement's, or a memo's
+// (aklaLayout below). The model writes Markdown; akla/build_docx.py turns it
 // into the Word file to the firm's Word Formatting and Shortcuts Guide, as
 // measured from circulated firm documents — A4, Arial 11, the title on a navy
 // banner, "1." section headings in bold small caps with a rule beneath, a
@@ -36,11 +37,36 @@ export function aklaFileName(title, date = aklaDate()) {
   return `${stem} [AKLA][${date}].docx`;
 }
 
-export async function renderAklaDocx({ markdown, title, status = "Draft", date = aklaDate(), timeoutMs = 60_000 }) {
+// The firm sets an agreement differently from a memo (docs/house-format.md):
+// a cover page, the parties and recitals, bold small caps throughout and no
+// banner or emblem. These say which documents are agreements.
+const MEMO_CATEGORIES = new Set(["Reports", "Meetings & Correspondence", "General/Legal"]);
+const AGREEMENT_WORDS = /\b(agreement|deed|contract|term\s*sheet|heads\s+of\s+terms|undertaking|guarantee|indenture|memorandum\s+of\s+understanding|mou|side\s+letter|letter\s+of\s+(?:lien|hypothecation|comfort|credit)|charter|articles\s+of\s+association|power\s+of\s+attorney|pledge|mortgage|assignment|lease|licen[cs]e|novation)\b/i;
+const MEMO_WORDS = /\b(notes?\s+on|memo\b|memorandum\s+(?:on|of\s+law|regarding)|report|minutes|meeting\s+notes|proposal|opinion|summary|review|analysis|research|concept\s+(?:note|paper)|briefing|advice|issues\s+list|checklist|register|tracker|comments\s+on|mark-?up\s+of)\b/i;
+
+/**
+ * "agreement" or "memo": the layout a document is set in. The document's
+ * type decides where it has one; otherwise its title, and then its first
+ * heading, by the words that name an agreement ("Notes on the Concession
+ * Agreement" is a memo: the memo words win).
+ */
+export function aklaLayout({ title, markdown, category } = {}) {
+  if (category) return MEMO_CATEGORIES.has(category) ? "memo" : "agreement";
+  const heading = /^\s*#\s+(.+)$/m.exec(String(markdown ?? ""))?.[1] ?? "";
+  for (const text of [title, heading]) {
+    const t = String(text ?? "");
+    if (!t.trim()) continue;
+    if (MEMO_WORDS.test(t)) return "memo";
+    if (AGREEMENT_WORDS.test(t)) return "agreement";
+  }
+  return "memo";
+}
+
+export async function renderAklaDocx({ markdown, title, status = "Draft", date = aklaDate(), layout = "memo", timeoutMs = 60_000 }) {
   const dir = await mkdtemp(join(tmpdir(), "akla-"));
   const out = join(dir, "document.docx");
   try {
-    const args = [SCRIPT, "-", "-o", out, "--doc-title", String(title ?? "").slice(0, 200), "--doc-status", status, "--doc-date", date];
+    const args = [SCRIPT, "-", "-o", out, "--doc-title", String(title ?? "").slice(0, 200), "--doc-status", status, "--doc-date", date, "--layout", layout === "agreement" ? "agreement" : "memo"];
     const stderr = await new Promise((resolve, reject) => {
       const child = spawn(python(), args, { stdio: ["pipe", "ignore", "pipe"] });
       let err = "";
@@ -63,7 +89,7 @@ export async function renderAklaDocx({ markdown, title, status = "Draft", date =
       child.stdin.end(markdown);
     });
     const bytes = new Uint8Array(await readFile(out));
-    return { bytes, warnings: String(stderr).split("\n").map((l) => l.trim()).filter(Boolean), check: checkAklaFormat(bytes) };
+    return { bytes, layout, warnings: String(stderr).split("\n").map((l) => l.trim()).filter(Boolean), check: checkAklaFormat(bytes, { layout }) };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -73,7 +99,7 @@ export async function renderAklaDocx({ markdown, title, status = "Draft", date =
  * Checks a rendered file against the house format. A failure here means the
  * renderer regressed, so it is recorded on the document for anyone to see.
  */
-export function checkAklaFormat(bytes) {
+export function checkAklaFormat(bytes, { layout = "memo" } = {}) {
   const files = unzipSync(bytes);
   const part = (name) => (files[name] ? strFromU8(files[name]) : "");
   const doc = part("word/document.xml");
@@ -105,9 +131,16 @@ export function checkAklaFormat(bytes) {
   if (!/<w:sz w:val="26"\/>/.test(heading1) || !/<w:smallCaps\/>/.test(heading1) || !/<w:b\/>/.test(heading1)) findings.push("Section headings are not 13pt bold small caps.");
   if (!/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody1")) || !/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody2"))) findings.push("Body paragraphs are not numbered by their style.");
 
-  // Title banner, header, footer.
-  if (/<w:pStyle w:val="AKLATitle"\/>/.test(doc) && !/w:fill="002060"/.test(doc)) findings.push("The title is not on the navy banner.");
-  if (!headers.includes("C00000")) findings.push("The running header's confidentiality line is missing.");
+  // Title, header, footer: a memo's title on the navy banner and a red
+  // confidentiality line; an agreement's title centred over a rule, and no
+  // banner, emblem or red line anywhere.
+  if (layout === "agreement") {
+    if (!/<w:pStyle w:val="AKLAAgreementTitle"\/>/.test(doc)) findings.push("The agreement's title is missing.");
+    if (/w:fill="002060"/.test(doc) || headers.includes("C00000") || /<w:drawing/.test(headers)) findings.push("The agreement carries memo furniture (a banner, the emblem or a red line).");
+  } else {
+    if (/<w:pStyle w:val="AKLATitle"\/>/.test(doc) && !/w:fill="002060"/.test(doc)) findings.push("The title is not on the navy banner.");
+    if (!headers.includes("C00000")) findings.push("The running header's confidentiality line is missing.");
+  }
   if (!/PAGE/.test(footers) || !/NUMPAGES/.test(footers)) findings.push("The Page X of Y footer is missing.");
 
   if (/\[\[\s*AKLA|\[\^[^\]]+\]/i.test(doc)) findings.push("A comment or footnote marker was left in the text.");

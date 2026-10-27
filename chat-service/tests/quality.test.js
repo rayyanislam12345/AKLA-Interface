@@ -255,6 +255,64 @@ test('a generated document is rendered in AKLA house format, remarks as Word com
   assert.equal(aklaFileName('Notes: On/The "Deal"', 'September 14, 2026'), 'Notes On The Deal [AKLA][September 14, 2026].docx');
 });
 
+test('an agreement is set as the firm sets its agreements: cover, parties, lettered recitals, unnumbered definitions, no banner', async () => {
+  const { renderAklaDocx, aklaLayout } = await import('../aklaRender.js');
+  assert.equal(aklaLayout({ title: 'Subordinated Debt Agreement – M-6 Section I' }), 'agreement');
+  assert.equal(aklaLayout({ title: 'Notes on the Concession Agreement' }), 'memo');
+  assert.equal(aklaLayout({ title: 'Memorandum of Understanding' }), 'agreement');
+  assert.equal(aklaLayout({ title: 'Memorandum on the Privatisation' }), 'memo');
+  assert.equal(aklaLayout({ title: 'Anything', category: 'Financing & Security' }), 'agreement');
+  assert.equal(aklaLayout({ title: 'Escrow Agreement', category: 'Reports' }), 'memo', 'the type decides first');
+  assert.equal(aklaLayout({ markdown: '# Share Pledge Deed\n' }), 'agreement');
+  const markdown = [
+    '# Escrow Agreement',
+    'Party: EnerTech Water (Private) Limited | the Project Company',
+    'Party: Ali Khan Law Associates | the Escrow Agent',
+    'Dated: [●], 2026',
+    'At: Karachi, Pakistan',
+    'This Escrow Agreement (this **Agreement**) is made on [●] by and between:',
+    '**EnerTech Water (Private) Limited**, a company incorporated in Pakistan (the **Project Company**);',
+    'And',
+    '**Ali Khan Law Associates**, a sole proprietorship (the **Escrow Agent**).',
+    '## Recitals',
+    'The Project Company requires an escrow agent.',
+    'The Escrow Agent has agreed to act.',
+    'Now, Therefore, the Parties agree as follows:',
+    '## Definitions And Interpretation',
+    '### Definitions',
+    '**Escrow Account** means the account opened under Clause 2;',
+    '- **Payment Instruction** means a written instruction;',
+    '## Appointment',
+    'The Project Company appoints the Escrow Agent. [[AKLA Comment: The Firm notes the fee is to be agreed.]]',
+    '- to hold the funds; and',
+    '- to disburse them.',
+    '## Execution',
+    'For and on behalf of EnerTech Water (Private) Limited',
+    'Name: [●]',
+    '## Schedule A – Payment Instruction',
+    'Form of instruction.',
+  ].join('\n');
+  const { bytes, check, layout } = await renderAklaDocx({ markdown, title: 'Escrow Agreement', date: 'October 27, 2026', layout: 'agreement' });
+  assert.equal(layout, 'agreement');
+  assert.deepEqual(check.findings, []);
+  assert.equal(check.comments, 1);
+  const files = unzipSync(bytes);
+  const doc = strFromU8(files['word/document.xml']);
+  const numbering = strFromU8(files['word/numbering.xml']);
+  const headers = Object.keys(files).filter((n) => /^word\/header/.test(n)).map((n) => strFromU8(files[n])).join('');
+  assert.ok(!doc.includes('002060') && !headers.includes('<w:drawing') && !headers.includes('C00000'), 'no banner, emblem or red line');
+  assert.ok(doc.includes('<w:vAlign w:val="center"/>'), 'the cover is its own page, centred');
+  assert.ok(doc.includes('By &amp; Between:') && doc.includes('(As The Project Company)'), 'the cover names the parties and their roles');
+  assert.ok(headers.includes('AKLA Draft'), 'the header carries the draft line');
+  assert.equal((doc.match(/<w:pStyle w:val="AKLARecital"\/>/g) ?? []).length, 2, 'two lettered recitals; "Now, Therefore," is not one');
+  assert.ok(/w:abstractNumId="7500"[\s\S]*?w:val="upperLetter"/.test(numbering), 'recitals are lettered A., B.');
+  assert.equal((doc.match(/<w:pStyle w:val="AKLADefinition"\/>/g) ?? []).length, 2, 'both definitions are unnumbered, the list item too');
+  assert.ok(!doc.includes('**'), 'no Markdown left in the text');
+  assert.ok(/<w:pStyle w:val="AKLAJoiner"\/>[\s\S]*?<w:t[^>]*>And<\/w:t>/.test(doc), '"And" between the parties is centred');
+  assert.equal((doc.match(/<w:pStyle w:val="AKLAScheduleTitle"\/>/g) ?? []).length, 2, 'execution and the schedule start their own pages');
+  assert.ok(/<w:smallCaps\/>[\s\S]{0,200}For And On Behalf Of/.test(doc), 'a signing line is in bold small caps');
+});
+
 test('a review chat runs a new review only when asked, and "review it" is not an instruction', async () => {
   const { isBareReviewRequest, asksForReviewRerun } = await import('../chatState.js');
   for (const m of ['review it', 'Review this.', 'please review the attached document', 'can you check this for me?', 'verify', '']) assert.equal(isBareReviewRequest(m), true, m);

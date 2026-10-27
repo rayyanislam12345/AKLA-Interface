@@ -29,7 +29,7 @@ import { retrieve, MIN_RELEVANCE } from "./retrieve.js";
 import { inspectDocx, extractOps, applyDocxOps, describeResults, OPS_PROTOCOL, applyReviewSuggestions, acceptChangesBy, acceptAllChanges } from "./docxAgent.js";
 import { runReview, reviewDocument, commitReview, failReviewRun, checkReviewInstruction } from "./review.js";
 import { editRecords, recordedResults, reviewRecords, reconcile, findRevisions, countsFor, countsWith, cardsFor, placementNote, codeFor, stateOf, applyDecisions, withDocumentLock, notDoneFor, undecidable, cleanRefusal, CHANGED_WHILE_DECIDING, NO_CHANGES_YET } from "./changes.js";
-import { renderAklaDocx, aklaFileName } from "./aklaRender.js";
+import { renderAklaDocx, aklaFileName, aklaLayout } from "./aklaRender.js";
 import { checkFormat, formatRecord, variableLinesFor, storeUnlessRefused, openWorkingCopy } from "./formatFingerprint.js";
 import { packForBase, packPromptBlock, packMap, packTypesOf, packTypeFor, packPointer, withPackColumns, PACK_COLUMNS } from "./draftingPacks.js";
 import { mentionsProjectDocuments, fitDocuments } from "./contextBudget.js";
@@ -653,7 +653,7 @@ async function readDocumentText(supabase, a) {
 // format. Returns the stored file's details, or throws.
 async function storeAklaWord(supabase, { markdown, title, prefix, threadId }) {
   const fileName = aklaFileName(title);
-  const rendered = await renderAklaDocx({ markdown, title });
+  const rendered = await renderAklaDocx({ markdown, title, layout: aklaLayout({ title, markdown }) });
   const storagePath = `${prefix}/${threadId}/${Date.now()}-${fileName.replace(/[^\w.-]+/g, "-").replace(/-{2,}/g, "-")}`;
   const { error } = await supabase.storage.from("ai-chat-files").upload(storagePath, rendered.bytes, { contentType: DOCX_MIME });
   if (error) throw new Error(`Couldn't store the Word file: ${error.message}`);

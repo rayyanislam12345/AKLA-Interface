@@ -40,9 +40,38 @@ Input is a Markdown subset:
     [[AKLA Comment: ...]]   -> native Word comment by "AKLA Comments"
     [^1] ... [^1]: note     -> the note becomes a comment where it is cited
 
+That is the memo layout: memoranda, notes, reports, minutes and proposals.
+Agreements, deeds, term sheets, undertakings and guarantees take the
+agreement layout (--layout agreement), measured on October 27, 2026 from the
+71 documents in the precedent library the firm wrote itself (34 of them
+agreements; scripts in docs/house-format.md). The firm's agreements carry no
+banner and no logo; what sets them apart from other firms' drafts is bold
+small caps for every title, heading and party name, and defined terms in
+bold inside brackets without quotation marks. In that layout:
+
+    # Title                 -> cover page title and the body's title, centred
+                               bold small caps over a rule
+    Party: Name | role      -> on the cover, "By & Between:" each party in
+                               bold small caps "(As The role)", "And" between
+    Dated: / At: / Regarding:  the cover's date, place and subject lines
+    other front matter      -> the preamble, justified; a paragraph opening on
+                               **Name** sets the name in bold small caps, and a
+                               line "And" or "By and between:" is centred
+    ## Recitals             -> unnumbered heading; its paragraphs are lettered
+                               A., B., C.; "Now, Therefore," in bold small caps
+    ## Clause               -> numbered as in the memo layout
+    **Term** means ...      -> a definition: unnumbered, set to the clause text
+    - item                  -> (a) (i) A., one step in from the clause text
+    ## Schedule A - Name    -> new page, centred heading, unnumbered content;
+    ## Execution            -> likewise, with "For And On Behalf Of" lines in
+                               bold small caps
+A contents page follows the cover once there are five or more clauses.
+
 Usage:
     python3 build_docx.py NOTES.md -o OUT.docx --doc-title "..." --doc-status "Draft" --doc-date "September 15, 2026"
+    python3 build_docx.py DRAFT.md -o OUT.docx --layout agreement --doc-title "..." --doc-date "..."
 """
+import copy
 import argparse
 import os
 import re
@@ -81,8 +110,14 @@ OUTLINE = (7100, 7101)      # abstractNumId, numId for 1. / 1.1. / 1.1.1.
 # ids are the two indentation contexts a list can sit in.
 LIST_UNDER_BODY1 = 7200     # (a) under a 1.1. paragraph
 LIST_UNDER_BODY2 = 7300     # (a) under a 1.1.1. paragraph
+RECITALS = 7500             # A. B. C., an agreement's recitals
+LIST_IN_CLAUSE = 7600       # (a) one step in from the clause text (agreements)
+STEP = 720                  # twips (1.27 cm), one step of indentation
 
 FIRM_NAME = re.compile(r"(Ali Khan Law Associates)")
+# The firm's name in running text is italic navy in a memo; in an agreement it
+# is a party's name like any other. render() turns this off for agreements.
+STYLE_FIRM_NAME = True
 
 # Each of these element sequences is schema-mandated: append a child out of
 # order and Word declares the file corrupt on open.
@@ -268,6 +303,22 @@ def build_numbering(doc):
         lists.append(_level(2, "upperLetter", "%3.", TEXT_AT, TEXT_AT))
         numbering.append(lists)
 
+    # An agreement's recitals: the letter at the margin, the text where the
+    # clauses' text starts.
+    recitals = _el("w:abstractNum", **{"w:abstractNumId": RECITALS})
+    recitals.append(_el("w:multiLevelType", **{"w:val": "singleLevel"}))
+    recitals.append(_level(0, "upperLetter", "%1.", TEXT_AT, TEXT_AT))
+    numbering.append(recitals)
+
+    # In the firm's agreements a list under a clause steps in: (a) where the
+    # clause text starts, its text one step further, (i) a step beyond.
+    in_clause = _el("w:abstractNum", **{"w:abstractNumId": LIST_IN_CLAUSE})
+    in_clause.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
+    in_clause.append(_level(0, "lowerLetter", "(%1)", TEXT_AT + STEP, STEP))
+    in_clause.append(_level(1, "lowerRoman", "(%2)", TEXT_AT + 2 * STEP, STEP))
+    in_clause.append(_level(2, "upperLetter", "%3.", TEXT_AT + 3 * STEP, STEP))
+    numbering.append(in_clause)
+
     num = _el("w:num", **{"w:numId": OUTLINE[1]})
     num.append(_el("w:abstractNumId", **{"w:val": OUTLINE[0]}))
     numbering.append(num)
@@ -296,7 +347,8 @@ class ListNumbers:
 
 def style(doc, name, base="Normal", size=None, bold=None, italic=None, small_caps=None,
           underline=None, color=None, align=None, before=None, after=None,
-          keep_next=False, outline=None, numbered=None, rule=False, left=None, hanging=None, right=None):
+          keep_next=False, outline=None, numbered=None, rule=False, left=None, hanging=None, right=None,
+          page_break=False):
     st = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
     st.base_style = doc.styles[base]
     st.quick_style = True
@@ -322,6 +374,8 @@ def style(doc, name, base="Normal", size=None, bold=None, italic=None, small_cap
         pf.space_after = Pt(after)
     if keep_next:
         pf.keep_with_next = True
+    if page_break:
+        pf.page_break_before = True
     ppr = st.element.get_or_add_pPr()
     if numbered is not None:
         numbering_ref(ppr, OUTLINE[1], numbered)
@@ -368,6 +422,21 @@ def build_styles(doc):
     style(doc, "AKLA Table Header", bold=True, small_caps=True, color=GOLD, align=CENTER, before=0, after=0)
     style(doc, "AKLA Header", size=SMALL_PT, small_caps=True, align=LEFT, before=0, after=0)
     style(doc, "AKLA Footer", size=SMALL_PT, align=CENTER, before=0, after=0)
+
+    # The agreement layout's own styles.
+    JUSTIFY = WD_ALIGN_PARAGRAPH.JUSTIFY
+    style(doc, "AKLA Cover Title", size=TITLE_PT + 2, bold=True, small_caps=True, align=CENTER, before=12, after=18)
+    style(doc, "AKLA Cover", small_caps=True, align=CENTER, before=0, after=6)
+    style(doc, "AKLA Agreement Title", size=HEADING_PT, bold=True, small_caps=True, align=CENTER, before=0, after=12, rule=True)
+    style(doc, "AKLA Preamble", align=JUSTIFY, after=10)
+    style(doc, "AKLA Joiner", bold=True, small_caps=True, align=CENTER, after=10, keep_next=True)
+    style(doc, "AKLA Heading Plain", size=HEADING_PT, bold=True, small_caps=True, align=LEFT, before=12, after=10,
+          keep_next=True, rule=True)
+    style(doc, "AKLA Recital", align=JUSTIFY, after=10)
+    style(doc, "AKLA Definition", align=JUSTIFY, after=10, left=TEXT_AT)
+    style(doc, "AKLA Schedule Title", size=HEADING_PT, bold=True, small_caps=True, align=CENTER, before=0, after=12,
+          keep_next=True, outline=0, rule=True, page_break=True)
+    style(doc, "AKLA Schedule Heading", bold=True, small_caps=True, align=LEFT, before=6, after=10, keep_next=True)
 
 
 # --------------------------------------------------------------------------
@@ -566,7 +635,7 @@ def add_runs(paragraph, text):
                 run.bold = True
             if italic:
                 run.italic = True
-            if FIRM_NAME.fullmatch(piece):
+            if STYLE_FIRM_NAME and FIRM_NAME.fullmatch(piece):
                 # The Guide: the firm's name in running text is italic, dark blue.
                 run.italic = True
                 run.font.color.rgb = RGBColor.from_string(NAVY)
@@ -639,6 +708,203 @@ def data_table(doc, rows, indent_twips):
     doc.add_paragraph(style="AKLA Front").paragraph_format.space_after = Pt(4)
 
 
+# --------------------------------------------------------------------------
+# the agreement layout
+# --------------------------------------------------------------------------
+
+COVER_FIELD = re.compile(r"^(party|dated|date|at|place|regarding|in respect of)\s*:\s*(.+)$", re.IGNORECASE)
+RECITALS_HEADING = re.compile(r"^(recitals|background|preamble|whereas)\W*$", re.IGNORECASE)
+SCHEDULE_HEADING = re.compile(r"^(schedule|annexure|annex|appendix|exhibit)\b", re.IGNORECASE)
+EXECUTION_HEADING = re.compile(r"^(execution(\s+page)?|signature\s+pages?|signatures|signing\s+page|in\s+witness\s+whereof)\W*$", re.IGNORECASE)
+JOINER = re.compile(r"^(?:\*\*)?(and|by\s*(?:and|&)\s*between\s*:?|between\s*:?)(?:\*\*)?$", re.IGNORECASE)
+# Words an agreement sets in bold small caps where they open a paragraph.
+LEAD = re.compile(r"^(?:\*\*)?(now,?\s+therefore,?|now\s+this\s+(?:agreement|deed)\s+witnesse(?:s|th)\s*(?:as\s+follows)?:?|in\s+witness\s+whereof,?|whereas,?|resolved\s+that,?|further\s+resolved\s+that,?|for\s+and\s+on\s+behalf\s+of|signed\s+(?:for\s+and\s+on\s+behalf\s+of|by))(?:\*\*)?", re.IGNORECASE)
+DEFINITION = re.compile(r"^\*\*[^*]+\*\*(?:\s*(?:or|and|,)\s*\*\*[^*]+\*\*)*\s+(means|mean|shall|has|have|includes|include|refers|is|are)\b")
+# A party line names the role after "|" or in brackets: "Name | the Concessionaire", "Name (as the Concessionaire)".
+PARTY_ROLE = re.compile(r"^(.*?)\s*(?:\|\s*(.+)|\((?:as\s+)?(.+)\))\s*$", re.IGNORECASE)
+
+
+def title_case(text):
+    return " ".join(w[:1].upper() + w[1:] for w in text.split(" "))
+
+
+def add_lead_runs(paragraph, text, lead_name=False):
+    """A paragraph whose opening words the firm sets in bold small caps.
+
+    "Now, Therefore," / "In Witness Whereof" / "For And On Behalf Of", and,
+    with lead_name, a party's name written **in bold** at the start.
+    """
+    m = LEAD.match(text)
+    if not m and lead_name:
+        m = re.match(r"^\*\*([^*]+)\*\*", text)
+    if not m:
+        add_runs(paragraph, text)
+        return
+    lead = m.group(1) if m.lastindex else m.group(0)
+    run = paragraph.add_run(title_case(lead.strip("*")) if LEAD.match(text) else lead)
+    run.bold = True
+    run.font.small_caps = True
+    add_runs(paragraph, text[m.end():])
+
+
+def page_break(doc):
+    p = doc.add_paragraph(style="AKLA Front")
+    p.paragraph_format.space_after = Pt(0)
+    br = OxmlElement("w:r")
+    br.append(_el("w:br", **{"w:type": "page"}))
+    p._p.append(br)
+
+
+def top_rule(ppr):
+    borders = OxmlElement("w:pBdr")
+    borders.append(_el("w:top", **{"w:val": "single", "w:sz": 6, "w:space": 12, "w:color": "000000"}))
+    ppr_insert(ppr, borders)
+
+
+def cover_page(doc, title, fields):
+    """The cover: title, "By & Between:", each party and its role, date and
+    place, set between two rules and centred on its own page."""
+    parties = [v for k, v in fields if k == "party"]
+    first = doc.add_paragraph(style="AKLA Cover Title")
+    add_runs(first, title)
+    top_rule(first._p.get_or_add_pPr())
+    for k, v in fields:
+        if k in ("regarding", "in respect of"):
+            p = doc.add_paragraph(style="AKLA Cover")
+            add_runs(p, v)
+    p = doc.add_paragraph(style="AKLA Cover")
+    add_runs(p, "By & Between:")
+    for i, party in enumerate(parties):
+        if i:
+            add_runs(doc.add_paragraph(style="AKLA Cover"), "And")
+        m = PARTY_ROLE.match(party)
+        name, role = (m.group(1), m.group(2) or m.group(3)) if m else (party, None)
+        p = doc.add_paragraph(style="AKLA Cover")
+        p.paragraph_format.space_after = Pt(0 if role else 6)
+        run_start = len(p.runs)
+        add_runs(p, name.strip().strip("*"))
+        for run in p.runs[run_start:]:
+            run.bold = True
+        if role:
+            role = re.sub(r"^as\s+", "", role.strip().strip("()"), flags=re.IGNORECASE)
+            add_runs(doc.add_paragraph(style="AKLA Cover"), f"(As {title_case(role)})")
+    last = None
+    for k, v in fields:
+        if k in ("dated", "date"):
+            p = doc.add_paragraph(style="AKLA Cover")
+            p.paragraph_format.space_before = Pt(12)
+            add_runs(p, "Dated As Of:")
+            last = doc.add_paragraph(style="AKLA Cover")
+            run_start = len(last.runs)
+            add_runs(last, v)
+            for run in last.runs[run_start:]:
+                run.bold = True
+        elif k in ("at", "place"):
+            p = doc.add_paragraph(style="AKLA Cover")
+            p.paragraph_format.space_before = Pt(12)
+            add_runs(p, "At:")
+            last = doc.add_paragraph(style="AKLA Cover")
+            add_runs(last, v)
+    last = last or doc.paragraphs[-1]
+    bottom_rule(last._p.get_or_add_pPr(), space=12)
+
+    # The cover is its own section, centred top to bottom and without the
+    # running header; the header and "Page X of Y" start on the next page.
+    body_sect = doc.element.body.find(qn("w:sectPr"))
+    sect = copy.deepcopy(body_sect)
+    for tag in ("w:headerReference", "w:footerReference", "w:titlePg"):
+        for el in sect.findall(qn(tag)):
+            sect.remove(el)
+    v = _el("w:vAlign", **{"w:val": "center"})
+    grid = sect.find(qn("w:docGrid"))
+    if grid is not None:
+        grid.addprevious(v)
+        grid.addprevious(OxmlElement("w:titlePg"))
+    else:
+        sect.append(v)
+        sect.append(OxmlElement("w:titlePg"))
+    holder = doc.add_paragraph(style="AKLA Front")
+    holder.paragraph_format.space_after = Pt(0)
+    holder._p.get_or_add_pPr().append(sect)
+    for el in body_sect.findall(qn("w:titlePg")):
+        body_sect.remove(el)
+
+
+def contents_page(doc):
+    p = doc.add_paragraph(style="AKLA Divider")
+    add_runs(p, "Table Of Contents")
+    toc = doc.add_paragraph(style="AKLA Front")
+    field = _el("w:fldSimple", **{"w:instr": 'TOC \\o "1-2" \\h \\z \\u'})
+    placeholder = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "Right-click and choose Update Field to show the table of contents."
+    placeholder.append(t)
+    field.append(placeholder)
+    toc._p.append(field)
+    page_break(doc)
+    return p
+
+
+def agreement_front(doc, lines):
+    """Takes the agreement's title and cover lines off the top of the
+    Markdown and sets the cover, the contents page and the body's title.
+    Returns the lines that remain."""
+    i = next((k for k, l in enumerate(lines) if re.match(r"^#\s+", l.strip())), None)
+    if i is None:
+        return lines
+    title = re.sub(r"^#\s+", "", lines[i].strip())
+    first_section = next((k for k in range(i + 1, len(lines)) if re.match(r"^##\s+", lines[k].strip())), len(lines))
+    fields, kept = [], []
+    for k in range(i + 1, first_section):
+        m = COVER_FIELD.match(lines[k].strip().strip("*").replace("**", ""))
+        if m:
+            fields.append((m.group(1).lower(), m.group(2).strip()))
+        else:
+            kept.append(lines[k])
+    headings = [re.sub(r"^##\s+", "", l.strip()) for l in lines if re.match(r"^##\s+", l.strip())]
+    clauses = [h for h in headings if not (RECITALS_HEADING.match(h) or SCHEDULE_HEADING.match(h) or EXECUTION_HEADING.match(h) or TOC_HEADING.match(h))]
+    if any(k == "party" for k, _ in fields):
+        cover_page(doc, title, fields)
+    if len(clauses) >= 5 or any(TOC_HEADING.match(h) for h in headings):
+        contents_page(doc)
+    add_runs(doc.add_paragraph(style="AKLA Agreement Title"), title)
+    return lines[:i] + kept + lines[first_section:]
+
+
+def agreement_paragraph(doc, line, part, recital_num):
+    """A paragraph of an agreement that is not a numbered clause."""
+    joiner = JOINER.match(line)
+    if joiner and part in ("front", "recitals"):
+        p = doc.add_paragraph(style="AKLA Joiner")
+        add_runs(p, title_case(joiner.group(1).lower()))
+        return p
+    if part == "clauses" and DEFINITION.match(line):
+        p = doc.add_paragraph(style="AKLA Definition")
+        add_runs(p, line)
+        return p
+    lead = LEAD.match(line)
+    only_lead = bool(lead) and not line[lead.end():].strip(" :,")
+    if part == "recitals" and recital_num and not only_lead and not re.match(r"^(?:\*\*)?now", line, re.IGNORECASE):
+        p = doc.add_paragraph(style="AKLA Recital")
+        numbering_ref(p._p.get_or_add_pPr(), recital_num, 0)
+        add_lead_runs(p, line)
+        return p
+    p = doc.add_paragraph(style="AKLA Preamble")
+    if part == "execution" and not lead:
+        p.paragraph_format.space_after = Pt(4)
+    if lead and re.match(r"^(?:\*\*)?(for\s+and\s+on\s+behalf|signed)", line, re.IGNORECASE):
+        # A signing line is bold small caps from end to end: "For And On Behalf Of Habib Construction Services Limited".
+        p.paragraph_format.keep_with_next = True
+        run_start = len(p.runs)
+        add_runs(p, title_case(line.replace("**", "")))
+        for run in p.runs[run_start:]:
+            run.bold = True
+            run.font.small_caps = True
+        return p
+    add_lead_runs(p, line, lead_name=part == "front")
+    return p
+
+
 def split_row(line):
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
@@ -647,15 +913,26 @@ DIVIDER = re.compile(r"^\|[\s:|-]+\|$")
 ITEM = re.compile(r"^(\s*)(?:[-*•]|\d{1,2}[.)]|\([a-z]{1,4}\))\s+(.*)$")
 
 
-def render(doc, markdown, numbering):
+def render(doc, markdown, numbering, layout="memo"):
     lists = ListNumbers(numbering)
+    agreement = layout == "agreement"
     title_done = False
     in_sections = False
     body_level = 1        # the outline level body text takes where it stands
     list_num = None       # the w:num of the list in progress, if any
     last = None
+    # Where an agreement's text stands: front (the preamble), recitals,
+    # clauses, schedule (a schedule or annexure), execution (signing).
+    part = "front"
+    recital_num = None
     lines = fold_comments_log(fold_footnotes(markdown.replace("\r\n", "\n"))).split("\n")
     lines = [re.sub(r"`([^`]*)`", r"\1", l) for l in lines]   # code marks are not document formatting
+    global STYLE_FIRM_NAME
+    STYLE_FIRM_NAME = not agreement
+    if agreement:
+        before = len(lines)
+        lines = agreement_front(doc, lines)
+        title_done = len(lines) < before
     i = 0
     while i < len(lines):
         raw = lines[i]
@@ -716,6 +993,11 @@ def render(doc, markdown, numbering):
                 if notes:
                     print("warning: a comment on the title was dropped", file=sys.stderr)
                 continue
+            if TOC_HEADING.match(text) and agreement:
+                # agreement_front has set Word's own contents page already.
+                while i < len(lines) and not re.match(r"^#{1,4}\s", lines[i].strip()):
+                    i += 1
+                continue
             if TOC_HEADING.match(text):
                 # A contents list typed by hand goes stale the moment a
                 # section moves; Word's own table of contents does not.
@@ -733,9 +1015,28 @@ def render(doc, markdown, numbering):
                     i += 1
                 last = p
                 continue
+            if agreement and depth == 2 and (RECITALS_HEADING.match(text) or SCHEDULE_HEADING.match(text) or EXECUTION_HEADING.match(text)):
+                in_sections = True
+                if RECITALS_HEADING.match(text):
+                    part, recital_num = "recitals", lists.new(RECITALS)
+                    p = doc.add_paragraph(style="AKLA Heading Plain")
+                else:
+                    part = "schedule" if SCHEDULE_HEADING.match(text) else "execution"
+                    p = doc.add_paragraph(style="AKLA Schedule Title")
+                add_runs(p, text)
+                attach_comments(doc, p, notes)
+                last = p
+                continue
+            if agreement and depth == 3 and part in ("schedule", "execution"):
+                p = doc.add_paragraph(style="AKLA Schedule Heading")
+                add_runs(p, text)
+                attach_comments(doc, p, notes)
+                last = p
+                continue
             if depth == 4:
                 p = doc.add_paragraph(style="AKLA Divider")
             else:
+                part = "clauses"
                 in_sections = True
                 p = doc.add_paragraph(style="AKLA Heading 1" if depth == 2 else "AKLA Heading 2")
                 body_level = 1 if depth == 2 else 2
@@ -755,10 +1056,16 @@ def render(doc, markdown, numbering):
             continue
 
         item = ITEM.match(take_comments(raw.rstrip())[0]) if in_sections else None
+        if item and agreement and part == "clauses" and DEFINITION.match(item.group(2).strip()):
+            item = None   # a definition written as a list item is still a definition
+            line = re.sub(r"^\s*(?:[-*•]|\d{1,2}[.)]|\([a-z]{1,4}\))\s+", "", take_comments(raw.rstrip())[0]).strip()
         if item:
             depth = min(2, len(item.group(1).replace("\t", "    ")) // 2)
             if list_num is None:
-                list_num = lists.new(LIST_UNDER_BODY1 if body_level == 1 else LIST_UNDER_BODY2)
+                if agreement and part == "clauses":
+                    list_num = lists.new(LIST_IN_CLAUSE)
+                else:
+                    list_num = lists.new(LIST_UNDER_BODY1 if body_level == 1 else LIST_UNDER_BODY2)
             p = doc.add_paragraph(style="AKLA List")
             numbering_ref(p._p.get_or_add_pPr(), list_num, depth)
             add_runs(p, item.group(2).strip())
@@ -767,6 +1074,15 @@ def render(doc, markdown, numbering):
             continue
 
         list_num = None
+        if agreement and (not in_sections or part != "clauses" or LEAD.match(line) or DEFINITION.match(line)):
+            p = agreement_paragraph(doc, line, part, recital_num)
+            if part == "clauses" and re.match(r"^(?:\*\*)?in\s+witness\s+whereof", line, re.IGNORECASE):
+                part = "execution"
+            if part == "recitals" and LEAD.match(line) and re.match(r"^(?:\*\*)?now", line, re.IGNORECASE):
+                recital_num = None   # "Now, Therefore," closes the recitals
+            attach_comments(doc, p, notes)
+            last = p
+            continue
         if not in_sections:
             p = doc.add_paragraph(style="AKLA Front")
         else:
@@ -791,10 +1107,19 @@ def main():
     ap.add_argument("--doc-date", default="", help="header date line")
     ap.add_argument("--logo", default=default_logo, help="header emblem (default: the bundled AK mark)")
     ap.add_argument("--no-logo", action="store_true")
+    ap.add_argument("--layout", choices=("memo", "agreement"), default="memo",
+                    help="memo: memoranda, notes, reports, minutes, proposals; agreement: agreements, deeds, term sheets")
     ap.add_argument("--heading-pt", type=int, default=HEADING_PT, help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.no_logo:
         args.logo = ""
+    if args.layout == "agreement":
+        # The firm's agreements carry no emblem and no red line; the header
+        # names the document, the draft and the date in small caps.
+        args.logo = ""
+        args.doc_notice = ""
+        if args.doc_status in ("", "Draft"):
+            args.doc_status = "AKLA Draft"
 
     if args.source == "-":
         markdown = sys.stdin.read()
@@ -809,7 +1134,7 @@ def main():
     body = doc.element.body
     for p in list(body.findall(qn("w:p"))):
         body.remove(p)   # the template's empty first paragraph
-    render(doc, markdown, numbering)
+    render(doc, markdown, numbering, args.layout)
     if doc.element.body.find(".//" + qn("w:fldSimple")) is not None:
         settings = doc.settings.element
         if settings.find(qn("w:updateFields")) is None:

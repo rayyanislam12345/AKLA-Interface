@@ -6,8 +6,8 @@
 // same words to a lawyer's own Claude through get_firm_rules, so the two
 // cannot drift apart. Nothing here reads anything: pure text.
 
-export const FIRM_MARKDOWN_RULES = `The document is delivered as a Word file in the firm's house format, generated from your Markdown: A4, Arial 11, the title on a navy banner, each "## " section numbered in bold small caps with a rule beneath, a real 1. / 1.1. / 1.1.1. / (a) outline with nothing indented, the running header and page numbers. You do not style anything; you give it the right structure. Format the document as Markdown matching the firm's clause-numbering convention exactly:
-- Exactly one "# " heading, for the document title only (e.g. "# CONCESSION AGREEMENT").
+export const FIRM_MARKDOWN_RULES = `The document is delivered as a Word file in the firm's house format, generated from your Markdown, set the way the firm sets that kind of document: an agreement, deed, term sheet, undertaking or guarantee as the firm's agreements are (a cover page, the parties, lettered recitals, bold small caps headings, no banner); a memo, note, report, minutes or proposal with the title on a navy banner. Both are A4, Arial 11, with each "## " section numbered in bold small caps with a rule beneath, a real 1. / 1.1. / 1.1.1. / (a) outline, the running header and page numbers. You do not style anything; you give it the right structure. Format the document as Markdown matching the firm's clause-numbering convention exactly:
+- Exactly one "# " heading, for the document title only (e.g. "# Concession Agreement").
 - "## " for each top-level clause/section — heading text only. Do NOT type the clause number yourself; numbering is generated on export, so a typed "1. " would duplicate it.
 - "### " for a sub-clause, "#### " one level deeper if genuinely needed — same rule, no typed numbers.
 - Ordinary paragraphs for recitals and body text that isn't itself a numbered sub-item.
@@ -16,7 +16,14 @@ export const FIRM_MARKDOWN_RULES = `The document is delivered as a Word file in 
 - "> " for quoted or reproduced text (set in italics, indented); "::: " for a key figure that must not be missed (a shaded box); a pipe table for genuinely tabular content.
 - Lines before the first "## " heading (parties, date, status) are front matter and are not numbered.
 - Remarks for the reader — outstanding matters, gaps in the sources, figures to confirm, the Firm's observations — are AKLA comments, never document text: end the paragraph they concern with [[AKLA Comment: The Firm notes that …]]. Each becomes a Word margin comment titled "AKLA Comments". Do not use footnotes and do not collect them in an end section.
-- Do not add bold labels, colours or other styling beyond **defined terms**; the house format supplies them.`;
+- Do not add bold labels, colours or other styling beyond **defined terms**; the house format supplies them. A defined term is bold inside brackets with no quotation marks, as the firm writes it: (the **Concessionaire**), (this **Agreement**).
+- An agreement, deed, term sheet or undertaking also takes the firm's agreement shape:
+  - Straight after the "# " title, the cover lines, one per line: "Party: <full name> | <role>" for each party in order (e.g. "Party: National Highway Authority | NHA", "Party: [●] (Private) Limited | the Concessionaire"), "Dated: [●], 2026", "At: Islamabad, Pakistan", and "Regarding: <the project or transaction>" if it helps. They make the cover page; do not also write a status or circulation line, which the running header carries.
+  - Then the preamble: "This <Title> (this **Agreement**) is made at <place> on [●] (the **Signing Date**) by and between:", each party's paragraph opening with its name in bold ("**National Highway Authority**, a statutory body … (**NHA**, which expression shall …);"), a line "And" alone between parties, and "(… collectively referred to as the **Parties** and each individually as a **Party**.)".
+  - "## Recitals" with one paragraph per recital (they are lettered A., B., C.), closed by a paragraph opening "Now, Therefore," (it stays unnumbered).
+  - "## Definitions And Interpretation", then "### Definitions" with each definition its own paragraph opening on the bold term: "**Effective Date** means …;" (not a list item, no quotation marks), then "### Interpretation".
+  - After the last clause, "## Execution" (or a paragraph opening "In Witness Whereof"), each signing block opening "For And On Behalf Of <Party>" with "Name:", "Designation:" lines, and each schedule as "## Schedule 1 – <Name>" (it starts a new page and is not numbered as a clause).
+- Title Case for the title and every heading, each word capitalised: "Definitions And Interpretation", "Conditions Precedent".`;
 
 export const COMPLETENESS_RULES = `The document must be COMPLETE and ready to edit — this is the single most important requirement:
 - Write every clause in full, from the title through to the execution block. Never stop part-way.

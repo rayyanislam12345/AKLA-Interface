@@ -35,7 +35,7 @@
 import { z } from "zod";
 import { WRITE } from "../app.js";
 import { str, uuid } from "../tools.js";
-import { renderAklaDocx } from "../../aklaRender.js";
+import { renderAklaDocx, aklaLayout } from "../../aklaRender.js";
 import { packTypesOf, packTypeFor, packRedirectSentence } from "../../draftingPacks.js";
 
 /** The most Markdown either tool takes in one save (the plan's cap). */
@@ -124,10 +124,17 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
     if (input.documentTypeId == null || String(input.documentTypeId).trim() === "") return null;
     const id = uuid(input.documentTypeId);
     if (!id) throw new Error("documentTypeId must be a document type id (a UUID). list_document_types gives them.");
-    const { data, error } = await supabase.from("document_types").select("id, name").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("document_types").select("id, name, category").eq("id", id).maybeSingle();
     if (error) throw new Error(`Could not read the document type: ${error.message}`);
     if (!data) throw new Error("There is no document type with that id. list_document_types gives them.");
     return data;
+  }
+
+  /** The category of an existing document's type, which decides its layout (an agreement's or a memo's); null when untyped or unreadable. */
+  async function categoryOf(documentTypeId) {
+    if (!documentTypeId) return null;
+    const { data } = await supabase.from("document_types").select("category").eq("id", documentTypeId).maybeSingle();
+    return data?.category ?? null;
   }
 
   /**
@@ -200,11 +207,11 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
     {
       name: DRAFT_TOOL,
       title: "Save a draft into a project as a house-format Word file",
-      description: `Save a draft document written in this chat into a project on the Hub as a Word file in AKLA's house format: A4, Arial 11, the title on the navy banner, numbered 1. / 1.1. headings, and [[AKLA Comment: …]] notes as Word margin comments (get_firm_rules with task draft gives the Markdown shape the renderer expects). Every firm document the lawyer asks you to draft is filed in the Hub, never handed over only as a file or artifact in the chat: this tool when its type has no standard or pack, fill_standard_to_project when it has one (list_document_types says which), upload_file_to_project for a file you made in your code sandbox. So use it whenever you draft such a document (say which project and title you will file under), and when the lawyer asks to save or file a draft in the firm's format; the Hub reads the file for search within a minute. A document of a type that has a firm pack (list_document_types says which: letters, memos, opinions, resolutions and others) is not saved here: it is drafted inside the firm's own Word file with open_standard_for_filling and fill_standard_to_project, and this tool answers with one sentence saying so. ${SAVE_RULES} documentTypeId (from list_document_types) files a new document under a type; an existing document keeps its type. The rendering takes up to a minute. Takes up to ${MAX_MARKDOWN_CHARS.toLocaleString("en")} characters of Markdown. Returns the new version's id, its Hub page and the house-format check's notes; if the renderer fails, save_note_to_project saves the same text as a Markdown file.`,
+      description: `Save a draft document written in this chat into a project on the Hub as a Word file in AKLA's house format, set the way the firm sets that kind of document: an agreement, deed, term sheet or undertaking with a cover page, the parties and lettered recitals, bold small caps headings and no banner; a memo, note, report or minutes with the title on the navy banner; both A4, Arial 11, numbered 1. / 1.1. / 1.1.1., with [[AKLA Comment: …]] notes as Word margin comments. The document's type, or else its title, decides which (get_firm_rules with task draft gives the Markdown shape the renderer expects). Every firm document the lawyer asks you to draft is filed in the Hub, never handed over only as a file or artifact in the chat: this tool when its type has no standard or pack, fill_standard_to_project when it has one (list_document_types says which), upload_file_to_project for a file you made in your code sandbox. So use it whenever you draft such a document (say which project and title you will file under), and when the lawyer asks to save or file a draft in the firm's format; the Hub reads the file for search within a minute. A document of a type that has a firm pack (list_document_types says which: letters, memos, opinions, resolutions and others) is not saved here: it is drafted inside the firm's own Word file with open_standard_for_filling and fill_standard_to_project, and this tool answers with one sentence saying so. ${SAVE_RULES} documentTypeId (from list_document_types) files a new document under a type; an existing document keeps its type. The rendering takes up to a minute. Takes up to ${MAX_MARKDOWN_CHARS.toLocaleString("en")} characters of Markdown. Returns the new version's id, its Hub page and the house-format check's notes; if the renderer fails, save_note_to_project saves the same text as a Markdown file.`,
       inputSchema: {
         projectId: z.string().describe("The project's id, from list_projects or find_document_by_title."),
         markdown: z.string().describe("The whole document as Markdown in the firm's shape: # title, ## numbered sections, [[AKLA Comment: …]] for margin comments, [●] for blanks."),
-        title: z.string().optional().describe(`The title of a NEW document on the Hub and on the Word file's banner, e.g. "Notes on the Concession Agreement". ${TITLE_RULE.replace("names the file", "names the file and goes on the banner")}`),
+        title: z.string().optional().describe(`The title of a NEW document on the Hub and on the Word file's title page, e.g. "Notes on the Concession Agreement". ${TITLE_RULE.replace("names the file", "names the file and goes on the title page")}`),
         documentTypeId: z.string().optional().describe("Optional, for a new document: the document type's id from list_document_types."),
         matterDocumentId: z.string().optional().describe("Optional: an existing document's id (documentId from list_project_documents) to save this as its next version. Leave out for a new document."),
         expectedVersionId: z.string().optional().describe("Optional, with matterDocumentId: the id of the latest version you read. The save is refused if a newer one exists."),
@@ -226,12 +233,14 @@ export function createSaveTools(deps, { render = renderAklaDocx } = {}) {
           if (packType) return packRedirectSentence(packType);
           // A type applies to a new document only; an existing one keeps its own.
           const type = target.matterDocumentId ? null : await documentTypeOf(input);
+          const category = type?.category ?? (await categoryOf(target.documentTypeId).catch(() => null));
+          const layout = aklaLayout({ title: target.title, markdown, category });
           return await fileInto({
             tool: DRAFT_TOOL, ctx, matter, target,
             prepare: async () => {
               let rendered;
               try {
-                rendered = await render({ markdown, title: target.title, timeoutMs: RENDER_TIMEOUT_MS });
+                rendered = await render({ markdown, title: target.title, layout, timeoutMs: RENDER_TIMEOUT_MS });
               } catch (err) {
                 log(`${DRAFT_TOOL} for ${ctx?.userId ?? "?"}: the renderer failed: ${err?.message ?? err}`);
                 throw new Error(`The Word file could not be made (${String(err?.message ?? err).replace(/\.$/, "")}); nothing was saved. save_note_to_project saves the same text as a Markdown file instead.`);

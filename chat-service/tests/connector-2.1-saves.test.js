@@ -258,7 +258,7 @@ test('a note as the next version of an existing document: the document\'s own ti
   assert.match(next, /^Saved "Concession Agreement" as v4 \(Concession-Agreement-notes-v4\.md\), its next version on M6 Motorway/);
   assert.equal(s.supabase.calls.rpc[1].args.p_expected_version_id, NEW_V);
   assert.match(s.byName[NOTE_TOOL].inputSchema.title.description, /title of a NEW document.*rename_document changes it.*only names the file/);
-  assert.match(s.byName[DRAFT_TOOL].inputSchema.title.description, /title of a NEW document.*rename_document changes it.*names the file and goes on the banner/);
+  assert.match(s.byName[DRAFT_TOOL].inputSchema.title.description, /title of a NEW document.*rename_document changes it.*names the file and goes on the title page/);
   // A document on another project, an unknown document, an expected version with no document, bad ids.
   await assert.rejects(s.run(NOTE_TOOL, { projectId: P2, text: 'x', matterDocumentId: D1 }), /^Error: That document is not on KPT Corridor\.$/);
   await assert.rejects(s.run(NOTE_TOOL, { projectId: P1, text: 'x', matterDocumentId: V1 }), /There is no project document with that id/);
@@ -326,7 +326,8 @@ test('a draft is rendered to the house-format Word file and saved as v1 of a new
   const markdown = '# Notes on the Concession Agreement\n\n## Term\n\nThe term is [●] years. [[AKLA Comment: confirm with the Authority]]\n';
   const out = await s.run(DRAFT_TOOL, { projectId: P1, title: 'Notes on the Concession Agreement', markdown, documentTypeId: T1, label: 'First draft' });
   // The renderer got the Markdown, the title for the banner and the timeout; the bytes it made were uploaded as a .docx.
-  assert.deepEqual(renderer.calls, [{ markdown, title: 'Notes on the Concession Agreement', timeoutMs: RENDER_TIMEOUT_MS }]);
+  // Notes on an agreement are a memo: the memo words in the title win.
+  assert.deepEqual(renderer.calls, [{ markdown, title: 'Notes on the Concession Agreement', layout: 'memo', timeoutMs: RENDER_TIMEOUT_MS }]);
   assert.equal(s.supabase.calls.upload.length, 1);
   const up = s.supabase.calls.upload[0];
   assert.match(up.path, new RegExp(`^${P1}/[0-9a-f-]{36}/[0-9a-f-]{36}-Notes-on-the-Concession-Agreement\\.docx$`));
@@ -357,7 +358,8 @@ test('a draft is rendered to the house-format Word file and saved as v1 of a new
   const next = await s.run(DRAFT_TOOL, { projectId: P1, markdown: '# CA v3', matterDocumentId: D1, expectedVersionId: V2, documentTypeId: V1 });
   assert.match(next, /^Saved "Concession Agreement" as v3 \(Concession-Agreement-v3\.docx\), its next version on M6 Motorway/);
   assert.equal(s.supabase.calls.rpc[1].args.p_document_type_id, T1);
-  assert.equal(renderer.calls[1].title, 'Concession Agreement', 'the document\'s own title goes on the banner');
+  assert.equal(renderer.calls[1].title, 'Concession Agreement', 'the document\'s own title goes on the title page');
+  assert.equal(renderer.calls[1].layout, 'agreement', 'an agreement is set as the firm sets agreements');
 });
 
 test('when the renderer fails, nothing is uploaded, the attempt is recorded as failed, and the reply offers save_note_to_project', async () => {
