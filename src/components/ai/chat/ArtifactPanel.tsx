@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { marked } from "marked";
 import { renderAsync } from "docx-preview";
+import { applyDocxFixes } from "@/lib/docxPreview";
 import type { Editor } from "@tiptap/react";
 import { AlertTriangle, Check, Copy, Download, FileText, Loader2, Save, X } from "lucide-react";
 import RichTextEditor from "@/components/editor/RichTextEditor";
@@ -210,6 +211,7 @@ function DocumentArtifact({ matterId, matterName, standard: session, artifact }:
       if (blob && previewRef.current) {
         previewRef.current.innerHTML = "";
         await renderAsync(blob, previewRef.current, previewRef.current, { inWrapper: true });
+        applyDocxFixes(previewRef.current);
       }
     } catch (err: any) {
       toast({ title: "Failed to build preview", description: friendlyError(err), variant: "destructive" });

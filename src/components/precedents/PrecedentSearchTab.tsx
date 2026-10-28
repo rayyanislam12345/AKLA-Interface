@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { renderAsync } from "docx-preview";
+import { applyDocxFixes } from "@/lib/docxPreview";
 import { ExternalLink, FileText, Loader2, Search, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
@@ -175,6 +176,7 @@ function PrecedentViewer({ target, terms, onClose }: { target: { hit: PrecedentH
         if (cancelled || !frame) return;
         frame.innerHTML = "";
         await renderAsync(data, frame, frame, { inWrapper: true });
+        applyDocxFixes(frame);
         if (cancelled) return;
         stopFitting = fitDocxPreview(frame);
         setState("ready");

@@ -2,6 +2,7 @@ import { friendlyError } from "@/lib/friendlyError";
 import { plainSaveError, saveDraftToMatter } from "@/lib/saveDraftToMatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
+import { applyDocxFixes } from "@/lib/docxPreview";
 import {
   CheckCircle2,
   Download,
@@ -178,7 +179,7 @@ function OutputCard({
       .then((blob) => {
         if (!previewRef.current) return;
         previewRef.current.innerHTML = "";
-        return renderAsync(blob, previewRef.current, previewRef.current, { inWrapper: true });
+        return renderAsync(blob, previewRef.current, previewRef.current, { inWrapper: true }).then(() => applyDocxFixes(previewRef.current!));
       })
       .finally(() => setBuilding(false));
   }, [format, text]);

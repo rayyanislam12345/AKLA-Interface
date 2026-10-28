@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { renderAsync } from "docx-preview";
+import { applyDocxFixes } from "@/lib/docxPreview";
 import { clearOutline, outlineSuggestion, suggestionAtPoint } from "@/lib/locateInPreview";
 import { AlertTriangle, ArrowLeftRight, Check, Download, ExternalLink, Save, ScanSearch, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -347,6 +348,7 @@ export default function ReviewSession({
     const frame = previewRef.current;
     let cancelled = false;
     renderAsync(previewBlob, frame, frame, { renderChanges: true, inWrapper: true }).then(() => {
+      applyDocxFixes(frame);
       const wrapper = frame.querySelector<HTMLElement>(".docx-wrapper");
       if (cancelled || !wrapper) return;
       const pages = [...wrapper.querySelectorAll<HTMLElement>("section.docx")];

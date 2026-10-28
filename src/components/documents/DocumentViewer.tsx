@@ -22,6 +22,7 @@ import { scrollPreviewTo, useVersionInsights } from "./versionInsights";
 import { VersionSummaryPanel } from "./VersionSummaryPanel";
 import { AskClaudeAboutSelection, type CompanionSource } from "./AskClaudeAboutSelection";
 import { fitScale, useFitSize } from "./fitWidth";
+import { applyDocxFixes } from "@/lib/docxPreview";
 
 // Look at a project document without downloading it: Word files are drawn
 // in the page, PDFs and images shown as they are, anything else offered as a
@@ -228,6 +229,7 @@ export function DocumentViewer({ document: doc, versions: given, versionId, onVe
             renderChanges: true,
             renderComments: false,
           });
+          if (docxRef.current) applyDocxFixes(docxRef.current);
           if (!cancelled) setState({ loading: false, error: null, url: null });
         } else if (kind === "pdf" || kind === "image") {
           const { data, error } = await supabase.storage.from("matter-documents").createSignedUrl(version.storage_path, 60 * 60);

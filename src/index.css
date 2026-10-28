@@ -961,6 +961,22 @@ All colors MUST be HSL.
   @apply my-4 border-border;
 }
 
+/* A Word file drawn by docx-preview, shown as Word shows it. Two things the
+   renderer gets wrong on its own: it draws a paragraph's number with a tab
+   after it that collapses to a space, so the text starts right after
+   "1.1.1." instead of at the hanging indent; and it turns automatic
+   hyphenation on, which Word leaves off. The viewer sets --docx-hang on each
+   numbered paragraph from its hanging indent (applyDocxFixes, src/lib/docxPreview.ts). */
+.docx-wrapper p[class*="docx-num-"]::before {
+  display: inline-block;
+  min-width: var(--docx-hang, 0px);
+  white-space: nowrap;
+  text-indent: 0; /* the paragraph's negative indent is inherited, and would shift the number again */
+}
+.docx-wrapper section.docx {
+  hyphens: manual;
+}
+
 /* Tracked changes in a Word file drawn by docx-preview (DocumentViewer,
    the chat's DocxArtifact, the review session). The renderer marks them as
    <ins> and <del> but leaves them in the text colour, so a mark-up looked

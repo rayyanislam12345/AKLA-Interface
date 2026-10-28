@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { renderAsync } from "docx-preview";
+import { applyDocxFixes } from "@/lib/docxPreview";
 import { fitDocxPreview } from "@/lib/fitDocxPreview";
 import { acceptTrackedChanges, stripComments } from "@/lib/docxAccept";
 import { clearOutline, outlineSuggestion, suggestionAtPoint } from "@/lib/locateInPreview";
@@ -148,6 +149,7 @@ export default function DocxArtifact({
       const file = previewForm === "accepted" ? await acceptTrackedChanges(blob) : blob;
       if (cancelled || !frameRef.current) return;
       await renderAsync(file, frame, frame, { renderChanges: previewForm !== "accepted", inWrapper: true });
+      applyDocxFixes(frame);
       if (cancelled) return;
       stopFitting = fitDocxPreview(frame);
       // A decision rebuilds the page; keep the chosen change marked.
