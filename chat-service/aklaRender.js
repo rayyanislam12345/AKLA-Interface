@@ -114,7 +114,8 @@ export function checkAklaFormat(bytes, { layout = "memo" } = {}) {
   // Page: A4 with one-inch margins, a clean first page (the Guide).
   const pgSz = /<w:pgSz [^>]*\/>/.exec(doc)?.[0] ?? "";
   if (!/w:w="1190\d"/.test(pgSz) || !/w:h="168\d\d"/.test(pgSz)) findings.push("The page is not A4.");
-  if (!/<w:titlePg\/>/.test(doc)) findings.push("The first page is not kept clean of the running header and page number.");
+  // A memo's first page is clean; an agreement's cover is its own section without the running header, and the contents page after it carries it.
+  if (layout === "agreement" ? (doc.match(/<w:sectPr[\s>]/g) ?? []).length < 2 : !/<w:titlePg\/>/.test(doc)) findings.push(layout === "agreement" ? "The cover is not its own section." : "The first page is not kept clean of the running header and page number.");
 
   // Text: Arial 11 through Normal, and every paragraph on a named AKLA style.
   const normal = styleXml("Normal");
@@ -128,7 +129,9 @@ export function checkAklaFormat(bytes, { layout = "memo" } = {}) {
   const heading1 = styleXml("AKLAHeading1");
   if (!/<w:numId w:val="7101"\/>/.test(heading1)) findings.push("Section headings are not numbered by their style.");
   if (!/<w:bottom [^>]*w:val="single"/.test(heading1)) findings.push("Section headings have no rule beneath.");
-  if (!/<w:sz w:val="26"\/>/.test(heading1) || !/<w:smallCaps\/>/.test(heading1) || !/<w:b\/>/.test(heading1)) findings.push("Section headings are not 13pt bold small caps.");
+  // 13pt in a memo; 12pt in an agreement, as the firm's own agreements have them.
+  const headingSize = layout === "agreement" ? "24" : "26";
+  if (!new RegExp(`<w:sz w:val="${headingSize}"\\/>`).test(heading1) || !/<w:smallCaps\/>/.test(heading1) || !/<w:b\/>/.test(heading1)) findings.push(`Section headings are not ${layout === "agreement" ? 12 : 13}pt bold small caps.`);
   if (!/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody1")) || !/<w:numId w:val="7101"\/>/.test(styleXml("AKLABody2"))) findings.push("Body paragraphs are not numbered by their style.");
 
   // Title, header, footer: a memo's title on the navy banner and a red

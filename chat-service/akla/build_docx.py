@@ -113,6 +113,10 @@ LIST_UNDER_BODY2 = 7300     # (a) under a 1.1.1. paragraph
 RECITALS = 7500             # A. B. C., an agreement's recitals
 LIST_IN_CLAUSE = 7600       # (a) one step in from the clause text (agreements)
 STEP = 720                  # twips (1.27 cm), one step of indentation
+# In the firm's agreements the clause text starts 1.27 cm from the margin and
+# each list steps in by the same; the cover block starts twelve lines down.
+AGREEMENT_TEXT_AT = 720
+COVER_DROP = 12
 
 FIRM_NAME = re.compile(r"(Ali Khan Law Associates)")
 # The firm's name in running text is italic navy in a memo; in an agreement it
@@ -276,48 +280,48 @@ def _level(ilvl, fmt, text, left, hanging, rpr=None):
     return lvl
 
 
-def build_numbering(doc):
+def build_numbering(doc, text_at=TEXT_AT):
     numbering = doc.part.numbering_part.element
     for child in list(numbering):
         numbering.remove(child)
 
     # The outline. The firm does not indent: every level's number sits at the
-    # margin and its text at TEXT_AT, so only the number shows the depth.
+    # margin and its text at text_at, so only the number shows the depth.
     outline = _el("w:abstractNum", **{"w:abstractNumId": OUTLINE[0]})
     outline.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
     plain = OxmlElement("w:rPr")
     plain.append(_el("w:u", **{"w:val": "none"}))
-    outline.append(_level(0, "decimal", "%1.", TEXT_AT, TEXT_AT))
-    outline.append(_level(1, "decimal", "%1.%2.", TEXT_AT, TEXT_AT, plain))
-    outline.append(_level(2, "decimal", "%1.%2.%3.", TEXT_AT, TEXT_AT))
+    outline.append(_level(0, "decimal", "%1.", text_at, text_at))
+    outline.append(_level(1, "decimal", "%1.%2.", text_at, text_at, plain))
+    outline.append(_level(2, "decimal", "%1.%2.%3.", text_at, text_at))
     for ilvl in range(3, 9):
-        outline.append(_level(ilvl, "decimal", "%1.%2.%3." + "".join(f"%{i + 1}." for i in range(3, ilvl + 1)), TEXT_AT, TEXT_AT))
+        outline.append(_level(ilvl, "decimal", "%1.%2.%3." + "".join(f"%{i + 1}." for i in range(3, ilvl + 1)), text_at, text_at))
     numbering.append(outline)
 
     # Lists: (a) -> (i) -> A., the Guide's scheme, set the same way - number
-    # at the margin, text at TEXT_AT.
+    # at the margin, text at text_at.
     for abstract_id in (LIST_UNDER_BODY1, LIST_UNDER_BODY2):
         lists = _el("w:abstractNum", **{"w:abstractNumId": abstract_id})
         lists.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
-        lists.append(_level(0, "lowerLetter", "(%1)", TEXT_AT, TEXT_AT))
-        lists.append(_level(1, "lowerRoman", "(%2)", TEXT_AT, TEXT_AT))
-        lists.append(_level(2, "upperLetter", "%3.", TEXT_AT, TEXT_AT))
+        lists.append(_level(0, "lowerLetter", "(%1)", text_at, text_at))
+        lists.append(_level(1, "lowerRoman", "(%2)", text_at, text_at))
+        lists.append(_level(2, "upperLetter", "%3.", text_at, text_at))
         numbering.append(lists)
 
     # An agreement's recitals: the letter at the margin, the text where the
     # clauses' text starts.
     recitals = _el("w:abstractNum", **{"w:abstractNumId": RECITALS})
     recitals.append(_el("w:multiLevelType", **{"w:val": "singleLevel"}))
-    recitals.append(_level(0, "upperLetter", "%1.", TEXT_AT, TEXT_AT))
+    recitals.append(_level(0, "upperLetter", "%1.", text_at, text_at))
     numbering.append(recitals)
 
     # In the firm's agreements a list under a clause steps in: (a) where the
     # clause text starts, its text one step further, (i) a step beyond.
     in_clause = _el("w:abstractNum", **{"w:abstractNumId": LIST_IN_CLAUSE})
     in_clause.append(_el("w:multiLevelType", **{"w:val": "multilevel"}))
-    in_clause.append(_level(0, "lowerLetter", "(%1)", TEXT_AT + STEP, STEP))
-    in_clause.append(_level(1, "lowerRoman", "(%2)", TEXT_AT + 2 * STEP, STEP))
-    in_clause.append(_level(2, "upperLetter", "%3.", TEXT_AT + 3 * STEP, STEP))
+    in_clause.append(_level(0, "lowerLetter", "(%1)", text_at + STEP, STEP))
+    in_clause.append(_level(1, "lowerRoman", "(%2)", text_at + 2 * STEP, STEP))
+    in_clause.append(_level(2, "upperLetter", "%3.", text_at + 3 * STEP, STEP))
     numbering.append(in_clause)
 
     num = _el("w:num", **{"w:numId": OUTLINE[1]})
@@ -428,11 +432,11 @@ def build_styles(doc):
 
     # The agreement layout's own styles.
     JUSTIFY = WD_ALIGN_PARAGRAPH.JUSTIFY
-    style(doc, "AKLA Cover Title", size=TITLE_PT + 2, bold=True, small_caps=True, align=CENTER, before=12, after=18)
-    style(doc, "AKLA Cover", small_caps=True, align=CENTER, before=0, after=6)
+    style(doc, "AKLA Cover Title", size=HEADING_PT, bold=True, small_caps=True, align=CENTER, before=0, after=0)
+    style(doc, "AKLA Cover", small_caps=True, align=CENTER, before=0, after=0)
     style(doc, "AKLA Agreement Title", size=HEADING_PT, bold=True, small_caps=True, align=CENTER, before=0, after=12, rule=True)
     style(doc, "AKLA Preamble", align=JUSTIFY, after=10)
-    style(doc, "AKLA Joiner", bold=True, small_caps=True, align=CENTER, after=10, keep_next=True)
+    style(doc, "AKLA Joiner", bold=False, small_caps=True, align=CENTER, after=10, keep_next=True)
     style(doc, "AKLA Heading Plain", size=HEADING_PT, bold=True, small_caps=True, align=LEFT, before=12, after=10,
           keep_next=True, rule=True)
     style(doc, "AKLA Recital", align=JUSTIFY, after=10)
@@ -440,6 +444,22 @@ def build_styles(doc):
     style(doc, "AKLA Schedule Title", size=HEADING_PT, bold=True, small_caps=True, align=CENTER, before=0, after=12,
           keep_next=True, outline=0, rule=True, page_break=True)
     style(doc, "AKLA Schedule Heading", bold=True, small_caps=True, align=LEFT, before=6, after=10, keep_next=True)
+
+
+def agreement_styles(doc):
+    """The measures of the firm's own agreements (the Share Ownership &
+    Shareholding Agreement of April 2026 is the exemplar): text 1.27 cm from
+    the number, a blank line's space after every paragraph and nothing extra
+    before a heading, 12pt clause headings, "Recitals" at body size."""
+    for name in ("AKLA Body 1", "AKLA Body 2", "AKLA List", "AKLA Definition", "AKLA Preamble", "AKLA Recital",
+                 "AKLA Quote", "AKLA Joiner", "AKLA Heading 1", "AKLA Heading 2", "AKLA Heading Plain",
+                 "AKLA Agreement Title", "AKLA Schedule Title", "AKLA Schedule Heading", "AKLA Divider"):
+        pf = doc.styles[name].paragraph_format
+        pf.space_after = Pt(12)
+        pf.space_before = Pt(0)
+    doc.styles["AKLA Heading 1"].font.size = Pt(12)
+    doc.styles["AKLA Heading Plain"].font.size = Pt(BODY_PT)
+    doc.styles["AKLA Definition"].paragraph_format.left_indent = Inches(0.5)
 
 
 # --------------------------------------------------------------------------
@@ -766,67 +786,61 @@ def top_rule(ppr):
 
 
 def cover_page(doc, title, fields):
-    """The cover: title, "By & Between:", each party and its role, date and
-    place, set between two rules and centred on its own page."""
+    """The cover as the firm sets it: twelve lines down the page, the title,
+    "By & Between:", each party in bold with its role beneath and "And"
+    between them, then the date and the place, every line centred and a blank
+    line between the items. No header or page number on the cover; the body
+    section that follows carries them."""
     parties = [v for k, v in fields if k == "party"]
-    first = doc.add_paragraph(style="AKLA Cover Title")
-    add_runs(first, title)
-    top_rule(first._p.get_or_add_pPr())
-    for k, v in fields:
-        if k in ("regarding", "in respect of"):
-            p = doc.add_paragraph(style="AKLA Cover")
-            add_runs(p, v)
-    p = doc.add_paragraph(style="AKLA Cover")
-    add_runs(p, "By & Between:")
+
+    def line(text="", bold=False, style="AKLA Cover"):
+        p = doc.add_paragraph(style=style)
+        if text:
+            run_start = len(p.runs)
+            add_runs(p, text)
+            if bold:
+                for run in p.runs[run_start:]:
+                    run.bold = True
+        return p
+
+    for _ in range(COVER_DROP):
+        line()
+    line(title, style="AKLA Cover Title")
+    line()
+    line()
+    line("By & Between:")
     for i, party in enumerate(parties):
+        line()
         if i:
-            add_runs(doc.add_paragraph(style="AKLA Cover"), "And")
+            line("And")
+            line()
         m = PARTY_ROLE.match(party)
         name, role = (m.group(1), m.group(2) or m.group(3)) if m else (party, None)
-        p = doc.add_paragraph(style="AKLA Cover")
-        p.paragraph_format.space_after = Pt(0 if role else 6)
-        run_start = len(p.runs)
-        add_runs(p, name.strip().strip("*"))
-        for run in p.runs[run_start:]:
-            run.bold = True
+        line(name.strip().strip("*"), bold=True)
         if role:
             role = re.sub(r"^as\s+", "", role.strip().strip("()"), flags=re.IGNORECASE)
-            add_runs(doc.add_paragraph(style="AKLA Cover"), f"(As {title_case(role)})")
-    last = None
-    for k, v in fields:
-        if k in ("dated", "date"):
-            p = doc.add_paragraph(style="AKLA Cover")
-            p.paragraph_format.space_before = Pt(12)
-            add_runs(p, "Dated As Of:")
-            last = doc.add_paragraph(style="AKLA Cover")
-            run_start = len(last.runs)
-            add_runs(last, v)
-            for run in last.runs[run_start:]:
-                run.bold = True
-        elif k in ("at", "place"):
-            p = doc.add_paragraph(style="AKLA Cover")
-            p.paragraph_format.space_before = Pt(12)
-            add_runs(p, "At:")
-            last = doc.add_paragraph(style="AKLA Cover")
-            add_runs(last, v)
-    last = last or doc.paragraphs[-1]
-    bottom_rule(last._p.get_or_add_pPr(), space=12)
+            line(f"(As {title_case(role)})")
+    dated = next((v for k, v in fields if k in ("dated", "date")), None)
+    place = next((v for k, v in fields if k in ("at", "place")), None)
+    if dated or place:
+        line()
+        line()
+    if dated:
+        line()
+        line("Dated As Of:")
+        line(dated, bold=True)
+    if place:
+        line()
+        line("At:")
+        line(place, bold=True)
 
-    # The cover is its own section, centred top to bottom and without the
-    # running header; the header and "Page X of Y" start on the next page.
+    # The cover is its own section without the running header; the header
+    # and "Page X of Y" start on the next page.
     body_sect = doc.element.body.find(qn("w:sectPr"))
     sect = copy.deepcopy(body_sect)
     for tag in ("w:headerReference", "w:footerReference", "w:titlePg"):
         for el in sect.findall(qn(tag)):
             sect.remove(el)
-    v = _el("w:vAlign", **{"w:val": "center"})
-    grid = sect.find(qn("w:docGrid"))
-    if grid is not None:
-        grid.addprevious(v)
-        grid.addprevious(OxmlElement("w:titlePg"))
-    else:
-        sect.append(v)
-        sect.append(OxmlElement("w:titlePg"))
     holder = doc.add_paragraph(style="AKLA Front")
     holder.paragraph_format.space_after = Pt(0)
     holder._p.get_or_add_pPr().append(sect)
@@ -1054,7 +1068,7 @@ def render(doc, markdown, numbering, layout="memo"):
         if quote:
             p = doc.add_paragraph(style="AKLA Quote")
             # Quoted text lines up with the text around it; italics mark it.
-            indent(p._p.get_or_add_pPr(), TEXT_AT if in_sections else 0)
+            indent(p._p.get_or_add_pPr(), (AGREEMENT_TEXT_AT if agreement else TEXT_AT) if in_sections else 0)
             add_runs(p, quote.group(1))
             attach_comments(doc, p, notes)
             last = p
@@ -1092,6 +1106,10 @@ def render(doc, markdown, numbering, layout="memo"):
             p = doc.add_paragraph(style="AKLA Front")
         else:
             p = doc.add_paragraph(style="AKLA Body 1" if body_level == 1 else "AKLA Body 2")
+            # The style numbers it; so does the paragraph, because LibreOffice
+            # (which draws the Hub's preview) drops a style's numbering at a
+            # level a heading style also uses.
+            numbering_ref(p._p.get_or_add_pPr(), OUTLINE[1], body_level)
             line = TYPED_NUMBER.sub("", line)   # Word numbers the clause itself
         add_runs(p, line)
         attach_comments(doc, p, notes)
@@ -1133,8 +1151,10 @@ def main():
             markdown = fh.read()
 
     doc = Document()
-    numbering = build_numbering(doc)
+    numbering = build_numbering(doc, AGREEMENT_TEXT_AT if args.layout == "agreement" else TEXT_AT)
     build_styles(doc)
+    if args.layout == "agreement":
+        agreement_styles(doc)
     build_page(doc, args)
     body = doc.element.body
     for p in list(body.findall(qn("w:p"))):

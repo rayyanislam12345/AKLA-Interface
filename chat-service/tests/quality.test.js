@@ -305,7 +305,7 @@ test('an agreement is set as the firm sets its agreements: cover, parties, lette
   const headers = Object.keys(files).filter((n) => /^word\/header/.test(n)).map((n) => strFromU8(files[n])).join('');
   assert.ok(!doc.includes('002060') && !headers.includes('<w:drawing') && !headers.includes('C00000'), 'no banner, navy table row, emblem or red line');
   assert.ok(doc.includes('AKLATableHeaderPlain'), 'a table\'s header row is plain bold small caps');
-  assert.ok(doc.includes('<w:vAlign w:val="center"/>'), 'the cover is its own page, centred');
+  assert.equal((doc.match(/<w:sectPr/g) ?? []).length, 2, 'the cover is its own section, without the running header');
   assert.ok(doc.includes('By &amp; Between:') && doc.includes('(As The Project Company)'), 'the cover names the parties and their roles');
   assert.ok(headers.includes('AKLA Draft'), 'the header carries the draft line');
   assert.equal((doc.match(/<w:pStyle w:val="AKLARecital"\/>/g) ?? []).length, 2, 'two lettered recitals; "Now, Therefore," is not one');
