@@ -116,7 +116,8 @@ STEP = 720                  # twips (1.27 cm), one step of indentation
 
 FIRM_NAME = re.compile(r"(Ali Khan Law Associates)")
 # The firm's name in running text is italic navy in a memo; in an agreement it
-# is a party's name like any other. render() turns this off for agreements.
+# is a party's name like any other. render() turns this off for agreements,
+# and with it the navy header row of a table.
 STYLE_FIRM_NAME = True
 
 # Each of these element sequences is schema-mandated: append a child out of
@@ -420,6 +421,8 @@ def build_styles(doc):
     style(doc, "AKLA Quote", italic=True, after=10)
     style(doc, "AKLA Table Text", align=LEFT, before=0, after=0)
     style(doc, "AKLA Table Header", bold=True, small_caps=True, color=GOLD, align=CENTER, before=0, after=0)
+    # An agreement's tables are plain: the header row in bold small caps, no fill.
+    style(doc, "AKLA Table Header Plain", bold=True, small_caps=True, align=CENTER, before=0, after=0)
     style(doc, "AKLA Header", size=SMALL_PT, small_caps=True, align=LEFT, before=0, after=0)
     style(doc, "AKLA Footer", size=SMALL_PT, align=CENTER, before=0, after=0)
 
@@ -692,9 +695,10 @@ def data_table(doc, rows, indent_twips):
     for j, text in enumerate(header):
         cell = table.rows[0].cells[j]
         cell.width = width * 635 // cols
-        cell_fill(cell, NAVY)
+        if STYLE_FIRM_NAME:
+            cell_fill(cell, NAVY)
         p = cell.paragraphs[0]
-        p.style = doc.styles["AKLA Table Header"]
+        p.style = doc.styles["AKLA Table Header" if STYLE_FIRM_NAME else "AKLA Table Header Plain"]
         add_runs(p, take_comments(text)[0])
     for i, row in enumerate(body, start=1):
         for j in range(cols):

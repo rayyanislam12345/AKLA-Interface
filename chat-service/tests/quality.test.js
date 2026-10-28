@@ -291,6 +291,9 @@ test('an agreement is set as the firm sets its agreements: cover, parties, lette
     'Name: [●]',
     '## Schedule A – Payment Instruction',
     'Form of instruction.',
+    '| Tranche | Amount (PKR) |',
+    '|---|---|',
+    '| 1 | [●] |',
   ].join('\n');
   const { bytes, check, layout } = await renderAklaDocx({ markdown, title: 'Escrow Agreement', date: 'October 27, 2026', layout: 'agreement' });
   assert.equal(layout, 'agreement');
@@ -300,7 +303,8 @@ test('an agreement is set as the firm sets its agreements: cover, parties, lette
   const doc = strFromU8(files['word/document.xml']);
   const numbering = strFromU8(files['word/numbering.xml']);
   const headers = Object.keys(files).filter((n) => /^word\/header/.test(n)).map((n) => strFromU8(files[n])).join('');
-  assert.ok(!doc.includes('002060') && !headers.includes('<w:drawing') && !headers.includes('C00000'), 'no banner, emblem or red line');
+  assert.ok(!doc.includes('002060') && !headers.includes('<w:drawing') && !headers.includes('C00000'), 'no banner, navy table row, emblem or red line');
+  assert.ok(doc.includes('AKLATableHeaderPlain'), 'a table\'s header row is plain bold small caps');
   assert.ok(doc.includes('<w:vAlign w:val="center"/>'), 'the cover is its own page, centred');
   assert.ok(doc.includes('By &amp; Between:') && doc.includes('(As The Project Company)'), 'the cover names the parties and their roles');
   assert.ok(headers.includes('AKLA Draft'), 'the header carries the draft line');
