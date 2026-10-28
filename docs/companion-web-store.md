@@ -19,7 +19,7 @@ Everything for the first upload is in `~/Desktop/AKLA Companion for the Web Stor
 ## 2. First upload (Rayyan, about 20 minutes)
 
 1. In the developer console: **New item** → upload
-   `FOR THE WEB STORE ONLY - do not send to staff - 0.6.1.zip`.
+   `FOR THE WEB STORE ONLY - do not send to staff - 0.6.2.zip`.
 2. **Store listing** tab:
    - Description: paste the text in section 5 below.
    - Category: *Productivity* (Workflow & Planning). Language: English.
@@ -46,6 +46,12 @@ Hub's page names, theme and highlighted passages do not reach it:
 - deploy the Hub (`vercel --prod`), check with
   `curl -I https://akla-interface.vercel.app/ai` that the header names both ids;
 - put the listing link in the employee guide.
+
+Done 28 Oct 2026: store id `hokddpeigmpeenpkhokeakdidmdgjipo`, listing
+https://chromewebstore.google.com/detail/hokddpeigmpeenpkhokeakdidmdgjipo.
+The 0.6.1 package was submitted before the id existed, so its `KNOWN_IDS`
+(panel.js) lacks the store id and that copy will say "installed from the
+wrong file"; 0.6.2 carries both ids and must be uploaded as the next package.
 
 ## 4. One-command releases (optional, recommended)
 

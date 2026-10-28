@@ -116,7 +116,8 @@ same extension id: `djjhabnppnfpboomokbikdjdoimgogdp`. That matters because
 the Hub only lets itself and this id embed it (`vercel.json` sends
 `Content-Security-Policy: frame-ancestors 'self'
 chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp`). An install with any
-other id gets Chrome's grey "refused to connect" page in the panel.
+other id gets Chrome's grey "refused to connect" page in the panel. The Web
+Store copy has its own id, `hokddpeigmpeenpkhokeakdidmdgjipo`, and is let in too.
 
 ### Unlisted Chrome Web Store listing (updates itself)
 

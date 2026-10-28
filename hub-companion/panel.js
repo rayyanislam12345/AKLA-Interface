@@ -152,7 +152,7 @@
   // The Hub lets only this extension's own id frame it (vercel.json). A copy
   // installed from another file gets another id, and the browser would only
   // show a grey "refused to connect"; say what to do instead.
-  var KNOWN_IDS = ["djjhabnppnfpboomokbikdjdoimgogdp"];
+  var KNOWN_IDS = ["djjhabnppnfpboomokbikdjdoimgogdp", "hokddpeigmpeenpkhokeakdidmdgjipo"]; // sideload, Web Store
   var wrongCopy = KNOWN_IDS.indexOf(chrome.runtime.id) === -1;
 
   function navigateFrame(url) {

@@ -38,6 +38,8 @@ export type EmbedHost = "companion" | "pane";
 export const COMPANION_ORIGINS: readonly string[] = [
   "chrome-extension://djjhabnppnfpboomokbikdjdoimgogdp",
   "extension://djjhabnppnfpboomokbikdjdoimgogdp",
+  "chrome-extension://hokddpeigmpeenpkhokeakdidmdgjipo",
+  "extension://hokddpeigmpeenpkhokeakdidmdgjipo",
 ];
 /** True when a message or a framer is the companion (any of its ids). */
 export function isCompanionOrigin(origin: string): boolean {
