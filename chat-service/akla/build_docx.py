@@ -899,6 +899,7 @@ def agreement_paragraph(doc, line, part, recital_num):
     if lead and re.match(r"^(?:\*\*)?(for\s+and\s+on\s+behalf|signed)", line, re.IGNORECASE):
         # A signing line is bold small caps from end to end: "For And On Behalf Of Habib Construction Services Limited".
         p.paragraph_format.keep_with_next = True
+        p.paragraph_format.space_before = Pt(18)   # each party's block stands apart
         run_start = len(p.runs)
         add_runs(p, title_case(line.replace("**", "")))
         for run in p.runs[run_start:]:
