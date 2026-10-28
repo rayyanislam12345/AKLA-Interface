@@ -1,0 +1,21 @@
+# Vercel builds the Vite app only; everything else stays off the upload
+# (the CLI took gitignored harvest data of over 100 MB along otherwise).
+# Each line is anchored to the root: a bare "supabase" would also drop
+# src/integrations/supabase.
+/.git
+/node_modules
+/chat-service
+/law-monitor
+/hub-companion
+/firm-skills
+/scripts
+/supabase
+/docs
+/whatsapp-dashboard
+/transcription-bot
+/transcription-relay
+/timesheet-sample
+/RFP Questionnaire
+/UAE LAWS
+/.smoke-tmp
+*.tsbuildinfo
