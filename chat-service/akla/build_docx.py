@@ -246,20 +246,25 @@ def table_width(table, twips, indent_twips=0):
 
 
 def add_field(paragraph, instruction, size_pt=SMALL_PT):
-    """A Word field (PAGE, NUMPAGES) that updates when the file is opened."""
-    run = paragraph.add_run()
-    run.font.name = FONT
-    run.font.size = Pt(size_pt)
-    run._r.append(_el("w:fldChar", **{"w:fldCharType": "begin"}))
+    """A Word field (PAGE, NUMPAGES) that updates when the file is opened.
+
+    Written as Word writes it, one run for each part, so that a viewer that
+    cannot work fields out (the Hub's docx-preview drops every run holding a
+    field character) still shows the last value in the run between them.
+    """
+    def run():
+        r = paragraph.add_run()
+        r.font.name = FONT
+        r.font.size = Pt(size_pt)
+        return r
+    run()._r.append(_el("w:fldChar", **{"w:fldCharType": "begin"}))
     instr = OxmlElement("w:instrText")
     instr.set(qn("xml:space"), "preserve")
     instr.text = f" {instruction} "
-    run._r.append(instr)
-    run._r.append(_el("w:fldChar", **{"w:fldCharType": "separate"}))
-    placeholder = OxmlElement("w:t")
-    placeholder.text = "1"
-    run._r.append(placeholder)
-    run._r.append(_el("w:fldChar", **{"w:fldCharType": "end"}))
+    run()._r.append(instr)
+    run()._r.append(_el("w:fldChar", **{"w:fldCharType": "separate"}))
+    run().text = "1"
+    run()._r.append(_el("w:fldChar", **{"w:fldCharType": "end"}))
 
 
 # --------------------------------------------------------------------------
