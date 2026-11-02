@@ -87,6 +87,11 @@ const STYLE_SECTIONS = [
   ["voice", "Voice"], ["spelling", "Spelling"], ["defined_terms", "Defined terms"], ["numbers", "Numbers"],
   ["money", "Money"], ["dates", "Dates"], ["placeholder", "Unknowns"], ["cross_refs", "Cross-references"],
   ["headings", "Headings"], ["obligations", "Obligations"], ["statutes", "Statutes"], ["government", "Government"],
+  // Added 2 Nov 2026 from Usama Siddiqui's claude.ai memory export (USAMA DATA/inventory/memory-rules):
+  // the conventions he taught his own Claude over eight months, now every lawyer's.
+  ["quotations", "Quotations"], ["punctuation", "Punctuation"], ["lists", "Lists"], ["labels", "Labels"],
+  ["names", "Names"], ["tracked_changes", "Tracked changes"], ["layout", "Layout"], ["law_currency", "Current law"],
+  ["correspondence", "Correspondence"], ["file_naming", "File names"],
 ];
 
 function styleLines(sheet) {

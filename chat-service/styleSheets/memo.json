@@ -98,6 +98,8 @@
     }
   },
   "notes": [
-    "No sign-off: the memo ends with its last section and the page-end line."
+    "No sign-off: the memo ends with its last section and the page-end line.",
+    "A memorandum carries no risk or status ratings (Met / Not Met) in its tables and no bracketed labels such as [Inferred] or [Recommended]; its lists are lettered (a), (b), (c) on separate lines under the lead-in.",
+    "A reviewed document is the document entitled ‘[●]’: no page counts, no description of its format."
   ]
 }

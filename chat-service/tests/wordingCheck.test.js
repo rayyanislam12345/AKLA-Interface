@@ -124,7 +124,10 @@ test('spelling: -ize to -ise, once per word with a count; size, seize and a name
 
 test('banned phrasings: "we" in a memo, "will" for an obligation in an agreement, another firm\'s party clause; a letter may say "we"', () => {
   const memo = runWordingCheck(doc('We are of the view that our client must consent, and we note it.', 'The Firm notes “we agree” in the quoted letter.'), { styleSheet: 'Research Memo' });
-  assert.deepEqual(of(memo, 'banned_phrase').map((i) => i.note), ['The firm speaks as "the Firm", never "we", "our" or "us". (3 times in this paragraph)']);
+  assert.deepEqual(of(memo, 'banned_phrase').map((i) => i.note), [
+    'The firm speaks as "the Firm", never "we", "our" or "us". (3 times in this paragraph)',
+    'Never double quotation marks: single quotation marks, with the quoted matter in italics.',
+  ]);
   const letter = runWordingCheck(doc('We, [●] (the Concessionaire), refer you to the following:'), { styleSheet: 'Letter / Notice' });
   assert.equal(of(letter, 'banned_phrase').length, 0);
   const agreement = runWordingCheck(doc(
@@ -192,7 +195,7 @@ test('the style sheets: every family file loads, names its types and sources, co
   assert.deepEqual(merged.money.source, ['s1', 's2']);
 });
 
-test('the style sheet as prompt text: the core alone, or the core and the family, each one to two pages', () => {
+test('the style sheet as prompt text: the core alone, or the core and the family, each two to three pages', () => {
   assert.match(FIRM_STYLE_CORE, /^HOW THE FIRM WRITES/);
   for (const phrase of ['(the **Concessionaire**)', 'thirty (30) days', 'PKR 1,000,000/- (Pakistani Rupees One Million Only)', 'October 19, 2026', '[●]', 'Section 2.1 (The Appointment)', 'successors-in-interest and permitted assigns', 'Government']) {
     assert.ok(FIRM_STYLE_CORE.includes(phrase), phrase);
@@ -201,7 +204,7 @@ test('the style sheet as prompt text: the core alone, or the core and the family
   for (const key of FAMILY_KEYS) {
     const text = styleSheetText(key);
     assert.ok(text.startsWith(FIRM_STYLE_CORE), key);
-    assert.ok(text.length > FIRM_STYLE_CORE.length + 300 && text.length < 12_000, `${key}: ${text.length}`);
+    assert.ok(text.length > FIRM_STYLE_CORE.length + 300 && text.length < 16_000, `${key}: ${text.length}`);
   }
   assert.match(styleSheetText('Escrow Agreement'), /FOR ESCROW AGREEMENTS/);
   assert.match(styleSheetText('Letter / Notice'), /"we" is allowed here/);

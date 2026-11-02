@@ -96,7 +96,7 @@
   },
   "defined_terms": {
     "form": "bold-parenthesis-no-quotes",
-    "rule": "A term is defined once, in bold inside brackets, without quotation marks, and used with the same capitals ever after. In a definitions clause the term is bold without quotation marks, followed by \"means\" or the pointer formula.",
+    "rule": "A term is defined once, in bold inside brackets, without quotation marks, and used with the same capitals ever after. In a definitions clause the term is bold without quotation marks, followed by \"means\" or the pointer formula. Define a thing that recurs at its first mention, and only then; a term defined inside a clause also gets an entry in the definitions list pointing to it, in alphabetical order; a term defined but never used again is a slip. Defined terms are long-form, never short forms or acronyms (Memorandum of Understanding, not MoU; Liquidated Damages, not LD); industry acronyms stay (EPC, BESS).",
     "examples": [
       "(the **Concessionaire**)",
       "(each a **Party** and together the **Parties**)",
@@ -106,7 +106,8 @@
     "source": [
       "Decisions 20 Oct 2026",
       "plan: How it will work: the wording",
-      "firm-skills/concession-agreement/references/house-style.md"
+      "firm-skills/concession-agreement/references/house-style.md",
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (document-standards; Orient drafting standards)"
     ]
   },
   "numbers": {
@@ -142,7 +143,7 @@
     ]
   },
   "money": {
-    "rule": "The currency code, the figure with thousands separators and \"/-\", then the amount in words in Title Case in brackets on first mention; the figure alone thereafter. Inside a standard, follow the wording already in the slot.",
+    "rule": "The currency code, the figure with thousands separators and \"/-\", then the amount in words in Title Case in brackets on first mention; the figure alone thereafter. Inside a standard, follow the wording already in the slot. The currency is always its code (PKR), never an abbreviation such as Rs.",
     "examples": [
       "PKR 1,000,000/- (Pakistani Rupees One Million Only)",
       "USD 118,750,000/- (United States Dollars One Hundred Eighteen Million Seven Hundred Fifty Thousand Only)",
@@ -165,7 +166,8 @@
       "plan: How it will work: the wording",
       "firm-skills/akla-dd-format/references/house-style.md",
       "firm-skills/concession-agreement/references/house-style.md",
-      "PQE4.3, AM7, PI45 (USD and PKR fee forms)"
+      "PQE4.3, AM7, PI45 (USD and PKR fee forms)",
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (Sapphire Volume III house style)"
     ]
   },
   "dates": {
@@ -192,13 +194,14 @@
     ]
   },
   "cross_refs": {
-    "rule": "A reference to a provision of the same document carries its heading in brackets the first time it is made in a clause.",
+    "rule": "A reference to a provision of the same document carries its heading in brackets the first time it is made in a clause. The heading is set in italics; a reference to a sub-section (Section 7.1) carries no heading; a statutory section is cited the same way, with the Act: section 11 (Approval of Mergers) of the Competition Act, 2010.",
     "example": "Section 2.1 (The Appointment)",
     "heading_required": true,
     "words": null,
     "source": [
       "plan: How it will work: the wording",
-      "firm-skills/concession-agreement/references/house-style.md"
+      "firm-skills/concession-agreement/references/house-style.md",
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (Sapphire Volume III; Artistic drafting standards)"
     ]
   },
   "headings": {
@@ -241,6 +244,70 @@
     ],
     "source": [
       "Decisions 20 Oct 2026 (no government or province is built in)"
+    ]
+  },
+  "quotations": {
+    "rule": "Single quotation marks only, with the quoted matter in italics; never double quotation marks. A document is referred to by its title the same way: the document entitled ‘[●]’, without page counts or a description of its format. Law reproduced word for word is introduced as ‘Section [●] of the [●] is reproduced below:’ and set in italics.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (document-standards; KPT memorandum format; Sapphire house style)"
+    ]
+  },
+  "punctuation": {
+    "rule": "No em dashes anywhere; an en dash only inside an annexure title. No semicolon joining independent clauses: each provision is its own sentence and its own paragraph. Apostrophes are curly (’). “and/ or” takes a space after the slash. No word is broken by a hyphen at the end of a line. No contractions.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (akla-house-style; Project Cancer house style; Sapphire Volume III)"
+    ]
+  },
+  "lists": {
+    "rule": "A list follows a lead-in ending in a colon, then items lettered (a), (b), (c), each on its own line and ending with a semicolon, “and” after the last but one; never run inline in a sentence, and never roman numerals at the first level. In a schedule or a list of points a flat 1, 2, 3 without headings. All numbering is Word’s own: never a number typed as text and pushed across with a tab, for clause numbers and (a), (i) alike.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (KPT memorandum format; Sapphire house style; document-standards)"
+    ]
+  },
+  "labels": {
+    "rule": "A lead-in label before a colon at the start of a paragraph or cell (‘Query:’, ‘NSCL:’) is bold small caps, the colon plain. No bracketed labels such as [Inferred], [Law Silent], [Recommended] or [Firm’s View], and no risk or status ratings (Met / Not Met) in a memorandum: they read as machine-written. Nothing is written without a purpose it can justify.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (document-standards; KPT memorandum format)"
+    ]
+  },
+  "names": {
+    "rule": "People and parties by their full names, never initials (Mr. Hashim Arshad Faruqui, not HF). The firm is Ali Khan Law Associates, never Ali Asgher Khan Law Associates; in its own correspondence it is ‘the Firm’ without a defining line (never ‘Ali Khan Law Associates (the Firm)’). The Founder’s designation is Founder; Barrister-at-Law. The other side’s law firm is never named: a defined role (the Seller’s Counsel). On a due diligence matter the DD report’s own defined terms are used, as it defines them.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (akla-house-style; M-6 standing rules; Artistic drafting standards; Sapphire house style)"
+    ]
+  },
+  "tracked_changes": {
+    "rule": "Every tracked change is authored ‘Ali Khan Law Associates’. Only wording is tracked, never formatting, so no formatting balloons appear in the margin. Each change marks only the characters that differ: never a clause struck and retyped where the text was substantially right, and nothing struck against the counterparty’s own text beyond the change intended. Every consequential change is carried through in the same pass: cross-references, the definitions list, numbering. A comment that has been answered is deleted in that pass. Formatting, styles, margins and layout are never changed unless asked, except to match what the document already does when adding to it.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (akla-house-style; M-6 standing rules; document-standards; TSA key learnings)"
+    ]
+  },
+  "layout": {
+    "rule": "Arial 11, justified throughout, inside tables too; A4; headings in bold small caps, Title Case with acronyms kept in capitals. Paragraph spacing before and after is 0, with one empty paragraph between clauses and none between the items of one list. In a table the Sr. No. and date columns are centred; filled-in values are not bold. ‘Page X of Y’ in the footer; ‘Privileged & Confidential’ on a client-facing document; the sign-off is ‘For And On Behalf Of’.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (akla-house-style; document-standards; M-6 standing rules; bid drafting standards)"
+    ]
+  },
+  "law_currency": {
+    "rule": "Never cite superseded law: before an instrument is cited, check it for amendment or replacement (the Public Procurement Rules, 2026 replaced the 2004 Rules on September 28, 2026; Forms 28 and 29 were abolished by the Companies Regulations, 2024; section 15 of the NEPRA Act was replaced by section 14B in 2018). A pinpoint that cannot be verified against the primary source is removed, not kept. Nothing is stated as a consequence unless the documents expressly support it.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (M-6 standing rules; Sapphire citation corrections; IRL drafting discipline)"
+    ]
+  },
+  "correspondence": {
+    "rule": "An email to the team opens ‘Team,’. A capitalised short form (the Bill, the Rules) is defined at first use, straight after the full title. A pleasantry sits in its own paragraph. Formal and assured, never deferential: no ‘flag’, ‘grateful’ or ‘impose’; prefer ‘inform’, ‘confirm’. In government and revenue correspondence less is more: nothing volunteered that is not required.",
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (M-6 standing rules; drafting-style; government correspondence principles)"
+    ]
+  },
+  "file_naming": {
+    "rule": "A file is named <MatterCode><n> - <Document name> [<Party or author>][<Stage>][<Month DD, YYYY>], with an optional suffix after a hyphen (- Track, - Clean, - Compared, - OCR). Square brackets only, never round. A new document takes the matter’s next whole number; a document derived from another takes a decimal of its number (a markup of NSCL1 is NSCL1.1). A document the Firm circulated is tagged [AKLA][1st Cir]; internal work is tagged by its author and round ([Usama 1st WD], [Ahmed 1st Rec]). Names stay short.",
+    "examples": [
+      "NSCL1 - Transmission Services Agreement [NSCL][1st Rec][July 03, 2026]",
+      "NSCL9.21 - GSA [AKLA][Further Changes on NSCL Draft][September 18, 2026] - Track"
+    ],
+    "source": [
+      "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (file-naming; M-6 standing rules)"
     ]
   },
   "formulae": {
@@ -297,6 +364,46 @@
       "source": [
         "plan: How it will work: the wording"
       ]
+    },
+    {
+      "id": "em_dash",
+      "pattern": "—",
+      "flags": "",
+      "severity": "low",
+      "reason": "No em dashes: a comma, a colon, a hyphen or a new sentence instead.",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (akla-house-style)"
+      ]
+    },
+    {
+      "id": "double_quotes",
+      "pattern": "(?<!\\((?:the|this|these|each\\s+an?|together(?:,)?\\s+the|collectively(?:,)?\\s+the|an?)\\s)(?<!\\w)[“\"](?=\\S)[^”\"\\n]*\\s[^”\"\\n]*?(?<=\\S)[”\"](?!\\w)(?!\\s+(?:means|shall\\s+(?:have|mean)|has\\s+the\\s+meaning))",
+      "flags": "",
+      "severity": "low",
+      "reason": "Never double quotation marks: single quotation marks, with the quoted matter in italics.",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (document-standards)"
+      ]
+    },
+    {
+      "id": "rupees_abbrev",
+      "pattern": "\\bRs\\.?\\s?\\d",
+      "flags": "",
+      "severity": "low",
+      "reason": "The firm writes the currency as PKR, never Rs.",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (Sapphire Volume III house style)"
+      ]
+    },
+    {
+      "id": "section_abbrev",
+      "pattern": "\\bss?\\.\\s?\\d",
+      "flags": "",
+      "severity": "low",
+      "reason": "A section is written out: section 197 of the Act, Section 5.4 of this Agreement, never s.197.",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026 (Project Cancer house style)"
+      ]
     }
   ],
   "tells_of_counterparty": [
@@ -340,6 +447,20 @@
       "tell": "Dates written 19 October 2026 or 19th October, 2026",
       "source": [
         "Decisions 20 Oct 2026"
+      ]
+    },
+    {
+      "id": "em_dash",
+      "tell": "em dashes in the text",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026"
+      ]
+    },
+    {
+      "id": "double_quotes",
+      "tell": "double quotation marks around quoted matter",
+      "source": [
+        "Usama Siddiqui's claude.ai memory, exported 2 Nov 2026"
       ]
     }
   ]
