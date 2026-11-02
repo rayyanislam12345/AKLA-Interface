@@ -84,3 +84,6 @@ exports/
 
 scripts/precedent_backlog/sharepoint/data/
 scripts/precedent_backlog/sharepoint/evict
+
+# Client material from Usama Siddiqui's claude.ai export (never committed)
+USAMA DATA/
