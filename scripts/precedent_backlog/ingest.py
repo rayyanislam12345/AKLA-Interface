@@ -95,6 +95,33 @@ def extract_snippet(path: str, ext: str) -> str:
     return ""
 
 
+def extract_full_text(path: str, ext: str) -> str:
+    """The whole document, for when process-document can't do the extraction itself.
+
+    Same libraries as extract_snippet above, without the caps it applies for
+    classification. Unlike that one this also walks tables: a concession
+    agreement keeps its payment bands, term dates and schedule figures in
+    them, so a docx reader that only visits paragraphs silently drops exactly
+    the content the drafting side needs most.
+    """
+    if ext == "docx":
+        import docx
+        doc = docx.Document(path)
+        parts = [p.text for p in doc.paragraphs]
+        for table in doc.tables:
+            for row in table.rows:
+                parts.append("\t".join(cell.text for cell in row.cells))
+        return "\n".join(parts)
+    if ext == "pdf":
+        import pdfplumber
+        pages = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                pages.append(page.extract_text() or "")
+        return "\n".join(pages)
+    raise ValueError(f"no local extractor for .{ext}")
+
+
 def classify_winner(candidate, folder_name, alias_table, document_types, anthropic_client) -> dict:
     row = {
         "path": candidate.path,
@@ -246,12 +273,26 @@ def confirm(
     only_existing_types: bool = False,
     min_files_per_type: int = 0,
     only_created_types: bool = False,
+    retry_failed: bool = False,
 ):
     outcomes = ("pending_ingest",) if only_existing_types else ("pending_ingest", "pending_ingest_new_type")
+    # Failures are terminal to a normal --confirm: the run records the error
+    # and never looks at that file again. Most of them are not bad documents,
+    # they are documents that were too big for one edge-function invocation,
+    # so they need a way back into the queue once that is handled.
+    if retry_failed:
+        outcomes = outcomes + ("failed",)
     pending = [
         (key, row) for key, row in manifest.items()
         if is_under(row.get("path", ""), root) and row["outcome"] in outcomes
     ]
+    if retry_failed and only_existing_types:
+        # Honour "existing types only" for retries too: a failure that never
+        # got a type would otherwise force a type to be created here.
+        pending = [
+            (key, row) for key, row in pending
+            if row["outcome"] != "failed" or row.get("document_type_id")
+        ]
 
     # Finishing an interrupted --min-files-per-type run. That threshold counts
     # what is still PENDING, so a type approved at 6 files and ingested down to
@@ -319,7 +360,11 @@ def confirm(
     for i, (key, row) in enumerate(pending, 1):
         try:
             document_type_id = row.get("document_type_id")
-            if row["outcome"] == "pending_ingest_new_type":
+            # A retried failure that began life as a new-type proposal now
+            # reads outcome="failed", so keying on that outcome alone would
+            # let it through with no type at all. What actually distinguishes
+            # it is having a proposed name and no id yet.
+            if not document_type_id and row.get("proposed_type_name"):
                 name_key = row["proposed_type_name"].lower()
                 if name_key in existing_by_name:
                     document_type_id = existing_by_name[name_key]["id"]
@@ -341,32 +386,70 @@ def confirm(
                     err.response is not None
                     and "No text content could be extracted" in err.response.text
                 )
-                if not (no_text_layer and ext.lower() == "pdf" and sb.ocr_configured):
+                status = err.response.status_code if err.response is not None else None
+                # 546 is Supabase's edge-function resource ceiling — the single
+                # invocation downloads, extracts, chunks and embeds, and a long
+                # agreement exhausts it. 503/504 are the same story with time
+                # rather than memory. These are the bulk of this backlog's
+                # failures, and they are all documents worth having: the two KPT
+                # concession agreements failed this way.
+                over_platform_limit = status in (500, 503, 504, 546)
+
+                # Exactly one recovery route may run. These are branches on
+                # different failures, not a sequence: reaching OCR after a
+                # local extraction has already succeeded ingests the same
+                # document a second time.
+                base_metadata = {
+                    "filename": row["filename"],
+                    "file_type": ext,
+                    "upload_date": datetime.now(timezone.utc).isoformat(),
+                    "storage_path": storage_path,
+                    "storage_bucket": "precedent-library",
+                }
+
+                if no_text_layer and ext.lower() == "pdf" and sb.ocr_configured:
+                    # Scanned/photographed PDF, no real text layer — process-document's
+                    # own OCR fallback only has Supabase's 400s platform ceiling to work
+                    # with, which a long scan blows straight through, so this calls the
+                    # OCR service directly (no such limit here) and feeds the result to
+                    # ingest-documents ourselves rather than through process-document.
+                    print(f"  No text layer — running OCR (can take a while for a long scan)...")
+                    ocr_text = sb.ocr_pdf(data)
+                    sb.ingest_document_text(
+                        ocr_text,
+                        document_type_id=document_type_id,
+                        is_precedent=True,
+                        metadata={**base_metadata, "original_format": "pdf", "ocr": True},
+                    )
+                elif over_platform_limit:
+                    # Extract here, where there is no platform ceiling, and hand
+                    # ingest-documents the text — the same route the OCR
+                    # branch above takes.
+                    print(f"  {status} from process-document — extracting locally instead...")
+                    try:
+                        local_text = extract_full_text(row["path"], ext.lower())
+                    except Exception as extract_err:
+                        raise err from extract_err
+                    if not local_text.strip():
+                        # Nothing to ingest; surface the original failure rather
+                        # than a misleading empty-success.
+                        raise
+                    sb.ingest_document_text(
+                        local_text,
+                        document_type_id=document_type_id,
+                        is_precedent=True,
+                        metadata={**base_metadata, "original_format": ext.lower(), "extracted_locally": True},
+                    )
+                    print(f"  extracted {len(local_text):,} chars locally")
+                else:
                     raise
-                # Scanned/photographed PDF, no real text layer — process-document's
-                # own OCR fallback only has Supabase's 400s platform ceiling to work
-                # with, which a long scan blows straight through, so this calls the
-                # OCR service directly (no such limit here) and feeds the result to
-                # ingest-documents ourselves rather than through process-document.
-                print(f"  No text layer — running OCR (can take a while for a long scan)...")
-                ocr_text = sb.ocr_pdf(data)
-                sb.ingest_document_text(
-                    ocr_text,
-                    document_type_id=document_type_id,
-                    is_precedent=True,
-                    metadata={
-                        "filename": row["filename"],
-                        "file_type": ext,
-                        "upload_date": datetime.now(timezone.utc).isoformat(),
-                        "storage_path": storage_path,
-                        "storage_bucket": "precedent-library",
-                        "original_format": "pdf",
-                        "ocr": True,
-                    },
-                )
 
             row["outcome"] = "ingested"
             row["document_type_id"] = document_type_id
+            # A file being retried carries the error that failed it last time;
+            # leaving it on a now-ingested row makes the manifest read as
+            # though it is still broken.
+            row.pop("error", None)
             manifest[key] = row
             print(f"Ingested: {row['filename']}")
         except Exception as err:
@@ -443,6 +526,7 @@ def main():
     parser = argparse.ArgumentParser(description="Precedent backlog ingestion tool")
     parser.add_argument("--scan", required=True, help="Folder to walk (e.g. a path on the Passport drive)")
     parser.add_argument("--confirm", action="store_true", help="Act on already-classified pending files instead of (re-)scanning")
+    parser.add_argument("--retry-failed", action="store_true", help="With --confirm, also re-attempt files previously recorded as failed")
     parser.add_argument("--only-existing-types", action="store_true", help="With --confirm, ingest only files matched to existing types — hold back new-type proposals")
     parser.add_argument("--consolidate-types", action="store_true", help="Group near-duplicate proposed new type names before --confirm")
     parser.add_argument(
@@ -510,6 +594,7 @@ def main():
             only_existing_types=args.only_existing_types,
             min_files_per_type=args.min_files_per_type,
             only_created_types=args.only_created_types,
+            retry_failed=args.retry_failed,
         )
         return
 

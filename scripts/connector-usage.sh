@@ -5,7 +5,7 @@ set -e
 TOK=$(security find-generic-password -s 'Supabase CLI' -w | sed 's/^go-keyring-base64://' | base64 -d)
 SQL="select p.full_name as member,
   count(distinct t.family_id) filter (where t.revoked_at is null and t.expires_at > now()) as connections,
-  count(a.id) as calls, max(a.created_at)::date as last_used
+  count(distinct a.id) as calls, max(a.created_at)::date as last_used
   from profiles p
   left join connector_tokens t on t.user_id = p.id
   left join connector_actions a on a.user_id = p.id
