@@ -1131,6 +1131,151 @@ export type Database = {
           },
         ]
       }
+      intake_agendas: {
+        Row: {
+          agenda_date: string | null
+          blocks: number
+          file_name: string
+          id: string
+          matched: number
+          person_id: string | null
+          person_name: string
+          read_at: string
+          sha256: string
+          time_lines: number
+          timesheet_date: string | null
+          trayed: number
+        }
+        Insert: {
+          agenda_date?: string | null
+          blocks?: number
+          file_name: string
+          id?: string
+          matched?: number
+          person_id?: string | null
+          person_name: string
+          read_at?: string
+          sha256: string
+          time_lines?: number
+          timesheet_date?: string | null
+          trayed?: number
+        }
+        Update: {
+          agenda_date?: string | null
+          blocks?: number
+          file_name?: string
+          id?: string
+          matched?: number
+          person_id?: string | null
+          person_name?: string
+          read_at?: string
+          sha256?: string
+          time_lines?: number
+          timesheet_date?: string | null
+          trayed?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_agendas_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      intake_runs: {
+        Row: {
+          error: string | null
+          finished_at: string | null
+          id: string
+          kind: string
+          ok: boolean | null
+          started_at: string
+          summary: Json
+        }
+        Insert: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          kind: string
+          ok?: boolean | null
+          started_at?: string
+          summary?: Json
+        }
+        Update: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          ok?: boolean | null
+          started_at?: string
+          summary?: Json
+        }
+        Relationships: []
+      }
+      intake_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
+      intake_tray: {
+        Row: {
+          created_at: string
+          guess: Json | null
+          id: string
+          kind: string
+          payload: Json
+          resolution: Json | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          guess?: Json | null
+          id?: string
+          kind: string
+          payload: Json
+          resolution?: Json | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          guess?: Json | null
+          id?: string
+          kind?: string
+          payload?: Json
+          resolution?: Json | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_tray_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       law_library_versions: {
         Row: {
           act_name: string
@@ -2605,6 +2750,233 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transaction_rows: {
+        Row: {
+          archived_at: string | null
+          client: string
+          created_at: string
+          currently_with: string | null
+          deliverable: string
+          id: string
+          latest_update: string | null
+          latest_update_at: string | null
+          matter_id: string | null
+          project: string
+          sort_order: number
+          status: string
+          team: string[]
+          updated_at: string
+          updated_by: string | null
+          updated_source: string
+        }
+        Insert: {
+          archived_at?: string | null
+          client: string
+          created_at?: string
+          currently_with?: string | null
+          deliverable: string
+          id?: string
+          latest_update?: string | null
+          latest_update_at?: string | null
+          matter_id?: string | null
+          project: string
+          sort_order: number
+          status?: string
+          team?: string[]
+          updated_at?: string
+          updated_by?: string | null
+          updated_source?: string
+        }
+        Update: {
+          archived_at?: string | null
+          client?: string
+          created_at?: string
+          currently_with?: string | null
+          deliverable?: string
+          id?: string
+          latest_update?: string | null
+          latest_update_at?: string | null
+          matter_id?: string | null
+          project?: string
+          sort_order?: number
+          status?: string
+          team?: string[]
+          updated_at?: string
+          updated_by?: string | null
+          updated_source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transaction_rows_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_rows_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transaction_sheet_snapshots: {
+        Row: {
+          file_etag: string | null
+          id: string
+          rows: Json
+          written_at: string
+        }
+        Insert: {
+          file_etag?: string | null
+          id?: string
+          rows: Json
+          written_at?: string
+        }
+        Update: {
+          file_etag?: string | null
+          id?: string
+          rows?: Json
+          written_at?: string
+        }
+        Relationships: []
+      }
+      transaction_time_suggestions: {
+        Row: {
+          billable_hours: number | null
+          created_at: string
+          hours: number
+          id: string
+          matter_id: string | null
+          narrative: string
+          person_id: string | null
+          person_name: string
+          resolved_at: string | null
+          row_id: string | null
+          source_ref: string
+          status: string
+          timeslip_id: string | null
+          transaction: string
+          work_date: string
+        }
+        Insert: {
+          billable_hours?: number | null
+          created_at?: string
+          hours: number
+          id?: string
+          matter_id?: string | null
+          narrative: string
+          person_id?: string | null
+          person_name: string
+          resolved_at?: string | null
+          row_id?: string | null
+          source_ref: string
+          status?: string
+          timeslip_id?: string | null
+          transaction: string
+          work_date: string
+        }
+        Update: {
+          billable_hours?: number | null
+          created_at?: string
+          hours?: number
+          id?: string
+          matter_id?: string | null
+          narrative?: string
+          person_id?: string | null
+          person_name?: string
+          resolved_at?: string | null
+          row_id?: string | null
+          source_ref?: string
+          status?: string
+          timeslip_id?: string | null
+          transaction?: string
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transaction_time_suggestions_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_time_suggestions_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_time_suggestions_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_rows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_time_suggestions_timeslip_id_fkey"
+            columns: ["timeslip_id"]
+            isOneToOne: false
+            referencedRelation: "matter_timeslips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transaction_updates: {
+        Row: {
+          at: string
+          author: string | null
+          author_id: string | null
+          body: string
+          created_at: string
+          id: string
+          row_id: string
+          source: string
+          source_ref: string | null
+        }
+        Insert: {
+          at: string
+          author?: string | null
+          author_id?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          row_id: string
+          source: string
+          source_ref?: string | null
+        }
+        Update: {
+          at?: string
+          author?: string | null
+          author_id?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          row_id?: string
+          source?: string
+          source_ref?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transaction_updates_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_updates_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_rows"
             referencedColumns: ["id"]
           },
         ]

@@ -20,6 +20,7 @@ import {
   useUpdateMyTimeslip,
 } from "@/hooks/useMatterTimeslips";
 import { buildTimesheetDocxBlob } from "@/lib/timesheetDocx";
+import { TimeSuggestions } from "@/components/TimeSuggestions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -622,6 +623,9 @@ export default function TodaysTimesheetPage() {
           </Button>
         </div>
       </div>
+
+      {/* Hours read from the person's own agenda, only while some wait for a yes. */}
+      <TimeSuggestions />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

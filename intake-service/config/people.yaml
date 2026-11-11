@@ -1,0 +1,46 @@
+# The firm's people as the Hub's profiles spell them, and the other spellings the
+# sheet and the agendas use for them. A name not listed here is kept as written.
+names:
+  - Ahmed Yasin
+  - Aiman Mehmood
+  - Ali Asgher Khan
+  - Areen Shah
+  - Ayaan Qureshi
+  - Haya Ansari
+  - Huroom Khan
+  - Moiz Ali Khan
+  - Rumaisa Hussain
+  - Umer Maroof
+  - Usama Siddiqui
+  - Zainab Aamir
+  - Rayyan Islam
+
+# Initials, first names, and misspellings, each to one full name above.
+aliases:
+  AQ: Ayaan Qureshi
+  AS: Areen Shah
+  HK: Huroom Khan
+  AY: Ahmed Yasin
+  MAK: Moiz Ali Khan
+  UM: Umer Maroof
+  US: Usama Siddiqui
+  RI: Rayyan Islam
+  Rumaissa: Rumaisa Hussain
+  Rumaisa: Rumaisa Hussain
+  Rumaisah Hussain: Rumaisa Hussain
+  Rumaisah: Rumaisa Hussain
+  Rayaan Islam: Rayyan Islam
+  Muhammad Rayyan ul Islam: Rayyan Islam
+  Areen Ali Shah: Areen Shah
+  Ahmed: Ahmed Yasin
+  Aiman: Aiman Mehmood
+  Areen: Areen Shah
+  Ayaan: Ayaan Qureshi
+  Haya: Haya Ansari
+  Huroom: Huroom Khan
+  Moiz: Moiz Ali Khan
+  Umer: Umer Maroof
+  Usama: Usama Siddiqui
+  Zainab: Zainab Aamir
+  Rayyan: Rayyan Islam
+  Rayaan: Rayyan Islam

@@ -39,6 +39,7 @@ import {
   Settings,
   Inbox,
   Loader2,
+  Table2,
 } from "lucide-react";
 
 interface HelpItem {
@@ -63,6 +64,7 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   "/assistant":
     "the AI. Ask a question, drop in a document, or type / to draft, review or summarise. Works with or without a project.",
   "/dashboard": "a firm-wide view: project counts, today's legal updates and the project list.",
+  "/transactions": "the firm's sheet of deliverables: who has each one, its latest update and its status. The daily agendas move the rows.",
   "/matters": "every project. Open one for its documents, tasks and time.",
   "/legal-updates": "the morning briefing on new and amended laws, and what is awaiting its official text.",
   "/claude": "how to connect your own Claude to the Hub, so you can ask, draft and review there with the firm's projects, precedents and laws.",
@@ -238,6 +240,46 @@ const HelpPage = () => {
         {
           question: "Can several lawyers work on the same project?",
           answer: "Yes. There is no per-project permission to set: every lawyer can view and edit every project.",
+        },
+      ],
+    },
+    {
+      id: "transactions",
+      title: "Transactions Hub",
+      icon: Table2,
+      description: "The firm's sheet of deliverables, kept on the Hub",
+      content: [
+        {
+          question: "What is the Transactions Hub?",
+          answer:
+            "The firm's Transactions spreadsheet, one row per deliverable: client, project, team, who it is currently with, the latest update and its status in the sheet's own words (With Boss, With Client, On Hold and so on). The Hub is the master copy; the Excel on SharePoint is rewritten from it every night, and a cell someone changes in the Excel comes back here the next night.",
+        },
+        {
+          question: "Do I still have to update the sheet?",
+          answer:
+            "Mostly not. Every night the Hub reads everyone's daily agenda and moves the rows it names: the Scope of Task becomes the row's latest update, stamped with the person and the time. Every automatic move carries a small 'auto' pill saying where it came from (agenda, excel, email, whatsapp), so you can always tell it from something a person typed.",
+        },
+        {
+          question: "How do I move a row myself?",
+          answer:
+            "Click the row. Type what happened in Add update, or change the status, who it is currently with, or the team and press Save. A change you make here is written into the row's history in plain words (Status: With Boss → With Client), so the Excel shows it too. New row adds a line at the bottom of the sheet.",
+        },
+        {
+          question: "What are the views at the top?",
+          answer:
+            "By project groups the rows as the sheet does. By person shows each team member's rows. Moved today shows what changed today. Stale shows open rows that have not moved for more than ten days, each with how long it has sat. Show closed brings the closed rows back.",
+        },
+        {
+          question: "What is Needs a look?",
+          answer:
+            "The pill in the header, with a count, when the Hub could not place something on its own: an agenda line that matches no row (with a drafted row ready to add), one it is not sure about, a cell changed in both the Hub and the Excel on the same night, hours with no row, or an agenda file it could not read. Each card has the buttons that settle it; nothing is guessed at silently.",
+        },
+      ],
+      faqs: [
+        {
+          question: "Where do the hours from my agenda go?",
+          answer:
+            "To the top of your Timesheet page as My hours to confirm. Press Confirm and a line with a Hub project becomes a timesheet entry in your name; one without a project is kept as a record only.",
         },
       ],
     },

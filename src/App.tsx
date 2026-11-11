@@ -12,6 +12,8 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
+import TransactionsPage from "./pages/TransactionsPage";
+import IntakeTrayPage from "./pages/IntakeTrayPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import AssistantSearchPage from "./pages/AssistantSearchPage";
 import AiWorkspacePage from "./pages/AiWorkspacePage";
@@ -69,7 +71,7 @@ const App = () => {
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <RouteErrorBoundary>
                 <Routes>
-                  <Route path="/" element={<Navigate to="/matters" replace />} />
+                  <Route path="/" element={<Navigate to="/transactions" replace />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   <Route
@@ -82,6 +84,8 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route path="/transactions" element={<ProtectedRoute><AppLayout><TransactionsPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/transactions/tray" element={<ProtectedRoute><AppLayout><IntakeTrayPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/search" element={<RedirectSearch />} />
                   <Route path="/assistant/search" element={<ProtectedRoute><AppLayout><AssistantSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/caselaw-research" element={<ProtectedRoute><AppLayout><CaselawResearchPage /></AppLayout></ProtectedRoute>} />

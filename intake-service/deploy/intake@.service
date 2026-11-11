@@ -1,0 +1,22 @@
+[Unit]
+Description=AKLA Transactions Hub intake (%i): the daily agendas and the Excel on SharePoint, into the Hub
+# One unit for every command: intake@agendas.service reads the agendas,
+# intake@sheet-sync.service reads the sheet back and rewrites it. The timers
+# below name which one they start.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# A batch job, not a server: Type=oneshot and no Restart, so a failing run does
+# not relaunch in a loop. The timer tries again the next day.
+Type=oneshot
+User=opc
+WorkingDirectory=/opt/intake-service
+# Supabase keys live with the chat service, the SharePoint app with the WhatsApp
+# Filer; this service has no secrets of its own (see deploy/env).
+EnvironmentFile=/opt/chat-service/.env
+EnvironmentFile=/opt/whatsapp-filer/.env
+# flock so a manual run and the timer never overlap.
+ExecStart=/usr/bin/flock -n /tmp/intake-%i.lock /opt/intake-service/venv/bin/python -m intake %i --sharepoint
+TimeoutStartSec=1800
+Nice=10

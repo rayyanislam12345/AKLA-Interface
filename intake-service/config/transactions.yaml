@@ -1,0 +1,171 @@
+# Transactions the filer knows. Confirmed 23 Oct 2026 (codes and names checked by Rayyan).
+# Built from the codes the firm already uses in AKLA - Data Room (tools/scan_codes.py;
+# state/codes.json). For each: the code that starts filed names, the folder under
+# Automated Inbox, and other names it goes by (helps Claude recognise it).
+# keys: words that, when they appear in a filename, settle the transaction without
+#   asking Claude (only if they point to exactly one transaction).
+# title_words: the project's own name and place words, ignored (with the keys) when a new
+#   title is matched against documents already filed, so "Concession Agreement (M6 Motorway)"
+#   and "Concession Agreement - Section I of the Hyderabad Sukkur Motorway (M-6)" land in one
+#   folder (added 28 Oct 2026).
+# Numbering continues after the highest number already used on SharePoint for
+# the code (e.g. Master Mining is at MM75, so the next filed file is MM76).
+# Files that belong to none of these are not filed (decided 23 Oct 2026), except CVs,
+# which go to Automated Inbox/Recruitment.
+
+matters:
+  - {code: ADB, keys: [M6, M-6],  name: Asian Development Bank (M6 Motorway), aliases: [ADB, M6, M-6 Motorway, NHA, Hyderabad Sukkur Motorway, Land DD],
+     title_words: [Hyderabad, Sukkur, Tando Adam, Motorway]}
+  - {code: AI,   name: AKLA International, aliases: [AKLA International]}
+  - {code: AM, keys: [Artistic, DISCOs],   name: Artistic Milliners, aliases: [Artistic Milliners, Batch-I DISCOs, DISCOs privatisation, Bridge Factor, MRC]}
+  - {code: AP,   name: AsiaPak - SSRL, aliases: [AsiaPak, SSRL, mortgage]}
+  - {code: AQ,   name: Aqua Culture, aliases: [aquaculture]}
+  - {code: ASL,  name: Amreli Steel, aliases: [Amreli, MRA, debt restructuring]}
+  - {code: CDA,  name: CDA - Illegal Schemes Bid, aliases: [CDA, Capital Development Authority, illegal housing schemes]}
+  - {code: DHA,  name: DHA Dredging, aliases: [DHA, Gizri, dredging]}
+  - {code: EE,   name: Engro Bid, aliases: [Engro]}
+  - {code: EVB,  name: Electric Vehicle Buses, aliases: [electric buses, EV buses]}
+  - {code: EWPL, keys: [EWPL, Enertech], name: Enertech Water Private Limited, aliases: [EWPL, Enertech Water, Enertech, OWDP, EHC]}
+  - {code: FC, keys: [FCS, Chiniot],   name: Faisalabad Chiniot, aliases: [FCS, Faisalabad Chiniot Sargodha, Punjab road PPP]}
+  - {code: FRA,  name: Fundraising Agreement, aliases: [DiabMart, fundraising]}
+  - {code: GP,   name: ITZ Ganool, aliases: [Ganool, ITZ]}
+  - {code: KPK, keys: [KPK],  name: Project Carbon - KPK, aliases: [KP Carbon Credits, GoKP, IFM, ARR, carbon]}
+  - {code: KPT, keys: [KPT, Manora],  name: Karachi Port Trust, aliases: [KPT, Karachi Port Trust, Manora, USP, KPT consultants]}
+  - {code: LEL, keys: [Lakeside],  name: Lakeside, aliases: [Lakeside, LEL]}
+  - {code: MEW, keys: [MEW, Malir],  name: Malir Expressway, aliases: [MEW, Malir Expressway, RFID, Escrow, EFUA]}
+  - {code: MM, keys: [Master Mining, MM],   name: Master Mining, aliases: [Master Mining, Master Group, Master, ML-29, ML-30, ML-31, ML-32, iron ore,
+                 'joint Orion/Master ML-50 deal from 13 Feb 2026 (DD report, PS&IA, Addendum, Equity Subscription & Shareholders Agreement)',
+                 Zainab, Khalid Usman]}
+  - {code: MXM, keys: [Maxam, MXM],  name: Maxamcorp, aliases: [Maxam, Maxamcorp, explosives]}
+  - {code: NED,  name: NED, aliases: [NED STP, NED University]}
+  - {code: NSCL, keys: [NSCL, Sojitz], name: NSCL, aliases: [NSCL, Sojitz, STDC, gas sale]}
+  - {code: OCG, keys: [OCG, Osler],  name: Osler Cardiovascular Group (OCG), aliases: [OCG, Osler, Ossler, Osler Cardiovascular Group, Cleveland Clinic model, GCC healthcare, Verona REIT]}
+  - {code: OES, keys: [Orient],  name: Orient, aliases: [Orient, Orient Energy Systems, Pakistan Cable, SMC legal opinion]}
+  - {code: OR, keys: [Orion],   name: Orion, aliases: [Orion, Orion Exploration (Private) Limited, Ali Rind, Siddiqsons, antimony,
+                 'ML-50 before 13 Feb 2026 (Joint Venture Agreement, Term Sheet, Equity Subscription and Shareholding Agreement)']}
+  - {code: PC,   name: Project Cancer, aliases: [Project Cancer, cancer prevention]}
+  - {code: PCB, keys: [PCB],  name: Pakistan Cricket Board, aliases: [PCB]}
+  - {code: PI, keys: [PIDG, Dhabeji],   name: Dhabeji Bid - PIDG, aliases: [PIDG, InfraCo Asia, Dhabeji, KE EPA]}
+  - {code: PQE,  name: Port Qasim Coal Plant DD, aliases: [Port Qasim Electric, PQEPC]}
+  - {code: PR, keys: [Railways],   name: Pakistan Railways PPP, aliases: [Pakistan Railways, PR, Rebel]}
+  - {code: PTQ, keys: [KPQCP, PTQ],  name: Karachi Port to Qayyumabad Corridor (KPQCP), aliases: [PTQ, KPQCP, Port to Qayyumabad, Qayyumabad Corridor, Class A shares, Class B shares, PEA, PSF, NHS]}
+  - {code: RBP, keys: [Rani Bagh, Ranibagh],  name: Rani Bagh, aliases: [Rani Bagh, Ranibagh]}
+  - {code: RI, keys: [Riali],   name: Riali, aliases: [Riali, RHPCO, Riali Hydro]}
+  - {code: SADB, keys: [SADB], name: Sardar Ashraf D. Baloch, aliases: [SADB, Sardar Ashraf D Baloch, SITE, SITE Phase III, industrial estate]}
+  - {code: SC, keys: [Scatec],   name: Scatec, aliases: [Scatec, Helios, FMO]}
+  - {code: SKIM, keys: [SKIM], name: Sialkot Kharian Infrastructure Management (Private) Limited, aliases: [SKIM, Sialkot Kharian Infrastructure Management, LLC, Lincoln's Law Chamber, Concession Direct Agreement, HP, FKM]}
+  - {code: SKM, keys: [SKM],  name: Sialkot Kharian Motorway, aliases: [Sialkot Kharian Motorway, SKM, FWO, HP, FKM, CTA]}
+  - {code: SP, keys: [Sapphire],   name: Sapphire Power Acquisition, aliases: [Sapphire, Sapphire Power]}
+  - {code: WP,   name: Waste Project, aliases: [CDA SWM, solid waste management, STDC waste, ICT SWM]}
+  - {code: ZEL, keys: [Zorlu],  name: Zorlu, aliases: [Zorlu, CPPA-G]}
+  - {code: ZPL, keys: [Zephyr],  name: Zephyr, aliases: [Zephyr, Zephyr Power]}
+
+# ---------------------------------------------------------------------------
+# The Transactions Hub sheet (added 11 Nov 2026 for the intake service).
+#
+# An agenda says "Transaction: ADB – M6" or "PTQ – Financing Workstream" or just
+# "M6"; the sheet files the same work under a CLIENT and a PROJECT. Each entry
+# below is one transaction as the sheet knows it:
+#   code      the code above (so the extractor's aliases count too)
+#   pairs     the [CLIENT, PROJECT] pairs the sheet uses for it (several when the
+#             sheet spells the client two ways, or one client has sister projects)
+#   new_row   the pair a brand-new row is created under
+#   aliases   extra spellings seen in agendas and timesheets
+#   matter_id the Hub project (matters.id) for its rows, when one exists
+#   matter_rules  a deliverable whose text matches `contains` goes to another project
+# A transaction with no pairs is known but has no sheet rows yet.
+hub_clients:
+  - code: ADB
+    pairs: [["Asian Development Bank", "M6 Motorway"], ["ADB", "M6 Motorway"]]
+    new_row: ["Asian Development Bank", "M6 Motorway"]
+    matter_id: 9f3184dc-a85f-4fe3-a2a4-2f77cc2420fd
+    aliases: [ADB, M6, M-6, M6 Motorway, ADB – M6, M6 - ADB, ADB – M6 Motorway, Asian Development Bank,
+              Hyderabad Sukkur Motorway, NHA, ADB – Standarised Concession]
+    matter_rules:
+      - {contains: "PC Ordinance", matter_id: a2e5c618-c049-457c-b46e-a27798566566}
+      - {contains: "Privatisation Commission", matter_id: a2e5c618-c049-457c-b46e-a27798566566}
+      - {contains: "Privatization Commission", matter_id: a2e5c618-c049-457c-b46e-a27798566566}
+  - code: AM
+    pairs: [["Artistic Milliners (Private) Limited", "DISCOS Acquisition"]]
+    matter_id: 1093d128-c014-44e6-ada1-cb1b7bcb9492
+    aliases: [Artistic, Artistic Milliners, DISCOS, DISCOs, DISCOS Acquisition, Artistic – DISCOS Acquisition, Batch-I DISCOs]
+  - code: EWPL
+    pairs: [["EnerTech Water (Private) Limited", "Nabisar to Vajihar Water Supply Project"]]
+    matter_id: b8093a3b-1191-4da9-8c9f-b033f653a8bb
+    aliases: [EWPL, Enertech, EnerTech Water, Enertech Water, Nabisar, Vajihar, OWDP, Gas Pipeline]
+  - code: NSCL
+    pairs: [["National Steel Complex Limited", "Steel Mill Revival"], ["National Steel Complex Limited", "STDC Transmission Line Project"]]
+    new_row: ["National Steel Complex Limited", "Steel Mill Revival"]
+    aliases: [NSCL, National Steel Complex, NSCL – Gas Sale Matter, Gas Sale, Sojitz, STDC, Transmission Line, Steel Mill Revival]
+  - code: WP
+    pairs: [["Zia Sb", "CDA Waste Project"]]
+    aliases: [CDA, CDA – Waste Management Project, CDA – Waste Project, Waste Project, Waste Management, CDA SWM, Solid Waste]
+  - code: PI
+    pairs: [["Private Infrastructure Development Group", "Supplementary Workstream"]]
+    aliases: [PIDG, Private Infrastructure Development Group, Dhabeji, InfraCo, Supplementary Workstream]
+  - code: SP
+    pairs: [["Synergistic Financial Advisors", "Sapphire Wind Power Company Limited Acquisition"]]
+    matter_id: 1632e9f0-dbb1-448c-80f8-3f5e5242d3af
+    aliases: [Sapphire, Sapphire DD, Sapphire Due Diligence, Sapphire Power, Sapphire Wind, Synergistic, SWPCL]
+  - code: RI
+    pairs: [["Zia Barry", "Riali Hydro Power Acquisition"]]
+    aliases: [Riali, Riali Hydro, RHPCO, Zia Barry]
+  - code: EVB
+    pairs: [["Daewoo Pakistan Express Bus Service Limited", "Electric Vehicle Buses Project"]]
+    aliases: [Daewoo, EV Buses, Electric Vehicle Buses, Electric Buses, EVB]
+  - code: PTQ
+    pairs: [["JN & Co", "PTQ Expressway"], ["JN & Co", "Karachi Port to Qayumabad Corridor Project"]]
+    new_row: ["JN & Co", "PTQ Expressway"]
+    matter_id: ec4863c7-c818-45f1-b9cc-ef69523537ca
+    aliases: [PTQ, KPQCP, PTQ Expressway, Port to Qayyumabad, Qayumabad, Qayyumabad, JN & Co, JN and Co,
+              PTQ – Financing Workstream, PTQ – Corporate Matters Workstream, PTQ – Project Documents Workstream]
+    matter_rules:
+      - {contains: "Escrow", matter_id: eb364b66-f9c6-4770-bc0e-d502225d512b}
+  - code: MEW
+    pairs: [["JN & Co", "MEW"]]
+    aliases: [MEW, Malir Expressway, MEW – RFID Amendments, RFID Amendments]
+  - code: MXM
+    pairs: [["Maxamcorp", "Explosives Project"]]
+    aliases: [Maxam, Maxamcorp, Maxam Corp, Explosives, Explosives Project, Maxam – Explosives Matter,
+              Maxam – Explosives Workstream, Maxam – Explsoives Workstream, Explsoives]
+  - code: SKIM
+    pairs: [["FBL", "SKIM"], ["Faysal Bank Limited", "SKIM"]]
+    new_row: ["Faysal Bank Limited", "SKIM"]
+    aliases: [SKIM, FBL, Faysal Bank, Faysal Bank Limited, Sialkot Kharian, SKM]
+  - code: KPK
+    pairs: [["Govt of KPK", "KPK Carbon"]]
+    aliases: [KPK, KPK Carbon, KPK Project Carbon, Project Carbon, Project Carbon KPK, Carbon, GoKP, Carbon Credits]
+  - code: PR
+    pairs: [["Rebel Group", "Pakistan Railways"]]
+    matter_id: e1ddd5af-f7f0-4050-b988-2eb25594e9ad
+    aliases: [Pakistan Railways, Pakistan Railways PPP, Railways, Rebel, Rebel Group]
+  - code: SC
+    pairs: [["FMO & Syndicate of Local Banks", "Scatec Solar Project"]]
+    aliases: [Scatec, FMO, Scatec – Equity Mismatch Matter, Scatec – Mismatch Matter, Equity Mismatch,
+              Scatec – Tariff Modification Petition Matter, Tariff Modification Petition, Helios]
+  - code: SADB
+    pairs: [["SITE Karachi Developments (Private) Limited", "Response to letter of Secretary Letter"]]
+    matter_id: c79437eb-a600-4295-8c16-0867e28679aa
+    aliases: [SADB, SADB - SITE, SITE, SITE Karachi, Sardar Ashraf]
+  - code: OCG
+    pairs: [["Osler", "AKLA International"]]
+    matter_id: 591f4e6e-d48e-4c5c-91f6-cf0b12f4b10b
+    aliases: [Osler, OCG, OGC, OCG Project, OGC Project, Osler – OCG, Osler Project, Osler Cardiovascular, GCC]
+  - code: ZEL
+    pairs: [["Zorlu Enerji", "Zorlu Group Matters"]]
+    matter_id: c5bc1387-df6f-4b04-b342-389d164d7d15
+    aliases: [Zorlu, Zorlu Enerji, Zorlu Group, CPPA-G]
+  # Known transactions with no sheet rows yet. A confident agenda line for one of
+  # these is trayed (or, with auto_create_rows on, creates the row) under new_row.
+  - code: FC
+    pairs: []
+    new_row: ["Faisalabad Chiniot Sargodha", "Road PPP"]    # client name to be confirmed by the owner
+    aliases: [Faisalabad Chiniot, Faisalabad Chiniot Sargodha, FCS, FSC]
+  - code: KPT
+    pairs: []
+    new_row: ["Karachi Port Trust", "Manora Shipyard"]
+    matter_id: 96401024-f152-4ba2-b8ad-b98475067569
+    aliases: [KPT, Karachi Port Trust, Manora, Manora Shipyard]
+
+# A block or timesheet row under one of these is the firm's own work, not a deliverable.
+internal_transactions: [Internal, Admin, Administrative, AKLA Project Hub AI, AKLA Project Hub, Project Hub, Recruitment, Internal/Administrative]

@@ -1,4 +1,4 @@
-import { FolderKanban, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles, Settings, Newspaper, type LucideIcon } from "lucide-react";
+import { FolderKanban, Table2, Users, ListTree, BookMarked, Megaphone, MessageCircle, HelpCircle, LogOut, Mic, Clock, Scale, Sparkles, Settings, Newspaper, type LucideIcon } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMyProfile, usePendingProfiles, type AppRole } from "@/hooks/useProfiles";
@@ -24,6 +24,7 @@ import aklaMonogram from "@/assets/akla-monogram.png";
 // What every associate does day to day. The AI is used from Claude through
 // the firm's connector; "Use with Claude" is how to set that up.
 export const NAV_ITEMS: { title: string; url: string; icon: LucideIcon }[] = [
+  { title: "Transactions", url: "/transactions", icon: Table2 },
   { title: "Projects", url: "/matters", icon: FolderKanban },
   { title: "Record Meeting", url: "/record-meeting", icon: Mic },
   { title: "Timesheet", url: "/timesheet", icon: Clock },

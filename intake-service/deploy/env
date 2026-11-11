@@ -1,0 +1,13 @@
+The intake service keeps no secrets of its own. On the VM the unit reads two
+files that other services already own:
+
+  /opt/chat-service/.env     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   (the Hub)
+  /opt/whatsapp-filer/.env   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+                             SHAREPOINT_SITE, DATA_ROOM_PATH            (SharePoint, app-only)
+
+Both are listed as EnvironmentFile= in deploy/intake@.service, so nothing is
+copied. If either file moves, change those two lines and `systemctl daemon-reload`.
+
+On a Mac the same names are read from intake-service/.env, the repo's .env, and
+~/AKLA - Agenda Extractor/.env (see intake/config.py), or from INTAKE_ENV, a
+colon-separated list of .env paths that replaces that list.

@@ -1,0 +1,25 @@
+# Switches the code reads at start. Thresholds are 0 to 1 scores from match.py.
+timezone: Asia/Karachi
+
+matching:
+  transaction_high: 0.8      # the Transaction string is this sure to be one sheet transaction
+  deliverable_high: 0.75     # the deliverable text is this close to one row: apply the update
+  deliverable_low: 0.45      # below this the block matches no row at all; between, it is unsure
+
+agendas:
+  update_hour: 8             # an agenda's update line is stamped at 08:00 local on the agenda date
+  # Words that say the deliverable sits with the writer of the agenda.
+  pending_with_me: ["pending with me", "with me"]
+
+sheet:
+  sheet_name: Transactions Hub
+  log_sheet_name: Agenda Log
+  header_row: 5              # rows 1-4 are the title block
+  first_data_row: 6
+  hub_id_column: 9           # column I, hidden: the Hub's row id
+  status_prefix: "Deliverable "
+
+sharepoint:
+  # Paths under the Data Room folder (DATA_ROOM_PATH in the Graph .env).
+  sheet_path: "Usama - Backup/Active Transactions/AKLA Transaction Hub/AKLA1 - Transactions Hub - AKLA - September 24, 2026.xlsx"
+  agendas_folder: "Automated Inbox/Daily Agendas"

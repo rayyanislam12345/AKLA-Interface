@@ -1,0 +1,13 @@
+[Unit]
+Description=Read the daily agendas into the Transactions Hub every morning
+
+[Timer]
+# 07:30 Pakistan Standard Time. The VM runs on UTC; PKT has no daylight saving.
+OnCalendar=*-*-* 02:30:00 UTC
+Unit=intake@agendas.service
+# If the VM was down at 02:30, run once it comes back rather than skip the day.
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

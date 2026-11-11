@@ -1,0 +1,12 @@
+[Unit]
+Description=Rewrite the Transactions Hub Excel from the Hub every night (after reading its edits back)
+
+[Timer]
+# 23:30 Pakistan Standard Time (18:30 UTC), after everyone has closed the sheet.
+OnCalendar=*-*-* 18:30:00 UTC
+Unit=intake@sheet-sync.service
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
