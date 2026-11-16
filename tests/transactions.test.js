@@ -99,3 +99,57 @@ test('a tray item is read without crashing on missing keys', () => {
   assert.equal(conflict.rowId, 'r1');
   assert.equal(conflict.sheetValue, 'Closed');
 });
+
+// ---- the timeline and the compact table
+import { groupByDay, parseChangeLine, zonedTime } from '../src/lib/transactions.ts';
+
+test('a line the Hub wrote for a move is read back into its parts; a typed note is left alone', () => {
+  assert.deepEqual(parseChangeLine(changeLine('status', 'With Boss', 'With Client')), [
+    { field: 'status', label: 'Status', was: 'With Boss', now: 'With Client' },
+  ]);
+  const both = changeLines({ status: 'In Progress', currently_with: null }, { status: 'With Boss', currently_with: 'Boss' });
+  assert.deepEqual(parseChangeLine(both).map((p) => [p.field, p.was, p.now]), [
+    ['status', 'In Progress', 'With Boss'],
+    ['currently_with', '', 'Boss'],
+  ]);
+  assert.deepEqual(parseChangeLine('Team: cleared'), [{ field: 'team', label: 'Team', was: '', now: '' }]);
+  assert.equal(parseChangeLine('Sent to the client. Status: awaiting their comments'), null);
+  assert.equal(parseChangeLine('Note: call moved to Friday'), null);
+  assert.equal(parseChangeLine(''), null);
+  assert.equal(parseChangeLine(null), null);
+});
+
+test('updates fall under their Karachi day, in the order given', () => {
+  const days = groupByDay([
+    { at: '2026-10-28T19:30:00Z', id: 'c' }, // 00:30 on the 29th in Karachi
+    { at: '2026-10-28T04:14:00Z', id: 'b' },
+    { at: '2026-10-28T03:00:00Z', id: 'a' },
+  ]);
+  assert.deepEqual(days.map((d) => [d.key, d.label, d.items.map((i) => i.id)]), [
+    ['2026-10-29', 'October 29, 2026', ['c']],
+    ['2026-10-28', 'October 28, 2026', ['b', 'a']],
+  ]);
+  assert.equal(zonedTime('2026-10-28T04:14:00Z'), '09:14');
+});
+
+import { mergeSameLines } from '../src/lib/transactions.ts';
+
+test('a line written on several rows in the same minute is read once, with its rows', () => {
+  const line = (id, at, body, row, author = 'Usama') => ({ id, at, body, author, source: 'load', row });
+  const merged = mergeSameLines(
+    [
+      line('a', '2026-10-19T03:44:00Z', 'Team to sit with Boss.', 'Volume I'),
+      line('b', '2026-10-19T03:44:30Z', 'Team to sit with Boss.', 'Volume V'),
+      line('c', '2026-10-19T03:44:00Z', 'Sent to the client.', 'Volume I'),
+      line('d', '2026-10-19T03:50:00Z', 'Team to sit with Boss.', 'Volume III'),
+      line('e', '2026-10-19T03:44:00Z', 'Team to sit with Boss.', 'Memo', 'Umer'),
+    ],
+    (u) => u.row,
+  );
+  assert.deepEqual(merged.map((m) => [m.item.id, m.rows]), [
+    ['a', ['Volume I', 'Volume V']],
+    ['c', ['Volume I']],
+    ['d', ['Volume III']],
+    ['e', ['Memo']],
+  ]);
+});

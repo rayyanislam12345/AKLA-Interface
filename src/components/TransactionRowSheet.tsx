@@ -4,16 +4,18 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LoadState } from "@/components/LoadState";
 import { TeamPicker } from "@/components/TeamPicker";
 import { TransactionStatusBadge } from "@/components/TransactionStatusBadge";
+import { Timeline } from "@/components/TransactionTimeline";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useToast } from "@/hooks/use-toast";
 import { friendlyError } from "@/lib/friendlyError";
-import { AUTO_SOURCES, TRANSACTION_STATUSES, changeLines, formatUpdateStampLong } from "@/lib/transactions";
+import { TRANSACTION_STATUSES, changeLines } from "@/lib/transactions";
 import {
   useAddTransactionUpdate,
   useEditTransactionRow,
@@ -27,24 +29,12 @@ interface TransactionRowSheetProps {
   onClose: () => void;
 }
 
-/** The full history of one row, newest first, each line with where it came from. */
+/** The row's whole timeline, newest first, moves as chips and notes as text. */
 function UpdateHistory({ rowId }: { rowId: string }) {
   const { data: updates, isLoading, error, refetch } = useTransactionUpdates(rowId);
   return (
     <LoadState isLoading={isLoading} error={error} onRetry={() => refetch()} what="updates" compact isEmpty={!updates?.length} empty="No updates on this row yet.">
-      <ol className="space-y-3">
-        {updates?.map((u) => (
-          <li key={u.id} className="text-sm">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <span>{formatUpdateStampLong(u.at, u.author)}</span>
-              <Badge variant={AUTO_SOURCES.includes(u.source) ? "secondary" : "outline"} className="h-4 px-1.5 text-[10px] font-normal" title={u.source_ref ?? undefined}>
-                {u.source === "hub" ? "typed here" : u.source === "load" ? "from the sheet" : `auto · ${u.source}`}
-              </Badge>
-            </div>
-            <p className="whitespace-pre-wrap">{u.body}</p>
-          </li>
-        ))}
-      </ol>
+      <Timeline updates={updates ?? []} />
     </LoadState>
   );
 }
@@ -155,8 +145,12 @@ export function TransactionRowSheet({ row, onClose }: TransactionRowSheetProps) 
                 </div>
               </section>
 
-              <section className="space-y-4">
-                <h3 className="text-sm font-medium">Move the row</h3>
+              <Collapsible defaultOpen={false} className="space-y-4">
+                <CollapsibleTrigger className="group flex w-full items-center justify-between text-left text-sm font-medium">
+                  Move the row
+                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Status</Label>
@@ -202,10 +196,11 @@ export function TransactionRowSheet({ row, onClose }: TransactionRowSheetProps) 
                     {editRow.isPending ? "Saving…" : "Save"}
                   </Button>
                 </div>
-              </section>
+                </CollapsibleContent>
+              </Collapsible>
 
               <section className="space-y-3">
-                <h3 className="text-sm font-medium">History</h3>
+                <h3 className="text-sm font-medium">Timeline</h3>
                 <UpdateHistory rowId={row.id} />
               </section>
             </div>

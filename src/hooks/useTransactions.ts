@@ -60,6 +60,26 @@ export function useTransactionUpdates(rowId: string | null | undefined) {
   });
 }
 
+/** The updates of several rows at once (a project's, a person's), newest first, each with its row's name. */
+export type TimelineUpdate = TransactionUpdate & { row?: { deliverable: string; client: string; project: string } | null };
+export function useTransactionTimeline(rowIds: string[], enabled = true) {
+  const key = [...rowIds].sort().join(",");
+  return useQuery({
+    queryKey: [...UPDATES_KEY, "timeline", key],
+    enabled: enabled && rowIds.length > 0,
+    queryFn: async (): Promise<TimelineUpdate[]> => {
+      const { data, error } = await supabase
+        .from("transaction_updates")
+        .select("*, row:transaction_rows(deliverable, client, project)")
+        .in("row_id", rowIds)
+        .order("at", { ascending: false })
+        .limit(600);
+      if (error) throw error;
+      return (data ?? []) as unknown as TimelineUpdate[];
+    },
+  });
+}
+
 /** intake_settings.stale_after_days, or the firm's default when unset or unreadable. */
 export function useStaleAfterDays() {
   return useQuery({

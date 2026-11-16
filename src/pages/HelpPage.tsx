@@ -262,7 +262,7 @@ const HelpPage = () => {
         {
           question: "How do I move a row myself?",
           answer:
-            "Click the row. Type what happened in Add update, or change the status, who it is currently with, or the team and press Save. A change you make here is written into the row's history in plain words (Status: With Boss → With Client), so the Excel shows it too. New row adds a line at the bottom of the sheet.",
+            "Click the row to open it out and read its latest update, then press Update. Type what happened in Add update, or open Move the row to change the status, who it is currently with, or the team, and press Save. A change you make here is written into the row's timeline in plain words (Status: With Boss → With Client), so the Excel shows it too. Timeline, on a row or on a project's heading, shows everything that has happened, day by day. New row adds a line at the bottom of the sheet.",
         },
         {
           question: "What are the views at the top?",

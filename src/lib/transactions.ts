@@ -88,6 +88,14 @@ export function karachiDateKey(at: Date | string): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+/** "09:14", the Karachi clock time of a stamp. */
+export function zonedTime(at: Date | string): string {
+  const d = toDate(at);
+  if (!d) return "";
+  const p = zonedParts(d);
+  return `${p.hour}:${p.minute}`;
+}
+
 /** "Oct 28", for the table. */
 export function formatShortDate(at: Date | string): string {
   const d = toDate(at);
@@ -331,4 +339,86 @@ export function readTrayItem(item: { payload: unknown; guess?: unknown }): TrayI
       : null,
     confidence: pickText(g, "confidence"),
   };
+}
+
+// ---- the timeline and the compact table
+
+export interface ChangePart {
+  field: string;
+  label: string;
+  was: string;
+  now: string;
+}
+
+const LABEL_TO_FIELD = Object.fromEntries(Object.entries(FIELD_LABELS).map(([f, l]) => [l.toLowerCase(), f]));
+
+/**
+ * The parts of a line changeLines() wrote ("Status: With Boss → With Client;
+ * Currently with: Umer"), or null when the line is a note a person typed.
+ * Every piece must start with a field label, so a note that happens to
+ * mention "Status:" mid-sentence stays a note.
+ */
+export function parseChangeLine(body: string | null | undefined): ChangePart[] | null {
+  if (!body) return null;
+  const pieces = body.split(/;\s+/).map((p) => p.trim()).filter(Boolean);
+  if (!pieces.length) return null;
+  const parts: ChangePart[] = [];
+  for (const piece of pieces) {
+    const m = piece.match(/^([A-Za-z ]+?):\s(.*)$/);
+    if (!m) return null;
+    const field = LABEL_TO_FIELD[m[1].trim().toLowerCase()];
+    if (!field) return null;
+    const rest = m[2].trim();
+    if (rest === "cleared") parts.push({ field, label: m[1].trim(), was: "", now: "" });
+    else {
+      const arrow = rest.indexOf(" → ");
+      if (arrow === -1) parts.push({ field, label: m[1].trim(), was: "", now: rest });
+      else parts.push({ field, label: m[1].trim(), was: rest.slice(0, arrow), now: rest.slice(arrow + 3) });
+    }
+  }
+  return parts;
+}
+
+export interface DayGroup<U> {
+  key: string;
+  label: string;
+  items: U[];
+}
+
+/** Updates bucketed by Karachi day, in the order given (newest first from the query). */
+export function groupByDay<U extends { at: string }>(updates: U[]): DayGroup<U>[] {
+  const groups: DayGroup<U>[] = [];
+  for (const u of updates) {
+    const key = karachiDateKey(u.at);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(u);
+    else groups.push({ key, label: formatLongDate(u.at), items: [u] });
+  }
+  return groups;
+}
+
+/**
+ * One entry for a line written on several rows at once (the same words, by
+ * the same person, in the same minute), with the rows it was written on; a
+ * project's timeline then reads once what the sheet repeats per deliverable.
+ */
+export function mergeSameLines<U extends { at: string; author: string | null; body: string; source: string }>(
+  items: U[],
+  rowName: (item: U) => string,
+): { item: U; rows: string[] }[] {
+  const out: { item: U; rows: string[] }[] = [];
+  const seen = new Map<string, { item: U; rows: string[] }>();
+  for (const item of items) {
+    const key = [karachiDateKey(item.at), zonedTime(item.at), item.author ?? "", item.source, item.body.trim()].join("\u0001");
+    const name = rowName(item);
+    const hit = seen.get(key);
+    if (hit) {
+      if (name && !hit.rows.includes(name)) hit.rows.push(name);
+      continue;
+    }
+    const entry = { item, rows: name ? [name] : [] };
+    seen.set(key, entry);
+    out.push(entry);
+  }
+  return out;
 }

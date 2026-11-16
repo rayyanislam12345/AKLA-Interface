@@ -21,3 +21,24 @@ export function TransactionStatusBadge({ status, className }: { status: string; 
     </Badge>
   );
 }
+
+// The quiet form for a long list: one small dot and the word, no filled pill.
+const DOT: Record<string, string> = {
+  "Not Started": "bg-zinc-300 dark:bg-zinc-600",
+  "In Progress": "bg-sky-500",
+  "With Boss": "bg-indigo-500",
+  "With Client": "bg-amber-500",
+  "With Counterparty": "bg-orange-500",
+  "With Client And AKLA": "bg-emerald-500",
+  "On Hold": "border border-zinc-400 bg-transparent",
+  Closed: "border border-zinc-300 bg-transparent dark:border-zinc-600",
+};
+
+export function TransactionStatusDot({ status, className }: { status: string; className?: string }) {
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground", className)}>
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", DOT[status] ?? "bg-zinc-300")} aria-hidden />
+      <span className="truncate">{status}</span>
+    </span>
+  );
+}
