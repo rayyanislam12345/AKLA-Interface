@@ -73,6 +73,7 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   "/timesheet": "your own time for any day. Add, edit or delete entries and download the firm's timesheet file.",
   "/record-meeting": "record a meeting; its minutes, proposal or concept note are saved into the project.",
   "/precedent-library": "the firm's own agreements and the laws Claude draws on, with clause search and firm standards.",
+  "/sharepoint-search": "describe a file in plain words and the assistant looks through the firm's SharePoint Data Room for it, opening the likely files and listing the ones that fit.",
   "/caselaw-research": "ask a question of Pakistani case law and get judgments with links.",
   "/mandate-opportunities": "new tenders and PPP opportunities found on public procurement sites.",
   "/whatsapp-activity": "client matters and documents picked up from a linked WhatsApp account.",

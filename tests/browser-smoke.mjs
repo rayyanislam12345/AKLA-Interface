@@ -29,6 +29,46 @@ try {
  await page.getByRole('option',{name:'Notes',exact:true}).click();
  assert.equal((await noteRequest).postDataJSON().p_kind,'note');
  console.log('PASS: project search filters, safe snippets, exact-version links');
+ // Search SharePoint: the description goes to the chat server, what it is doing shows while it works, and the files come back with why, where and a link.
+ // On a page of its own: the checks after this one carry on from the project search page.
+ const sp=await browser.newPage();
+ const spAsked=[]; let spRelease; const spHeld=new Promise(r=>{spRelease=r;});
+ const spResult={query:'q',note:'Earlier drafts sit in the same folder.',searches:['"direct agreement" lenders','step-in lenders'],seen:23,opened:1,complete:true,results:[
+  {name:'KPT21 - Direct Agreement [AKLA][Final].docx',webUrl:'https://aklacopk.sharepoint.com/x/KPT21.docx',folder:'Usama - Backup/Active Transactions/Karachi Port Trust',folderUrl:'https://aklacopk.sharepoint.com/x',modified:'2026-01-24T11:47:00Z',size:84000,why:"The final lenders' direct agreement for the KPT terminal.",fit:'strong',opened:true},
+  {name:'Signed Direct Agreement (scan).pdf',webUrl:'https://aklacopk.sharepoint.com/x/scan.pdf',folder:'',folderUrl:'https://aklacopk.sharepoint.com/room',modified:null,size:null,why:'A scan that could not be read; the name suggests the signed copy.',fit:'possible',opened:false}]};
+ await sp.route('**/sharepoint/search',async route=>{
+  if(route.request().method()!=='POST') return route.fulfill({status:204});
+  spAsked.push(route.request().postDataJSON());
+  if(spAsked.length===1) await spHeld;
+  return route.fulfill({status:200,contentType:'text/event-stream',body:`event: step\ndata: ${JSON.stringify({kind:'search',text:'Searching SharePoint for "direct agreement" lenders'})}\n\n: working\n\nevent: result\ndata: ${JSON.stringify(spResult)}\n\n`});
+ });
+ await sp.goto(`${base}/tests/sharepoint-search.html`);
+ assert.equal(await sp.getByRole('button',{name:'Search',exact:true}).isDisabled(),true);
+ await sp.getByTestId('sharepoint-search-input').fill('the signed lenders direct agreement');
+ await sp.getByRole('button',{name:'Search',exact:true}).click();
+ await sp.getByTestId('sharepoint-search-progress').waitFor();
+ assert.equal(await sp.getByRole('button',{name:'Stop'}).count(),1);
+ spRelease();
+ await sp.getByTestId('sharepoint-hit').first().waitFor();
+ assert.deepEqual(spAsked,[{query:'the signed lenders direct agreement'}]);
+ assert.match(sp.url(),/sp=the\+signed\+lenders\+direct\+agreement/);
+ const spHits=sp.getByTestId('sharepoint-hit');
+ assert.equal(await spHits.count(),2);
+ assert.equal(await spHits.nth(0).getByRole('link',{name:'KPT21 - Direct Agreement [AKLA][Final].docx'}).getAttribute('href'),'https://aklacopk.sharepoint.com/x/KPT21.docx');
+ assert.match(await spHits.nth(0).innerText(),/Strong match[\s\S]*final lenders' direct agreement[\s\S]*Karachi Port Trust[\s\S]*Changed 24 Jan 2026[\s\S]*Opened and read/);
+ assert.match(await spHits.nth(1).innerText(),/Possible[\s\S]*Data Room[\s\S]*Judged by its name/);
+ assert.match(await sp.getByTestId('sharepoint-search').innerText(),/2 files found · 2 searches run, 23 files looked at, 1 opened[\s\S]*Earlier drafts sit in the same folder\./);
+ // The description is in the address, so a reload looks again; so does pressing Search on the same description.
+ await sp.reload();
+ await sp.getByTestId('sharepoint-hit').first().waitFor();
+ assert.equal(spAsked.length,2);
+ const spAgain=sp.waitForResponse(r=>r.url().endsWith('/sharepoint/search') && r.request().method()==='POST');
+ await sp.getByRole('button',{name:'Search',exact:true}).click();
+ await spAgain;
+ await sp.getByTestId('sharepoint-hit').first().waitFor();
+ assert.equal(spAsked.length,3);
+ console.log('PASS: Search SharePoint shows progress, then the files with why, where and a link');
+ await sp.close();
  const saves=[],uploads=[];
  let state='failed';
  await page.route('**/storage/v1/object/matter-documents/**',route=>{

@@ -16,6 +16,7 @@ import TransactionsPage from "./pages/TransactionsPage";
 import IntakeTrayPage from "./pages/IntakeTrayPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import AssistantSearchPage from "./pages/AssistantSearchPage";
+import SharePointSearchPage from "./pages/SharePointSearchPage";
 import AiWorkspacePage from "./pages/AiWorkspacePage";
 import RecordMeetingPage from "./pages/RecordMeetingPage";
 import DocumentTypesPage from "./pages/DocumentTypesPage";
@@ -88,6 +89,7 @@ const App = () => {
                   <Route path="/transactions/tray" element={<ProtectedRoute><AppLayout><IntakeTrayPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/search" element={<RedirectSearch />} />
                   <Route path="/assistant/search" element={<ProtectedRoute><AppLayout><AssistantSearchPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/sharepoint-search" element={<ProtectedRoute><AppLayout><SharePointSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/caselaw-research" element={<ProtectedRoute><AppLayout><CaselawResearchPage /></AppLayout></ProtectedRoute>} />
                   <Route
                     path="/matters"

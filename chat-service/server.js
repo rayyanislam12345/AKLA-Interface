@@ -41,6 +41,8 @@ import { FIRM_MARKDOWN_RULES, COMPLETENESS_RULES, ARTIFACT_RULES, FILL_INSTRUCTI
 import { listVersionChanges, decideVersionChanges, versionOf, versionRows, workingFileOf, downloadFile as downloadVersionFile, isWordPath, NOT_WORD_SENTENCE, latestVersionOf } from "./versionChanges.js";
 import { fileReviewRun, fileFollowUp, filingReplyText, filingSummary } from "./reviewFiling.js";
 import { createProjectWrites } from "./connector/projectWrites.js";
+import { sharePointEnv, createSharePoint, SharePointError } from "./sharepointGraph.js";
+import { findSharePointFiles } from "./sharepointSearch.js";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -4131,6 +4133,68 @@ async function handlePrecedentSearch(req, res) {
   }
 }
 
+// "Search SharePoint": the lawyer describes a file, the model searches the
+// Data Room for it and reads the candidates (sharepointSearch.js). It takes
+// a while, so the answer is streamed: a "step" as each search or file read
+// starts, then one "result" (or "error"). The SharePoint app's settings live
+// with the WhatsApp Filer; without them the route says it is not set up.
+const SHAREPOINT_ENV = sharePointEnv();
+const sharepoint = SHAREPOINT_ENV ? createSharePoint({ env: SHAREPOINT_ENV, log: console.log }) : null;
+if (!sharepoint) console.error("chat-service: the SharePoint app's settings were not found; Search SharePoint is off");
+// One search per person at a time: a second one replaces the first.
+const sharePointSearches = new Map();
+
+async function handleSharePointSearch(req, res) {
+  const json = (status, body) => {
+    res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return json(401, { error: "Authorization header required" });
+  const { user, error: authError } = await authorize(authHeader);
+  if (authError) return json(authError.status, authError.body);
+  const query = typeof body.query === "string" ? body.query.trim() : "";
+  if (query.length < 3 || query.length > 600) return json(400, { error: "Describe the file you are looking for, in a sentence or a few words." });
+  if (!sharepoint) return json(503, { error: "SharePoint search is not set up on the server yet. Ask an administrator." });
+
+  const stop = new AbortController();
+  sharePointSearches.get(user.id)?.abort();
+  sharePointSearches.set(user.id, stop);
+  res.on("close", () => { if (!res.writableFinished) stop.abort(); });
+
+  res.writeHead(200, { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  res.flushHeaders?.();
+  res.socket?.setTimeout(0);
+  const send = (event, data) => {
+    if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const beat = setInterval(() => { if (!res.writableEnded) res.write(": working\n\n"); }, 15_000);
+  const started = Date.now();
+  try {
+    const result = await findSharePointFiles({
+      question: query, sharepoint, anthropicJson, model: CHAT_MODEL, signal: stop.signal,
+      onStep: (step) => send("step", step), log: console.log,
+    });
+    console.log(`sharepoint search "${query.slice(0, 120)}": ${result.results.length} files from ${result.seen} seen, ${result.searches.length} searches, ${result.opened} opened, ${Math.round((Date.now() - started) / 1000)}s`);
+    send("result", result);
+  } catch (err) {
+    if (!stop.signal.aborted) {
+      console.error(`sharepoint search "${query.slice(0, 120)}" failed:`, err instanceof SharePointError ? `${err.code}: ${err.message}` : err);
+      send("error", { error: err instanceof SharePointError && err.code !== "graph" ? err.message : "The search could not be finished. Try again in a moment.", code: err instanceof SharePointError ? err.code : "failed" });
+    }
+  } finally {
+    clearInterval(beat);
+    if (sharePointSearches.get(user.id) === stop) sharePointSearches.delete(user.id);
+    if (!res.writableEnded) res.end();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // On-demand checks and comparisons for the project page's preview. The index
 // worker stores both for every version it reads (proof_check and
@@ -4243,6 +4307,18 @@ const server = createServer((req, res) => {
   if (req.method === "POST" && Object.hasOwn(CHANGES_ROUTES, url.pathname)) {
     CHANGES_ROUTES[url.pathname](req, res).catch((err) => {
       console.error("changes handler crashed:", err);
+      if (!res.headersSent) {
+        res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/sharepoint/search") {
+    handleSharePointSearch(req, res).catch((err) => {
+      console.error("sharepoint search handler crashed:", err);
       if (!res.headersSent) {
         res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error" }));
