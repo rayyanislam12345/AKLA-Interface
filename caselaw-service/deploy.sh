@@ -20,7 +20,7 @@ printf '{"commit":"%s","committedAt":"%s","deployedAt":"%s"}\n' \
 
 # package-lock.json is intentionally omitted: there is none in the repo, and
 # `npm install` on the box (below) resolves and writes one there.
-FILES="server.js mcpClient.js parse.js retrieve.js rank.js pipeline.js answer.js anthropic.js store.js package.json"
+FILES="server.js mcpClient.js parse.js retrieve.js rank.js pipeline.js answer.js anthropic.js store.js pls.js plsParse.js package.json"
 
 TS=$(date -u +%Y%m%d%H%M)
 echo "Backing up the running copy…"

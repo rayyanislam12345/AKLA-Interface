@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import MarkdownMessage from "@/components/ai/chat/MarkdownMessage";
-import { useCaselawResearch, type CaselawSource, type CaselawTurn } from "@/hooks/useCaselawResearch";
+import { useCaselawResearch, type CaselawOfficialCheck, type CaselawSource, type CaselawTurn } from "@/hooks/useCaselawResearch";
 
 const EMPTY_ARTIFACTS = new Map();
 const noop = () => {};
@@ -177,13 +177,14 @@ function SourcesPanel({ sources }: { sources: CaselawSource[] }) {
                 <span className="text-xs font-semibold text-muted-foreground">[{s.n}]</span>
                 <span className="text-sm font-medium">{s.citations[0] ?? s.title}</span>
                 {s.overruled && <Badge variant="destructive" className="text-[10px]">overruled</Badge>}
+                {s.grounding === "official" && <Badge variant="secondary" className="text-[10px]">official text</Badge>}
               </div>
               <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.title}</p>
               <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground flex-wrap">
                 {s.court && <span>{s.court}</span>}
                 {s.year && <span>· {s.year}</span>}
                 {s.citedByCount > 0 && <span>· cited by {s.citedByCount}</span>}
-                <span>· {s.grounding === "full" ? "full text read" : "summary only"}</span>
+                <span>· {s.grounding === "official" ? "official text read (Pakistan Law Site)" : s.grounding === "full" ? "full text read" : "summary only"}</span>
               </div>
             </div>
             {s.url && (
@@ -198,6 +199,14 @@ function SourcesPanel({ sources }: { sources: CaselawSource[] }) {
   );
 }
 
+// One plain sentence on whether the official reported text was read.
+function officialLine(o: CaselawOfficialCheck): string {
+  if (o.reason === "in_use") return "Official text not checked: the firm's Pakistan Law Site account was in use by someone else.";
+  if (o.reason === "not_configured") return "Official text not checked: Pakistan Law Site is not connected.";
+  if (o.reason) return "Official text not checked: could not sign in to Pakistan Law Site.";
+  return `Official text read from Pakistan Law Site for ${o.found} of the top ${o.checked} judgments.`;
+}
+
 function CoverageLine({ turn }: { turn: CaselawTurn }) {
   const c = turn.coverage!;
   return (
@@ -208,6 +217,7 @@ function CoverageLine({ turn }: { turn: CaselawTurn }) {
       <div className="mt-2 pl-3 border-l space-y-1">
         <div>{c.directHits} from search, {c.graphHits} more from the citation graph.</div>
         <div>Shortlisted {c.shortlisted}, graded {c.graded}, kept {c.kept}.</div>
+        {c.official && <div>{officialLine(c.official)}</div>}
         {turn.plan?.statutes && turn.plan.statutes.length > 0 && (
           <div>Statutes considered: {turn.plan.statutes.join("; ")}</div>
         )}

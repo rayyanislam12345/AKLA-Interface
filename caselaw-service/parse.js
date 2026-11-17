@@ -8,9 +8,12 @@
 //   Found 24 (showing 20, offset 0).
 //   Filters applied - years: 2015-.
 //
-//   - **TITLE** — 2026 PLC(CS) 386, 2026 SCMR 1 (2026) · **Petition allowed**
+//   - **TITLE** — 2026 PLC(CS) 386, 2026 SCMR 1 (2026) · Islamabad High Court · 1 judge · author: NAME · **Petition allowed**
 //     https://pakistancaselaw.com/case/234019
 //       - Optional sub-bullet (a settled legal question, from search_questions)
+//
+//   (The court / judges / author parts were added by the source after this was
+//   first written and any of them may be absent.)
 //
 // Single-case shape (caselaw_get_case):
 //
@@ -56,14 +59,19 @@ export function parseListing(markdown) {
       const title = bullet[1].trim();
       const rest = bullet[2];
       // Split the "<citations> (<year>) · **<outcome>**" tail into its parts.
+      // The tail is " · "-separated: citations with the year first, then
+      // (optionally) the court, the bench size and the author.
       const outcome = rest.match(/·\s*\*\*(.+?)\*\*/);
-      const citationSpan = rest.replace(/·\s*\*\*.+?\*\*\s*$/, "").replace(/^\s*—\s*/, "");
+      const parts = rest.replace(/·\s*\*\*.+?\*\*\s*$/, "").replace(/^\s*—\s*/, "").split(/\s+·\s+/);
+      const citationSpan = parts[0].trim();
       const year = citationSpan.match(/\((\d{4})\)\s*$/);
+      const court = parts.slice(1).find((p) => !/^\d+\s+judges?$/i.test(p.trim()) && !/^author:/i.test(p.trim()));
       current = {
         caseId: null,
         title,
         citations: splitCitations(citationSpan),
         year: year ? Number(year[1]) : null,
+        court: court ? court.trim() : null,
         outcome: outcome ? outcome[1].trim() : null,
         questions: [],
         url: null,
@@ -127,6 +135,7 @@ export function dedupeByCase(records) {
     }
     existing.title ||= r.title;
     existing.year ??= r.year;
+    existing.court ||= r.court;
     existing.outcome ||= r.outcome;
     existing.url ||= r.url;
     existing.citations = [...new Set([...existing.citations, ...r.citations])];

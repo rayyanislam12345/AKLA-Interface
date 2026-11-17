@@ -15,7 +15,19 @@ export interface CaselawSource {
   relevance: number;
   overruled: boolean;
   citedByCount: number;
-  grounding: "full" | "summary";
+  // "official": the text read was the official reported text from Pakistan
+  // Law Site, found by this judgment's citation.
+  grounding: "official" | "full" | "summary";
+  officialCitation?: string | null;
+}
+
+// How the official-text check on Pakistan Law Site went for one answer.
+export interface CaselawOfficialCheck {
+  checked: number;
+  found: number;
+  // Why nothing was checked, when that is the case: the firm's account was in
+  // use, the sign-in failed, or the service has no sign-in set up.
+  reason: "in_use" | "bad_credentials" | "inactive" | "not_configured" | "error" | null;
 }
 
 export interface CaselawCoverage {
@@ -27,6 +39,7 @@ export interface CaselawCoverage {
   graded: number;
   onPoint: number;
   kept: number;
+  official?: CaselawOfficialCheck;
 }
 
 export interface CaselawPlan {

@@ -25,6 +25,7 @@ import { researchQuestion } from "./pipeline.js";
 import { composeAnswer } from "./answer.js";
 import { makeStore, cacheAdapter } from "./store.js";
 import { parseCase } from "./parse.js";
+import { PlsClient } from "./pls.js";
 
 const PORT = Number(process.env.PORT ?? 8094);
 const SERVER_STARTED_AT = new Date().toISOString();
@@ -51,6 +52,12 @@ async function authorize(authHeader) {
   if (!isMember) return { error: { status: 403, body: { error: "Your account is not an active member of this firm workspace." } } };
   return { user };
 }
+
+// Pakistan Law Site, the source of the official reported text. One shared
+// client for the whole service, because the firm's account allows one session
+// at a time; it stays signed out except while a question is being answered.
+const pls = new PlsClient();
+if (!pls.configured) console.error("caselaw-service: PLS_USERNAME / PLS_PASSWORD are not set; answers will not carry the official text");
 
 let deployedVersion = {};
 try {
@@ -132,11 +139,11 @@ async function handleCaselaw(req, res, user) {
       await store.finishRun({ runId, status: "stopped", tier, plan, coverage, ranked });
       return;
     }
-    send("notice", { text: tier === "related" ? "Nothing squarely on point; drafting from the nearest authority…" : "Drafting the answer…" });
+    send("notice", { text: tier === "related" ? "Nothing squarely on point; drafting from the nearest authority…" : pls.configured ? "Reading the official text and drafting the answer…" : "Drafting the answer…" });
 
     let answerText = "";
-    const { text, sources, stopReason, citationIssues } = await composeAnswer({
-      question, ranked, tier, client,
+    const { text, sources, stopReason, citationIssues, official } = await composeAnswer({
+      question, ranked, tier, client, official: pls,
       signal: abort.signal,
       onDelta: (t) => { answerText += t; send("delta", { text: t }); },
     });
@@ -147,12 +154,15 @@ async function handleCaselaw(req, res, user) {
       await store.finishRun({ runId, messageId: msgId, status: "stopped", tier, plan, coverage, ranked });
       return;
     }
+    // How the official-text check went travels with the coverage report, so
+    // the page can say so and the audit trail records it.
+    coverage.official = official;
 
     const sourcesForStore = sources.map((s) => ({
       n: s.n, caseId: s.caseId, title: s.title, citations: s.citations,
       court: s.court, year: s.year, outcome: s.outcome, url: s.url,
       relevance: s.relevance, overruled: s.overruled, citedByCount: s.citedByCount,
-      grounding: s.grounding,
+      grounding: s.grounding, officialCitation: s.officialCitation ?? null,
     }));
     const messageId = await store.saveMessage({
       threadId, role: "assistant", content: text,
@@ -213,3 +223,12 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => console.log(`caselaw-service listening on 127.0.0.1:${PORT}`));
+
+// Free the firm's Pakistan Law Site session when the service stops or restarts.
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.once(sig, () => {
+    const done = () => process.exit(0);
+    setTimeout(done, 5000).unref();
+    pls.close().then(done, done);
+  });
+}

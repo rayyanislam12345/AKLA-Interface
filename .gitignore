@@ -24,6 +24,8 @@ qa-bot/traces/
 .env
 .env.local
 .env.*.local
+# Pages saved from Pakistan Law Site while mapping it (subscription content)
+caselaw-service/.pls-pages/
 .mcp.json
 
 # Mandate Bot lives in its own separate git repo (AKLA_Mandate_Bot) —

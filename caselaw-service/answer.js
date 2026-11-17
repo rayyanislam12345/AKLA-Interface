@@ -66,6 +66,40 @@ export async function buildSources({ client, ranked, signal }) {
   return sources;
 }
 
+const OFFICIAL_REASONS = { IN_USE: "in_use", BAD_CREDENTIALS: "bad_credentials", INACTIVE: "inactive", NOT_CONFIGURED: "not_configured" };
+
+// Look the top judgments up on Pakistan Law Site (the publisher's own service)
+// by citation and collect the official reported text for each one it carries.
+// `official` is the shared PlsClient. Nothing here can fail the answer: if the
+// site cannot be reached, or the firm's account is in use by a lawyer, the
+// sources simply keep the text they have and `reason` says why.
+export async function fetchOfficialTexts({ official, sources, signal }) {
+  const outcome = { checked: 0, found: 0, reason: null, texts: new Map(), misses: [] };
+  if (!official?.configured) return { ...outcome, reason: "not_configured" };
+  try {
+    await official.use(async () => {
+      for (const s of sources.slice(0, FULL_TEXT_COUNT)) {
+        if (signal?.aborted) return;
+        outcome.checked++;
+        try {
+          const hit = await official.officialText({ citations: s.citations, court: s.court, title: s.title });
+          if (hit.status === "found") {
+            outcome.found++;
+            outcome.texts.set(s.n, hit);
+          } else {
+            outcome.misses.push({ n: s.n, status: hit.status });
+          }
+        } catch (err) {
+          outcome.misses.push({ n: s.n, status: "error", error: String(err.message ?? err).slice(0, 200) });
+        }
+      }
+    });
+  } catch (err) {
+    outcome.reason = OFFICIAL_REASONS[err?.code] ?? "error";
+  }
+  return outcome;
+}
+
 function systemPrompt(tier) {
   const framing = tier === "related"
     ? `No judgment in the sources is squarely on point for this question — this is a sparse or developing area. Say so plainly at the start, then present the supplied judgments as the NEAREST analogous authority, being explicit about how each differs from the precise question. Do not overstate them or imply they decide the question.`
@@ -80,6 +114,7 @@ Rules:
 - Prefer binding authority: Supreme Court over High Court over tribunal, and more recent over older where they conflict — but note when an older judgment remains the leading authority.
 - If a source is flagged overruled or set aside, say so and do not rely on it as good law.
 - Where a source is grounded on its summary only (marked), attribute more cautiously.
+- A source marked "grounding: official" carries the official reported text from Pakistan Law Site; rely on its wording over any other.
 - Be concise and precise, in the register of a note to a colleague. Give the citation in text the first time you rely on a judgment (e.g. "2023 SCP 369"). End with a one-line statement of how settled or open the position is.
 - Never give a definitive opinion the sources do not support; flag what remains unresolved.`;
 }
@@ -99,12 +134,27 @@ function renderSources(sources) {
 
 // Compose and stream the answer. `onDelta` receives text as it streams; returns
 // the full text, the source list, the stop reason and any citation issues.
-export async function composeAnswer({ question, ranked, tier, client, signal, onDelta = () => {}, stream = anthropicStreamOnce }) {
-  const sources = await buildSources({ client, ranked, signal });
+export async function composeAnswer({ question, ranked, tier, client, official = null, signal, onDelta = () => {}, stream = anthropicStreamOnce }) {
+  const stub = ranked.map((r, i) => ({ n: i + 1, citations: r.citations, court: r.court ?? null, title: r.title }));
+  // The official-text lookups do not depend on the other source's text, so the
+  // two run side by side; the official text, where found, replaces the other.
+  const [sources, officialOutcome] = await Promise.all([
+    buildSources({ client, ranked, signal }),
+    fetchOfficialTexts({ official, sources: stub, signal }),
+  ]);
+  for (const s of sources) {
+    const hit = officialOutcome.texts.get(s.n);
+    if (!hit) continue;
+    s.text = hit.text.slice(0, FULL_TEXT_CHARS);
+    s.grounding = "official";
+    s.officialCitation = hit.citation;
+  }
+  const officialSummary = { checked: officialOutcome.checked, found: officialOutcome.found, reason: officialOutcome.reason, misses: officialOutcome.misses };
+
   if (sources.length === 0) {
     const text = "I could not find any reported judgments that bear on this question, even as analogous authority. It may be worth rephrasing the issue, widening the year range, or checking the official reports directly.";
     onDelta(text);
-    return { text, sources, stopReason: "end_turn", citationIssues: [] };
+    return { text, sources, stopReason: "end_turn", citationIssues: [], official: officialSummary };
   }
 
   const userContent = `QUESTION:\n${String(question).slice(0, 2000)}\n\nREPORTED JUDGMENTS (numbered sources):\n\n${renderSources(sources)}`;
@@ -119,7 +169,7 @@ export async function composeAnswer({ question, ranked, tier, client, signal, on
     signal
   );
 
-  return { text, sources, stopReason, aborted, citationIssues: citationIssues(text, sources.length) };
+  return { text, sources, stopReason, aborted, citationIssues: citationIssues(text, sources.length), official: officialSummary };
 }
 
 // Streams one Messages call, invoking onDelta(textChunk) as text arrives.

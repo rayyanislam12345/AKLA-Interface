@@ -22,7 +22,10 @@ own page, own tables.
    overruled judgments, and a recency curve that favours recent law without
    silencing an older leading case. Sparse questions fall back to a "related
    authority" tier instead of returning nothing.
-5. **Compose** (`answer.js`, Sonnet) — the top judgments' full text grounds a
+5. **Official text** (`pls.js`, `plsParse.js`) — the top six judgments are
+   looked up on Pakistan Law Site by citation and, where the site carries them,
+   its official reported text replaces the other source's text.
+6. **Compose** (`answer.js`, Sonnet) — the top judgments' full text grounds a
    streamed answer that cites `[Source n]`; out-of-range citations are flagged.
 
 Every run is recorded in `caselaw_runs` (the audit trail), so a "did it miss a
@@ -50,13 +53,32 @@ First time:
 Then `npm install` on the box, and set `VITE_CASELAW_API_URL` in the web app to
 `https://aklacaselaw.duckdns.org/caselaw`.
 
-## The Pakistan Law Site hook
+## Pakistan Law Site (official text)
 
-The firm's subscription to Pakistan Law Site is the source of official reported
-text. `answer.js` is built so a verification/official-text fetch plugs in behind
-one function (fetch the official text for a citation). That credentialed client
-is configured with `PLS_USERNAME` / `PLS_PASSWORD` and is implemented by the
-firm; the service runs fully without it (answers are grounded in the MCP).
+The firm works with the publisher directly and has its permission to read the
+site by program; the publisher has no API, so the service signs in with the
+firm's own account (`PLS_USERNAME` / `PLS_PASSWORD` in `.env`).
+
+- **What it does.** For each of the top six judgments it parses the citation
+  ("2018 SCMR 365", "2014 PLD Supreme Court 47"), runs the site's citation
+  search, picks the row (by court, then parties, for PLD pages that repeat
+  across courts), fetches the judgment and checks its opening lines really are
+  that citation and those parties before using it. A source grounded this way is
+  marked `grounding: "official"` and the page shows "official text".
+- **What it does not cover.** Journals the site does not publish (PLJ, P.S.C.,
+  neutral citations such as SCP / SHC / LHC) are skipped.
+- **One session at a time.** The account allows a single session. The service
+  signs in only while answering, signs out after `PLS_IDLE_MS` of quiet (and on
+  shutdown), and never forces another session off. If a lawyer is using the
+  account the answer goes ahead without the official text and the coverage note
+  says so; sign-in is then not retried for a minute.
+- **Not yet used for search.** The site also has a keyword search
+  (`GET /Login/ElasticSearchTest?q=&page=`) and a question search
+  (`GET /Login/AIElasticSearch?q=&page=`), both returning Elasticsearch JSON
+  with the headnote in each hit. Retrieval still runs on the MCP alone.
+- **If the site changes.** `node plsMap.mjs` signs in, saves the first pages
+  and page scripts into `.pls-pages/` (git-ignored) and signs out, so the
+  parsers can be brought back in line. `node --test` covers the parsing.
 
 ## Local dev
 
