@@ -18,7 +18,8 @@ const TIMEOUT_MS = 30_000;
 // in one region does not say which. SHAREPOINT_REGION pins it; otherwise the
 // site's own data location is tried, then whatever region the refusal names,
 // then these in turn. The one that works is remembered for the process.
-export const REGION_GUESSES = ["APC", "EUR", "NAM", "ARE", "IND", "GBR", "AUS", "JPN", "CAN", "ZAF"];
+// The firm's tenant answers in EUR (first live run, 23 Nov 2026), so it leads.
+export const REGION_GUESSES = ["EUR", "APC", "NAM", "ARE", "IND", "GBR", "AUS", "JPN", "CAN", "ZAF"];
 export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 
 const ENV_KEYS = ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "SHAREPOINT_SITE", "DATA_ROOM_PATH", "SHAREPOINT_REGION"];
@@ -84,6 +85,16 @@ export function linkUrl(url) {
   return /%[0-9a-f]{2}/i.test(text) ? text.replace(/ /g, "%20") : encodePlain(text);
 }
 
+/**
+ * The link a lawyer clicks. A Word, Excel or PowerPoint file's plain address
+ * downloads it; "?web=1" opens it in the browser instead. A PDF's plain
+ * address already opens in the browser.
+ */
+export function openUrl(url) {
+  const link = linkUrl(url);
+  return /\.(docx?|xlsx?|pptx?)$/i.test(link) ? `${link}?web=1` : link;
+}
+
 /** SharePoint marks the matched words and the gaps in a snippet; this is the snippet as plain text. */
 export function cleanSummary(summary) {
   return String(summary ?? "")
@@ -140,7 +151,7 @@ export function hitToFile(hit, room) {
     id,
     driveId: r.parentReference?.driveId ?? room.driveId,
     name: r.name || rel.slice(slash + 1),
-    webUrl: linkUrl(r.webUrl),
+    webUrl: openUrl(r.webUrl),
     folder: slash < 0 ? "" : rel.slice(0, slash),
     folderUrl: encodePlain(slash < 0 ? room.url : `${room.url}/${rel.slice(0, slash)}`),
     modified: r.lastModifiedDateTime ?? r.fileSystemInfo?.lastModifiedDateTime ?? null,

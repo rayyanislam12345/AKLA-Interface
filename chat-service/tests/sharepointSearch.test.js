@@ -71,7 +71,7 @@ test('a hit is a file only when it sits inside the Data Room', () => {
   assert.equal(file.name, 'KPT21 - Direct Agreement [AKLA][Final].docx');
   assert.equal(file.folder, 'Usama - Backup/KPT');
   assert.equal(file.snippet, '… Direct Agreement In Relation …');
-  assert.equal(file.webUrl, 'https://aklacopk.sharepoint.com/sites/akla-internal/Shared%20Documents/AKLA%20-%20Data%20Room/Usama%20-%20Backup/KPT/KPT21%20-%20Direct%20Agreement%20[AKLA][Final].docx');
+  assert.equal(file.webUrl, 'https://aklacopk.sharepoint.com/sites/akla-internal/Shared%20Documents/AKLA%20-%20Data%20Room/Usama%20-%20Backup/KPT/KPT21%20-%20Direct%20Agreement%20[AKLA][Final].docx?web=1');
   assert.equal(file.folderUrl, 'https://aklacopk.sharepoint.com/sites/akla-internal/Shared%20Documents/AKLA%20-%20Data%20Room/Usama%20-%20Backup/KPT');
   // Another library, a folder whose name merely starts the same, and a folder itself.
   assert.equal(hitToFile({ hitId: 'B', resource: { id: 'B', webUrl: 'https://aklacopk.sharepoint.com/sites/hr/Shared Documents/Payroll.xlsx' } }, room), null);
@@ -111,10 +111,10 @@ test('the search finds the region once, keeps to Data Room files and counts the 
   assert.equal(first.total, 1393);
   assert.deepEqual(first.files.map((f) => f.id), ['A1']);
   // The first guess was refused, and the refusal named the region.
-  assert.deepEqual(asked, ['APC', 'IND']);
+  assert.deepEqual(asked, ['EUR', 'IND']);
   assert.ok(logs.some((l) => l.includes('SHAREPOINT_REGION=IND')));
   await sp.search({ words: 'again' });
-  assert.deepEqual(asked, ['APC', 'IND', 'IND']);
+  assert.deepEqual(asked, ['EUR', 'IND', 'IND']);
   // Signed in once, and the Data Room looked up once.
   assert.equal(calls.filter((c) => c.url.includes('login.microsoftonline.com')).length, 1);
   assert.equal(calls.filter((c) => c.url.endsWith('/drives')).length, 1);
@@ -189,7 +189,7 @@ test('it searches in several wordings, opens what the name does not settle, and 
   const { anthropicJson, bodies } = scripted([
     { stop_reason: 'tool_use', content: [{ type: 'thinking', thinking: '', signature: 'sig' }, use('u1', 'search_sharepoint', { query: '"direct agreement" lenders', file_type: 'word' }), use('u2', 'search_sharepoint', { query: 'step-in lenders', folder: 'Usama - Backup' })] },
     { stop_reason: 'tool_use', content: [use('u3', 'read_file', { file: 'f1', look_for: 'step-in' }), use('u4', 'read_file', { file: 'F9' })] },
-    { stop_reason: 'tool_use', content: [use('u5', 'report_files', { files: [{ file: 'F1', why: 'The final lenders\' direct agreement for the KPT terminal.', fit: 'strong' }, { file: 'F1', why: 'again', fit: 'strong' }, { file: 'F7', why: 'made up', fit: 'strong' }, { file: 'F2', why: 'A timesheet that mentions it.', fit: 'maybe' }], note: 'Earlier drafts exist.' })] },
+    { stop_reason: 'tool_use', content: [use('u5', 'report_files', { files: [{ file: 'F1', why: 'The final lenders\' direct agreement for the KPT terminal.', fit: 'strong' }, { file: 'F1', why: 'again', fit: 'strong' }, { file: 'F7', why: 'made up', fit: 'strong' }, { file: 'F2', why: 'A timesheet that mentions it, unlike F1.', fit: 'maybe' }], note: 'Earlier drafts exist (F2); F7 was not seen.' })] },
   ]);
   const steps = [];
   const result = await findSharePointFiles({
@@ -200,7 +200,9 @@ test('it searches in several wordings, opens what the name does not settle, and 
 
   assert.deepEqual(searched, [{ words: '"direct agreement" lenders', fileType: 'word', folder: null }, { words: 'step-in lenders', fileType: null, folder: 'Usama - Backup' }]);
   assert.deepEqual(result.results.map((r) => [r.name, r.fit, r.opened]), [['KPT21 - Direct Agreement [AKLA][Final].docx', 'strong', true], ['KPT50 - Jan Timesheets.docx', 'unchecked', false]]);
-  assert.equal(result.note, 'Earlier drafts exist.');
+  // The model's own labels never reach the lawyer: a known one becomes the file's name.
+  assert.equal(result.note, 'Earlier drafts exist "KPT50 - Jan Timesheets.docx"; F7 was not seen.');
+  assert.equal(result.results[1].why, 'A timesheet that mentions it, unlike "KPT21 - Direct Agreement [AKLA][Final].docx".');
   assert.deepEqual([result.seen, result.opened, result.complete], [2, 1, true]);
   assert.deepEqual(result.searches, ['"direct agreement" lenders', 'step-in lenders']);
   assert.deepEqual(steps, ['Searching SharePoint for "direct agreement" lenders', 'Searching SharePoint for step-in lenders', 'Reading KPT21 - Direct Agreement [AKLA][Final].docx']);
