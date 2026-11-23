@@ -69,6 +69,15 @@ class People:
         return next(iter(first)) if first and len(first) == 1 else None
 
 
+INTAKE_PROFILE_NAME = 'Hub Intake'
+
+
+def intake_user_id(db):
+    """The Hub's own account for what the intake files (a profile named "Hub Intake"), or None."""
+    row = db.one('profiles', {'full_name': f'eq.{INTAKE_PROFILE_NAME}', 'status': 'eq.approved'}, 'id')
+    return row['id'] if row else None
+
+
 def start_run(db, kind):
     rows = db.insert('intake_runs', {'kind': kind, 'started_at': now_iso()})
     return rows[0]['id'] if rows else None

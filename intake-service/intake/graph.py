@@ -17,6 +17,7 @@ from . import config
 
 GRAPH = 'https://graph.microsoft.com/v1.0'
 TIMEOUT = 60
+DOWNLOAD_TIMEOUT = 600     # a draft agreement with its scans can be tens of MB
 SIMPLE_LIMIT = 4 * 1024 * 1024          # Graph's limit for a single PUT; the sheet is 45 KB
 
 
@@ -73,7 +74,7 @@ class Graph:
         self._token, self._expires = body['access_token'], time.time() + int(body.get('expires_in', 3600))
         return self._token
 
-    def call(self, method, path, body=None, content_type=None, retries=4, raw=False):
+    def call(self, method, path, body=None, content_type=None, retries=4, raw=False, timeout=TIMEOUT):
         url = path if path.startswith('http') else GRAPH + path
         for attempt in range(retries + 1):
             headers = {'Authorization': f'Bearer {self._access_token()}'}
@@ -81,7 +82,7 @@ class Graph:
                 headers['Content-Type'] = content_type
             req = urllib.request.Request(url, data=body, method=method, headers=headers)
             try:
-                with _OPENER.open(req, timeout=TIMEOUT) as r:
+                with _OPENER.open(req, timeout=timeout) as r:
                     data = r.read()
                     if raw:
                         return data
@@ -152,7 +153,7 @@ class Graph:
         item = self.item(rel)
         if not item:
             raise GraphError(404, f'GET {rel} -> not found')
-        return self.call('GET', self._item_path(rel) + ':/content', raw=True), item.get('eTag')
+        return self.call('GET', self._item_path(rel) + ':/content', raw=True, timeout=DOWNLOAD_TIMEOUT), item.get('eTag')
 
     def upload(self, rel, data):
         """Replace the file at a path (or create it). Small files only; returns the new item."""

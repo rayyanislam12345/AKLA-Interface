@@ -16,7 +16,7 @@ from .match import Matcher
 
 def load_sheet(path, db, dry_run=False):
     tz = config.tz()
-    matcher = Matcher()
+    matcher = Matcher(db)   # the Hub's project names too, so a project made after the YAML keeps its rows
     people = hub.People(db)
     sheet_date = parse_date(os.path.basename(path)) or date.today()
     wb = sheet.open_workbook(path)

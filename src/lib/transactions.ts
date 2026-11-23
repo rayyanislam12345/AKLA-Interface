@@ -306,15 +306,68 @@ export interface TrayItemView {
   guessRowId: string;
   guessNewRow: { client: string; project: string; deliverable: string; team: string[] } | null;
   confidence: string;
+  // Documents, proposed projects and emails.
+  /** A document's standard title, as the Filer worded it. */
+  title: string;
+  /** A proposed project's name, as it was seen. */
+  name: string;
+  code: string;
+  /** The WhatsApp group, or the mailbox for an email. */
+  chat: string;
+  via: string;
+  webUrl: string;
+  /** What an email asks for; `scope` holds its gist. */
+  ask: string;
+  proposedStatus: string;
+  /** The project the item already belongs to, when it has one. */
+  matterId: string;
+  /** The project an undone filing was taken off. */
+  wasMatterId: string;
+  /** What a line added from an email is marked with: the message's key, else its id. */
+  messageRef: string;
+  /** How many times a proposed project's name has been seen. */
+  count: number;
+  /** Where it was seen, newest first. */
+  seen: { where: string; person: string; date: string }[];
+  /** False when the agenda named a transaction the Hub did not know; null when the item does not say. */
+  transactionKnown: boolean | null;
+  guessMatterId: string;
+  guessDocumentId: string;
+  guessDocumentTitle: string;
+  guessRowDeliverable: string;
+  guessNewProject: { name: string; client: string; code: string } | null;
+  /** Existing projects the proposed one may be. */
+  near: { matterId: string; name: string }[];
 }
 
-export function readTrayItem(item: { payload: unknown; guess?: unknown }): TrayItemView {
+function pickObject(obj: unknown, key: string): Record<string, unknown> | null {
+  if (!obj || typeof obj !== "object") return null;
+  const v = (obj as Record<string, unknown>)[key];
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function pickList(obj: unknown, key: string): unknown[] {
+  if (!obj || typeof obj !== "object") return [];
+  const v = (obj as Record<string, unknown>)[key];
+  return Array.isArray(v) ? v : [];
+}
+
+export function readTrayItem(item: { payload: unknown; guess?: unknown; kind?: string | null }): TrayItemView {
   const p = item.payload;
   const g = item.guess;
   const newRow = g && typeof g === "object" && (g as Record<string, unknown>).new_row;
   const personId = pickText(p, "person_id", "author_id");
+  const newProject = pickObject(g, "new_project");
+  const seen = pickList(p, "seen")
+    .map((s) => ({ where: pickText(s, "where", "file", "subject"), person: pickText(s, "person"), date: pickText(s, "date") }))
+    .filter((s) => s.where || s.person || s.date)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const known = p && typeof p === "object" ? (p as Record<string, unknown>).transaction_known : undefined;
+  const count = Number(pickText(p, "count"));
+  // A proposed project's `name` is the project, not a person: whoever mentioned it last is.
+  const proposal = item.kind === "new_project";
   return {
-    person: pickText(p, "person", "person_name", "author", "name"),
+    person: proposal ? seen[0]?.person ?? "" : pickText(p, "person", "person_name", "author", "name"),
     personId: personId || null,
     transaction: pickText(p, "transaction", "project", "matter"),
     deliverable: pickText(p, "deliverable", "complete_deliverable", "title"),
@@ -338,6 +391,30 @@ export function readTrayItem(item: { payload: unknown; guess?: unknown }): TrayI
         }
       : null,
     confidence: pickText(g, "confidence"),
+    title: pickText(p, "title"),
+    name: pickText(p, "name"),
+    code: pickText(p, "code"),
+    chat: pickText(p, "chat"),
+    via: pickText(p, "via"),
+    webUrl: pickText(p, "web_url"),
+    ask: pickText(p, "ask"),
+    proposedStatus: pickText(p, "status"),
+    matterId: pickText(p, "matter_id"),
+    wasMatterId: pickText(p, "was_matter_id"),
+    messageRef: pickText(p, "message_key", "message_id"),
+    count: Number.isFinite(count) && count > 0 ? count : seen.length,
+    seen,
+    transactionKnown: typeof known === "boolean" ? known : null,
+    guessMatterId: pickText(g, "matter_id"),
+    guessDocumentId: pickText(g, "document_id"),
+    guessDocumentTitle: pickText(g, "document_title"),
+    guessRowDeliverable: pickText(g, "row_deliverable"),
+    guessNewProject: newProject
+      ? { name: pickText(newProject, "name"), client: pickText(newProject, "client"), code: pickText(newProject, "code") }
+      : null,
+    near: pickList(g, "near")
+      .map((n) => ({ matterId: pickText(n, "matter_id"), name: pickText(n, "name") }))
+      .filter((n) => n.matterId),
   };
 }
 

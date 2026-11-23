@@ -15,6 +15,8 @@ from . import config
 from .log import log
 
 TIMEOUT = 60
+PAGE = 1000                 # PostgREST's own cap on rows per call
+STORAGE_TIMEOUT = 300      # one file of up to 50 MB
 
 
 def _ssl_context():
@@ -38,6 +40,7 @@ class Db:
         if not self.offline:
             e = config.env()
             self._base = e['SUPABASE_URL'].rstrip('/') + '/rest/v1/'
+            self._storage = e['SUPABASE_URL'].rstrip('/') + '/storage/v1/'
             self._key = e['SUPABASE_SERVICE_ROLE_KEY']
 
     # ---- the wire
@@ -72,7 +75,16 @@ class Db:
             params['order'] = order
         if limit:
             params['limit'] = str(limit)
-        return self._request('GET', table, params)
+            return self._request('GET', table, params)
+        # No limit asked for: the API hands back at most PAGE rows a call, so keep
+        # asking until a short page. (Give an order when a table can pass PAGE rows.)
+        out, offset = [], 0
+        while True:
+            page = self._request('GET', table, dict(params, limit=str(PAGE), offset=str(offset)))
+            out.extend(page)
+            if len(page) < PAGE:
+                return out
+            offset += PAGE
 
     def one(self, table, filters, columns='*'):
         rows = self.select(table, filters, columns, limit=1)
@@ -105,6 +117,53 @@ class Db:
             log('  would update %s where %s: %s', table, filters, _short(data))
             return [dict(data)]
         return self._request('PATCH', table, filters, body=data, prefer='return=representation')
+
+    def delete(self, table, filters):
+        """Deletes the rows the filters name. Refuses to run without a filter."""
+        if not filters:
+            raise DbError(f'delete from {table} needs a filter')
+        if self.dry_run or self.offline:
+            log('  would delete from %s where %s', table, filters)
+            return []
+        return self._request('DELETE', table, filters, prefer='return=representation')
+
+    def rpc(self, function, args, write=True):
+        """Calls a database function. A write is only printed on a dry run (and returns None)."""
+        if self.offline or (write and self.dry_run):
+            log('  would call %s(%s)', function, _short(args))
+            return None
+        return self._request('POST', 'rpc/' + function, body=args)
+
+    # ---- storage (the Hub's file buckets)
+    def storage_upload(self, bucket, path, data, content_type='application/octet-stream'):
+        """Puts a new object in a bucket. Never overwrites: an existing path is an error."""
+        if self.dry_run or self.offline:
+            log('  would upload %d bytes to %s/%s', len(data), bucket, path)
+            return path
+        url = self._storage + 'object/' + bucket + '/' + urllib.parse.quote(path, safe='/')
+        headers = {'apikey': self._key, 'Authorization': f'Bearer {self._key}', 'Content-Type': content_type,
+                   'x-upsert': 'false', 'cache-control': 'max-age=3600'}
+        req = urllib.request.Request(url, data=data, method='POST', headers=headers)
+        try:
+            with self._opener.open(req, timeout=STORAGE_TIMEOUT) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode('utf8', 'replace')[:300]
+            raise DbError(f'upload {bucket}/{path} -> {e.code}: {detail}') from None
+        return path
+
+    def storage_remove(self, bucket, paths):
+        """Removes objects this run uploaded and could not use (a save that failed). Nothing else calls it."""
+        if not paths or self.dry_run or self.offline:
+            return
+        url = self._storage + 'object/' + bucket
+        headers = {'apikey': self._key, 'Authorization': f'Bearer {self._key}', 'Content-Type': 'application/json'}
+        req = urllib.request.Request(url, data=json.dumps({'prefixes': list(paths)}).encode(), method='DELETE', headers=headers)
+        try:
+            with self._opener.open(req, timeout=TIMEOUT) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            log('  could not remove %s from %s: %s', paths, bucket, e.code)
 
     # ---- settings
     def setting(self, key, default=None):

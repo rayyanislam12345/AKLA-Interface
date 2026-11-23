@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import MattersPage from "./pages/MattersPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import IntakeTrayPage from "./pages/IntakeTrayPage";
+import ArrivedPage from "./pages/ArrivedPage";
 import MatterWorkspacePage from "./pages/MatterWorkspacePage";
 import AssistantSearchPage from "./pages/AssistantSearchPage";
 import SharePointSearchPage from "./pages/SharePointSearchPage";
@@ -87,6 +88,7 @@ const App = () => {
                   />
                   <Route path="/transactions" element={<ProtectedRoute><AppLayout><TransactionsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/transactions/tray" element={<ProtectedRoute><AppLayout><IntakeTrayPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/transactions/arrived" element={<ProtectedRoute><AppLayout><ArrivedPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/search" element={<RedirectSearch />} />
                   <Route path="/assistant/search" element={<ProtectedRoute><AppLayout><AssistantSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/sharepoint-search" element={<ProtectedRoute><AppLayout><SharePointSearchPage /></AppLayout></ProtectedRoute>} />

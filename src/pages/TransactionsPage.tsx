@@ -10,6 +10,7 @@ import { TransactionRowSheet } from "@/components/TransactionRowSheet";
 import { TimelineDialog } from "@/components/TransactionTimeline";
 import { NewTransactionRowDialog } from "@/components/NewTransactionRowDialog";
 import { useStaleAfterDays, useTransactionRows, useTrayCount, type TransactionRow } from "@/hooks/useTransactions";
+import { useArrivedTodayCount } from "@/hooks/useIntake";
 import { cn } from "@/lib/utils";
 import {
   formatShortDate,
@@ -114,6 +115,7 @@ export default function TransactionsPage() {
   const { data: rows, isLoading, error, refetch } = useTransactionRows();
   const { data: staleAfter = 10 } = useStaleAfterDays();
   const { data: trayCount = 0 } = useTrayCount();
+  const { data: arrivedToday = 0 } = useArrivedTodayCount();
   const [view, setView] = useState<View>("project");
   const [query, setQuery] = useState("");
   const [showClosed, setShowClosed] = useState(false);
@@ -174,6 +176,11 @@ export default function TransactionsPage() {
           <span className="text-sm text-muted-foreground">{openCount} open</span>
         </div>
         <div className="flex items-center gap-2">
+          {arrivedToday > 0 && (
+            <Button asChild size="sm" variant="ghost" className="h-8 text-muted-foreground">
+              <Link to="/transactions/arrived">Arrived today · {arrivedToday}</Link>
+            </Button>
+          )}
           {trayCount > 0 && (
             <Button asChild size="sm" variant="ghost" className="h-8">
               <Link to="/transactions/tray">

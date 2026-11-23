@@ -65,6 +65,8 @@ import {
   type DocumentStatus,
 } from "@/hooks/useMatterDocuments";
 import { MatterTimeslips } from "@/components/MatterTimeslips";
+import { ProjectAlsoCalled } from "@/components/ProjectAlsoCalled";
+import { ProjectArrivedCard } from "@/components/ProjectArrivedCard";
 import { DocumentDropZone } from "@/components/documents/DocumentDropZone";
 import { DocumentIntakePanel } from "@/components/documents/DocumentIntakePanel";
 import { useDocumentIntake, type IntakeDocument } from "@/components/documents/useDocumentIntake";
@@ -1150,6 +1152,7 @@ export default function MatterWorkspacePage() {
             {matter.sector ? ` · ${matter.sector}` : ""}
             {(matter as any).lead_partner?.full_name ? ` · Project Lead: ${(matter as any).lead_partner.full_name}` : ""}
           </p>
+          <ProjectAlsoCalled matterId={matter.id} projectName={matter.name} code={matter.code} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" onClick={() => setEditProjectOpen(true)}><Pencil className="mr-2 h-4 w-4"/>Edit</Button>
@@ -1186,6 +1189,7 @@ export default function MatterWorkspacePage() {
       />
 
       <div className="grid gap-6 md:grid-cols-2">
+        <ProjectArrivedCard matterId={matterId} />
         <DocumentDropZone className="md:col-span-2" onDrop={intake.addDrop} disabled={!matterId}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap space-y-0">

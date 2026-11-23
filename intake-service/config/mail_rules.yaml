@@ -1,0 +1,262 @@
+# ---------------------------------------------------------------------------
+# Rules that run on every message BEFORE any model sees it (intake/rules.py).
+# Ported from the Email Bot's config/rules.yaml and widened for the intake:
+# the bot posts one founder's inbox to the team, the intake reads the whole
+# firm's mailboxes, so the list of what is never read is longer here.
+#
+# In order:
+#   1. never share   the message is withheld: nothing of it is read by Claude
+#                    and nothing but "a message was withheld" is recorded.
+#                    First and final. Sent mail is treated exactly the same.
+#   2. work signal   a legal term or a court / regulator sender: goes to Claude
+#                    even if it looks automated or comes from a Gmail address.
+#   3. automated     newsletters, no-reply senders, bulk mail: dropped.
+#   4. personal      consumer-domain mail with no work signal: dropped.
+#   5. everything else goes to Claude.
+#
+# Matching is by whole words, any letter case; a final "s" is allowed
+# ("bonus" also finds "bonuses"); apostrophes, hyphens and line breaks inside
+# a phrase do not matter ("partners' meeting", "partners meeting" and
+# "profit-share" are all found).
+# ---------------------------------------------------------------------------
+
+# The firm's own mail domains. A sender here is a member of the firm.
+firm_domains:
+  - akla.com.pk
+
+# Courts, tribunals, regulators, registries. Never dropped as automated:
+# Claude reads them for dates.
+institutional_domains:
+  # Courts
+  - supremecourt.gov.pk
+  - lhc.gov.pk                 # Lahore High Court
+  - sindhhighcourt.gov.pk
+  - ihc.gov.pk                 # Islamabad High Court
+  - peshawarhighcourt.gov.pk
+  - balochistanhighcourt.gov.pk
+  # Regulators and registries
+  - secp.gov.pk                # Securities & Exchange Commission
+  - sbp.org.pk                 # State Bank of Pakistan
+  - fbr.gov.pk                 # Federal Board of Revenue
+  - cc.gov.pk                  # Competition Commission
+  - nepra.org.pk               # Electric power regulator
+  - ogra.org.pk                # Oil & gas regulator
+  - ppra.org.pk                # Public procurement
+  - privatisation.gov.pk       # Privatisation Commission
+
+# ---------------------------------------------------------------------------
+# NEVER SHARE. A hit anywhere in the subject, the newest message, the quoted
+# thread or an attachment's NAME withholds the message. The group name (pay,
+# hr, ...) is all that is recorded: "never_share:pay", never the word found.
+#
+# WARNING, kept from the Email Bot: phrases that sit in email disclaimers
+# ("strictly confidential", "confidential", "do not forward", "privileged",
+# "intended recipient") must NEVER go on this list. Almost every client email
+# carries one, so they would withhold the firm's ordinary work.
+#
+# Two words are deliberately NOT here although partners' business is:
+#   "partnership"  the firm's main work is public-private partnerships, and it
+#                  drafts partnership deeds for clients; the bare word would
+#                  withhold most work mail. The partners' own business is
+#                  caught by the tighter phrases under `partners`.
+#   "drawings"     engineering drawings are in every infrastructure project.
+#                  Only a partner's drawings are listed.
+# ---------------------------------------------------------------------------
+never_share:
+  # An individual's pay.
+  pay:
+    - salary
+    - salaries
+    - payroll
+    - payslip
+    - pay slip
+    - bonus
+    - increment
+  # How a person is doing, and trouble they are in.
+  appraisal:
+    - appraisal
+    - performance review
+    - disciplinary
+  # Joining, leaving and leave.
+  hr:
+    - termination of employment
+    - resignation
+    - leave application
+    - leave request
+  # A person's health.
+  health:
+    - medical
+    - sick leave
+    - maternity leave
+    - paternity leave
+    - diagnosis
+  # The partners' own business (not a client's partnership: see the note above).
+  partners:
+    - partners' meeting
+    - profit share
+    - profit sharing
+    - partner drawings
+    - partners' drawings
+    - equity partner
+    - salaried partner
+    - partner remuneration
+    - partners' remuneration
+  # Mail the sender marks for one reader.
+  eyes_only:
+    - for your eyes only
+    - eyes only
+
+# Looked for in the SUBJECT only. In a body these words are ordinary English
+# or a footer ("my personal view", "private and confidential" in a disclaimer);
+# in a subject they are the sender marking the message as not for others.
+# "Privileged & Confidential", the usual heading on legal advice, is not here.
+never_share_subject:
+  marked_private:
+    - personal
+    - private and confidential
+    - private & confidential
+
+# Addresses or whole domains (an HR consultant, the firm's accountant, a
+# doctor). Mail FROM or TO any of them is withheld. One per line.
+never_share_addresses: []
+
+# Free-mail providers. A sender here is probably private; the message is
+# dropped only when there is no work signal anywhere in it. Mail a member of
+# the firm sends only to such addresses, with no work signal, is dropped too.
+personal_domains:
+  - gmail.com
+  - googlemail.com
+  - yahoo.com
+  - ymail.com
+  - hotmail.com
+  - outlook.com
+  - live.com
+  - msn.com
+  - icloud.com
+  - me.com
+  - proton.me
+  - protonmail.com
+
+# Pieces of the part before the @ that mark machine-sent mail.
+automated_senders:
+  - noreply
+  - no-reply
+  - no_reply
+  - donotreply
+  - do-not-reply
+  - mailer-daemon
+  - postmaster
+  - notifications
+  - notification
+  - bounce
+  - newsletter
+  - marketing
+  - alerts
+
+# Headers whose presence alone means bulk or list mail.
+automated_headers:
+  - list-unsubscribe
+  - list-id
+  - x-campaign-id
+  - x-mailchimp-id
+
+# Values of the Precedence header that mark bulk mail.
+bulk_precedence_values:
+  - bulk
+  - list
+  - junk
+
+# WORK SIGNAL. Any of these in the subject, the message or an attachment name
+# sends the message to Claude even when the sender looks private or automated:
+# a hearing notice that came through a mailing list is still a hearing notice,
+# and a client writing from Gmail is still a client. Passed to Claude as
+# "legal terms found".
+work_signal_keywords:
+  - affidavit
+  - agreement
+  - annexure
+  - arbitration
+  - bench
+  - bid
+  - bidder
+  - cause list
+  - clause
+  - client
+  - concession
+  - contract
+  - counsel
+  - court
+  - deed
+  - defendant
+  - deposition
+  - due diligence
+  - engagement letter
+  - escrow
+  - execution version
+  - filing
+  - financing
+  - hearing
+  - injunction
+  - invoice
+  - judgment
+  - legal opinion
+  - lenders
+  - litigation
+  - mark-up
+  - markup
+  - matter
+  - memorandum
+  - notice
+  - petition
+  - plaintiff
+  - pleading
+  - redline
+  - retainer
+  - rfp
+  - settlement
+  - shareholders
+  - statement of claim
+  - subpoena
+  - summons
+  - tender
+  - term sheet
+  - termination
+  - tribunal
+  - vakalatnama
+  - witness
+
+# Advice for Claude only ("deadline-ish phrases found"); never decides anything.
+deadline_hint_keywords:
+  - asap
+  - as soon as possible
+  - by close of business
+  - by cob
+  - by eod
+  - by end of day
+  - by tomorrow
+  - deadline
+  - due today
+  - expires
+  - immediately
+  - last chance
+  - limitation period
+  - overdue
+  - reminder
+  - time sensitive
+  - time-barred
+  - today
+  - tomorrow
+  - urgent
+  - without delay
+
+# Advice for Claude only ("meeting-ish phrases found").
+meeting_hint_keywords:
+  - call scheduled
+  - calendar
+  - conference
+  - hearing date
+  - invitation
+  - meeting
+  - reschedule
+  - teams meeting
+  - zoom

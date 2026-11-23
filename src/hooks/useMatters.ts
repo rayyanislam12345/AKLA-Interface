@@ -116,6 +116,8 @@ export function useCreateMatter() {
       lead_partner_id?: string;
       target_close_date?: string;
       description?: string;
+      /** The firm's short code for the transaction (ADB, PTQ…), when it has one. */
+      code?: string;
     }) => {
       const { data: userData } = await supabase.auth.getUser();
       const { data: matter, error } = await supabase
@@ -128,6 +130,7 @@ export function useCreateMatter() {
           lead_partner_id: input.lead_partner_id || null,
           target_close_date: input.target_close_date || null,
           description: input.description || null,
+          ...(input.code?.trim() ? { code: input.code.trim() } : {}),
           created_by: userData.user?.id,
         })
         .select()

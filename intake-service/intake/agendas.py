@@ -9,15 +9,17 @@ import re
 import tempfile
 from datetime import datetime
 
-from . import config, hub
+from . import actions, config, hub
 from .agenda import parse_agenda, parse_file_name
 from .db import in_list
 from .log import log, warn
-from .match import Matcher
+from .match import Matcher, name_key
+from .projects import propose_project, ready_matcher
 
 
 def run_agendas(db, folder=None, use_sharepoint=False, since=None, dry_run=False, rows_sheet=None):
-    matcher = Matcher()
+    # The YAML with the Hub's project names laid over it, after any project decisions made in the tray.
+    matcher = ready_matcher(db, dry_run=dry_run)
     tz = config.tz()
     people = hub.People(db)
     settings = config.settings()['agendas']
@@ -29,7 +31,8 @@ def run_agendas(db, folder=None, use_sharepoint=False, since=None, dry_run=False
     run_id = hub.start_run(db, 'agendas')
     summary = {'files_seen': len(files), 'files_read': 0, 'files_failed': 0, 'files_skipped_dup': 0, 'blocks': 0,
                'internal_blocks': 0, 'matched': 0, 'unsure': 0, 'no_row': 0, 'created': 0, 'time_lines': 0,
-               'time_trayed': 0, 'unresolved_transactions': {}, 'matches': [], 'dry_run': dry_run}
+               'time_trayed': 0, 'projects_proposed': 0, 'unresolved_transactions': {}, 'matches': [], 'dry_run': dry_run}
+    proposed = set()             # Transaction strings already put forward as a missing project in this run
     try:
         for path in files:
             name = os.path.basename(path)
@@ -45,7 +48,7 @@ def run_agendas(db, folder=None, use_sharepoint=False, since=None, dry_run=False
                 db.insert('intake_agendas', _agenda_record(agenda, people, matcher, 0, 0, 0))
                 continue
             seen_hashes.add(agenda['sha256'])
-            counts = _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, summary)
+            counts = _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, summary, proposed)
             db.insert('intake_agendas', _agenda_record(agenda, people, matcher, *counts))
             summary['files_read'] += 1
         hub.finish_run(db, run_id, True, _trim(summary))
@@ -111,7 +114,21 @@ def _agenda_record(agenda, people, matcher, matched, trayed, time_lines):
             'trayed': trayed, 'time_lines': time_lines}
 
 
-def _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, summary):
+def _propose(db, matcher, transaction, name, person, day, summary, proposed):
+    """A Transaction string nothing answers to may be a project the Hub lacks: one tray item per
+    name (projects.propose_project), and each distinct string is put forward once per run."""
+    key = name_key(transaction)
+    if not key or key in proposed:
+        return
+    proposed.add(key)
+    done = propose_project(db, matcher, name=transaction, source='agenda',
+                           seen={'where': name, 'person': person, 'date': day.isoformat() if day else None})
+    if done.get('action') in ('proposed', 'updated', 'created'):
+        summary['projects_proposed'] += 1
+
+
+def _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, summary, proposed=None):
+    proposed = set() if proposed is None else proposed
     name = agenda['file_name']
     person = matcher.person(agenda['person'] or '') or (agenda['person'] or '')
     person_id = people.id_for(person)
@@ -127,11 +144,16 @@ def _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, su
         candidates = matcher.candidate_rows(rows, entry) if entry else []
         row, d_score, ranked = matcher.match_row([block['complete'], block['day'], block['scope']], candidates, block['transaction'])
         grade = matcher.grade(t_score, d_score) if row else ('none' if entry is None or t_score < matcher.th['transaction_high'] else 'no_row')
+        known = entry is not None and t_score >= matcher.th['transaction_high']
         if entry is None:
             summary['unresolved_transactions'][block['transaction']] = summary['unresolved_transactions'].get(block['transaction'], 0) + 1
+            _propose(db, matcher, block['transaction'], name, person, day, summary, proposed)
+        # code and transaction_known tell the tray whether accepting this line should also teach the
+        # Hub the name (a project_names row), so the same string is never asked about again
         payload = {'person': person, 'person_id': person_id, 'transaction': block['transaction'],
                    'deliverable': block['complete'], 'day_deliverable': block['day'], 'scope': block['scope'],
-                   'file': name, 'date': day.isoformat() if day else None}
+                   'file': name, 'date': day.isoformat() if day else None,
+                   'code': entry['code'] if entry else None, 'transaction_known': known}
         record = {'file': name, 'person': person, 'date': payload['date'], 'transaction': block['transaction'],
                   'code': entry['code'] if entry else None, 'transaction_score': round(t_score, 3),
                   'complete': block['complete'], 'day': block['day'], 'row_id': row['id'] if row else None,
@@ -162,7 +184,7 @@ def _one_agenda(db, agenda, rows, matcher, people, settings, auto_create, tz, su
                 summary['no_row'] += 1
                 trayed += 1
         summary['matches'].append(record)
-    time_lines = _time_rows(db, agenda, rows, matcher, person, person_id, summary)
+    time_lines = _time_rows(db, agenda, rows, matcher, person, person_id, summary, proposed)
     return matched, trayed, time_lines
 
 
@@ -171,14 +193,13 @@ def _apply_block(db, row, block, person, person_id, at, name, settings):
     day, complete = (block['day'] or '').strip(), (block['complete'] or '').strip()
     if day and complete and day.lower() != complete.lower() and day.lower() not in body.lower():
         body = f'{body} Day deliverable: {day}'
-    db.insert('transaction_updates', {'row_id': row['id'], 'at': at.isoformat(), 'author': person,
-                                      'author_id': person_id, 'body': body, 'source': 'agenda', 'source_ref': name})
     status = (block['status'] or '').lower()
-    if any(phrase in status for phrase in settings['pending_with_me']):
-        # the writer says the deliverable sits with them; the row's status is never changed from an agenda
-        db.patch('transaction_rows', {'id': f'eq.{row["id"]}'},
-                 {'currently_with': person, 'updated_source': 'agenda', 'updated_by': person_id})
-        row['currently_with'] = person
+    # the writer says the deliverable sits with them; the row's status is never changed from an agenda
+    changes = {'currently_with': person} if any(phrase in status for phrase in settings['pending_with_me']) else None
+    # the line and the move go through actions, so both are logged and a person can undo them
+    actions.add_row_update(db, row, body, source='agenda', source_ref=name, at=at.isoformat() if at else None,
+                           author=person, author_id=person_id, changes=changes,
+                           detail={'from': person, 'via': 'agenda', 'file': name})
 
 
 def _new_row(entry, block, person, matcher):
@@ -200,12 +221,20 @@ def _create_row(db, rows, new_row, block, person, person_id, at, name):
         'status': 'In Progress', 'matter_id': new_row['matter_id'], 'updated_source': 'agenda', 'updated_by': person_id})[0]
     rows.append(dict(created, archived_at=None))
     body = re.sub(r'\s+', ' ', block['scope'] or block['complete']).strip()
-    db.insert('transaction_updates', {'row_id': created['id'], 'at': at.isoformat(), 'author': person, 'author_id': person_id,
-                                      'body': f"Row created from {person}'s agenda: {body}", 'source': 'agenda', 'source_ref': name})
+    # the new row and its first line are one arrival: logged together, each of them undoable
+    group = actions.new_group()
+    detail = {'from': person, 'via': 'agenda', 'file': name}
+    actions.record(db, 'row_created', 'agenda', f"{new_row['deliverable']} \u00b7 new row", source_ref=name,
+                   detail=dict(detail, client=new_row['client'], project=new_row['project']), group_id=group,
+                   matter_id=new_row['matter_id'], row_id=created['id'])
+    actions.add_row_update(db, created, f"Row created from {person}'s agenda: {body}", source='agenda', source_ref=name,
+                           at=at.isoformat() if at else None, author=person, author_id=person_id, detail=detail,
+                           group_id=group)
     return created
 
 
-def _time_rows(db, agenda, rows, matcher, person, person_id, summary):
+def _time_rows(db, agenda, rows, matcher, person, person_id, summary, proposed=None):
+    proposed = set() if proposed is None else proposed
     work_date = agenda['timesheet_date']
     count = 0
     suggestions = []
@@ -234,7 +263,9 @@ def _time_rows(db, agenda, rows, matcher, person, person_id, summary):
             db.insert('intake_tray', {'kind': 'time_no_row', 'guess': None,
                                       'payload': {'person': person, 'person_id': person_id, 'date': date.isoformat(),
                                                   'hours': f'{t["hours"]:.1f}', 'transaction': t['transaction'],
-                                                  'narrative': t['narrative'], 'file': agenda['file_name']}})
+                                                  'narrative': t['narrative'], 'file': agenda['file_name'],
+                                                  'code': None, 'transaction_known': False}})
+            _propose(db, matcher, t['transaction'], agenda['file_name'], person, date, summary, proposed)
             summary['time_trayed'] += 1
     if suggestions:
         db.upsert('transaction_time_suggestions', suggestions, on_conflict='source_ref')

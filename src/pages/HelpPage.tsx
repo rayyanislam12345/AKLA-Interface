@@ -275,6 +275,33 @@ const HelpPage = () => {
           answer:
             "The pill in the header, with a count, when the Hub could not place something on its own: an agenda line that matches no row (with a drafted row ready to add), one it is not sure about, a cell changed in both the Hub and the Excel on the same night, hours with no row, or an agenda file it could not read. Each card has the buttons that settle it; nothing is guessed at silently.",
         },
+        {
+          question: "What is Arrived?",
+          answer:
+            "The list of what the Hub did on its own: a document sent by WhatsApp or email filed into its project as the next version, a dated line added to the row it belongs to, a note kept on a project. Each line says who it came from and when. Arrived today, in the Transactions header, opens the last 14 days; a project's own page shows its latest few under Arrived.",
+        },
+        {
+          question: "How do I undo something that arrived?",
+          answer:
+            "Press Undo on its line. A filed version comes off the project, and the line it added to the row goes with it; the file itself stays on SharePoint and waits in Needs a look to be placed again or dropped. A row that was moved goes back to how it was, unless someone has changed it since. If a later version has been filed on top, or someone has already reviewed or marked up that version, Undo says so and leaves it alone; remove it from the document's own page instead.",
+        },
+        {
+          question: "What do the questions about documents, projects and emails in Needs a look mean?",
+          answer:
+            "The page is grouped by kind, so you can clear one kind at a time. Your answer is saved straight away; the filing itself follows within a few minutes.",
+          bullets: [
+            "Documents with no project: a file the Hub could not match to a project. File it in the one suggested, pick another, or press Not ours.",
+            "The next version, or a new one?: the file looks like a document already on the project, but not surely. Say which it is.",
+            "Filings taken back: a document someone pressed Undo on. Place it on the right project, or drop it.",
+            "Projects the Hub doesn't have: a name the team keeps using with no project behind it. Create the project (its name, client and code are drafted for you) or say which existing project it is. Either way the name is remembered and whatever was waiting for it is filed.",
+            "Emails, not sure which row: an email names a project but not clearly which deliverable. Pick the row and what the email asks is added to it.",
+          ],
+        },
+        {
+          question: "What is Also called on a project?",
+          answer:
+            "Under a project's name on its page: the firm's code for it and the other names people use for it (M6, Hyderabad Sukkur Motorway). Whatever arrives under any of those names is placed on that project. Press Edit there to remove a name or add one; a name you confirm in Needs a look is added for you.",
+        },
       ],
       faqs: [
         {

@@ -21,7 +21,7 @@ def run_sync(db, path=None, dry_run=False, out=None):
         log('intake_settings.sheet_sync is off; nothing done')
         return {'skipped': 'sheet_sync off'}
     tz = config.tz()
-    matcher = Matcher()
+    matcher = Matcher(db)   # the Hub's project names too, so a project made after the YAML keeps its rows
     people = hub.People(db)
     rel = config.settings()['sharepoint']['sheet_path']
     graph = None

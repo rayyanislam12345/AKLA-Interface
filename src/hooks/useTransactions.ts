@@ -135,13 +135,13 @@ export function useMyTimeSuggestions(userId: string | undefined) {
 
 // Who is making the change, as the sheet stamps it: the full name, or the
 // email when the profile has none yet.
-function useActor() {
+export function useActor() {
   const { user } = useAuth();
   const { data: me } = useMyProfile();
   return { id: user?.id ?? null, name: me?.full_name || user?.email || null };
 }
 
-function useInvalidateSheet() {
+export function useInvalidateSheet() {
   const qc = useQueryClient();
   return () => {
     qc.invalidateQueries({ queryKey: ROWS_KEY });
@@ -151,7 +151,7 @@ function useInvalidateSheet() {
   };
 }
 
-interface UpdateLine {
+export interface UpdateLine {
   rowId: string;
   body: string;
   source?: UpdateSource;
@@ -161,7 +161,7 @@ interface UpdateLine {
   at?: string;
 }
 
-async function insertUpdate(line: UpdateLine, actor: { id: string | null; name: string | null }) {
+export async function insertUpdate(line: UpdateLine, actor: { id: string | null; name: string | null }) {
   const { error } = await supabase.from("transaction_updates").insert({
     row_id: line.rowId,
     body: line.body,
@@ -256,12 +256,26 @@ export function useCreateTransactionRow() {
   });
 }
 
-async function resolveTray(id: string, status: "accepted" | "dropped", resolution: Json | null, actorId: string | null) {
+export async function resolveTray(id: string, status: "accepted" | "dropped", resolution: Json | null, actorId: string | null) {
   const { error } = await supabase
     .from("intake_tray")
     .update({ status, resolution, resolved_by: actorId, resolved_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+}
+
+/**
+ * A name a person confirmed in Needs a look, kept on the project. The answer
+ * itself is already saved by the time this runs, so a name that is already
+ * there (or one that could not be kept) never undoes it.
+ */
+export async function learnProjectName(matterId: string, name: string, actorId: string | null): Promise<void> {
+  const clean = name.trim();
+  if (!matterId || !clean) return;
+  const { error } = await supabase
+    .from("project_names")
+    .insert({ matter_id: matterId, name: clean, kind: "learned", source: "tray", created_by: actorId });
+  if (error && error.code !== "23505") console.warn("The name could not be kept on the project:", error.message);
 }
 
 export function useDropTrayItem() {
@@ -309,6 +323,12 @@ export function useAcceptAgendaLine() {
         actor,
       );
       await resolveTray(item.id, "accepted", created ? { created_row_id: targetId } : { row_id: targetId }, actor.id);
+      // The agenda used a name the Hub did not know and a person has now said
+      // which project it is: keep the name, so it is never asked about again.
+      if (!created && v.transactionKnown === false && v.transaction) {
+        const { data: row } = await supabase.from("transaction_rows").select("matter_id").eq("id", targetId).maybeSingle();
+        if (row?.matter_id) await learnProjectName(row.matter_id, v.transaction, actor.id);
+      }
     },
     onSuccess: invalidate,
   });

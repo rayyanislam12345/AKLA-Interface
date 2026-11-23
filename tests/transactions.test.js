@@ -153,3 +153,125 @@ test('a line written on several rows in the same minute is read once, with its r
     ['e', ['Memo']],
   ]);
 });
+
+// ---- Needs a look: documents, proposed projects and emails
+
+test('a document with no project is read with its file, sender, chat, link and the guessed project', () => {
+  const payload = {
+    intake_document_id: 'i1', file: 'ADB-CTA-Mark-up-v4.docx', title: 'Common Terms Agreement', transaction: 'ADB M6',
+    code: 'ADB', person: 'Usama', chat: 'AKLA TEAM - OFFICE', date: '2026-10-17T09:00:00+00:00',
+    web_url: 'https://example.sharepoint.com/x', via: 'WhatsApp',
+  };
+  const guessed = readTrayItem({ kind: 'document_no_project', payload, guess: { matter_id: 'm1', confidence: 0.82 } });
+  assert.equal(guessed.file, 'ADB-CTA-Mark-up-v4.docx');
+  assert.equal(guessed.title, 'Common Terms Agreement');
+  assert.equal(guessed.transaction, 'ADB M6');
+  assert.equal(guessed.code, 'ADB');
+  assert.equal(guessed.person, 'Usama');
+  assert.equal(guessed.chat, 'AKLA TEAM - OFFICE');
+  assert.equal(guessed.via, 'WhatsApp');
+  assert.equal(guessed.webUrl, 'https://example.sharepoint.com/x');
+  assert.equal(guessed.guessMatterId, 'm1');
+  assert.equal(guessed.confidence, '0.82');
+  assert.equal(guessed.guessNewProject, null);
+
+  const drafted = readTrayItem({ kind: 'document_no_project', payload, guess: { new_project: { name: 'M6 Motorway', client: 'ADB', code: 'ADB' } } });
+  assert.equal(drafted.guessMatterId, '');
+  assert.deepEqual(drafted.guessNewProject, { name: 'M6 Motorway', client: 'ADB', code: 'ADB' });
+
+  const bare = readTrayItem({ kind: 'document_no_project', payload: { file: 'x.pdf' }, guess: null });
+  assert.equal(bare.guessMatterId, '');
+  assert.equal(bare.guessNewProject, null);
+  assert.equal(bare.webUrl, '');
+  assert.deepEqual(bare.near, []);
+});
+
+test('a document the Hub is unsure of names its project and the document it may be the next version of', () => {
+  const v = readTrayItem({
+    kind: 'document_unsure',
+    payload: { intake_document_id: 'i2', file: 'CTA v5 (clean).docx', title: 'Common Terms Agreement', person: 'Usama', chat: 'AKLA TEAM - OFFICE', matter_id: 'm1' },
+    guess: { document_id: 'd1', document_title: 'Common Terms Agreement', confidence: 0.78 },
+  });
+  assert.equal(v.matterId, 'm1');
+  assert.equal(v.guessDocumentId, 'd1');
+  assert.equal(v.guessDocumentTitle, 'Common Terms Agreement');
+  assert.equal(v.file, 'CTA v5 (clean).docx');
+});
+
+test('an undone filing remembers the project it was taken off, and has no guess', () => {
+  const v = readTrayItem({
+    kind: 'document_undone',
+    payload: { intake_document_id: 'i3', file: 'CTA v4.docx', title: 'CTA', transaction: 'ADB M6', person: 'Usama', chat: 'Outlook - someone@example.com (Inbox)', date: '2026-10-17T09:00:00+00:00', web_url: null, was_matter_id: 'm1' },
+    guess: null,
+  });
+  assert.equal(v.wasMatterId, 'm1');
+  assert.equal(v.matterId, '');
+  assert.equal(v.guessMatterId, '');
+  assert.equal(v.webUrl, '');
+  assert.equal(v.chat, 'Outlook - someone@example.com (Inbox)');
+});
+
+test('a proposed project is read with its name, how often and where it was seen (newest first), and the projects it may be', () => {
+  const v = readTrayItem({
+    kind: 'new_project',
+    payload: {
+      name: 'Port Qasim (PQEPC)', code: 'PQ', count: 4,
+      seen: [
+        { where: 'Agenda 14 Oct.docx', person: 'Haya', date: '2026-10-14T03:00:00Z' },
+        { where: 'RE: PQEPC term sheet', person: 'Owais Sb', date: '2026-10-19T06:00:00Z' },
+        { junk: true },
+      ],
+    },
+    guess: { new_project: { name: 'Port Qasim', client: 'PQEPC', code: 'PQ' }, near: [{ matter_id: 'm7', name: 'Port Qasim Terminal', confidence: 0.6 }, { name: 'no id' }] },
+  });
+  assert.equal(v.name, 'Port Qasim (PQEPC)');
+  assert.equal(v.code, 'PQ');
+  assert.equal(v.count, 4);
+  assert.deepEqual(v.seen.map((s) => s.where), ['RE: PQEPC term sheet', 'Agenda 14 Oct.docx']);
+  // The name is the project's, not a person's: whoever mentioned it last is the person.
+  assert.equal(v.person, 'Owais Sb');
+  assert.deepEqual(v.guessNewProject, { name: 'Port Qasim', client: 'PQEPC', code: 'PQ' });
+  assert.deepEqual(v.near, [{ matterId: 'm7', name: 'Port Qasim Terminal' }]);
+
+  const sparse = readTrayItem({ kind: 'new_project', payload: { name: 'K-IV' }, guess: null });
+  assert.equal(sparse.count, 0);
+  assert.deepEqual(sparse.seen, []);
+  assert.equal(sparse.person, '');
+  assert.equal(sparse.guessNewProject, null);
+  // No count written: as many as were seen.
+  assert.equal(readTrayItem({ kind: 'new_project', payload: { name: 'K-IV', seen: [{ where: 'a' }, { where: 'b' }] } }).count, 2);
+});
+
+test('an email the Hub could not place on a row is read with its ask, its gist, its project and the row it probably means', () => {
+  const v = readTrayItem({
+    kind: 'message_unsure',
+    payload: {
+      message_id: 'msg-1', person: 'Owais Sb', date: '2026-10-19T06:00:00Z', transaction: 'ADB', deliverable: 'Common Terms Agreement',
+      scope: 'Owais Sb wants the CTA mark-up back before the lenders call.', ask: 'Owais Sb asks for the mark-up by 19 Oct', status: '', via: 'email', matter_id: 'm1',
+    },
+    guess: { row_id: 'r1', confidence: 'unsure', row_deliverable: 'CTA', others: [{ row_id: 'r2', deliverable: 'Facility Agreement', confidence: 0.4 }] },
+  });
+  assert.equal(v.person, 'Owais Sb');
+  assert.equal(v.ask, 'Owais Sb asks for the mark-up by 19 Oct');
+  assert.equal(v.scope, 'Owais Sb wants the CTA mark-up back before the lenders call.');
+  assert.equal(v.deliverable, 'Common Terms Agreement');
+  assert.equal(v.proposedStatus, '');
+  assert.equal(v.matterId, 'm1');
+  assert.equal(v.guessRowId, 'r1');
+  assert.equal(v.rowId, 'r1');
+  assert.equal(v.guessRowDeliverable, 'CTA');
+  assert.equal(v.messageRef, 'msg-1');
+  // The message's own key marks the line when the payload carries it.
+  assert.equal(readTrayItem({ kind: 'message_unsure', payload: { message_id: 'msg-1', message_key: '<abc@mail>' } }).messageRef, '<abc@mail>');
+  assert.equal(readTrayItem({ kind: 'message_unsure', payload: { person: 'x' }, guess: null }).guessRowId, '');
+});
+
+test('an agenda line says whether its transaction was known, so an accepted one can be learned', () => {
+  assert.equal(readTrayItem({ kind: 'agenda_line_unsure', payload: { transaction: 'M6', transaction_known: false, code: null } }).transactionKnown, false);
+  assert.equal(readTrayItem({ kind: 'agenda_line_unsure', payload: { transaction: 'M6', transaction_known: true, code: 'ADB' } }).transactionKnown, true);
+  // An older item says nothing either way.
+  assert.equal(readTrayItem({ kind: 'agenda_line_unsure', payload: { transaction: 'M6' } }).transactionKnown, null);
+  assert.equal(readTrayItem({ payload: null }).transactionKnown, null);
+  // Without a kind, a payload's `name` is still read as the person, as before.
+  assert.equal(readTrayItem({ payload: { name: 'Usama' } }).person, 'Usama');
+});

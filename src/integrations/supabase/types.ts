@@ -1131,6 +1131,139 @@ export type Database = {
           },
         ]
       }
+      intake_actions: {
+        Row: {
+          after: Json | null
+          before: Json | null
+          created_at: string
+          detail: Json
+          document_id: string | null
+          group_id: string
+          id: string
+          intake_document_id: string | null
+          kind: string
+          matter_id: string | null
+          message_id: string | null
+          note_id: string | null
+          row_id: string | null
+          source: string
+          source_ref: string | null
+          summary: string
+          undone_at: string | null
+          undone_by: string | null
+          update_id: string | null
+          version_id: string | null
+        }
+        Insert: {
+          after?: Json | null
+          before?: Json | null
+          created_at?: string
+          detail?: Json
+          document_id?: string | null
+          group_id?: string
+          id?: string
+          intake_document_id?: string | null
+          kind: string
+          matter_id?: string | null
+          message_id?: string | null
+          note_id?: string | null
+          row_id?: string | null
+          source: string
+          source_ref?: string | null
+          summary: string
+          undone_at?: string | null
+          undone_by?: string | null
+          update_id?: string | null
+          version_id?: string | null
+        }
+        Update: {
+          after?: Json | null
+          before?: Json | null
+          created_at?: string
+          detail?: Json
+          document_id?: string | null
+          group_id?: string
+          id?: string
+          intake_document_id?: string | null
+          kind?: string
+          matter_id?: string | null
+          message_id?: string | null
+          note_id?: string | null
+          row_id?: string | null
+          source?: string
+          source_ref?: string | null
+          summary?: string
+          undone_at?: string | null
+          undone_by?: string | null
+          update_id?: string | null
+          version_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_actions_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "matter_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_intake_document_id_fkey"
+            columns: ["intake_document_id"]
+            isOneToOne: false
+            referencedRelation: "intake_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "intake_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "matter_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_rows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_undone_by_fkey"
+            columns: ["undone_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_update_id_fkey"
+            columns: ["update_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_updates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_actions_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       intake_agendas: {
         Row: {
           agenda_date: string | null
@@ -1180,6 +1313,222 @@ export type Database = {
             columns: ["person_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      intake_documents: {
+        Row: {
+          attempts: number
+          caption: string | null
+          chat: string | null
+          code: string | null
+          created_at: string
+          direction: string | null
+          doc_status: string | null
+          document_date: string | null
+          document_version_id: string | null
+          filed_name: string | null
+          filer_id: number
+          folder: string | null
+          handled_at: string | null
+          id: string
+          mailbox: string | null
+          matter_document_id: string | null
+          matter_id: string | null
+          original_name: string | null
+          outcome: string
+          party: string | null
+          reason: string | null
+          row_id: string | null
+          sender: string | null
+          sender_id: string | null
+          sent_at: string | null
+          sha256: string | null
+          source: string
+          storage_path: string | null
+          title: string | null
+          transaction_name: string | null
+          version_number: number | null
+          web_url: string | null
+        }
+        Insert: {
+          attempts?: number
+          caption?: string | null
+          chat?: string | null
+          code?: string | null
+          created_at?: string
+          direction?: string | null
+          doc_status?: string | null
+          document_date?: string | null
+          document_version_id?: string | null
+          filed_name?: string | null
+          filer_id: number
+          folder?: string | null
+          handled_at?: string | null
+          id?: string
+          mailbox?: string | null
+          matter_document_id?: string | null
+          matter_id?: string | null
+          original_name?: string | null
+          outcome?: string
+          party?: string | null
+          reason?: string | null
+          row_id?: string | null
+          sender?: string | null
+          sender_id?: string | null
+          sent_at?: string | null
+          sha256?: string | null
+          source: string
+          storage_path?: string | null
+          title?: string | null
+          transaction_name?: string | null
+          version_number?: number | null
+          web_url?: string | null
+        }
+        Update: {
+          attempts?: number
+          caption?: string | null
+          chat?: string | null
+          code?: string | null
+          created_at?: string
+          direction?: string | null
+          doc_status?: string | null
+          document_date?: string | null
+          document_version_id?: string | null
+          filed_name?: string | null
+          filer_id?: number
+          folder?: string | null
+          handled_at?: string | null
+          id?: string
+          mailbox?: string | null
+          matter_document_id?: string | null
+          matter_id?: string | null
+          original_name?: string | null
+          outcome?: string
+          party?: string | null
+          reason?: string | null
+          row_id?: string | null
+          sender?: string | null
+          sender_id?: string | null
+          sent_at?: string | null
+          sha256?: string | null
+          source?: string
+          storage_path?: string | null
+          title?: string | null
+          transaction_name?: string | null
+          version_number?: number | null
+          web_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_documents_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_documents_matter_document_id_fkey"
+            columns: ["matter_document_id"]
+            isOneToOne: false
+            referencedRelation: "matter_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_documents_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_documents_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_rows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_documents_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      intake_messages: {
+        Row: {
+          classification: Json | null
+          conversation_key: string | null
+          created_at: string
+          folder: string | null
+          id: string
+          mailboxes: string[]
+          matter_id: string | null
+          message_key: string
+          outcome: string
+          row_id: string | null
+          rule: string | null
+          sender: string | null
+          sender_class: string | null
+          sent_at: string | null
+          source: string
+          subject: string | null
+          usd: number | null
+        }
+        Insert: {
+          classification?: Json | null
+          conversation_key?: string | null
+          created_at?: string
+          folder?: string | null
+          id?: string
+          mailboxes?: string[]
+          matter_id?: string | null
+          message_key: string
+          outcome: string
+          row_id?: string | null
+          rule?: string | null
+          sender?: string | null
+          sender_class?: string | null
+          sent_at?: string | null
+          source: string
+          subject?: string | null
+          usd?: number | null
+        }
+        Update: {
+          classification?: Json | null
+          conversation_key?: string | null
+          created_at?: string
+          folder?: string | null
+          id?: string
+          mailboxes?: string[]
+          matter_id?: string | null
+          message_key?: string
+          outcome?: string
+          row_id?: string | null
+          rule?: string | null
+          sender?: string | null
+          sender_class?: string | null
+          sent_at?: string | null
+          source?: string
+          subject?: string | null
+          usd?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_messages_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_messages_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "transaction_rows"
             referencedColumns: ["id"]
           },
         ]
@@ -1275,6 +1624,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      intake_usage: {
+        Row: {
+          calls: number
+          day: string
+          usd: number
+        }
+        Insert: {
+          calls?: number
+          day: string
+          usd?: number
+        }
+        Update: {
+          calls?: number
+          day?: string
+          usd?: number
+        }
+        Relationships: []
       }
       law_library_versions: {
         Row: {
@@ -2230,6 +2597,7 @@ export type Database = {
       matters: {
         Row: {
           client_id: string | null
+          code: string | null
           created_at: string
           created_by: string | null
           description: string | null
@@ -2245,6 +2613,7 @@ export type Database = {
         }
         Insert: {
           client_id?: string | null
+          code?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -2260,6 +2629,7 @@ export type Database = {
         }
         Update: {
           client_id?: string | null
+          code?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -2351,6 +2721,57 @@ export type Database = {
             columns: ["document_id"]
             isOneToOne: false
             referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_names: {
+        Row: {
+          code: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          matter_id: string | null
+          name: string
+          name_key: string | null
+          source: string
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          matter_id?: string | null
+          name: string
+          name_key?: never
+          source?: string
+        }
+        Update: {
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          matter_id?: string | null
+          name?: string
+          name_key?: never
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_names_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_names_matter_id_fkey"
+            columns: ["matter_id"]
+            isOneToOne: false
+            referencedRelation: "matters"
             referencedColumns: ["id"]
           },
         ]
@@ -3462,6 +3883,10 @@ export type Database = {
       touch_index_job: {
         Args: { p_job_id: string; p_run_id: string }
         Returns: boolean
+      }
+      undo_intake_action: {
+        Args: { p_action_id: string }
+        Returns: Json
       }
       unread_law_notification_count: { Args: never; Returns: number }
     }

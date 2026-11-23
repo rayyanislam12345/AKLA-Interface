@@ -1,0 +1,17 @@
+[Unit]
+Description=File what the WhatsApp Filer filed on SharePoint into its Hub project, every 10 minutes
+
+[Timer]
+# Every ten minutes, round the clock: a document sent to the group at night is on its
+# project by morning. A run takes at most 25 documents (see intake/documents.py), so a
+# backlog trickles in over a few runs instead of flooding the Hub's indexing.
+OnCalendar=*:0/10
+Unit=intake@documents.service
+# No Persistent=: a slot missed while the VM was down needs no catching up, because the
+# next run takes whatever is waiting. A run still going when the next slot comes is not
+# started twice (the unit is a oneshot, and it holds a flock of its own).
+AccuracySec=30s
+RandomizedDelaySec=45
+
+[Install]
+WantedBy=timers.target

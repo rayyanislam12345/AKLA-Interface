@@ -1,0 +1,16 @@
+[Unit]
+Description=Read the firm's mailboxes into the Transactions Hub every 10 minutes
+
+[Timer]
+# Every ten minutes, round the clock. A run that finds mail_enabled off, or
+# nothing new, ends in a second or two.
+OnCalendar=*:0/10
+Unit=intake@mail.service
+# No catch-up after downtime: each run starts from the saved place in every
+# folder, so the next one reads whatever arrived in between.
+Persistent=false
+RandomizedDelaySec=20
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
