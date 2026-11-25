@@ -406,7 +406,7 @@ class NewDocumentTest(DocumentsCase):
         self.assertEqual(args['p_document_type_id'], 't-agreement')          # "Agreement" is the type "Agreements"
         self.assertEqual((args['p_is_ai_generated'], args['p_extension']), (False, 'docx'))
         self.assertEqual(args['p_file_stem'], 'NB-A1-Concession-Agreement-AKLA-Mark-up-October-17-2026')
-        self.assertEqual(args['p_label'], 'From WhatsApp (TEAM GROUP) · Sana · 17 Oct 2026')
+        self.assertEqual(args['p_label'], 'From WhatsApp (TEAM GROUP) · Sana Mirza · 17 Oct 2026')
         self.assertRegex(args['p_storage_path'],
                          rf'^{MATTER}/{doc_id}/[0-9a-f-]{{36}}-NB-A1-Concession-Agreement-AKLA-Mark-up-October-17-2026\.docx$')
         self.assertEqual(self.stored(), ['matter-documents/' + args['p_storage_path']])
@@ -433,7 +433,7 @@ class NewDocumentTest(DocumentsCase):
 
         # the row line, and the two log entries in one group
         update, = self.db.rows('transaction_updates')
-        self.assertEqual(update['body'], f"Mark-up sent by Sana (TEAM GROUP): {row['filed_name']}")
+        self.assertEqual(update['body'], f"Mark-up sent by Sana Mirza (TEAM GROUP): {row['filed_name']}")
         self.assertEqual((update['row_id'], update['source'], update['source_ref'], update['at']),
                          ('row-ca', 'whatsapp', 'filer:1', '2026-10-17T12:00:15+00:00'))
         self.assertEqual((update['author'], update['author_id']), ('Sana', 'u-sana'))
@@ -1094,7 +1094,7 @@ class RowLineTest(DocumentsCase):
         self.filer(inside, outside)
         self.run_it()
         first, second = self.db.rows('transaction_updates')
-        self.assertEqual(first['body'], f"Mark-up sent by Sana (TEAM GROUP): {inside['filed_name']}")
+        self.assertEqual(first['body'], f"Mark-up sent by Sana Mirza (TEAM GROUP): {inside['filed_name']}")
         self.assertEqual((first['author'], first['author_id'], first['source']), ('Sana', 'u-sana', 'whatsapp'))
         self.assertEqual(second['body'], f"Comments received from Tariq Aziz by WhatsApp: {outside['filed_name']}")
         self.assertEqual((second['author'], second['author_id'], second['row_id']), (None, None, 'row-ea'))
@@ -1113,7 +1113,7 @@ class RowLineTest(DocumentsCase):
         first, second = self.db.rows('transaction_updates')
         self.assertEqual(first['body'], f"Comments received from Tariq Aziz by email: {received['filed_name']}")
         self.assertEqual((first['source'], first['author']), ('email', None))
-        self.assertEqual(second['body'], f"Clean sent by Bilal (email): {sent['filed_name']}")
+        self.assertEqual(second['body'], f"Clean sent by Bilal Chaudhry (email): {sent['filed_name']}")
         self.assertEqual((second['author'], second['author_id']), ('Bilal', 'u-bilal'))
         labels = [args['p_label'] for _, args in self.db.rpc_calls]
         self.assertEqual(labels[:2], ['From email · Tariq Aziz · 17 Oct 2026', 'From email · Bilal Chaudhry · 17 Oct 2026'])
@@ -1143,16 +1143,17 @@ class RowLineTest(DocumentsCase):
         # never by a shared first name alone, and never a number the Filer's phone has not saved
         self.assertFalse(who('Sana Qadir')['firm'])
         self.assertFalse(who('Ahmed Raza')['firm'])
-        self.assertFalse(who('Bilal (999000111000)', saved=False)['firm'])
+        # an unsaved number whose push name is a staff first name is that person
+        self.assertEqual(who('Bilal (999000111000)', saved=False)['full'], 'Bilal Chaudhry')
         self.assertTrue(who('Sana Mirza (999000111000)', saved=False)['firm'])   # unless the whole name is a profile's
         self.assertEqual(who('')['first'], '')
 
     def test_the_sentence(self):
         line = documents.row_line
-        firm = {'firm': True, 'first': 'Sana', 'name': 'Sana Mirza'}
+        firm = {'firm': True, 'first': 'Sana', 'name': 'Sana', 'full': 'Sana Mirza'}
         outside = {'firm': False, 'first': 'Tariq', 'name': 'Tariq Aziz'}
-        self.assertEqual(line('Final', firm, 'whatsapp', 'TEAM GROUP', 'f.docx'), 'Final sent by Sana (TEAM GROUP): f.docx')
-        self.assertEqual(line('Final', firm, 'email', 'Outlook - x (Sent)', 'f.docx'), 'Final sent by Sana (email): f.docx')
+        self.assertEqual(line('Final', firm, 'whatsapp', 'TEAM GROUP', 'f.docx'), 'Final sent by Sana Mirza (TEAM GROUP): f.docx')
+        self.assertEqual(line('Final', firm, 'email', 'Outlook - x (Sent)', 'f.docx'), 'Final sent by Sana Mirza (email): f.docx')
         self.assertEqual(line('Received', outside, 'email', None, 'f.pdf'), 'Received received from Tariq Aziz by email: f.pdf')
         self.assertEqual(line(None, outside, 'whatsapp', 'G', 'f.pdf'), 'Document received from Tariq Aziz by WhatsApp: f.pdf')
         self.assertEqual(line('Draft', {'firm': False, 'name': ''}, 'whatsapp', 'G', 'f.pdf'), 'Draft received by WhatsApp: f.pdf')
@@ -1218,7 +1219,7 @@ class DryRunTest(DocumentsCase):
         self.assertEqual(len(lines), 7)                                       # one line per document
         said = {int(re.search(r' filer:(\d+)  ', l).group(1)): l for l in lines}
         self.assertIn("would file in Northern Bypass: new document 'Concession Agreement', v1; row line on "
-                      "'Concession Agreement': Mark-up sent by Sana (TEAM GROUP): NB-A1 - Concession Agreement", said[1])
+                      "'Concession Agreement': Mark-up sent by Sana Mirza (TEAM GROUP): NB-A1 - Concession Agreement", said[1])
         self.assertIn("would file in Northern Bypass: 'Escrow Agreement', v3; row line on 'Escrow Agreement': "
                       'Draft received from Tariq Aziz by WhatsApp', said[2])
         self.assertIn("would file in Northern Bypass: 'Concession Agreement', v2", said[3])
@@ -1329,3 +1330,43 @@ class HubDocsTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FirmMemberTest(unittest.TestCase):
+    """A WhatsApp contact is shown by the staff list's name when the sender is one of the firm."""
+    FIRM = {n.lower(): (n, 'id-' + n.split()[0].lower()) for n in (
+        'Ahmed Yasin', 'Ali Asgher Khan', 'Ayaan Qureshi', 'Haya Ansari', 'Huroom Khan', 'Moiz Ali Khan',
+        'Rumaisa Hussain', 'Umer Maroof', 'Usama Siddiqui', 'Rayyan Islam', 'Hamza Yousuf')}
+    ALIASES = {'usama': 'Usama Siddiqui', 'umer': 'Umer Maroof', 'rayyan': 'Rayyan Islam', 'rayaan': 'Rayyan Islam',
+               'ali khan': 'Ali Asgher Khan', 'ali': 'Ali Asgher Khan', 'hamza': 'Hamza Yousuf'}
+
+    def who(self, contact):
+        from intake.documents import firm_member
+        return firm_member(self.FIRM, self.ALIASES, contact, contact)[0]
+
+    def test_staff_saved_every_way_are_matched_to_their_real_name(self):
+        cases = {
+            'Usama Siddique Akla': 'Usama Siddiqui',       # a surname spelt differently, AKLA added
+            'Usama Senior Counsel AKLA': 'Usama Siddiqui',
+            'Rayyan (196907154595950:32)': 'Rayyan Islam',  # unsaved: push name and a hidden id
+            'Rayyan Baba USA - AKLA Intern': 'Rayyan Islam',
+            'Umer': 'Umer Maroof',
+            'Umer Maroof OES': 'Umer Maroof',
+            'Haya Ansari - AKLA Trainee': 'Haya Ansari',
+            'Huroom Khan AKLA': 'Huroom Khan',
+            'Ahmed Yasin AKLA': 'Ahmed Yasin',
+            'Rumaisa Hussain C/o Zeeshan Hussain': 'Rumaisa Hussain',
+            'Ali Khan': 'Ali Asgher Khan',
+            'Moiz Ali Khan AKLA': 'Moiz Ali Khan',
+        }
+        for contact, full in cases.items():
+            self.assertEqual(self.who(contact), full, contact)
+
+    def test_outsiders_are_not_taken_for_the_firm(self):
+        for contact in ('Noman (ADB)', 'Barister Ali', 'Ahmed Raza', 'Sajid bhai (EWPL)', '(92300123456)', ''):
+            self.assertIsNone(self.who(contact), contact)
+
+    def test_an_outsider_keeps_the_contact_name_without_a_number(self):
+        from intake.filer import clean_sender
+        self.assertEqual(clean_sender('Noman (ADB)')['name'], 'Noman (ADB)')
+        self.assertEqual(clean_sender('Barister Ali (+92 300 1234567)')['name'], 'Barister Ali')

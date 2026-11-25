@@ -282,7 +282,7 @@ def clean_sender(text):
     if not raw or _BARE_NUMBER.match(raw):
         return {'name': '', 'email': None, 'saved': False}
     # Belt and braces: no run of digits long enough to be a number survives in a name.
-    raw = re.sub(r'\s+', ' ', _LONG_NUMBER.sub('', raw)).strip(' ()')
+    raw = re.sub(r'\s+', ' ', re.sub(r'\(\s*\)', '', _LONG_NUMBER.sub('', raw))).strip()
     if not raw:
         return {'name': '', 'email': None, 'saved': False}
     name = raw.lstrip('~ ').strip(' "\'')

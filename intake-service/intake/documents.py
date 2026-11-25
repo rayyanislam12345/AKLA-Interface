@@ -20,6 +20,7 @@ overwrite or delete anything, or let one bad document stop the rest.
 """
 import hashlib
 import inspect
+import difflib
 import re
 import uuid
 
@@ -279,6 +280,58 @@ def _known_person(run, text):
     return None, None
 
 
+_LABEL_WORDS = {'akla', 'c/o', 'co'}
+
+
+def firm_member(firm, aliases, contact, raw=''):
+    """(Full Name, profile id) for a WhatsApp contact who is one of the firm, else (None, None).
+
+    Staff are saved on the Filer's phone under their first name, with "AKLA" added, with a role
+    ("Senior Counsel", "- AKLA Trainee"), or as a push name when unsaved, so the contact name is
+    matched to the staff list rather than shown. The first word must be a firm person's first
+    name (or a known short form), and then one of these must hold, so an outsider who merely
+    shares a first name ("Ahmed Raza") is not taken for one of the firm:
+      - the contact is that one word ("Umer", or an unsaved "Rayyan");
+      - the contact carries AKLA, in any case ("Usama Siddique Akla", "Huroom Khan AKLA");
+      - a later word is close to a later word of the full name ("Siddique" for "Siddiqui").
+    firm     {lower-case full name: (Full Name, id)}
+    aliases  {lower-case short form: Full Name}"""
+    text = re.sub(r'\s*\([^()]*\)', ' ', raw or contact or '')          # numbers and "(ADB)"-style notes
+    words = [w for w in re.findall(r"[a-z]+", text.lower())]
+    if not words:
+        return None, None
+    tagged = 'akla' in words
+    words = [w for w in words if w not in _LABEL_WORDS]
+    if not words:
+        return None, None
+    hit = firm.get(' '.join(words))
+    if hit:
+        return hit
+    first, rest = words[0], words[1:]
+    by_first = {}
+    for key, value in firm.items():
+        by_first.setdefault(key.split()[0], []).append(value)
+    named = aliases.get(first)
+    if named:
+        candidates = [firm[named.lower()]] if named.lower() in firm else []
+    else:
+        candidates = by_first.get(first, [])
+    if len(candidates) != 1:
+        if rest and len(candidates) > 1:       # two people share the first name: the surname decides
+            candidates = [c for c in candidates if _surname_close(rest, c[0])]
+        if len(candidates) != 1:
+            return None, None
+    full = candidates[0]
+    if not rest or tagged or _surname_close(rest, full[0]):
+        return full
+    return None, None
+
+
+def _surname_close(rest, full_name):
+    later = full_name.lower().split()[1:]
+    return any(difflib.SequenceMatcher(None, w, x).ratio() >= 0.8 for w in rest for x in later if len(w) > 2)
+
+
 def _who(run, frow):
     """The sender: {'name' as shown, 'full' (the firm person's full name), 'first', 'firm', 'id'}.
 
@@ -297,12 +350,13 @@ def _who(run, frow):
             firm = True
             if not full:
                 full, pid = _known_person(run, name)
-    elif not firm and name and saved:
-        full, pid = _known_person(run, name)
-        tagged = bool(_FIRM_TAG.search(raw))
-        if not full and tagged:
-            full, pid = _known_person(run, name.split()[0])
-        firm = full is not None or tagged
+    elif not firm:
+        # WhatsApp: matched to the staff list; anyone else keeps the contact name (no number).
+        aliases = {str(k).lower(): v for k, v in (getattr(run.matcher, 'aliases', None) or {}).items()}
+        full, pid = firm_member(run.firm, aliases, name, raw)
+        # A contact the phone labels AKLA but not on the staff list yet (a new trainee) is still
+        # the firm's own; they are shown by the contact name until the Hub has them.
+        firm = full is not None or bool(re.search(r'(?<![a-z])akla(?![a-z])', raw.lower()))
     shown = full or name
     return {'name': name, 'full': full, 'first': shown.split()[0] if shown else '', 'firm': firm, 'id': pid}
 
@@ -643,7 +697,7 @@ def _handle(run, frow, irow, decision=None):
     doc_id = target['id'] if target else str(uuid.uuid4())
     path = hubdocs.storage_path(matter_id, doc_id, frow['filed_name'])
     run.patch_row(irow, {'matter_id': matter_id, 'storage_path': path, 'outcome': 'pending', 'reason': None})
-    sender = who['first'] if (who['firm'] and frow.get('source') == 'whatsapp') else (who['full'] or who['name'])
+    sender = who['full'] or who['name']        # a firm member by their real name; anyone else as WhatsApp has them
     saved = hubdocs.file_version(
         db, user_id=run.user_id, matter_id=matter_id, title=doc_title, file_name=frow['filed_name'], data=data,
         label=hubdocs.source_label(frow.get('source'), frow.get('chat'), sender, frow.get('sent_at'), run.tz),
@@ -900,13 +954,13 @@ def row_line(status_word, who, source, chat, file_name):
     """The one sentence a filing adds to its Transactions row.
 
     From outside the firm:  "Mark-up received from <name> by WhatsApp: <file>"
-    From a firm person:     "Mark-up sent by <first name> (<group, or 'email'>): <file>"
+    From a firm person:     "Mark-up sent by <their name on the staff list> (<group, or 'email'>): <file>"
     """
     word = (status_word or '').strip() or 'Document'
     via = 'WhatsApp' if source == 'whatsapp' else 'email'
     if who.get('firm'):
         where = chat if source == 'whatsapp' and chat else via
-        return f"{word} sent by {who.get('first') or 'the firm'} ({where}): {file_name}"
+        return f"{word} sent by {who.get('full') or who.get('first') or 'the firm'} ({where}): {file_name}"
     if who.get('name'):
         return f"{word} received from {who['name']} by {via}: {file_name}"
     return f'{word} received by {via}: {file_name}'
