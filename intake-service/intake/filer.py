@@ -249,7 +249,10 @@ def parse_sent(value, naive=timezone.utc):
 
 _ADDRESS = re.compile(r'^\s*(?P<name>.*?)\s*<\s*(?P<email>[^<>\s]+@[^<>\s]+)\s*>\s*$')
 _BARE_ADDRESS = re.compile(r'^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$')
-_NUMBER_SUFFIX = re.compile(r'\s*\(\s*\+?[\d\s\-]{6,}\)\s*$')
+# A phone number, or WhatsApp's own id for a number it hides ("196907154595950:32", "…@lid"):
+# any bracket at the end holding a run of six or more digits.
+_NUMBER_SUFFIX = re.compile(r'\s*\([^()]*\d{6,}[^()]*\)\s*$')
+_LONG_NUMBER = re.compile(r'\+?\d[\d\s\-:]{5,}\d(@\w+)?')
 _BARE_NUMBER = re.compile(r'^\+?[\d\s\-()]{6,}$')
 _CARE_OF = re.compile(r'\s+c/o\b.*$', re.I)
 _LABEL = re.compile(r'\s+[-–—]\s+.*$')                 # "Haya Ansari - AKLA Trainee"
@@ -277,6 +280,10 @@ def clean_sender(text):
         saved = False
         raw = _NUMBER_SUFFIX.sub('', raw)
     if not raw or _BARE_NUMBER.match(raw):
+        return {'name': '', 'email': None, 'saved': False}
+    # Belt and braces: no run of digits long enough to be a number survives in a name.
+    raw = re.sub(r'\s+', ' ', _LONG_NUMBER.sub('', raw)).strip(' ()')
+    if not raw:
         return {'name': '', 'email': None, 'saved': False}
     name = raw.lstrip('~ ').strip(' "\'')
     name = _CARE_OF.sub('', name)

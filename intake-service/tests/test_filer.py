@@ -263,3 +263,13 @@ class ParsingTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HiddenNumberTest(unittest.TestCase):
+    def test_no_number_of_any_shape_survives_in_a_sender_name(self):
+        from intake.filer import clean_sender
+        for raw in ('Sana (196907154595950:32)', 'Sana (196907154595950@lid)', 'Sana (+92 300 1234567)',
+                    'Sana 923001234567', 'Sana (92300-1234567)'):
+            name = clean_sender(raw)['name']
+            self.assertEqual(name, 'Sana', raw)
+        self.assertEqual(clean_sender('(196907154595950:32)')['name'], '')
