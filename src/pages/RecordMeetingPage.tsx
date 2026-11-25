@@ -22,7 +22,7 @@ import {
   Wand2,
   XCircle,
 } from "lucide-react";
-import { useMeetingRelay, type MeetingLanguage } from "@/hooks/useMeetingRelay";
+import { useMeetingRelay, type MeetingLanguage, type MeetingSegment } from "@/hooks/useMeetingRelay";
 import { useGenerateMeetingOutput, type MeetingOutputFormat } from "@/hooks/useGenerateMeetingOutput";
 import { useMatters } from "@/hooks/useMatters";
 import { useDocumentTypes } from "@/hooks/useMatterDocuments";
@@ -35,6 +35,7 @@ import SegmentList, {
   parseTranscriptText,
   segmentsToEnglishTranscriptText,
   segmentsToTranscriptText,
+  type TranscriptView,
 } from "@/components/meeting/SegmentList";
 import { useSearchParams } from "react-router-dom";
 import { claudeOpenedNotice, documentPrompt, openInClaude } from "@/lib/openInClaude";
@@ -251,6 +252,10 @@ export default function RecordMeetingPage() {
   const [drafts, setDrafts] = useState<Partial<Record<MeetingOutputFormat, string>>>({});
   const [generating, setGenerating] = useState<MeetingOutputFormat | null>(null);
   const [translating, setTranslating] = useState(false);
+  // Which wording the transcript shows, saves and downloads: what was said
+  // (Urdu in Roman script) or its English.
+  const [transcriptView, setTranscriptView] = useState<TranscriptView>("original");
+  const [lookingOver, setLookingOver] = useState(false);
   const [improving, setImproving] = useState(false);
   const [transcribingRecording, setTranscribingRecording] = useState(false);
   const [captureMeetingAudio, setCaptureMeetingAudioState] = useState(() => remembered().captureMeetingAudio ?? false);
@@ -380,11 +385,47 @@ export default function RecordMeetingPage() {
   const speakerLabelRef = useRef(relay.speakerLabel);
   speakerLabelRef.current = relay.speakerLabel;
 
+  const transcriptViewRef = useRef(transcriptView);
+  transcriptViewRef.current = transcriptView;
+
+  // The AI look-over: corrects what the speech model misheard and gives every
+  // line its original and its English. Runs by itself after an upload and
+  // after Stop, and from the More menu for a transcript that has not had it.
+  const runLookOver = async (source?: MeetingSegment[]) => {
+    if (lookingOverRef.current) return;
+    lookingOverRef.current = true;
+    setLookingOver(true);
+    try {
+      const outcome = await relay.lookOver(
+        {
+          projectName,
+          title: meetingTitle.trim() || undefined,
+          attendees: attendees.trim() || undefined,
+          speakerNames: Array.from(relay.speakerNames.values()),
+        },
+        source ?? segmentsRef.current
+      );
+      if (!outcome.ok) {
+        toast({ title: "The transcript was not looked over", description: outcome.error, variant: "destructive" });
+      } else if (outcome.failed) {
+        toast({
+          title: "Some lines were not looked over",
+          description: `${outcome.failed} ${outcome.failed === 1 ? "line was" : "lines were"} left as transcribed. Use More › Look the transcript over to try them again.`,
+          variant: "destructive",
+        });
+      }
+    } finally {
+      lookingOverRef.current = false;
+      setLookingOver(false);
+    }
+  };
+  const lookingOverRef = useRef(false);
+
   const fileTranscriptToProject = async () => {
     const segments = segmentsRef.current;
     if (!uploadMatterId || segments.length === 0) return;
     const title = meetingDocumentTitle("Meeting Transcript", meetingTitle, new Date());
-    const lines = segmentsToTranscriptText(segments, speakerLabelRef.current);
+    const lines = segmentsToTranscriptText(segments, speakerLabelRef.current, transcriptViewRef.current);
     const markdown = `${meetingHeader({ title: meetingTitle, attendees }, new Date()).replace("Transcript:\n", "")}\n${lines
       .split("\n")
       .filter(Boolean)
@@ -405,8 +446,13 @@ export default function RecordMeetingPage() {
     relay.stopMeeting();
     void vision.stop();
     setStartedAt(null);
-    // The last words arrive a moment after Stop.
-    if (fileTranscript) setTimeout(() => void fileTranscriptToProject(), 2500);
+    // The last words arrive a moment after Stop. The look-over comes first, so
+    // what is filed is the corrected transcript.
+    setTimeout(() => {
+      void runLookOver().then(() => {
+        if (fileTranscript) void fileTranscriptToProject();
+      });
+    }, 2500);
   };
 
   // Calibration needs a frame of the shared screen, but before a meeting
@@ -515,7 +561,8 @@ export default function RecordMeetingPage() {
   };
 
   const ensureTranslated = async () => {
-    const needsTranslation = relay.segments.filter((s) => Boolean(s.rawText) || /[؀-ۿ]/.test(s.text));
+    // A line the look-over has been through already has its English.
+    const needsTranslation = relay.segments.filter((s) => !s.lookedOver && (Boolean(s.rawText) || /[؀-ۿ]/.test(s.text)));
     if (needsTranslation.length === 0) return;
     setTranslating(true);
     try {
@@ -613,14 +660,17 @@ export default function RecordMeetingPage() {
       setRecoverable(null);
       if (!result.segments || result.segments.length === 0) {
         toast({ title: "No speech detected in the recording", variant: "destructive" });
+        return;
       }
+      setTranscribingRecording(false);
+      await runLookOver(result.segments);
     } finally {
       setTranscribingRecording(false);
     }
   };
 
   const handleSaveTranscript = () => {
-    const text = segmentsToTranscriptText(relay.segments, relay.speakerLabel);
+    const text = segmentsToTranscriptText(relay.segments, relay.speakerLabel, transcriptView);
     download(new Blob([text], { type: "text/plain" }), "transcript.txt");
   };
 
@@ -968,6 +1018,23 @@ export default function RecordMeetingPage() {
                 {meetingTitle.trim() && <span className="ml-2 text-sm font-normal text-muted-foreground">{meetingTitle.trim()}</span>}
               </CardTitle>
               <div className="flex items-center gap-2">
+                {relay.segments.some((s) => s.translation) && (
+                  <div className="flex rounded-md border p-0.5" role="group" aria-label="Transcript wording">
+                    {(["original", "translation"] as const).map((v) => (
+                      <Button
+                        key={v}
+                        size="sm"
+                        variant={transcriptView === v ? "secondary" : "ghost"}
+                        className="h-7 px-2.5"
+                        aria-pressed={transcriptView === v}
+                        title={v === "original" ? "What was said: Urdu in Roman script, English as English" : "Everything in English"}
+                        onClick={() => setTranscriptView(v)}
+                      >
+                        {v === "original" ? "Original" : "Translation"}
+                      </Button>
+                    ))}
+                  </div>
+                )}
                 <input ref={transcriptFileInputRef} type="file" accept=".txt" className="hidden" onChange={handleTranscriptFileSelected} />
                 <input ref={recordingFileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleRecordingFileSelected} />
                 <DropdownMenu modal={false}>
@@ -991,6 +1058,13 @@ export default function RecordMeetingPage() {
                       <Wand2 className="mr-2 h-4 w-4" />
                       {improving ? "Tidying…" : "Tidy up who said what"}
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!hasContent || lookingOver || relay.recording || relay.segments.every((s) => s.lookedOver)}
+                      onSelect={() => void runLookOver()}
+                    >
+                      <Languages className="mr-2 h-4 w-4" />
+                      {lookingOver ? "Looking it over…" : "Look the transcript over"}
+                    </DropdownMenuItem>
                     <DropdownMenuItem disabled={!hasContent || !uploadMatterId || relay.recording} onSelect={() => void fileTranscriptToProject()}>
                       <Upload className="mr-2 h-4 w-4" />
                       Save the transcript to the project
@@ -1009,6 +1083,15 @@ export default function RecordMeetingPage() {
               </div>
             </CardHeader>
             <CardContent>
+              {lookingOver && (
+                <p className="mb-2 text-sm text-muted-foreground">
+                  Looking the transcript over: correcting misheard words and writing the English
+                  {relay.lookOverProgress && relay.lookOverProgress.total > 0
+                    ? ` (part ${Math.min(relay.lookOverProgress.done + 1, relay.lookOverProgress.total)} of ${relay.lookOverProgress.total})`
+                    : ""}
+                  …
+                </p>
+              )}
               <div className="border rounded-md p-4 h-[55vh] min-h-[320px] overflow-y-auto">
                 {hasContent || relay.interimText ? (
                   <SegmentList
@@ -1020,6 +1103,7 @@ export default function RecordMeetingPage() {
                     onRenameSpeaker={handleRenameSpeaker}
                     onSetManualSpeakerName={relay.setManualSpeakerName}
                     nameSuggestions={names}
+                    view={transcriptView}
                   />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
@@ -1033,6 +1117,21 @@ export default function RecordMeetingPage() {
                   </div>
                 )}
               </div>
+              {relay.readings.length > 0 && hasContent && (
+                <details className="mt-3 text-sm">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    {relay.readings.length} {relay.readings.length === 1 ? "word" : "words"} the recording misheard, as corrected
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {relay.readings.map((r, i) => (
+                      <li key={i}>
+                        <span className="text-muted-foreground">“{r.heard}”</span> read as <span className="font-medium">{r.reading}</span>
+                        {!r.certain && <span className="text-muted-foreground"> (best guess)</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </CardContent>
           </Card>
 

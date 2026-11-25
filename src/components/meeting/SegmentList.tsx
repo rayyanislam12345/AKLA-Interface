@@ -14,7 +14,14 @@ interface SegmentListProps {
   onSetManualSpeakerName: (segmentId: number, name: string) => void;
   /** Names offered when renaming a speaker, e.g. the meeting's attendees. */
   nameSuggestions?: string[];
+  /** Which wording to show: what was said, its English, or (the default) both. */
+  view?: TranscriptView;
 }
+
+// "original" is what was said, in the language it was said in (Urdu in Roman
+// script); "translation" is the same line in English, falling back to the
+// original where a line has no translation yet; "both" shows the two together.
+export type TranscriptView = "original" | "translation" | "both";
 
 const NAME_LIST_ID = "meeting-speaker-names";
 
@@ -47,6 +54,7 @@ export default function SegmentList({
   onRenameSpeaker,
   onSetManualSpeakerName,
   nameSuggestions = [],
+  view = "both",
 }: SegmentListProps) {
   const [menuFor, setMenuFor] = useState<number | null>(null); // speakerId with the rename/merge popover open
   const [editingManualFor, setEditingManualFor] = useState<number | null>(null); // segment id being named
@@ -162,8 +170,8 @@ export default function SegmentList({
                     </button>
                   ))}
               </div>
-              <p className="text-foreground">{seg.text}</p>
-              {seg.translation && <p className="text-muted-foreground pl-4">→ {seg.translation}</p>}
+              <p className="text-foreground">{view === "translation" ? seg.translation ?? seg.text : seg.text}</p>
+              {view === "both" && seg.translation && <p className="text-muted-foreground pl-4">→ {seg.translation}</p>}
             </div>
           </div>
         );
@@ -186,12 +194,17 @@ export default function SegmentList({
 // Matches renderer.js's getTranscriptText exactly (speaker prefix + raw
 // text + an indented "→ translation" line where one exists) so a saved
 // transcript round-trips cleanly back through parseTranscriptText below.
-export function segmentsToTranscriptText(segments: MeetingSegment[], speakerLabel: (id: number | undefined) => string) {
+export function segmentsToTranscriptText(
+  segments: MeetingSegment[],
+  speakerLabel: (id: number | undefined) => string,
+  view: TranscriptView = "both"
+) {
   return segments
     .map((s) => {
       const label = s.speakerId !== undefined ? speakerLabel(s.speakerId) : s.manualSpeaker;
       const prefix = label ? `${label}: ` : "";
-      const translationLine = s.translation ? `\n    → ${s.translation}` : "";
+      if (view === "translation") return `${prefix}${s.translation ?? s.text}`;
+      const translationLine = view === "both" && s.translation ? `\n    → ${s.translation}` : "";
       return `${prefix}${s.text}${translationLine}`;
     })
     .join("\n");

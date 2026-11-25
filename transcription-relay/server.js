@@ -208,6 +208,239 @@ async function mapWithConcurrency(items, limit, fn) {
   return results;
 }
 
+// ---- AI look-over (Sonnet) ----
+//
+// The second pass a careful reader would make over a machine transcript,
+// done with the whole meeting in view rather than a line at a time: it fixes
+// what the speech model misheard (a place or company name, a legal term
+// respelt phonetically), marks what cannot be made out instead of guessing,
+// and writes every line twice — "original" (what was said, in the language it
+// was said in: Urdu in Roman script, English left as English) and
+// "translation" (all of it in English). Two steps: one read of the whole
+// transcript for the likely mishearings, then the lines in chunks, each chunk
+// carrying those readings so a name is spelt the same way throughout.
+const LOOK_OVER_MODEL = "claude-sonnet-5-5";
+const LOOK_OVER_CHUNK_WORDS = 1100;
+const LOOK_OVER_CHUNK_LINES = 60;
+const LOOK_OVER_CONCURRENCY = 4;
+// Sonnet here does not accept a forced tool choice, so each prompt says to
+// answer through the tool; an answer that comes back as prose is treated as a
+// failed call rather than parsed.
+const LOOK_OVER_VIA_TOOL = (name) => `Answer only by calling the ${name} tool, once. Do not write anything outside the tool call.`;
+
+const LOOK_OVER_BACKGROUND =
+  "The transcript is of a meeting or dictation at a Pakistani law firm (project finance, PPP concessions, procurement, corporate and regulatory work). It was produced by a speech-to-text model. Spoken Urdu was recognised with a Hindi model, so Urdu appears in Devanagari script even though it is Urdu, not Hindi; some lines may already be in Roman Urdu or Perso-Arabic script. Speakers switch between Urdu and English mid-sentence. The speech model often mishears: proper names (people, companies, banks, places), abbreviations (CTA, RFP, KPI, CDA, SECP, EPC, PAC), and legal or financial terms come out as similar-sounding wrong words. The firm is AKLA (often written \"Acla\" by the speech model); its lawyers also mention AI tools such as Claude (often written \"clot\" or \"cloud\") and Gemini.";
+
+function lookOverContextText(context) {
+  const lines = [];
+  if (context?.projectName) lines.push(`Project: ${String(context.projectName).slice(0, 200)}`);
+  if (context?.title) lines.push(`Meeting title: ${String(context.title).slice(0, 200)}`);
+  if (context?.attendees) lines.push(`Attendees: ${String(context.attendees).slice(0, 500)}`);
+  if (Array.isArray(context?.speakerNames) && context.speakerNames.length) {
+    lines.push(`Named speakers: ${context.speakerNames.map((n) => String(n).slice(0, 80)).join(", ")}`);
+  }
+  return lines.length ? lines.join("\n") : "(none given)";
+}
+
+function lookOverLine(seg) {
+  return `[${seg.id}] S${seg.speakerId ?? "?"}: ${seg.text}`;
+}
+
+function toolInput(res, name) {
+  const block = res.content.find((b) => b.type === "tool_use" && b.name === name);
+  return block ? block.input : null;
+}
+
+// Step one: read everything once and list what the speech model most likely
+// misheard. Small output, so the whole meeting fits in one call; a very long
+// transcript is sampled from the start, middle and end.
+async function lookOverReadings(segments, context) {
+  let lines = segments.map(lookOverLine);
+  const MAX_CHARS = 280_000;
+  let joined = lines.join("\n");
+  if (joined.length > MAX_CHARS) {
+    const third = Math.floor(MAX_CHARS / 3);
+    const mid = Math.floor(joined.length / 2);
+    joined = `${joined.slice(0, third)}\n[...]\n${joined.slice(mid - third / 2, mid + third / 2)}\n[...]\n${joined.slice(-third)}`;
+  }
+  const res = await anthropic.messages.create(
+    {
+      model: LOOK_OVER_MODEL,
+      max_tokens: 3000,
+      system: `${LOOK_OVER_BACKGROUND}\n\nRead the whole transcript and work out what it is about and which words the speech model most likely misheard. List only readings the surrounding conversation supports; mark the ones you are less sure of. Do not invent names: where a word is plainly wrong but you cannot tell what was said, leave it out of the list.\n\n${LOOK_OVER_VIA_TOOL("record_readings")}`,
+      tools: [
+        {
+          name: "record_readings",
+          description: "Record what the meeting is about and the likely mishearings.",
+          input_schema: {
+            type: "object",
+            properties: {
+              subject: { type: "string", description: "One or two sentences: what the meeting is about and who appears to be speaking." },
+              readings: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    heard: { type: "string", description: "The word or phrase as it appears in the transcript (all variants, separated by ' / ')." },
+                    reading: { type: "string", description: "What was most likely said." },
+                    certain: { type: "boolean", description: "False when this is a best guess." },
+                  },
+                  required: ["heard", "reading", "certain"],
+                },
+              },
+            },
+            required: ["subject", "readings"],
+          },
+        },
+      ],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `What is known about the meeting:\n${lookOverContextText(context)}\n\nTranscript:\n${joined}` }],
+    },
+    { timeout: 180_000, maxRetries: 2 },
+  );
+  const input = toolInput(res, "record_readings") || {};
+  return {
+    subject: typeof input.subject === "string" ? input.subject : "",
+    readings: Array.isArray(input.readings) ? input.readings.filter((r) => r && r.heard && r.reading).slice(0, 80) : [],
+  };
+}
+
+function lookOverChunks(segments) {
+  const chunks = [];
+  let current = [];
+  let words = 0;
+  for (const seg of segments) {
+    const n = String(seg.text).split(/\s+/).length;
+    // A new chunk starts only at a change of speaker, so a turn is not cut in two.
+    const speakerChanges = current.length > 0 && current[current.length - 1].speakerId !== seg.speakerId;
+    const full = words + n > LOOK_OVER_CHUNK_WORDS || current.length >= LOOK_OVER_CHUNK_LINES;
+    const overfull = words + n > LOOK_OVER_CHUNK_WORDS * 1.5 || current.length >= LOOK_OVER_CHUNK_LINES * 1.5;
+    if (current.length > 0 && ((full && speakerChanges) || overfull)) {
+      chunks.push(current);
+      current = [];
+      words = 0;
+    }
+    current.push(seg);
+    words += n;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+const LOOK_OVER_LINE_RULES = `For every line write two versions.
+
+"original": what was said, in the language it was said in. Urdu goes into casual Roman Urdu, the way Urdu speakers text in Latin script ("aap kaise hain", "hum retainer discuss karna chahte hain"): drop the unspoken short vowels, no diacritics, no academic transliteration. English words and phrases stay in English, in their normal spelling. Do not translate the Urdu and do not rephrase anything.
+
+"translation": the same line entirely in English. Translate the Urdu faithfully and plainly, as a careful translator would, keeping the speaker's meaning, hedges and tone (do not tidy up rough or blunt speech, and do not add anything that was not said). English passages are carried over with only the mishearings corrected.
+
+In both versions:
+- Correct what the speech model misheard, using the readings given and the surrounding conversation. Write the corrected word in the text itself; do not keep the mishearing. Where a correction is a best guess, put it in square brackets with a question mark, e.g. [Humak?].
+- Where words cannot be made out, write [unclear] rather than guessing. Never fill a gap with invented content.
+- Words added only so the English reads as a sentence go in [square brackets] in the translation.
+- Keep one output line for each input line, with the same id. Do not merge, split, drop or reorder lines. A line that is only a filler ("ji", "hmm") is still returned.
+- Punctuate properly. Do not add speaker names or labels.`;
+
+async function lookOverChunk(chunk, before, notes, context) {
+  const readings = notes.readings.length
+    ? notes.readings.map((r) => `- "${r.heard}" is ${r.certain ? "" : "probably "}${r.reading}`).join("\n")
+    : "(none found)";
+  const user = [
+    `What is known about the meeting:\n${lookOverContextText(context)}`,
+    notes.subject ? `What it is about: ${notes.subject}` : null,
+    `Likely mishearings found across the whole transcript:\n${readings}`,
+    before.length ? `The lines just before these, for context only (do not return them):\n${before.map(lookOverLine).join("\n")}` : null,
+    `Lines to look over (${chunk.length}). Each is "[id] S<speaker number>: text":\n${chunk.map(lookOverLine).join("\n")}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const res = await anthropic.messages.create(
+    {
+      model: LOOK_OVER_MODEL,
+      max_tokens: 16000,
+      system: `${LOOK_OVER_BACKGROUND}\n\n${LOOK_OVER_LINE_RULES}\n\n${LOOK_OVER_VIA_TOOL("return_lines")}`,
+      tools: [
+        {
+          name: "return_lines",
+          description: "Return the looked-over lines.",
+          input_schema: {
+            type: "object",
+            properties: {
+              lines: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "integer" },
+                    original: { type: "string" },
+                    translation: { type: "string" },
+                  },
+                  required: ["id", "original", "translation"],
+                },
+              },
+            },
+            required: ["lines"],
+          },
+        },
+      ],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: user }],
+    },
+    { timeout: 300_000, maxRetries: 2 },
+  );
+  const input = toolInput(res, "return_lines");
+  if (!input) throw new Error(res.stop_reason === "max_tokens" ? "The answer was cut short." : "No lines were returned.");
+  const wanted = new Set(chunk.map((s) => s.id));
+  const byId = new Map();
+  for (const line of Array.isArray(input.lines) ? input.lines : []) {
+    if (!line || !wanted.has(line.id)) continue;
+    const original = typeof line.original === "string" ? line.original.trim() : "";
+    const translation = typeof line.translation === "string" ? line.translation.trim() : "";
+    if (original && translation) byId.set(line.id, { id: line.id, original, translation });
+  }
+  // A line the model left out is reported as such, never silently dropped.
+  return chunk.map((s) => byId.get(s.id) || { id: s.id, error: "not returned" });
+}
+
+// Runs the whole look-over, reporting each chunk as it finishes.
+async function lookOverTranscript(segments, context, onChunk) {
+  const clean = (segments || [])
+    .filter((s) => s && Number.isInteger(s.id) && typeof s.text === "string" && s.text.trim())
+    .map((s) => ({ id: s.id, speakerId: Number.isInteger(s.speakerId) ? s.speakerId + 1 : undefined, text: s.text.trim().slice(0, 4000) }));
+  if (clean.length === 0) return { subject: "", readings: [], failed: 0 };
+
+  let notes = { subject: "", readings: [] };
+  try {
+    notes = await lookOverReadings(clean, context);
+  } catch {
+    // The lines can still be looked over without the meeting-wide readings.
+  }
+
+  const chunks = lookOverChunks(clean);
+  const starts = [];
+  let offset = 0;
+  for (const c of chunks) {
+    starts.push(offset);
+    offset += c.length;
+  }
+  let done = 0;
+  let failed = 0;
+  await mapWithConcurrency(chunks, LOOK_OVER_CONCURRENCY, async (chunk, i) => {
+    const before = clean.slice(Math.max(0, starts[i] - 6), starts[i]);
+    let results;
+    try {
+      results = await lookOverChunk(chunk, before, notes, context);
+    } catch (err) {
+      const message = err.message || String(err);
+      results = chunk.map((s) => ({ id: s.id, error: message }));
+    }
+    failed += results.filter((r) => r.error).length;
+    done += 1;
+    onChunk({ results, done, total: chunks.length });
+  });
+  return { subject: notes.subject, readings: notes.readings, failed };
+}
+
 function deepgramLanguageFor(uiLanguage) {
   return uiLanguage === "ur" ? "hi" : "en-US";
 }
@@ -234,6 +467,7 @@ function createSession(ws, userId) {
     pendingEndSec: undefined,
     recordingBuffers: [],
     deepgramSocket: null,
+    lookingOver: false,
   };
 
   const send = (payload) => {
@@ -437,6 +671,22 @@ function createSession(ws, userId) {
               ok: false,
               results: (msg.groups || []).flat().map((s) => ({ id: s.id, error: message })),
             });
+          });
+        return;
+      }
+      case "look-over": {
+        // One at a time per connection: a second request while the first is
+        // still running would pay for the same transcript twice.
+        if (state.lookingOver) {
+          send({ type: "look-over-done", ok: false, error: "A look-over is already running." });
+          return;
+        }
+        state.lookingOver = true;
+        lookOverTranscript(msg.segments, msg.context, (progress) => send({ type: "look-over-progress", ...progress }))
+          .then((summary) => send({ type: "look-over-done", ok: true, ...summary }))
+          .catch((err) => send({ type: "look-over-done", ok: false, error: err.message || String(err) }))
+          .finally(() => {
+            state.lookingOver = false;
           });
         return;
       }

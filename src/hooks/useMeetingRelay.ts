@@ -7,6 +7,10 @@ export interface MeetingSegment {
   text: string;
   rawText?: string;
   translation?: string;
+  // Set once the AI look-over has been through the line: `text` is then the
+  // corrected original (Urdu in Roman script, English as English) and
+  // `translation` the same line in English.
+  lookedOver?: boolean;
   manualSpeaker?: string;
   startSec?: number;
   endSec?: number;
@@ -36,6 +40,27 @@ interface TranslateResultEvent {
   type: "translate-result";
   ok: boolean;
   results: { id: number; translation?: string | null; error?: string }[];
+}
+
+// What the look-over found across the whole meeting: a word as the speech
+// model wrote it, and what was most likely said.
+export interface MeetingReading {
+  heard: string;
+  reading: string;
+  certain: boolean;
+}
+
+export interface LookOverContext {
+  projectName?: string;
+  title?: string;
+  attendees?: string;
+  speakerNames?: string[];
+}
+
+export interface LookOverOutcome {
+  ok: boolean;
+  failed?: number;
+  error?: string;
 }
 
 const RELAY_URL = import.meta.env.VITE_TRANSCRIPTION_RELAY_URL as string | undefined;
@@ -85,6 +110,8 @@ export function useMeetingRelay() {
   const [interimSpeaker, setInterimSpeaker] = useState<number | undefined>();
   const [speakerNames, setSpeakerNames] = useState<Map<number, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [lookOverProgress, setLookOverProgress] = useState<{ done: number; total: number } | null>(null);
+  const [readings, setReadings] = useState<MeetingReading[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -92,6 +119,7 @@ export function useMeetingRelay() {
   const displayStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const pendingTranslateResolvers = useRef<Map<number, (r: TranslateResultEvent["results"]) => void>>(new Map());
+  const pendingLookOverResolver = useRef<((r: LookOverOutcome) => void) | null>(null);
   const pendingDiarizeResolvers = useRef<((r: DiarizationResultEvent) => void)[]>([]);
   const pendingStartResolver = useRef<((ok: boolean) => void) | null>(null);
   // The recorded meeting's raw PCM chunks — kept client-side purely so the
@@ -200,6 +228,26 @@ export function useMeetingRelay() {
               resolvers.get(s.id)?.([s]);
               resolvers.delete(s.id);
             }
+            return;
+          }
+          case "look-over-progress": {
+            const results = (msg.results ?? []) as { id: number; original?: string; translation?: string; error?: string }[];
+            const done = new Map(results.filter((r) => r.original && r.translation).map((r) => [r.id, r]));
+            if (done.size > 0) {
+              setSegments((prev) =>
+                prev.map((s) => {
+                  const r = done.get(s.id);
+                  return r ? { ...s, text: r.original!, translation: r.translation!, lookedOver: true } : s;
+                })
+              );
+            }
+            setLookOverProgress({ done: Number(msg.done) || 0, total: Number(msg.total) || 0 });
+            return;
+          }
+          case "look-over-done": {
+            if (msg.ok) setReadings(Array.isArray(msg.readings) ? (msg.readings as MeetingReading[]) : []);
+            pendingLookOverResolver.current?.(msg.ok ? { ok: true, failed: Number(msg.failed) || 0 } : { ok: false, error: msg.error || "The look-over failed." });
+            pendingLookOverResolver.current = null;
             return;
           }
           case "error":
@@ -469,6 +517,46 @@ export function useMeetingRelay() {
     [segments, send, ensureConnected]
   );
 
+  // The AI look-over: the whole transcript read again with the meeting in
+  // view. Lines come back a chunk at a time and replace what is on screen as
+  // they arrive, so a long recording fills in rather than appearing at once.
+  // `source` is for the caller that has just set the segments and cannot yet
+  // read them back from state (an upload).
+  const lookOver = useCallback(
+    async (context: LookOverContext, source?: MeetingSegment[]): Promise<LookOverOutcome> => {
+      const targets = (source ?? segments).filter((s) => !s.lookedOver && (s.rawText ?? s.text).trim());
+      if (targets.length === 0) return { ok: true, failed: 0 };
+      if (pendingLookOverResolver.current) return { ok: false, error: "A look-over is already running." };
+
+      const connectedOk = await ensureConnected();
+      if (!connectedOk) return { ok: false, error: "Could not reach the transcription service." };
+
+      setLookOverProgress({ done: 0, total: 0 });
+      const outcome = await new Promise<LookOverOutcome>((resolve) => {
+        // Sized to the work: the relay allows each chunk five minutes and runs
+        // four at a time, so an answer that hasn't come by then never will.
+        const timeout = setTimeout(() => {
+          pendingLookOverResolver.current = null;
+          resolve({ ok: false, error: "The look-over timed out." });
+        }, Math.max(10 * 60_000, targets.length * 2_500));
+        pendingLookOverResolver.current = (result) => {
+          clearTimeout(timeout);
+          resolve(result);
+        };
+        send({
+          type: "look-over",
+          context,
+          // The speech model's own text where there is one: the look-over
+          // reads what was heard, not an earlier romanisation of it.
+          segments: targets.map((s) => ({ id: s.id, speakerId: s.speakerId, text: s.rawText ?? s.text })),
+        });
+      });
+      setLookOverProgress(null);
+      return outcome;
+    },
+    [segments, send, ensureConnected]
+  );
+
   const disconnect = useCallback(() => {
     stopAudioPipeline();
     wsRef.current?.close();
@@ -546,6 +634,9 @@ export function useMeetingRelay() {
     setSpeakerName,
     setManualSpeakerName,
     translateSegments,
+    lookOver,
+    lookOverProgress,
+    readings,
     transcribeFile,
     getRecordingBlob,
     clearRecording,
