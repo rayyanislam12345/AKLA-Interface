@@ -236,7 +236,9 @@ export class PlsClient {
       if (!row) { status = "ambiguous"; continue; }
       const text = await this.judgmentText(row.caseName);
       if (!matchesCitation(text, c, title)) { status = "mismatch"; continue; }
-      return { status: "found", text, citation: row.citation || c.raw, caseName: row.caseName, court: row.court };
+      // The address the site's own "Read" button opens; it works for anyone signed in to the site.
+      const url = `${BASE}/Login/ReferenceCaseLawSearch?CaseName=${encodeURIComponent(row.caseName)}&&court= &&Row=0 &&bookName=undefined`;
+      return { status: "found", text, citation: row.citation || c.raw, caseName: row.caseName, court: row.court, url };
     }
     return { status };
   }

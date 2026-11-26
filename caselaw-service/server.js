@@ -162,7 +162,7 @@ async function handleCaselaw(req, res, user) {
       n: s.n, caseId: s.caseId, title: s.title, citations: s.citations,
       court: s.court, year: s.year, outcome: s.outcome, url: s.url,
       relevance: s.relevance, overruled: s.overruled, citedByCount: s.citedByCount,
-      grounding: s.grounding, officialCitation: s.officialCitation ?? null,
+      grounding: s.grounding, officialCitation: s.officialCitation ?? null, officialUrl: s.officialUrl ?? null,
     }));
     const messageId = await store.saveMessage({
       threadId, role: "assistant", content: text,

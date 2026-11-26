@@ -19,6 +19,8 @@ export interface CaselawSource {
   // Law Site, found by this judgment's citation.
   grounding: "official" | "full" | "summary";
   officialCitation?: string | null;
+  // Opens the judgment on Pakistan Law Site (the reader must be signed in there).
+  officialUrl?: string | null;
 }
 
 // How the official-text check on Pakistan Law Site went for one answer.

@@ -148,6 +148,7 @@ export async function composeAnswer({ question, ranked, tier, client, official =
     s.text = hit.text.slice(0, FULL_TEXT_CHARS);
     s.grounding = "official";
     s.officialCitation = hit.citation;
+    s.officialUrl = hit.url ?? null;
   }
   const officialSummary = { checked: officialOutcome.checked, found: officialOutcome.found, reason: officialOutcome.reason, misses: officialOutcome.misses };
 

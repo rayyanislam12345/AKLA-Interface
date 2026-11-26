@@ -187,11 +187,18 @@ function SourcesPanel({ sources }: { sources: CaselawSource[] }) {
                 <span>· {s.grounding === "official" ? "official text read (Pakistan Law Site)" : s.grounding === "full" ? "full text read" : "summary only"}</span>
               </div>
             </div>
-            {s.url && (
-              <a href={s.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-muted-foreground hover:text-foreground" title="Open judgment">
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            )}
+            <div className="shrink-0 flex flex-col items-end gap-1 text-[11px]">
+              {s.officialUrl && (
+                <a href={s.officialUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-muted-foreground hover:text-foreground" title="Open on Pakistan Law Site (sign in there first)">
+                  Pakistan Law Site <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              {s.url && (
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-muted-foreground hover:text-foreground" title="Open on Pakistan Case Law">
+                  Pakistan Case Law <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
           </div>
         </Card>
       ))}
