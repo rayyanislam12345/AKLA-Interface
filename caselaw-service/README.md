@@ -67,7 +67,9 @@ firm's own account (`PLS_USERNAME` / `PLS_PASSWORD` in `.env`).
   marked `grounding: "official"` and the page shows "official text".
 - **What it does not cover.** Journals the site does not publish (PLJ, P.S.C.,
   neutral citations such as SCP / SHC / LHC) are skipped.
-- **One session at a time.** The account allows a single session. The service
+- **One session at a time.** Each account allows a single session. The
+  firm's accounts are listed as `PLS_USERNAME`, `PLS_USERNAME_2`, `_3`…; the
+  service uses the first one that is free and skips a busy one for a minute. The service
   signs in only while answering, signs out after `PLS_IDLE_MS` of quiet (and on
   shutdown), and never forces another session off. If a lawyer is using the
   account the answer goes ahead without the official text and the coverage note

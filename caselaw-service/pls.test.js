@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseCitation, courtKey, parseCitationRows, pickRow, htmlToText, matchesCitation } from "./plsParse.js";
-import { PlsClient, PlsError } from "./pls.js";
+import { PlsClient, PlsError, accountsFromEnv } from "./pls.js";
 
 test("parseCitation reads the journals the site carries", () => {
   assert.deepEqual(parseCitation("2018 SCMR 365"), { year: 2018, book: "SCMR", page: 365, courtHint: null });
@@ -129,4 +129,30 @@ test("PlsClient signs in again when the site shows its sign-in page", async () =
   assert.equal(rows.length, 1);
   assert.equal(session.signIns, 2);
   await client.close();
+});
+
+test("PlsClient moves to the next account when one is in use", async () => {
+  const busy = fakeSession({ failSignIn: "IN_USE" });
+  const free = fakeSession({ replies: { "/Login/CitationSearch": TABLE([["2020 SCMR 5", "A Versus B", "SUPREME-COURT", "X1"]]) } });
+  const client = new PlsClient({ sessions: [busy, free], idleMs: 5, spacingMs: 0 });
+  const rows = await client.use(() => client.findByCitation({ year: 2020, book: "SCMR", page: 5 }));
+  assert.equal(rows.length, 1);
+  assert.equal(client.session, free);
+  assert.deepEqual([busy.signIns, free.signIns], [1, 1]);
+  await client.close();
+  assert.equal(free.signOuts, 1);
+  // The busy account is skipped for a minute rather than retried each question.
+  await client.use(async () => 1);
+  assert.deepEqual([busy.signIns, free.signIns], [1, 2]);
+  await client.close();
+});
+
+test("PlsClient says in use only when every account is busy", async () => {
+  const client = new PlsClient({ sessions: [fakeSession({ failSignIn: "IN_USE" }), fakeSession({ failSignIn: "BAD_CREDENTIALS" })], spacingMs: 0 });
+  await assert.rejects(client.use(async () => 1), (e) => e.code === "IN_USE");
+});
+
+test("accountsFromEnv reads the numbered accounts in order", () => {
+  const env = { PLS_USERNAME: "a", PLS_PASSWORD: "1", PLS_USERNAME_2: "b", PLS_PASSWORD_2: "2", PLS_USERNAME_4: "d", PLS_PASSWORD_4: "4", PLS_USERNAME_3: "c" };
+  assert.deepEqual(accountsFromEnv(env).map((x) => x.username), ["a", "b", "d"]);
 });

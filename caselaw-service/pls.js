@@ -131,16 +131,34 @@ export class PlsSession {
 // keeps the session while questions are using it, and signs out after a short
 // idle spell so the account is free for the firm's lawyers again. Requests go
 // one at a time, spaced, so the service reads no faster than a person clicks.
+// The firm's accounts, in the order to try them: PLS_USERNAME / PLS_PASSWORD
+// first, then PLS_USERNAME_2 / PLS_PASSWORD_2, _3 and so on.
+export function accountsFromEnv(env = process.env) {
+  const accounts = [];
+  for (let i = 1; i <= 20; i++) {
+    const sfx = i === 1 ? "" : `_${i}`;
+    const username = env[`PLS_USERNAME${sfx}`], password = env[`PLS_PASSWORD${sfx}`];
+    if (username && password) accounts.push({ username, password });
+  }
+  return accounts;
+}
+
 export class PlsClient {
-  constructor({ session = new PlsSession(), idleMs = Number(process.env.PLS_IDLE_MS ?? 15_000), spacingMs = 400, busyRetryMs = 60_000 } = {}) {
-    this.session = session;
+  // `sessions`: one PlsSession per firm account. When an account is in use by
+  // a lawyer the next one is tried; nobody is ever signed off.
+  constructor({ session = null, sessions = null, idleMs = Number(process.env.PLS_IDLE_MS ?? 15_000), spacingMs = 400, busyRetryMs = 60_000 } = {}) {
+    this.sessions = sessions ?? (session ? [session] : accountsFromEnv().map((a) => new PlsSession(a)));
+    if (this.sessions.length === 0) this.sessions = [new PlsSession()];
+    this.session = this.sessions[0];
     this.idleMs = idleMs;
     this.spacingMs = spacingMs;
     this.busyRetryMs = busyRetryMs;
     this.users = 0;
     this.idleTimer = null;
     this.signingIn = null;
-    this.blocked = null; // { code, until } after a failed sign-in, so a burst of questions does not hammer it
+    // Per account, after a failed sign-in: { code, until }, so a burst of
+    // questions does not hammer an account that is busy or refused.
+    this.blocked = new Map();
     this.gate = Promise.resolve();
   }
 
@@ -148,18 +166,33 @@ export class PlsClient {
     return this.session.configured;
   }
 
-  async #signIn() {
-    if (this.session.signedIn) return;
-    if (this.blocked && Date.now() < this.blocked.until) throw new PlsError("Pakistan Law Site sign-in is paused after a failed attempt", this.blocked.code);
-    this.signingIn ??= this.session.signIn()
-      .then(() => { this.blocked = null; })
-      .catch((err) => {
+  // Sign in on the first account that is free. If every account fails, the
+  // error reported is IN_USE when any of them was merely busy.
+  async #trySessions() {
+    let lastErr = null, busy = false;
+    for (const session of this.sessions) {
+      const b = this.blocked.get(session);
+      if (b && Date.now() < b.until) { busy ||= b.code === "IN_USE"; lastErr ??= new PlsError("Pakistan Law Site sign-in is paused after a failed attempt", b.code); continue; }
+      try {
+        await session.signIn();
+        this.blocked.delete(session);
+        this.session = session;
+        return;
+      } catch (err) {
         // A busy account may free up in a minute; wrong details will not fix themselves.
         const wait = err.code === "IN_USE" ? this.busyRetryMs : 15 * 60_000;
-        this.blocked = { code: err.code ?? "UNEXPECTED", until: Date.now() + wait };
-        throw err;
-      })
-      .finally(() => { this.signingIn = null; });
+        this.blocked.set(session, { code: err.code ?? "UNEXPECTED", until: Date.now() + wait });
+        busy ||= err.code === "IN_USE";
+        lastErr = err;
+      }
+    }
+    if (busy) throw new PlsError("Every firm account is in use", "IN_USE");
+    throw lastErr ?? new PlsError("No Pakistan Law Site account is set up", "NOT_CONFIGURED");
+  }
+
+  async #signIn() {
+    if (this.session.signedIn) return;
+    this.signingIn ??= this.#trySessions().finally(() => { this.signingIn = null; });
     await this.signingIn;
   }
 
