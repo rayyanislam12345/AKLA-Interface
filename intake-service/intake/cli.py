@@ -131,6 +131,10 @@ def _projects(db, args):
             log('  %-5s %-55s client: %s', item['code'], item['name'], item.get('client') or '(to fill in)')
         log('Edit the file (set "create": false to leave one out, fix a client or a name), then: python -m intake projects --apply %s', args.plan)
         return
+    renamed = projects.apply_renames(db, projects.read_renames(args.apply))
+    log('renamed: %d, clients set: %d, already right: %d%s', renamed['renamed'], renamed['clients_set'], renamed['unchanged'],
+        f", not found: {renamed['not_found']}" if renamed['not_found'] else '')
+    matcher = Matcher(db)
     summary = projects.apply_plan(db, matcher, projects.read_plan(args.apply))
     log('projects: %d created, %d already there, %d left out, %d with no client or name', summary.get('created', 0),
         summary.get('already_there', 0), summary.get('left_out', 0), summary.get('no_name', 0))

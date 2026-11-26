@@ -341,6 +341,55 @@ def write_plan(path, plan):
     return path
 
 
+def read_renames(path):
+    """The plan file's "rename" list: Hub projects to give their full name (and right client)."""
+    with open(path, encoding='utf8') as fh:
+        data = json.load(fh)
+    renames = data.get('rename', []) if isinstance(data, dict) else []
+    if not isinstance(renames, list) or not all(isinstance(r, dict) for r in renames):
+        raise ValueError(f'{path}: "rename" should be a list')
+    return renames
+
+
+def _client_id(db, client):
+    """A client by name (case does not matter), created when the Hub has none of that name."""
+    client = re.sub(r'\s+', ' ', client or '').strip()
+    if not client:
+        return None
+    for c in db.select('clients', {}, 'id,name'):
+        if (c.get('name') or '').strip().lower() == client.lower():
+            return c['id']
+    return db.insert('clients', {'name': client, 'created_by': hub.intake_user_id(db)})[0]['id']
+
+
+def apply_renames(db, renames):
+    """Gives existing projects their full name and client. The old name is kept as an "Also
+    called" name, so whatever matched it before still does. Running it again changes nothing."""
+    out = {'renamed': 0, 'clients_set': 0, 'unchanged': 0, 'not_found': []}
+    on_hub = db.select('matters', {}, 'id,name,code,client_id')
+    for r in renames:
+        old, new = (r.get('from') or '').strip(), re.sub(r'\s+', ' ', r.get('name') or '').strip()
+        m = next((x for x in on_hub if name_key(x['name']) in (name_key(old), name_key(new))
+                  and (not r.get('code') or (x.get('code') or '').upper() == r['code'].upper())), None)
+        if not m or not new:
+            out['not_found'].append(old or new)
+            continue
+        change = {}
+        if m['name'] != new:
+            change['name'] = new
+            project_names.add_name(db, m['name'], 'alias', matter_id=m['id'], source='hub')
+        client_id = _client_id(db, r.get('client'))
+        if client_id and client_id != m.get('client_id'):
+            change['client_id'] = client_id
+            out['clients_set'] += 1
+        if change:
+            db.patch('matters', {'id': f"eq.{m['id']}"}, change)
+            out['renamed'] += 'name' in change
+        else:
+            out['unchanged'] += 1
+    return out
+
+
 def read_plan(path):
     with open(path, encoding='utf8') as fh:
         data = json.load(fh)
@@ -375,6 +424,10 @@ def apply_plan(db, matcher, plan, source='excel'):
                 summary['no_name'] += 1
                 continue
             if code and (coded.get(code.upper()) or matcher.matter_for_code(code)):
+                existing = coded.get(code.upper()) or matcher.matter_for_code(code)
+                for extra in item.get('also_codes') or ():       # a code added to the plan later still joins
+                    if not (coded.get(extra.strip().upper()) or matcher.matter_for_code(extra)):
+                        tie_code(db, extra, existing)
                 summary['already_there'] += 1
                 continue
             if name_key(name) in named:
@@ -383,6 +436,9 @@ def apply_plan(db, matcher, plan, source='excel'):
                 summary['same_name_projects'].append({'code': code, 'name': name, 'matter_id': named[name_key(name)]})
                 continue
             matter_id = create_project(db, name, client, code, source, source_ref='plan')
+            for extra in item.get('also_codes') or ():
+                tie_code(db, extra, matter_id)
+                coded[extra.strip().upper()] = matter_id
             if code:
                 coded[code.upper()] = matter_id
             named[name_key(name)] = matter_id
@@ -395,6 +451,17 @@ def apply_plan(db, matcher, plan, source='excel'):
         hub.finish_run(db, run_id, False, summary, repr(e))
         raise
     return summary
+
+
+def tie_code(db, code, matter_id):
+    """Files a second code's documents into a project (SKM into the Sialkot–Kharian Motorway,
+    whose own code is SKIM): a name row carrying both the project and the code, and the
+    code's own names and sheet rows moved onto the project."""
+    code = (code or '').strip().upper()
+    if not code:
+        return
+    project_names.add_name(db, code, 'alias', matter_id=matter_id, code=code, source='hub')
+    project_names.adopt_code(db, code, matter_id)
 
 
 def ready_matcher(db, dry_run=False):

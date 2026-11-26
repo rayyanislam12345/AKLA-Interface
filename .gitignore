@@ -89,3 +89,6 @@ scripts/precedent_backlog/sharepoint/evict
 
 # Client material from Usama Siddiqui's claude.ai export (never committed)
 USAMA DATA/
+
+# Project plans name the firm's clients: kept on this Mac, never committed.
+intake-service/plans/
